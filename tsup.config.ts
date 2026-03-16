@@ -15,16 +15,7 @@ export default defineConfig([
     sourcemap: true,
     clean: true,
     splitting: false,
-    external: [
-      'axios',
-      'form-data',
-      'isomorphic-ws',
-      'base64-js',
-      'jsonwebtoken',
-      'https',
-      'ws',
-      'event-source-polyfill',
-    ],
+    external: ['axios', 'form-data', 'isomorphic-ws', 'https', 'ws', 'event-source-polyfill'],
     define: {
       'process.env.PKG_VERSION': JSON.stringify(pkg.version),
     },
@@ -39,13 +30,12 @@ export default defineConfig([
     outDir: 'dist',
     sourcemap: true,
     splitting: false,
-    external: ['axios', 'form-data', 'isomorphic-ws', 'base64-js', 'ws', 'event-source-polyfill'],
+    external: ['axios', 'form-data', 'isomorphic-ws', 'ws', 'event-source-polyfill'],
     define: {
       'process.env.PKG_VERSION': JSON.stringify(pkg.version),
     },
     esbuildOptions(options) {
       options.alias = {
-        jsonwebtoken: shimPath,
         https: shimPath,
       };
     },
@@ -67,7 +57,6 @@ export default defineConfig([
     },
     esbuildOptions(options) {
       options.alias = {
-        jsonwebtoken: shimPath,
         https: shimPath,
       };
     },

@@ -68,8 +68,8 @@ import {
   AttachmentResponse,
   PollMessage,
   EditMessage,
+  Role,
 } from './types';
-import { Role } from './permissions';
 
 /**
  * Channel - The Channel class manages it's own state.

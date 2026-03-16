@@ -8,9 +8,9 @@ import WebSocket from 'isomorphic-ws';
 import { Channel } from './channel';
 import { ClientState } from './client_state';
 import { StableWSConnection } from './connection';
-import { DevToken, JWTUserToken } from './signing';
+
 import { TokenManager } from './token_manager';
-import { WSConnectionFallback } from './connection_fallback';
+
 import { isErrorResponse, isWSFailure } from './errors';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
@@ -111,7 +111,6 @@ import {
   GetTokenResponse,
   Contact,
 } from './types';
-import { InsightMetrics } from './insights';
 
 function isString(x: unknown): x is string {
   return typeof x === 'string' || x instanceof String;
@@ -150,7 +149,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   mutedUsers: Mute<ErmisChatGenerics>[];
   node: boolean;
   options: ErmisChatOptions;
-  secret?: string;
   setUserPromise: ConnectAPIResponse<ErmisChatGenerics> | null;
   state: ClientState<ErmisChatGenerics>;
   tokenManager: TokenManager<ErmisChatGenerics>;
@@ -159,10 +157,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   userID?: string;
   wsBaseURL?: string;
   wsConnection: StableWSConnection<ErmisChatGenerics> | null;
-  wsFallback?: WSConnectionFallback<ErmisChatGenerics>;
+
   wsPromise: ConnectAPIResponse<ErmisChatGenerics> | null;
   consecutiveFailures: number;
-  insightMetrics: InsightMetrics;
+
   defaultWSTimeoutWithFallback: number;
   defaultWSTimeout: number;
 
@@ -202,11 +200,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     // a list of channels to hide ws events from
     this.mutedChannels = [];
     this.mutedUsers = [];
-
-    // set the secret
-    if (secretOrOptions && isString(secretOrOptions)) {
-      this.secret = secretOrOptions;
-    }
 
     // set the options... and figure out defaults...
     const inputOptions = options ? options : secretOrOptions && !isString(secretOrOptions) ? secretOrOptions : {};
@@ -253,11 +246,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.anonymous = false;
     this.persistUserOnConnectionFailure = this.options?.persistUserOnConnectionFailure;
 
-    // If its a server-side client, then lets initialize the tokenManager, since token will be
-    // generated from secret.
-    this.tokenManager = new TokenManager(this.secret);
+    this.tokenManager = new TokenManager();
     this.consecutiveFailures = 0;
-    this.insightMetrics = new InsightMetrics();
 
     this.defaultWSTimeoutWithFallback = 6000;
     this.defaultWSTimeout = 15000;
@@ -372,9 +362,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return ErmisChat._instance as ErmisChat<ErmisChatGenerics>;
   }
 
-  devToken(userID: string) {
-    return DevToken(userID);
-  }
   async refreshNewToken(refresh_token: string) {
     return await this.post<APIResponse>(this.baseURL + '/uss/v1/refresh_token', { refresh_token });
   }
@@ -387,7 +374,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.wsBaseURL = this.baseURL.replace('http', 'ws').replace(':3030', ':8800');
   }
 
-  _getConnectionID = () => this.wsConnection?.connectionID || this.wsFallback?.connectionID;
+  _getConnectionID = () => this.wsConnection?.connectionID;
 
   _hasConnectionID = () => Boolean(this._getConnectionID());
 
@@ -555,7 +542,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       this.cleaningIntervalRef = undefined;
     }
 
-    await Promise.all([this.wsConnection?.disconnect(timeout), this.wsFallback?.disconnect(timeout)]);
+    await this.wsConnection?.disconnect(timeout);
     return Promise.resolve();
   };
 
@@ -574,7 +561,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       return this.wsPromise;
     }
 
-    if ((this.wsConnection?.isHealthy || this.wsFallback?.isHealthy()) && this._hasConnectionID()) {
+    if (this.wsConnection?.isHealthy && this._hasConnectionID()) {
       this.logger('info', 'client:openConnection() - openConnection called twice, healthy connection already exists', {
         tags: ['connection', 'client'],
       });
@@ -1283,30 +1270,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
 
     try {
-      // if fallback is used before, continue using it instead of waiting for WS to fail
-      if (this.wsFallback) {
-        return await this.wsFallback.connect();
-      }
-
-      // if WSFallback is enabled, ws connect should timeout faster so fallback can try
-      return await this.wsConnection.connect(
-        this.options.enableWSFallback ? this.defaultWSTimeoutWithFallback : this.defaultWSTimeout,
-      );
+      return await this.wsConnection.connect(this.defaultWSTimeout);
     } catch (err: any) {
-      // run fallback only if it's WS/Network error and not a normal API error
-      // make sure browser is online before even trying the longpoll
-      if (this.options.enableWSFallback && isWSFailure(err) && isOnline()) {
-        this.logger('info', 'client:connect() - WS failed, fallback to longpoll', { tags: ['connection', 'client'] });
-        this.dispatchEvent({ type: 'transport.changed', mode: 'longpoll' });
-
-        this.wsConnection._destroyCurrentWSConnection();
-        this.wsConnection.disconnect().then(); // close WS so no retry
-        this.wsFallback = new WSConnectionFallback<ErmisChatGenerics>({
-          client: this,
-        });
-        return await this.wsFallback.connect();
-      }
-
       throw err;
     }
   }
@@ -2601,7 +2566,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   /**
    * _isUsingServerAuth - Returns true if we're using server side auth
    */
-  _isUsingServerAuth = () => !!this.secret;
+  _isUsingServerAuth = () => false;
 
   _enrichAxiosOptions(
     options: AxiosRequestConfig & { config?: AxiosRequestConfig } = {

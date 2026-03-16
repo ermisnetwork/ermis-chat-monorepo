@@ -8,7 +8,7 @@ import {
   removeConnectionEventListeners,
   addConnectionEventListeners,
 } from './utils';
-import { buildWsFatalInsight } from './insights';
+
 import { ConnectAPIResponse, ConnectionOpen, ExtendableGenerics, DefaultGenerics, UR, LogLevel } from './types';
 import { ErmisChat } from './client';
 
@@ -259,10 +259,10 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
    * @return {ConnectAPIResponse<ChannelType, CommandType, UserType>} Promise that completes once the first health check message is received
    */
   async _connect() {
-    if (this.isConnecting || (this.isDisconnected && this.client.options.enableWSFallback)) return; // simply ignore _connect if it's currently trying to connect
+    if (this.isConnecting) return; // simply ignore _connect if it's currently trying to connect
     this.isConnecting = true;
     this.requestID = randomId();
-    this.client.insightMetrics.connectionStartTimestamp = new Date().getTime();
+
     let isTokenReady = false;
     try {
       this._log(`_connect() - waiting for token`);
@@ -291,20 +291,12 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
 
       if (response) {
         this.connectionID = response.connection_id;
-        if (this.client.insightMetrics.wsConsecutiveFailures > 0 && this.client.options.enableInsights) {
-          this.client.insightMetrics.wsConsecutiveFailures = 0;
-        }
         return response;
       }
     } catch (err: any) {
       this.isConnecting = false;
       this._log(`_connect() - Error - `, err);
-      if (this.client.options.enableInsights) {
-        this.client.insightMetrics.wsConsecutiveFailures++;
-        this.client.insightMetrics.wsTotalFailures++;
 
-        const insights = buildWsFatalInsight(this as unknown as StableWSConnection, convertErrorToJson(err as Error));
-      }
       throw err;
     }
   }
@@ -342,7 +334,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
       return;
     }
 
-    if (this.isDisconnected && this.client.options.enableWSFallback) {
+    if (this.isDisconnected) {
       this._log('_reconnect() - Abort (3) since disconnect() is called');
       return;
     }

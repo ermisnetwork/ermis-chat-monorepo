@@ -1,7 +1,8 @@
 import { AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { StableWSConnection } from './connection';
 import { EVENT_MAP } from './events';
-import { Role } from './permissions';
+
+export type Role = 'admin' | 'user' | 'guest' | 'anonymous' | 'channel_member' | 'channel_moderator' | string;
 
 /**
  * Utility Types
