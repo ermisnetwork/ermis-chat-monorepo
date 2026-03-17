@@ -1324,7 +1324,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           channel.data = {
             ...channel.data,
             ...event.channel,
-            hidden: event.channel?.hidden ?? channel.data?.hidden,
             own_capabilities: event.channel?.own_capabilities ?? channel.data?.own_capabilities,
           };
         }

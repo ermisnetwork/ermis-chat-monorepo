@@ -96,11 +96,6 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     this.client = client;
   }
 
-  /**
-   * connect - Connect to the WS URL
-   * the default 15s timeout allows between 2~3 tries
-   * @return {ConnectAPIResponse<ChannelType, CommandType, UserType>} Promise that completes once the first health check message is received
-   */
   async connect(timeout = 15000) {
     if (this.isConnecting) {
       throw Error(`You've called connect twice, can only attempt 1 connection at the time`);
@@ -252,11 +247,6 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     return isClosedPromise;
   }
 
-  /**
-   * _connect - Connect to the WS endpoint
-   *
-   * @return {ConnectAPIResponse<ChannelType, CommandType, UserType>} Promise that completes once the first health check message is received
-   */
   async _connect() {
     if (this.isConnecting) return; // simply ignore _connect if it's currently trying to connect
     this.isConnecting = true;
@@ -337,8 +327,6 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     // cleanup the old connection
     this._destroyCurrentWSConnection();
 
-
-
     try {
       await this._connect();
       this._log('_reconnect() - Waiting for recoverCallBack');
@@ -349,7 +337,6 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     } catch (error: any) {
       this.isHealthy = false;
       this.consecutiveFailures += 1;
-
 
       // reconnect on WS failures, don't reconnect if there is a code bug
       if (error.isWSFailure) {

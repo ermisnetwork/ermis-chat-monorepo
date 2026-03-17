@@ -2,7 +2,7 @@ import { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { StableWSConnection } from './connection';
 import { EVENT_MAP } from './events';
 
-export type Role = 'admin' | 'user' | 'guest' | 'anonymous' | 'channel_member' | 'channel_moderator' | string;
+export type Role = 'owner' | 'moder' | 'member' | 'pending' | 'skipped' | string;
 
 export type RequireAtLeastOne<T> = {
   [K in keyof T]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<keyof T, K>>>;
@@ -49,21 +49,13 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     type: string;
     created_at?: string;
     created_by?: UserResponse<ErmisChatGenerics> | null;
-    created_by_id?: string;
     deleted_at?: string;
-    hidden?: boolean;
-    invites?: string[];
-    joined?: boolean;
     last_message_at?: string;
     member_count?: number;
     members: ChannelMemberResponse<ErmisChatGenerics>[];
-    muted?: boolean;
     name?: string;
     own_capabilities?: string[];
     team?: string;
-    truncated_at?: string;
-    truncated_by?: UserResponse<ErmisChatGenerics>;
-    truncated_by_id?: string;
     updated_at?: string;
     image?: string;
     description?: string;
@@ -97,6 +89,7 @@ export type ChannelAPIResponse<ErmisChatGenerics extends ExtendableGenerics = De
 
 export type ChannelMemberResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   banned?: boolean;
+  blocked?: boolean;
   channel_role?: Role;
   created_at?: string;
   updated_at?: string;
@@ -193,11 +186,16 @@ export type UpdateChannelAPIResponse<ErmisChatGenerics extends ExtendableGeneric
   message?: MessageResponse<ErmisChatGenerics>;
 };
 
-export type UserResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = User<ErmisChatGenerics> & {
-  project_id?: string;
-  created_at?: string;
-  updated_at?: string;
-};
+export type UserResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
+  ErmisChatGenerics['userType'] & {
+    id: string;
+    name?: string;
+    avatar?: string;
+    about_me?: string;
+    project_id?: string;
+    email?: string;
+    phone?: string;
+  };
 export type Contact = {
   project_id: string;
   user_id: string;
@@ -378,6 +376,7 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
 export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   banned?: boolean;
+  blocked?: boolean;
   channel_role?: Role;
   created_at?: string;
   updated_at?: string;
@@ -450,15 +449,6 @@ export type Reaction<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     user?: UserResponse | null;
     user_id?: string;
   };
-
-export type User<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = ErmisChatGenerics['userType'] & {
-  id: string;
-  name?: string;
-  avatar?: string;
-  about_me?: string;
-  email?: string;
-  phone?: string;
-};
 
 export type MessageSetType = 'latest' | 'current' | 'new';
 
