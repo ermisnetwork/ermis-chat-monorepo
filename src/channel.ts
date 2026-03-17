@@ -525,40 +525,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this.state.topics = channels;
   }
 
-  /**
-   * mute - mutes the current channel
-   * @param {{ user_id?: string, expiration?: string }} opts expiration in minutes or user_id
-   * @return {Promise<MuteChannelAPIResponse<ErmisChatGenerics>>} The server response
-   *
-   * example with expiration:
-   * await channel.mute({expiration: moment.duration(2, 'weeks')});
-   *
-   * example server side:
-   * await channel.mute({user_id: userId});
-   *
-   */
-  // async mute(opts: { expiration?: number; user_id?: string } = {}) {
-  //   return await this.getClient().post<MuteChannelAPIResponse<ErmisChatGenerics>>(
-  //     this.getClient().baseURL + '/moderation/mute/channel',
-  //     { channel_cid: this.cid, ...opts },
-  //   );
-  // }
-
-  /**
-   * unmute - mutes the current channel
-   * @param {{ user_id?: string}} opts user_id
-   * @return {Promise<APIResponse>} The server response
-   *
-   * example server side:
-   * await channel.unmute({user_id: userId});
-   */
-  // async unmute(opts: { user_id?: string } = {}) {
-  //   return await this.getClient().post<APIResponse>(this.getClient().baseURL + '/moderation/unmute/channel', {
-  //     channel_cid: this.cid,
-  //     ...opts,
-  //   });
-  // }
-
   async muteNotification(duration: number | null) {
     return await this.getClient().post<AttachmentResponse<ErmisChatGenerics>>(
       this.getClient().baseURL + `/channels/${this.type}/${this.id}/muted`,
@@ -642,19 +608,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return messageSlice[0];
   }
 
-  /**
-   * markRead - Send the mark read event for this user, only works if the `read_events` setting is enabled
-   *
-   * @param {MarkReadOptions<ErmisChatGenerics>} data
-   * @return {Promise<EventAPIResponse<ErmisChatGenerics> | null>} Description
-   */
   async markRead(data: MarkReadOptions<ErmisChatGenerics> = {}) {
-    // this._checkInitialized();
-
-    // if (!this.getConfig()?.read_events && !this.getClient()._isUsingServerAuth()) {
-    //   return Promise.resolve(null);
-    // }
-
     return await this.getClient().post<EventAPIResponse<ErmisChatGenerics>>(this._channelURL() + '/read', {
       ...data,
     });
@@ -740,7 +694,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (message.silent) return false;
     if (message.parent_id && !message.show_in_channel) return false;
     if (message.user?.id === this.getClient().userID) return false;
-    // if (message.user?.id && this.getClient().userMuteStatus(message.user.id)) return false;
     if (message.type === 'system') return false;
 
     // Return false if channel doesn't allow read events.
@@ -1443,23 +1396,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           delete channelState.members[event.user.id];
         }
         break;
-      // case 'notification.mark_unread': {
-      //   const ownMessage = event.user?.id === this.getClient().user?.id;
-      //   if (!(ownMessage && event.user)) break;
-
-      //   const unreadCount = event.unread_messages ?? 0;
-
-      //   channelState.read[event.user.id] = {
-      //     first_unread_message_id: event.first_unread_message_id,
-      //     last_read: new Date(event.last_read_at as string),
-      //     last_read_message_id: event.last_read_message_id,
-      //     user: event.user,
-      //     unread_messages: unreadCount,
-      //   };
-
-      //   channelState.unreadCount = unreadCount;
-      //   break;
-      // }
       case 'channel.updated':
         if (event.channel) {
           channel.data = {
@@ -1510,39 +1446,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           event.message = channelState.removeReaction(event.reaction, event.message);
         }
         break;
-      // case 'reaction.updated':
-      //   if (event.reaction) {
-      //     // assuming reaction.updated is only called if enforce_unique is true
-      //     event.message = channelState.addReaction(event.reaction, event.message, true);
-      //   }
-      //   break;
-      // case 'channel.hidden':
-      //   channel.data = { ...channel.data, hidden: true };
-      //   if (event.clear_history) {
-      //     channelState.clearMessages();
-      //   }
-      //   break;
-      // case 'channel.visible':
-      //   channel.data = { ...channel.data, hidden: false };
-      //   break;
-      // case 'user.banned':
-      //   if (!event.user?.id) break;
-      //   channelState.members[event.user.id] = {
-      //     ...(channelState.members[event.user.id] || {}),
-      //     shadow_banned: !!event.shadow,
-      //     banned: !event.shadow,
-      //     user: { ...(channelState.members[event.user.id]?.user || {}), ...event.user },
-      //   };
-      //   break;
-      // case 'user.unbanned':
-      //   if (!event.user?.id) break;
-      //   channelState.members[event.user.id] = {
-      //     ...(channelState.members[event.user.id] || {}),
-      //     shadow_banned: false,
-      //     banned: false,
-      //     user: { ...(channelState.members[event.user.id]?.user || {}), ...event.user },
-      //   };
-      //   break;
       case 'member.joined':
       case 'notification.invite_accepted':
         if (event.member?.user_id) {

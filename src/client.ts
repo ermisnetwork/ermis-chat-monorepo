@@ -689,10 +689,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     });
 
     if (event.type === 'health.check' && event.me) {
-      // client.user = event.me;
-      // client.state.updateUser(event.me);
-      // client.mutedChannels = event.me.channel_mutes;
-      // client.mutedUsers = event.me.mutes;
     }
 
     if (event.channel && event.type === 'notification.message_new') {

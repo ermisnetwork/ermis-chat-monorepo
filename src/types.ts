@@ -177,7 +177,6 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
   };
 
 export type OwnUserBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  // mutes: Mute<ErmisChatGenerics>[];
   total_unread_count: number;
   unread_channels: number;
   unread_count: number;
@@ -267,11 +266,9 @@ export type ChannelStateOptions = {
 
 export type MarkReadOptions<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   client_id?: string;
-  connection_id?: string;
   user?: UserResponse<ErmisChatGenerics>;
   user_id?: string;
 };
-
 
 export type ErmisChatOptions = AxiosRequestConfig & {
   /**
@@ -313,17 +310,12 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   channel_id?: string;
   channel_type?: string;
   cid?: string;
-  clear_history?: boolean;
-  connection_id?: string;
   // event creation timestamp, format Date ISO string
   created_at?: string;
-  // id of the message that was marked as unread - all the following messages are considered unread. (notification.mark_unread)
-  first_unread_message_id?: string;
   hard_delete?: boolean;
   // creation date of a message with last_read_message_id, formatted as Date ISO string
   last_read_at?: string;
   last_read_message_id?: string;
-  mark_messages_deleted?: boolean;
   me?: OwnUserResponse<ErmisChatGenerics>;
   member?: ChannelMemberResponse<ErmisChatGenerics>;
   message?: MessageResponse<ErmisChatGenerics>;
@@ -336,7 +328,6 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   };
   reaction?: ReactionResponse<ErmisChatGenerics>;
   received_at?: string | Date;
-  team?: string;
   // @deprecated number of all unread messages across all current user's unread channels, equals unread_count
   total_unread_count?: number;
   // number of all current user's channels with at least one unread message including the channel in this event
@@ -382,18 +373,6 @@ export type ChannelSort = {
   direction: -1 | 1;
 }[];
 
-/**
- * Base Types
- */
-
-export type Action = {
-  name?: string;
-  style?: string;
-  text?: string;
-  type?: string;
-  value?: string;
-};
-
 export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['attachmentType'] & {
     // main fields for ermis.
@@ -409,9 +388,6 @@ export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     url?: string;
     cid?: string;
     user_id?: string;
-
-    // old fields.
-    actions?: Action[];
     asset_url?: string;
     author_icon?: string;
     author_link?: string;
@@ -437,24 +413,13 @@ export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   };
 
 export type ChannelConfigFields = {
-  reminders: boolean;
-  connect_events?: boolean;
-  custom_events?: boolean;
-  mark_messages_pending?: boolean;
-  max_message_length?: number;
-  message_retention?: string;
-  mutes?: boolean;
   name?: string;
   polls?: boolean;
-  push_notifications?: boolean;
   quotes?: boolean;
   reactions?: boolean;
-  read_events?: boolean;
-  replies?: boolean;
   search?: boolean;
   typing_events?: boolean;
   uploads?: boolean;
-  url_enrichment?: boolean;
 };
 
 export type ChannelConfigWithInfo = ChannelConfigFields & CreatedAtUpdatedAt;
@@ -485,7 +450,6 @@ export type Configs<ErmisChatGenerics extends ExtendableGenerics = DefaultGeneri
 >;
 
 export type ConnectionOpen<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  connection_id: string;
   cid?: string;
   created_at?: string;
   me?: OwnUserResponse<ErmisChatGenerics>;

@@ -19,7 +19,6 @@ type ChannelReadStatus<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     last_read: Date;
     unread_messages: number;
     user: UserResponse<ErmisChatGenerics>;
-    first_unread_message_id?: string;
     last_read_message_id?: string;
     last_send?: string;
   }
@@ -34,7 +33,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   typing: Record<string, Event<ErmisChatGenerics>>;
   read: ChannelReadStatus<ErmisChatGenerics>;
   pinnedMessages: Array<ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>>;
-  threads: Record<string, Array<ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>>>;
   mutedUsers: Array<UserResponse<ErmisChatGenerics>>;
   watchers: Record<string, UserResponse<ErmisChatGenerics>>;
   members: Record<string, ChannelMemberResponse<ErmisChatGenerics>>;
@@ -67,7 +65,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     this.read = {};
     this.initMessages();
     this.pinnedMessages = [];
-    this.threads = {};
     // a list of users to hide messages from
     this.mutedUsers = [];
     this.watchers = {};
@@ -198,14 +195,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
           this._channel.getClient().state.updateUserReference(message.user, this._channel.cid);
         }
 
-        if (initializing && message.id && this.threads[message.id]) {
-          // If we are initializing the state of channel (e.g., in case of connection recovery),
-          // then in that case we remove thread related to this message from threads object.
-          // This way we can ensure that we don't have any stale data in thread object
-          // and consumer can refetch the replies.
-          delete this.threads[message.id];
-        }
-
         if (!this.last_message_at) {
           this.last_message_at = new Date(message.created_at.getTime());
         }
@@ -227,27 +216,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
           'created_at',
           addIfDoesNotExist,
         );
-      }
-
-      /**
-       * Add message to thread if applicable and the message
-       * was added when querying for replies, or the thread already exits.
-       * This is to prevent the thread state from getting out of sync if
-       * a thread message is shown in channel but older than the newest thread
-       * message. This situation can result in a thread state where a random
-       * message is "oldest" message, and newer messages are therefore not loaded.
-       * This can also occur if an old thread message is updated.
-       */
-      if (parentID && !initializing) {
-        const thread = this.threads[parentID] || [];
-        const threadMessages = this._addToMessageList(
-          thread,
-          message,
-          timestampChanged,
-          'created_at',
-          addIfDoesNotExist,
-        );
-        this.threads[parentID] = threadMessages;
       }
     }
 
@@ -389,15 +357,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   ) {
     const { parent_id, show_in_channel, pinned } = message;
 
-    if (parent_id && this.threads[parent_id]) {
-      const thread = this.threads[parent_id];
-      const msgIndex = thread.findIndex((msg) => msg.id === message.id);
-      if (msgIndex !== -1) {
-        thread[msgIndex] = updateFunc(thread[msgIndex]);
-        this.threads[parent_id] = thread;
-      }
-    }
-
     if ((!show_in_channel && !parent_id) || show_in_channel) {
       const messageSetIndex = this.findMessageSetIndex(message);
       if (messageSetIndex !== -1) {
@@ -458,24 +417,14 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
    */
   removeMessage(messageToRemove: { id: string; messageSetIndex?: number; parent_id?: string }) {
     let isRemoved = false;
-    if (messageToRemove.parent_id && this.threads[messageToRemove.parent_id]) {
-      const { removed, result: threadMessages } = this.removeMessageFromArray(
-        this.threads[messageToRemove.parent_id],
+    const messageSetIndex = messageToRemove.messageSetIndex ?? this.findMessageSetIndex(messageToRemove);
+    if (messageSetIndex !== -1) {
+      const { removed, result: messages } = this.removeMessageFromArray(
+        this.messageSets[messageSetIndex].messages,
         messageToRemove,
       );
-
-      this.threads[messageToRemove.parent_id] = threadMessages;
+      this.messageSets[messageSetIndex].messages = messages;
       isRemoved = removed;
-    } else {
-      const messageSetIndex = messageToRemove.messageSetIndex ?? this.findMessageSetIndex(messageToRemove);
-      if (messageSetIndex !== -1) {
-        const { removed, result: messages } = this.removeMessageFromArray(
-          this.messageSets[messageSetIndex].messages,
-          messageToRemove,
-        );
-        this.messageSets[messageSetIndex].messages = messages;
-        isRemoved = removed;
-      }
     }
 
     return isRemoved;
@@ -520,10 +469,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     };
 
     this.messageSets.forEach((set) => _updateUserMessages(set.messages, user));
-
-    // for (const parentId in this.threads) {
-    //   _updateUserMessages(this.threads[parentId], user);
-    // }
 
     _updateUserMessages(this.pinnedMessages, user);
   };
@@ -578,10 +523,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
 
     this.messageSets.forEach((set) => _deleteUserMessages(set.messages, user, hardDelete));
 
-    for (const parentId in this.threads) {
-      _deleteUserMessages(this.threads[parentId], user, hardDelete);
-    }
-
     _deleteUserMessages(this.pinnedMessages, user, hardDelete);
   };
 
@@ -635,7 +576,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   async loadMessageIntoState(messageId: string | 'latest', parentMessageId?: string, limit = 25) {
     let messageSetIndex: number;
     let switchedToMessageSet = false;
-    let loadedMessageThread = false;
     const messageIdToFind = parentMessageId || messageId;
     if (messageId === 'latest') {
       if (this.messages === this.latestMessages) {
@@ -648,10 +588,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     if (messageSetIndex !== -1) {
       this.switchToMessageSet(messageSetIndex);
       switchedToMessageSet = true;
-    }
-    loadedMessageThread = !parentMessageId || !!this.threads[parentMessageId]?.find((m) => m.id === messageId);
-    if (switchedToMessageSet && loadedMessageThread) {
-      return;
     }
     if (!switchedToMessageSet) {
       await this._channel.query({ messages: { id_around: messageIdToFind, limit } }, 'new');
@@ -672,14 +608,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
    * @return {ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>} Returns the message, or undefined if the message wasn't found
    */
   findMessage(messageId: string, parentMessageId?: string) {
-    if (parentMessageId) {
-      const messages = this.threads[parentMessageId];
-      if (!messages) {
-        return undefined;
-      }
-      return messages.find((m) => m.id === messageId);
-    }
-
     const messageSetIndex = this.findMessageSetIndex({ id: messageId });
     if (messageSetIndex === -1) {
       return undefined;
@@ -722,7 +650,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
         case 'new':
           if (overlappingMessageSetIndices.length > 0) {
             targetMessageSetIndex = overlappingMessageSetIndices[0];
-            // No new message set is created if newMessages only contains thread replies
           } else if (newMessages.some((m) => !m.parent_id)) {
             this.messageSets.push({ messages: [], isCurrent: false, isLatest: false });
             targetMessageSetIndex = this.messageSets.length - 1;
