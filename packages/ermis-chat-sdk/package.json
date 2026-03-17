@@ -1,0 +1,64 @@
+{
+  "name": "@ermis-network/ermis-chat-sdk",
+  "version": "1.0.0",
+  "description": "Ermis Chat SDK",
+  "author": "Ermis",
+  "homepage": "https://ermis.network/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ermisnetwork/ermis-chat-monorepo"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "browser": {
+    "./dist/index.mjs": "./dist/index.browser.mjs",
+    "./dist/index.cjs": "./dist/index.browser.cjs"
+  },
+  "react-native": {
+    "./dist/index.mjs": "./dist/index.browser.mjs",
+    "./dist/index.cjs": "./dist/index.browser.cjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "jsdelivr": "./dist/index.browser.full-bundle.min.js",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": [
+    "chat",
+    "messaging",
+    "conversation",
+    "react",
+    "ermis",
+    "ermis.network"
+  ],
+  "files": [
+    "/dist",
+    "/src",
+    "readme.md",
+    "license"
+  ],
+  "dependencies": {
+    "@types/event-source-polyfill": "^1.0.5",
+    "@types/ws": "^7.4.0",
+    "axios": "^1.6.0",
+    "event-source-polyfill": "^1.0.31",
+    "form-data": "^4.0.0",
+    "isomorphic-ws": "^4.0.1",
+    "ws": "^7.4.4"
+  },
+  "devDependencies": {
+    "@types/node": "^16.11.11",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsup",
+    "dev": "tsup --watch",
+    "types": "tsc --noEmit"
+  }
+}

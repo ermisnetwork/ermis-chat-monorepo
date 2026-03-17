@@ -1,91 +1,34 @@
 {
-  "name": "ermis-chat-sdk",
+  "private": true,
+  "name": "ermis-chat-monorepo",
   "version": "1.0.0",
-  "description": "Ermis Chat SDK",
-  "author": "Ermis",
-  "homepage": "https://ermis.network/",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ermisnetwork/ermis-chat-sdk"
-  },
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
-  "browser": {
-    "./dist/index.mjs": "./dist/index.browser.mjs",
-    "./dist/index.cjs": "./dist/index.browser.cjs"
-  },
-  "react-native": {
-    "./dist/index.mjs": "./dist/index.browser.mjs",
-    "./dist/index.cjs": "./dist/index.browser.cjs"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
-    }
-  },
-  "jsdelivr": "./dist/index.browser.full-bundle.min.js",
-  "license": "SEE LICENSE IN LICENSE",
-  "keywords": [
-    "chat",
-    "messaging",
-    "conversation",
-    "react",
-    "ermis",
-    "ermis.network"
+  "description": "Ermis Chat SDK Monorepo",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
   ],
-  "files": [
-    "/dist",
-    "/src",
-    "readme.md",
-    "license"
-  ],
-  "dependencies": {
-    "@types/event-source-polyfill": "^1.0.5",
-    "@types/ws": "^7.4.0",
-    "axios": "^1.6.0",
-    "event-source-polyfill": "^1.0.31",
-    "form-data": "^4.0.0",
-    "isomorphic-ws": "^4.0.1",
-    "ws": "^7.4.4"
+  "scripts": {
+    "build": "yarn build:sdk && yarn build:react",
+    "build:sdk": "yarn workspace @ermis-network/ermis-chat-sdk build",
+    "build:react": "yarn workspace @ermis-network/ermis-chat-react build",
+    "dev": "yarn workspace chat-demo dev",
+    "dev:example": "yarn workspace chat-demo dev",
+    "prettier": "prettier --check '**/*.{js,ts,tsx,md,css,scss,json}' --ignore-path .prettierignore",
+    "prettier-fix": "prettier --write '**/*.{js,ts,tsx,md,css,scss,json}' --ignore-path .prettierignore",
+    "eslint": "eslint '**/*.{js,ts,tsx}' --max-warnings 0 --ignore-path .eslintignore",
+    "eslint-fix": "eslint --fix '**/*.{js,ts,tsx}' --max-warnings 0 --ignore-path .eslintignore",
+    "lint": "yarn prettier && yarn eslint",
+    "lint-fix": "yarn prettier-fix && yarn eslint-fix"
   },
   "devDependencies": {
-    "@types/node": "^16.11.11",
     "eslint": "7.21.0",
     "eslint-config-prettier": "^8.1.0",
     "eslint-plugin-prettier": "^3.3.1",
     "eslint-plugin-sonarjs": "^0.6.0",
-    "prettier": "^2.2.1",
-    "tsup": "^8.0.0",
-    "typescript": "^5.9.3"
-  },
-  "scripts": {
-    "start": "yarn run compile -w",
-    "compile": "tsup",
-    "build": "rm -rf dist && tsup",
-    "types": "tsc --noEmit",
-    "prettier": "prettier --check '**/*.{js,ts,md,css,scss,json}' .eslintrc.json .prettierrc",
-    "prettier-fix": "npx prettier --write '**/*.{js,ts,md,css,scss,json}' .eslintrc.json .prettierrc",
-    "eslint": "eslint '**/*.{js,md,ts}' --max-warnings 0 --ignore-path ./.eslintignore",
-    "eslint-fix": "npx eslint --fix '**/*.{js,md,ts}' --max-warnings 0 --ignore-path ./.eslintignore",
-    "lint": "yarn run prettier && yarn run eslint",
-    "lint-fix": "yarn run prettier-fix && yarn run eslint-fix",
-    "prepare": "yarn run build",
-    "preversion": "yarn && yarn lint",
-    "version": "git add yarn.lock",
-    "postversion": "git push && git push --tags && npm publish"
+    "prettier": "^2.2.1"
   },
   "engines": {
     "node": ">=18"
-  },
-  "directories": {
-    "doc": "docs",
-    "test": "test"
-  },
-  "bugs": {
-    "url": "https://github.com/ermisnetwork/ermis-chat-sdk/issues"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }
