@@ -49,7 +49,7 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     frozen: boolean;
     id: string;
     type: string;
-    config?: ChannelConfigWithInfo<ErmisChatGenerics>;
+    config?: ChannelConfigWithInfo;
     cooldown?: number;
     created_at?: string;
     created_by?: UserResponse<ErmisChatGenerics> | null;
@@ -121,12 +121,6 @@ export type ChannelMemberResponse<ErmisChatGenerics extends ExtendableGenerics =
   user_id?: string;
 };
 
-export type CommandResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
-  Partial<CreatedAtUpdatedAt> & {
-    args?: string;
-    description?: string;
-  };
-
 export type ConnectAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   Promise<void | ConnectionOpen<ErmisChatGenerics>>;
 
@@ -167,21 +161,13 @@ export type MessageResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
 export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   MessageBase<ErmisChatGenerics> & {
     type: MessageLabel;
-    args?: string;
-    before_message_send_failed?: boolean;
     channel?: ChannelResponse<ErmisChatGenerics>;
     cid?: string;
-    command?: string;
-    command_info?: { name?: string };
     created_at?: string;
     deleted_at?: string;
-    deleted_reply_count?: number;
     latest_reactions?: ReactionResponse<ErmisChatGenerics>[];
     mentioned_users?: UserResponse<ErmisChatGenerics>[];
-    message_text_updated_at?: string;
-    moderation_details?: ModerationDetailsResponse;
     own_reactions?: ReactionResponse<ErmisChatGenerics>[] | null;
-    pin_expires?: string | null;
     pinned_at?: string | null;
     pinned_by?: UserResponse<ErmisChatGenerics> | null;
     reaction_counts?: { [key: string]: number } | null;
@@ -189,28 +175,14 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     reply_count?: number;
     shadowed?: boolean;
     status?: string;
-    thread_participants?: UserResponse<ErmisChatGenerics>[];
     updated_at?: string;
   };
-
-export type ModerationDetailsResponse = {
-  action: 'MESSAGE_RESPONSE_ACTION_BOUNCE' | (string & {});
-  error_msg: string;
-  harms: ModerationHarmResponse[];
-  original_text: string;
-};
-
-export type ModerationHarmResponse = {
-  name: string;
-  phrase_list_ids: number[];
-};
 
 export type OwnUserBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   // mutes: Mute<ErmisChatGenerics>[];
   total_unread_count: number;
   unread_channels: number;
   unread_count: number;
-  unread_threads: number;
   invisible?: boolean;
   roles?: string[];
 };
@@ -243,7 +215,6 @@ export type SendFileAPIResponse = APIResponse & { file: string; thumb_url?: stri
 
 export type SendMessageAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = APIResponse & {
   message: MessageResponse<ErmisChatGenerics>;
-  pending_message_metadata?: Record<string, string> | null;
 };
 
 export type TruncateChannelAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = APIResponse & {
@@ -303,7 +274,6 @@ export type ChannelStateOptions = {
 export type MarkReadOptions<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   client_id?: string;
   connection_id?: string;
-  thread_id?: string;
   user?: UserResponse<ErmisChatGenerics>;
   user_id?: string;
 };
@@ -510,11 +480,7 @@ export type ChannelConfigFields = {
   url_enrichment?: boolean;
 };
 
-export type ChannelConfigWithInfo<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
-  ChannelConfigFields &
-    CreatedAtUpdatedAt & {
-      commands?: CommandResponse<ErmisChatGenerics>[];
-    };
+export type ChannelConfigWithInfo = ChannelConfigFields & CreatedAtUpdatedAt;
 
 export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['channelType'] & {
@@ -538,7 +504,7 @@ export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = Def
 
 export type Configs<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = Record<
   string,
-  ChannelConfigWithInfo<ErmisChatGenerics> | undefined
+  ChannelConfigWithInfo | undefined
 >;
 
 export type ConnectionOpen<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
@@ -600,7 +566,6 @@ export type MessageBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     html?: string;
     mml?: string;
     parent_id?: string;
-    pin_expires?: string | null;
     pinned?: boolean;
     pinned_at?: string | null;
     poll_id?: string;
@@ -613,16 +578,6 @@ export type MessageBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   };
 
 export type MessageLabel = 'deleted' | 'ephemeral' | 'error' | 'regular' | 'reply' | 'system';
-
-export type SendMessageOptions = {
-  force_moderation?: boolean;
-  is_pending_message?: boolean;
-  keep_channel_hidden?: boolean;
-  pending?: boolean;
-  pending_message_metadata?: Record<string, string>;
-  skip_enrich_url?: boolean;
-  skip_push?: boolean;
-};
 
 export type Reaction<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['reactionType'] & {

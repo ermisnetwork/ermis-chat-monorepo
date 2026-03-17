@@ -34,7 +34,6 @@ import {
   UpdateChannelAPIResponse,
   UserResponse,
   QueryChannelAPIResponse,
-  SendMessageOptions,
   AttachmentResponse,
   PollMessage,
   EditMessage,
@@ -144,16 +143,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    * sendMessage - Send a message to this channel
    *
    * @param {Message<ErmisChatGenerics>} message The Message object
-   * @param {boolean} [options.skip_enrich_url] Do not try to enrich the URLs within message
-   * @param {boolean} [options.skip_push] Skip sending push notifications
-   * @param {boolean} [options.is_pending_message] DEPRECATED, please use `pending` instead.
-   * @param {boolean} [options.pending] Make this message pending
-   * @param {Record<string,string>} [options.pending_message_metadata] Metadata for the pending message
-   * @param {boolean} [options.force_moderation] Apply force moderation for server-side requests
-   *
-   * @return {Promise<SendMessageAPIResponse<ErmisChatGenerics>>} The Server Response
    */
-  async sendMessage(message: Message<ErmisChatGenerics>, options?: SendMessageOptions) {
+  async sendMessage(message: Message<ErmisChatGenerics>) {
     if (!message.hasOwnProperty('id') || !message?.id) {
       const id = randomId();
       message = { ...message, id };
@@ -161,7 +152,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     return await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(this._channelURL() + '/message', {
       message: { ...message },
-      ...options,
     });
   }
 

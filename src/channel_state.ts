@@ -562,7 +562,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
             parent_id: m.parent_id,
             reply_count: m.reply_count,
             status: m.status,
-            thread_participants: m.thread_participants,
             type: 'deleted',
             updated_at: m.updated_at,
             user: m.user,
