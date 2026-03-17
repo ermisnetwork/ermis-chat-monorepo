@@ -4,10 +4,6 @@ import { EVENT_MAP } from './events';
 
 export type Role = 'owner' | 'moder' | 'member' | 'pending' | 'skipped' | string;
 
-export type RequireAtLeastOne<T> = {
-  [K in keyof T]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<keyof T, K>>>;
-}[keyof T];
-
 /* Unknown Record */
 export type UR = Record<string, unknown>;
 export type DefaultGenerics = {
