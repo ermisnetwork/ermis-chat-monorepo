@@ -172,10 +172,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     );
 
     for (let i = 0; i < messagesToAdd.length; i += 1) {
-      const isFromShadowBannedUser = messagesToAdd[i].shadowed;
-      if (isFromShadowBannedUser) {
-        continue;
-      }
       // If message is already formatted we can skip the tasks below
       // This will be true for messages that are already present at the state -> this happens when we perform merging of message sets
       // This will be also true for message previews used by some SDKs
@@ -208,7 +204,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       const parentID = message.parent_id;
 
       // add to the given message set
-      if ((!parentID || message.show_in_channel) && targetMessageSetIndex !== -1) {
+      if (!parentID && targetMessageSetIndex !== -1) {
         this.messageSets[targetMessageSetIndex].messages = this._addToMessageList(
           this.messageSets[targetMessageSetIndex].messages,
           message,
@@ -349,15 +345,14 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       id?: string;
       parent_id?: string;
       pinned?: boolean;
-      show_in_channel?: boolean;
     },
     updateFunc: (
       msg: ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>,
     ) => ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>,
   ) {
-    const { parent_id, show_in_channel, pinned } = message;
+    const { parent_id, pinned } = message;
 
-    if ((!show_in_channel && !parent_id) || show_in_channel) {
+    if (!parent_id) {
       const messageSetIndex = this.findMessageSetIndex(message);
       if (messageSetIndex !== -1) {
         const msgIndex = this.messageSets[messageSetIndex].messages.findIndex((msg) => msg.id === message.id);

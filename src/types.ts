@@ -157,7 +157,6 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     reaction_counts?: { [key: string]: number } | null;
     reaction_scores?: { [key: string]: number } | null;
     reply_count?: number;
-    shadowed?: boolean;
     status?: string;
     updated_at?: string;
   };
@@ -380,7 +379,6 @@ export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     color?: string;
     duration?: number;
     fallback?: string;
-    fields?: Field[];
     file_size?: number | string;
     footer?: string;
     footer_icon?: string;
@@ -397,7 +395,6 @@ export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     waveform_data?: Array<number>;
   };
 
-
 export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['channelType'] & {
     members?: string[];
@@ -413,7 +410,6 @@ export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = Def
   user?: UserResponse<ErmisChatGenerics>;
 };
 
-
 export type ConnectionOpen<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   cid?: string;
   created_at?: string;
@@ -424,12 +420,6 @@ export type ConnectionOpen<ErmisChatGenerics extends ExtendableGenerics = Defaul
 export type CreatedAtUpdatedAt = {
   created_at: string;
   updated_at: string;
-};
-
-export type Field = {
-  short?: boolean;
-  title?: string;
-  value?: string;
 };
 
 export type LiteralStringForUnion = string & {};
@@ -476,8 +466,6 @@ export type MessageBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     pinned_at?: string | null;
     poll_id?: string;
     quoted_message_id?: string;
-    show_in_channel?: boolean;
-    silent?: boolean;
     text?: string;
     user?: UserResponse<ErmisChatGenerics> | null;
     user_id?: string;

@@ -128,8 +128,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this._client;
   }
 
-
-
   /**
    * sendMessage - Send a message to this channel
    *
@@ -624,8 +622,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
   // TODO: KhoaKheu Add mute Users later, confict here
   _countMessageAsUnread(message: FormatMessageResponse<ErmisChatGenerics> | MessageResponse<ErmisChatGenerics>) {
-    if (message.shadowed) return false;
-    if (message.silent) return false;
     if (message.parent_id && !message.show_in_channel) return false;
     if (message.user?.id === this.getClient().userID) return false;
     if (message.type === 'system') return false;
@@ -782,8 +778,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       }
     }
 
-
-
     // add any messages to our channel state
     const { messageSet } = this._initializeState(state, messageSetToAddToIfDoesNotExist);
 
@@ -839,8 +833,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.messages = enrichWithUserInfo(state.messages, users);
     state.pinned_messages = state.pinned_messages ? enrichWithUserInfo(state.pinned_messages, users) : [];
     state.read = enrichWithUserInfo(state.read || [], users);
-
-
 
     // add any messages to our channel state
     const { messageSet } = this._initializeState(state, messageSetToAddToIfDoesNotExist);
@@ -1188,7 +1180,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         if (event.message) {
           /* if message belongs to current user, always assume timestamp is changed to filter it out and add again to avoid duplication */
           const ownMessage = event.user?.id === this.getClient().user?.id;
-          const isThreadMessage = event.message.parent_id && !event.message.show_in_channel;
+          const isThreadMessage = !!event.message.parent_id;
 
           const existUser = users.find((user) => user.id === event.user?.id);
           if (!existUser) {
