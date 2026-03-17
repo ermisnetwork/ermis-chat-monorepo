@@ -47,7 +47,6 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     cid: string;
     id: string;
     type: string;
-    config?: ChannelConfigWithInfo;
     cooldown?: number;
     created_at?: string;
     created_by?: UserResponse<ErmisChatGenerics> | null;
@@ -97,23 +96,10 @@ export type ChannelAPIResponse<ErmisChatGenerics extends ExtendableGenerics = De
   is_pinned?: boolean;
 };
 
-export type ChannelUpdateOptions = {
-  hide_history?: boolean;
-  skip_push?: boolean;
-};
-
 export type ChannelMemberResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   banned?: boolean;
   channel_role?: Role;
   created_at?: string;
-  invite_accepted_at?: string;
-  invite_rejected_at?: string;
-  invited?: boolean;
-  is_moderator?: boolean;
-  notifications_muted?: boolean;
-  role?: string;
-  shadow_banned?: boolean;
-  status?: string;
   updated_at?: string;
   user?: UserResponse<ErmisChatGenerics>;
   user_id?: string;
@@ -319,7 +305,6 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   me?: OwnUserResponse<ErmisChatGenerics>;
   member?: ChannelMemberResponse<ErmisChatGenerics>;
   message?: MessageResponse<ErmisChatGenerics>;
-  mode?: string;
   online?: boolean;
   parent_id?: string;
   queriedChannels?: {
@@ -412,17 +397,6 @@ export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     waveform_data?: Array<number>;
   };
 
-export type ChannelConfigFields = {
-  name?: string;
-  polls?: boolean;
-  quotes?: boolean;
-  reactions?: boolean;
-  search?: boolean;
-  typing_events?: boolean;
-  uploads?: boolean;
-};
-
-export type ChannelConfigWithInfo = ChannelConfigFields & CreatedAtUpdatedAt;
 
 export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['channelType'] & {
@@ -435,19 +409,10 @@ export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = Def
   banned?: boolean;
   channel_role?: Role;
   created_at?: string;
-  is_moderator?: boolean;
-  notifications_muted?: boolean;
-  role?: string;
-  shadow_banned?: boolean;
-  status?: string;
   updated_at?: string;
   user?: UserResponse<ErmisChatGenerics>;
 };
 
-export type Configs<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = Record<
-  string,
-  ChannelConfigWithInfo | undefined
->;
 
 export type ConnectionOpen<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   cid?: string;

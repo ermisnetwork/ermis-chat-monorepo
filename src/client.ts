@@ -38,7 +38,7 @@ import {
   ChannelResponse,
   ChannelSort,
   ChannelStateOptions,
-  Configs,
+
   ConnectAPIResponse,
   DefaultGenerics,
   ErrorFromResponse,
@@ -73,7 +73,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   browser: boolean;
   cleaningIntervalRef?: NodeJS.Timeout;
   clientID?: string;
-  configs: Configs<ErmisChatGenerics>;
+
   apiKey: string;
   projectId: string;
   listeners: Record<string, Array<(event: Event<ErmisChatGenerics>) => void>>;
@@ -131,8 +131,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     // keeps a reference to all the channels that are in use
     this.activeChannels = {};
 
-    // mapping between channel groups and configs
-    this.configs = {};
+
 
     this.tokenManager = new TokenManager();
     this.consecutiveFailures = 0;
@@ -691,9 +690,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     if (event.type === 'health.check' && event.me) {
     }
 
-    if (event.channel && event.type === 'notification.message_new') {
-      this._addChannelConfig(event.channel);
-    }
+
 
     if ((event.type === 'channel.deleted' || event.type === 'notification.channel_deleted') && event.cid) {
       client.state.deleteAllChannelReference(event.cid);
@@ -1136,11 +1133,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   ) {
     const { skipInitialization, offlineMode = false } = stateOptions;
 
-    // NOTE: we don't send config with channel data anymore
-    // for (const channelState of channelsFromApi) {
-    //   this._addChannelConfig(channelState.channel);
-    // }
-
     const channels: Channel<ErmisChatGenerics>[] = [];
     const userIds: string[] = [];
     for (const channelState of channelsFromApi) {
@@ -1205,9 +1197,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return await this.post<APIResponse>(this.baseURL + `/channels/${channelType}/${channelId}/unpin`);
   }
 
-  _addChannelConfig({ cid, config }: ChannelResponse<ErmisChatGenerics>) {
-    this.configs[cid] = config;
-  }
+
 
   channel(
     channelType: string,

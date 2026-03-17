@@ -15,7 +15,6 @@ import {
   ChannelData,
   ChannelQueryOptions,
   ChannelResponse,
-  ChannelUpdateOptions,
   DefaultGenerics,
   DeleteChannelAPIResponse,
   Event,
@@ -129,15 +128,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this._client;
   }
 
-  /**
-   * getConfig - Get the config for this channel id (cid)
-   *
-   * @return {Record<string, unknown>}
-   */
-  getConfig() {
-    const client = this.getClient();
-    return client.configs[this.cid];
-  }
+
 
   /**
    * sendMessage - Send a message to this channel
@@ -275,18 +266,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this.getClient().delete<ReactionAPIResponse<ErmisChatGenerics>>(url, {});
   }
 
-  /**
-   * update - Edit the channel's custom properties
-   *
-   * @param {ChannelData<ErmisChatGenerics>} channelData The object to update the custom properties of this channel with
-   * @param {Message<ErmisChatGenerics>} [updateMessage] Optional message object for channel members notification
-   * @param {ChannelUpdateOptions} [options] Option object, configuration to control the behavior while updating
-   * @return {Promise<UpdateChannelAPIResponse<ErmisChatGenerics>>} The server response
-   */
   async update(
     channelData: Partial<ChannelData<ErmisChatGenerics>> | Partial<ChannelResponse<ErmisChatGenerics>> = {},
     updateMessage?: Message<ErmisChatGenerics>,
-    options?: ChannelUpdateOptions,
   ) {
     // Strip out reserved names that will result in API errors.
     const reserved = [
@@ -308,7 +290,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return await this._update({
       message: updateMessage,
       data: channelData,
-      ...options,
     });
   }
 
@@ -379,33 +360,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this.getClient().post<APIResponse>(url);
   }
 
-  /**
-   * addMembers - add members to the channel
-   *
-   * @param {{user_id: string, channel_role?: Role}[]} members An array of members to add to the channel
-   * @param {Message<ErmisChatGenerics>} [message] Optional message object for channel members notification
-   * @param {ChannelUpdateOptions} [options] Option object, configuration to control the behavior while updating
-   * @return {Promise<UpdateChannelAPIResponse<ErmisChatGenerics>>} The server response
-   */
-  async addMembers(
-    members: string[] | { user_id: string; channel_role?: Role }[],
-    message?: Message<ErmisChatGenerics>,
-    options: ChannelUpdateOptions = {},
-  ) {
-    return await this._update({ add_members: members, message, ...options });
+  async addMembers(members: string[]) {
+    return await this._update({ add_members: members });
   }
-
-  /**
-   * addModerators - add moderators to the channel
-   *
-   * @param {string[]} members An array of member identifiers
-   * @param {Message<ErmisChatGenerics>} [message] Optional message object for channel members notification
-   * @param {ChannelUpdateOptions} [options] Option object, configuration to control the behavior while updating
-   * @return {Promise<UpdateChannelAPIResponse<ErmisChatGenerics>>} The server response
-   */
-  // async addModerators(members: string[], message?: Message<ErmisChatGenerics>, options: ChannelUpdateOptions = {}) {
-  //   return await this._update({ add_moderators: members, message, ...options });
-  // }
 
   async addModerators(members: string[]) {
     return await this._update({ promote_members: members });
@@ -453,29 +410,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     };
   }
 
-  /**
-   * removeMembers - remove members from channel
-   *
-   * @param {string[]} members An array of member identifiers
-   * @param {Message<ErmisChatGenerics>} [message] Optional message object for channel members notification
-   * @param {ChannelUpdateOptions} [options] Option object, configuration to control the behavior while updating
-   * @return {Promise<UpdateChannelAPIResponse<ErmisChatGenerics>>} The server response
-   */
-  async removeMembers(members: string[], message?: Message<ErmisChatGenerics>, options: ChannelUpdateOptions = {}) {
-    return await this._update({ remove_members: members, message, ...options });
+  async removeMembers(members: string[]) {
+    return await this._update({ remove_members: members });
   }
-
-  /**
-   * demoteModerators - remove moderator role from channel members
-   *
-   * @param {string[]} members An array of member identifiers
-   * @param {Message<ErmisChatGenerics>} [message] Optional message object for channel members notification
-   * @param {ChannelUpdateOptions} [options] Option object, configuration to control the behavior while updating
-   * @return {Promise<UpdateChannelAPIResponse<ErmisChatGenerics>>} The server response
-   */
-  // async demoteModerators(members: string[], message?: Message<ErmisChatGenerics>, options: ChannelUpdateOptions = {}) {
-  //   return await this._update({ demote_moderators: members, message, ...options });
-  // }
 
   async demoteModerators(members: string[]) {
     return await this._update({ demote_members: members });
@@ -581,9 +518,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   _isTypingIndicatorsEnabled(): boolean {
-    if (!this.getConfig()?.typing_events) {
-      return false;
-    }
     return true;
   }
 
@@ -848,7 +782,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       }
     }
 
-    this.getClient()._addChannelConfig(state.channel);
+
 
     // add any messages to our channel state
     const { messageSet } = this._initializeState(state, messageSetToAddToIfDoesNotExist);
@@ -906,7 +840,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.pinned_messages = state.pinned_messages ? enrichWithUserInfo(state.pinned_messages, users) : [];
     state.read = enrichWithUserInfo(state.read || [], users);
 
-    this.getClient()._addChannelConfig(state.channel);
+
 
     // add any messages to our channel state
     const { messageSet } = this._initializeState(state, messageSetToAddToIfDoesNotExist);
