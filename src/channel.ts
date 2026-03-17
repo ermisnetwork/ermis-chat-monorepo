@@ -675,24 +675,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this.state.clean();
   }
 
-  /**
-   * watch - Loads the initial channel state and watches for changes
-   *
-   * @param {ChannelQueryOptions<ErmisChatGenerics>} options additional options for the query endpoint
-   *
-   * @return {Promise<QueryChannelAPIResponse<ErmisChatGenerics>>} The server response
-   */
-  async watch(options?: ChannelQueryOptions<ErmisChatGenerics>) {
-    const defaultOptions = {
-      state: true,
-      watch: true,
-      presence: false,
-    };
-
+  async watch(options?: ChannelQueryOptions) {
     // Make sure we wait for the connect promise if there is a pending one
     await this.getClient().wsPromise;
 
-    const combined = { ...defaultOptions, ...options };
+    const combined = { ...options };
     const state = await this.query(combined, 'latest');
     this.initialized = true;
     // Ensure all members' user info are loaded in state.users
@@ -801,18 +788,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    * @return {Promise<QueryChannelAPIResponse<ErmisChatGenerics>>} The Server Response
    *
    */
-  create = async (options?: ChannelQueryOptions<ErmisChatGenerics>) => {
-    const defaultOptions = {
-      ...options,
-      watch: false,
-      state: false,
-      presence: false,
-    };
-
+  create = async () => {
     if (this.type === 'messaging') {
-      return await this.createDirectChannel(defaultOptions, 'latest');
+      return await this.createDirectChannel('latest');
     } else {
-      return await this.query(defaultOptions, 'latest');
+      return await this.query({}, 'latest');
     }
   };
 
@@ -836,15 +816,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   /**
    * query - Query the API, get messages, members or other channel fields
    *
-   * @param {ChannelQueryOptions<ErmisChatGenerics>} options The query options
+   * @param {ChannelQueryOptions} options The query options
    * @param {MessageSetType} messageSetToAddToIfDoesNotExist It's possible to load disjunct sets of a channel's messages into state, use `current` to load the initial channel state or if you want to extend the currently displayed messages, use `latest` if you want to load/extend the latest messages, `new` is used for loading a specific message and it's surroundings
    *
    * @return {Promise<QueryChannelAPIResponse<ErmisChatGenerics>>} Returns a query response
    */
-  async query(
-    options: ChannelQueryOptions<ErmisChatGenerics>,
-    messageSetToAddToIfDoesNotExist: MessageSetType = 'current',
-  ) {
+  async query(options: ChannelQueryOptions, messageSetToAddToIfDoesNotExist: MessageSetType = 'current') {
     // Make sure we wait for the connect promise if there is a pending one
     await this.getClient().wsPromise;
 
@@ -948,21 +925,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return state;
   }
 
-  async createDirectChannel(
-    options: ChannelQueryOptions<ErmisChatGenerics>,
-    messageSetToAddToIfDoesNotExist: MessageSetType = 'current',
-  ) {
+  async createDirectChannel(messageSetToAddToIfDoesNotExist: MessageSetType = 'current') {
     // Make sure we wait for the connect promise if there is a pending one
     await this.getClient().wsPromise;
 
-    let project_id = this._client.projectId;
-    let update_options = { ...options, project_id };
+    const project_id = this._client.projectId;
 
-    let queryURL = `${this.getClient().baseURL}/channels/${this.type}`;
+    const queryURL = `${this.getClient().baseURL}/channels/${this.type}`;
 
     const payload: any = {
-      state: true,
-      ...update_options,
+      project_id,
     };
 
     if (this._data && Object.keys(this._data).length > 0) {
@@ -1490,10 +1462,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       // }
       case 'channel.updated':
         if (event.channel) {
-          const isFrozenChanged = event.channel?.frozen !== undefined && event.channel.frozen !== channel.data?.frozen;
-          if (isFrozenChanged) {
-            this.query({ state: false, messages: { limit: 0 }, watchers: { limit: 0 } });
-          }
           channel.data = {
             ...channel.data,
             ...event.channel,

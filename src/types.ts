@@ -45,8 +45,6 @@ export type APIResponse = {
 export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['channelType'] & {
     cid: string;
-    disabled: boolean;
-    frozen: boolean;
     id: string;
     type: string;
     config?: ChannelConfigWithInfo;
@@ -253,17 +251,13 @@ export type ContactResult<ErmisChatGenerics extends ExtendableGenerics = Default
   block_users: UserResponse<ErmisChatGenerics>[];
 };
 
-export type ChannelQueryOptions<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  client_id?: string;
-  connection_id?: string;
-  data?: ChannelResponse<ErmisChatGenerics>;
-  hide_for_creator?: boolean;
-  members?: PaginationOptions;
-  messages?: MessagePaginationOptions;
-  presence?: boolean;
-  state?: boolean;
-  watch?: boolean;
-  watchers?: PaginationOptions;
+export type ChannelQueryOptions = {
+  messages?: {
+    limit?: number;
+    id_lt?: string;
+    id_gt?: string;
+    id_around?: string;
+  };
 };
 
 export type ChannelStateOptions = {
@@ -278,23 +272,6 @@ export type MarkReadOptions<ErmisChatGenerics extends ExtendableGenerics = Defau
   user_id?: string;
 };
 
-export type PaginationOptions = {
-  created_at_after?: string | Date;
-  created_at_after_or_equal?: string | Date;
-  created_at_before?: string | Date;
-  created_at_before_or_equal?: string | Date;
-  id_gt?: string;
-  id_gte?: string;
-  id_lt?: string;
-  id_lte?: string;
-  limit?: number;
-  offset?: number;
-};
-
-export type MessagePaginationOptions = PaginationOptions & {
-  created_at_around?: string | Date;
-  id_around?: string;
-};
 
 export type ErmisChatOptions = AxiosRequestConfig & {
   /**
