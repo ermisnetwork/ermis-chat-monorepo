@@ -16,8 +16,6 @@ import {
   ChannelQueryOptions,
   ChannelResponse,
   ChannelUpdateOptions,
-  CreateCallOptions,
-  CreateCallResponse,
   DefaultGenerics,
   DeleteChannelAPIResponse,
   Event,
@@ -1077,16 +1075,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return state.messages;
   }
 
-  /**
-   * createCall - creates a call for the current channel
-   *
-   * @param {CreateCallOptions} options
-   * @returns {Promise<CreateCallResponse>}
-   */
-  async createCall(options: CreateCallOptions) {
-    return await this.getClient().post<CreateCallResponse>(this._channelURL() + '/call', options);
-  }
-
   async deleteMessage(messageId: string) {
     return await this.getClient().delete<APIResponse & { message: MessageResponse<ErmisChatGenerics> }>(
       this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageId}`,
@@ -1851,9 +1839,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       this.state.pinnedMessages = [];
     }
     this.state.addPinnedMessages(state.pinned_messages || []);
-    if (state.pending_messages) {
-      this.state.pending_messages = state.pending_messages;
-    }
+
     if (state.watcher_count !== undefined) {
       this.state.watcher_count = state.watcher_count;
     }

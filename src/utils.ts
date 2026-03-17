@@ -8,7 +8,6 @@ import {
   UserResponse,
   MessageResponse,
   FormatMessageResponse,
-  ReactionGroupResponse,
 } from './types';
 import { AxiosRequestConfig } from 'axios';
 import { ErmisChat } from './client';
@@ -80,15 +79,11 @@ export function isOwnUserBaseProperty(property: string) {
   const ownUserBaseProperties: {
     [Property in keyof Required<OwnUserBase>]: boolean;
   } = {
-    channel_mutes: true,
-    devices: true,
-    // mutes: true,
     total_unread_count: true,
     unread_channels: true,
     unread_count: true,
     unread_threads: true,
     invisible: true,
-    privacy_settings: true,
     roles: true,
   };
 
@@ -298,11 +293,6 @@ export function formatMessage<ErmisChatGenerics extends ExtendableGenerics = Def
     created_at: message.created_at ? new Date(message.created_at) : new Date(),
     updated_at: message.updated_at ? new Date(message.updated_at) : new Date(),
     status: message.status || 'received',
-    reaction_groups: maybeGetReactionGroupsFallback(
-      message.reaction_groups,
-      message.reaction_counts,
-      message.reaction_scores,
-    ),
   };
 }
 
@@ -386,31 +376,6 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
     }
   }
   return uniqueMessages;
-}
-
-function maybeGetReactionGroupsFallback(
-  groups: { [key: string]: ReactionGroupResponse } | null | undefined,
-  counts: { [key: string]: number } | null | undefined,
-  scores: { [key: string]: number } | null | undefined,
-): { [key: string]: ReactionGroupResponse } | null {
-  if (groups) {
-    return groups;
-  }
-
-  if (counts && scores) {
-    const fallback: { [key: string]: ReactionGroupResponse } = {};
-
-    for (const type of Object.keys(counts)) {
-      fallback[type] = {
-        count: counts[type],
-        sum_scores: scores[type],
-      };
-    }
-
-    return fallback;
-  }
-
-  return null;
 }
 
 export const enrichWithUserInfo = (items: any[], users: any[]) => {

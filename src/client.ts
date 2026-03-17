@@ -1358,7 +1358,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return JSON.stringify({
       user_id: this.userID,
       user_details: this.user,
-      device: this.options.device,
       client_request_id,
     });
   };

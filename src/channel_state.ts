@@ -10,7 +10,6 @@ import {
   MessageResponse,
   ReactionResponse,
   UserResponse,
-  PendingMessageResponse,
 } from './types';
 import { addToMessageList } from './utils';
 
@@ -35,7 +34,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   typing: Record<string, Event<ErmisChatGenerics>>;
   read: ChannelReadStatus<ErmisChatGenerics>;
   pinnedMessages: Array<ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>>;
-  pending_messages: Array<PendingMessageResponse<ErmisChatGenerics>>;
   threads: Record<string, Array<ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>>>;
   mutedUsers: Array<UserResponse<ErmisChatGenerics>>;
   watchers: Record<string, UserResponse<ErmisChatGenerics>>;
@@ -69,7 +67,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     this.read = {};
     this.initMessages();
     this.pinnedMessages = [];
-    this.pending_messages = [];
     this.threads = {};
     // a list of users to hide messages from
     this.mutedUsers = [];

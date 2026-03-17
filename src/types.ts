@@ -49,8 +49,6 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     frozen: boolean;
     id: string;
     type: string;
-    auto_translation_enabled?: boolean;
-    auto_translation_language?: TranslationLanguages | '';
     config?: ChannelConfigWithInfo<ErmisChatGenerics>;
     cooldown?: number;
     created_at?: string;
@@ -94,9 +92,7 @@ export type ChannelAPIResponse<ErmisChatGenerics extends ExtendableGenerics = De
   pinned_messages: MessageResponse<ErmisChatGenerics>[];
   hidden?: boolean;
   membership?: ChannelMembership<ErmisChatGenerics> | null;
-  pending_messages?: PendingMessageResponse<ErmisChatGenerics>[];
   read?: ReadResponse<ErmisChatGenerics>[];
-  threads?: ThreadResponse[];
   topics?: QueryChannelAPIResponse<ErmisChatGenerics>[];
   watcher_count?: number;
   watchers?: UserResponse<ErmisChatGenerics>[];
@@ -129,8 +125,6 @@ export type CommandResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
   Partial<CreatedAtUpdatedAt> & {
     args?: string;
     description?: string;
-    name?: CommandVariants<ErmisChatGenerics>;
-    set?: CommandVariants<ErmisChatGenerics>;
   };
 
 export type ConnectAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
@@ -165,29 +159,6 @@ export type FormatMessageResponse<ErmisChatGenerics extends ExtendableGenerics =
     updated_at: Date;
   };
 
-export type ThreadResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  channel: ChannelResponse<ErmisChatGenerics>;
-  channel_cid: string;
-  created_at: string;
-  deleted_at: string;
-  latest_replies: MessageResponse<ErmisChatGenerics>[];
-  parent_message: MessageResponse<ErmisChatGenerics>;
-  parent_message_id: string;
-  read: {
-    last_read: string;
-    last_read_message_id: string;
-    unread_messages: number;
-    user: UserResponse<ErmisChatGenerics>;
-  }[];
-  reply_count: number;
-  thread_participants: {
-    created_at: string;
-    user: UserResponse<ErmisChatGenerics>;
-  }[];
-  title: string;
-  updated_at: string;
-};
-
 export type MessageResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   MessageResponseBase<ErmisChatGenerics> & {
     quoted_message?: MessageResponseBase<ErmisChatGenerics>;
@@ -205,9 +176,6 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     created_at?: string;
     deleted_at?: string;
     deleted_reply_count?: number;
-    i18n?: RequireAtLeastOne<Record<`${TranslationLanguages}_text`, string>> & {
-      language: TranslationLanguages;
-    };
     latest_reactions?: ReactionResponse<ErmisChatGenerics>[];
     mentioned_users?: UserResponse<ErmisChatGenerics>[];
     message_text_updated_at?: string;
@@ -218,7 +186,6 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     pinned_by?: UserResponse<ErmisChatGenerics> | null;
     poll?: PollResponse<ErmisChatGenerics>;
     reaction_counts?: { [key: string]: number } | null;
-    reaction_groups?: { [key: string]: ReactionGroupResponse } | null;
     reaction_scores?: { [key: string]: number } | null;
     reply_count?: number;
     shadowed?: boolean;
@@ -226,13 +193,6 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     thread_participants?: UserResponse<ErmisChatGenerics>[];
     updated_at?: string;
   };
-
-export type ReactionGroupResponse = {
-  count: number;
-  sum_scores: number;
-  first_reaction_at?: string;
-  last_reaction_at?: string;
-};
 
 export type ModerationDetailsResponse = {
   action: 'MESSAGE_RESPONSE_ACTION_BOUNCE' | (string & {});
@@ -247,15 +207,12 @@ export type ModerationHarmResponse = {
 };
 
 export type OwnUserBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  channel_mutes: ChannelMute<ErmisChatGenerics>[];
-  devices: Device<ErmisChatGenerics>[];
   // mutes: Mute<ErmisChatGenerics>[];
   total_unread_count: number;
   unread_channels: number;
   unread_count: number;
   unread_threads: number;
   invisible?: boolean;
-  privacy_settings?: PrivacySettings;
   roles?: string[];
 };
 
@@ -326,15 +283,6 @@ export type ContactResult<ErmisChatGenerics extends ExtendableGenerics = Default
   block_users: UserResponse<ErmisChatGenerics>[];
 };
 
-export type PrivacySettings = {
-  read_receipts?: {
-    enabled?: boolean;
-  };
-  typing_indicators?: {
-    enabled?: boolean;
-  };
-};
-
 export type ChannelQueryOptions<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   client_id?: string;
   connection_id?: string;
@@ -352,7 +300,6 @@ export type ChannelStateOptions = {
   offlineMode?: boolean;
   skipInitialization?: string[];
 };
-
 
 export type MarkReadOptions<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   client_id?: string;
@@ -391,7 +338,6 @@ export type ErmisChatOptions = AxiosRequestConfig & {
    */
   userBaseURL?: string;
   browser?: boolean;
-  device?: BaseDeviceFields;
   enableInsights?: boolean;
   /** experimental feature, please contact support if you want this feature enabled for you */
   logger?: Logger;
@@ -410,7 +356,6 @@ export type ErmisChatOptions = AxiosRequestConfig & {
   // not be used in production apps.
   wsConnection?: StableWSConnection;
 };
-
 
 /**
  * Event Types
@@ -448,7 +393,6 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   reaction?: ReactionResponse<ErmisChatGenerics>;
   received_at?: string | Date;
   team?: string;
-  thread?: ThreadResponse<ErmisChatGenerics>;
   // @deprecated number of all unread messages across all current user's unread channels, equals unread_count
   total_unread_count?: number;
   // number of all current user's channels with at least one unread message including the channel in this event
@@ -535,7 +479,6 @@ export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     file_size?: number | string;
     footer?: string;
     footer_icon?: string;
-    giphy?: GiphyData;
     image_url?: string;
     mime_type?: string;
     og_scrape_url?: string;
@@ -549,22 +492,8 @@ export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     waveform_data?: Array<number>;
   };
 
-export type ChannelConfigAutomod = '' | 'AI' | 'disabled' | 'simple';
-
-export type ChannelConfigAutomodBehavior = '' | 'block' | 'flag';
-
-export type ChannelConfigAutomodThresholds = null | {
-  explicit?: { block?: number; flag?: number };
-  spam?: { block?: number; flag?: number };
-  toxic?: { block?: number; flag?: number };
-};
-
 export type ChannelConfigFields = {
   reminders: boolean;
-  automod?: ChannelConfigAutomod;
-  automod_behavior?: ChannelConfigAutomodBehavior;
-  automod_thresholds?: ChannelConfigAutomodThresholds;
-  blocklist_behavior?: ChannelConfigAutomodBehavior;
   connect_events?: boolean;
   custom_events?: boolean;
   mark_messages_pending?: boolean;
@@ -610,27 +539,6 @@ export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = Def
   user?: UserResponse<ErmisChatGenerics>;
 };
 
-export type ChannelMute<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  user: UserResponse<ErmisChatGenerics>;
-  channel?: ChannelResponse<ErmisChatGenerics>;
-  created_at?: string;
-  expires?: string;
-  updated_at?: string;
-};
-
-export type PushProvider = 'apn' | 'firebase' | 'huawei' | 'xiaomi';
-
-export type CommandVariants<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
-  | 'all'
-  | 'ban'
-  | 'fun_set'
-  | 'giphy'
-  | 'moderation_set'
-  | 'mute'
-  | 'unban'
-  | 'unmute'
-  | ErmisChatGenerics['commandType'];
-
 export type Configs<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = Record<
   string,
   ChannelConfigWithInfo<ErmisChatGenerics> | undefined
@@ -649,49 +557,10 @@ export type CreatedAtUpdatedAt = {
   updated_at: string;
 };
 
-export type Device<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = DeviceFields & {
-  provider?: string;
-  user?: UserResponse<ErmisChatGenerics>;
-  user_id?: string;
-};
-
-export type BaseDeviceFields = {
-  id: string;
-  push_provider: PushProvider;
-  push_provider_name?: string;
-};
-
-export type DeviceFields = BaseDeviceFields & {
-  created_at: string;
-  disabled?: boolean;
-  disabled_reason?: string;
-};
-
 export type Field = {
   short?: boolean;
   title?: string;
   value?: string;
-};
-
-type GiphyVersionInfo = {
-  height: string;
-  url: string;
-  width: string;
-  frames?: string;
-  size?: string;
-};
-
-type GiphyVersions =
-  | 'original'
-  | 'fixed_height'
-  | 'fixed_height_still'
-  | 'fixed_height_downsampled'
-  | 'fixed_width'
-  | 'fixed_width_still'
-  | 'fixed_width_downsampled';
-
-type GiphyData = {
-  [key in GiphyVersions]: GiphyVersionInfo;
 };
 
 export type LiteralStringForUnion = string & {};
@@ -765,11 +634,6 @@ export type Mute<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics>
   user: UserResponse<ErmisChatGenerics>;
 };
 
-export type PendingMessageResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  message: MessageResponse<ErmisChatGenerics>;
-  pending_message_metadata?: Record<string, string>;
-};
-
 export type Reaction<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['reactionType'] & {
     type: string;
@@ -783,65 +647,6 @@ export type TokenOrProvider = null | string | TokenProvider | undefined;
 
 export type TokenProvider = () => Promise<string>;
 
-export type TranslationLanguages =
-  | ''
-  | 'af'
-  | 'am'
-  | 'ar'
-  | 'az'
-  | 'bg'
-  | 'bn'
-  | 'bs'
-  | 'cs'
-  | 'da'
-  | 'de'
-  | 'el'
-  | 'en'
-  | 'es'
-  | 'es-MX'
-  | 'et'
-  | 'fa'
-  | 'fa-AF'
-  | 'fi'
-  | 'fr'
-  | 'fr-CA'
-  | 'ha'
-  | 'he'
-  | 'hi'
-  | 'hr'
-  | 'hu'
-  | 'id'
-  | 'it'
-  | 'ja'
-  | 'ka'
-  | 'ko'
-  | 'lt'
-  | 'lv'
-  | 'ms'
-  | 'nl'
-  | 'no'
-  | 'pl'
-  | 'ps'
-  | 'pt'
-  | 'ro'
-  | 'ru'
-  | 'sk'
-  | 'sl'
-  | 'so'
-  | 'sq'
-  | 'sr'
-  | 'sv'
-  | 'sw'
-  | 'ta'
-  | 'th'
-  | 'tl'
-  | 'tr'
-  | 'uk'
-  | 'ur'
-  | 'vi'
-  | 'zh'
-  | 'zh-TW';
-
 export type User<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = ErmisChatGenerics['userType'] & {
   id: string;
   name?: string;
@@ -853,48 +658,12 @@ export type User<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics>
 
 export type MessageSetType = 'latest' | 'current' | 'new';
 
-export type CreateCallOptions<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  id: string;
-  type: string;
-  options?: UR;
-  user?: UserResponse<ErmisChatGenerics> | null;
-  user_id?: string;
-};
-
-export type HMSCall = {
-  room: string;
-};
-
-export type AgoraCall = {
-  channel: string;
-};
-
-export type Call = {
-  id: string;
-  provider: string;
-  agora?: AgoraCall;
-  hms?: HMSCall;
-};
-
-export type CreateCallResponse = APIResponse & {
-  call: Call;
-  token: string;
-  agora_app_id?: string;
-  agora_uid?: number;
-};
-
-type ErrorResponseDetails = {
-  code: number;
-  messages: string[];
-};
-
 export type APIErrorResponse = {
   code: number;
   duration: string;
   message: string;
   more_info: string;
   StatusCode: number;
-  details?: ErrorResponseDetails;
 };
 
 export class ErrorFromResponse<T> extends Error {
@@ -926,7 +695,6 @@ export type PollResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultG
     description?: string;
     is_closed?: boolean;
     own_votes?: PollVote<ErmisChatGenerics>[];
-    voting_visibility?: VotingVisibility;
   };
 
 export type PollOption<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
@@ -938,11 +706,6 @@ export type PollOption<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   vote_count: number;
   votes?: PollVote<ErmisChatGenerics>[];
 };
-
-export enum VotingVisibility {
-  anonymous = 'anonymous',
-  public = 'public',
-}
 
 export type PollVote<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   created_at: string;
