@@ -204,6 +204,33 @@
   color: var(--ermis-text-secondary);
 }
 
+/* --- Unread channel indicator --- */
+.ermis-channel-list__item--unread .ermis-channel-list__item-name {
+  font-weight: 700;
+  color: var(--ermis-text-primary);
+}
+
+.ermis-channel-list__item--unread .ermis-channel-list__item-last-message {
+  color: var(--ermis-text-secondary);
+  font-weight: 600;
+}
+
+.ermis-channel-list__unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--ermis-radius-full);
+  background-color: #ef4444;
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 /* ----------------------------------------------------------
    Channel
    ---------------------------------------------------------- */

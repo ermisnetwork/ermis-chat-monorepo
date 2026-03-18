@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
+import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
 import { Avatar } from './Avatar';
 import type { AvatarProps } from './Avatar';
 
@@ -10,6 +11,10 @@ import type { AvatarProps } from './Avatar';
 type ChannelItemProps = {
   channel: Channel;
   isActive: boolean;
+  hasUnread: boolean;
+  unreadCount: number;
+  lastMessageText: string;
+  lastMessageUser: string;
   onSelect: (channel: Channel) => void;
   AvatarComponent: React.ComponentType<AvatarProps>;
 };
@@ -17,24 +22,29 @@ type ChannelItemProps = {
 const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   channel,
   isActive,
+  hasUnread,
+  unreadCount,
+  lastMessageText,
+  lastMessageUser,
   onSelect,
   AvatarComponent,
 }) => {
   const name = channel.data?.name || channel.cid;
   const image = channel.data?.image as string | undefined;
-  const lastMessage = channel.state?.latestMessages?.slice(-1)[0];
-  const lastMessageText = lastMessage?.text;
-  const lastMessageUser = lastMessage?.user?.name || lastMessage?.user_id;
+  const showUnread = hasUnread && !isActive;
 
   const handleClick = useCallback(() => {
     onSelect(channel);
   }, [channel, onSelect]);
 
+  const itemClass = [
+    'ermis-channel-list__item',
+    isActive ? 'ermis-channel-list__item--active' : '',
+    showUnread ? 'ermis-channel-list__item--unread' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div
-      className={`ermis-channel-list__item ${isActive ? 'ermis-channel-list__item--active' : ''}`}
-      onClick={handleClick}
-    >
+    <div className={itemClass} onClick={handleClick}>
       <AvatarComponent image={image} name={name} size={40} />
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-name">{name}</div>
@@ -49,6 +59,11 @@ const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
           </div>
         )}
       </div>
+      {showUnread && unreadCount > 0 && (
+        <span className="ermis-channel-list__unread-badge">
+          {unreadCount > 99 ? '99+' : unreadCount}
+        </span>
+      )}
     </div>
   );
 });
@@ -120,12 +135,23 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
     return () => sub.unsubscribe();
   }, [client, loadChannels]);
 
+  // Real-time: move channel to top on new messages
+  useChannelListUpdates(channels, setChannels);
+
   const handleSelect = useCallback(
     (channel: Channel) => {
       setActiveChannel(channel);
       onChannelSelect?.(channel);
+
+      // Mark as read when user selects a channel
+      if ((channel.state as any)?.unreadCount > 0) {
+        channel.markRead().catch(() => {});
+        // Optimistically reset unread to update UI immediately
+        (channel.state as any).unreadCount = 0;
+        setChannels((prev) => [...prev]);
+      }
     },
-    [setActiveChannel, onChannelSelect],
+    [setActiveChannel, onChannelSelect, setChannels],
   );
 
   if (loading) return <LoadingIndicator />;
@@ -135,6 +161,14 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
     <div className={`ermis-channel-list${className ? ` ${className}` : ''}`}>
       {channels.map((channel) => {
         const isActive = activeChannel?.cid === channel.cid;
+        const unreadCount = (channel.state as any)?.unreadCount ?? 0;
+        const hasUnread = unreadCount > 0;
+
+        // Derive last message data here so React.memo on ChannelItem
+        // can detect changes (channel object reference stays the same)
+        const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
+        const lastMessageText = lastMsg?.text ?? '';
+        const lastMessageUser = lastMsg?.user?.name || lastMsg?.user_id || '';
 
         if (renderChannel) {
           return (
@@ -149,6 +183,10 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
             key={channel.cid}
             channel={channel}
             isActive={isActive}
+            hasUnread={hasUnread}
+            unreadCount={unreadCount}
+            lastMessageText={lastMessageText}
+            lastMessageUser={lastMessageUser}
             onSelect={handleSelect}
             AvatarComponent={AvatarComponent}
           />

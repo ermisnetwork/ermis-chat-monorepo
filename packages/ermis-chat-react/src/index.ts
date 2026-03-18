@@ -9,6 +9,7 @@ export type { ChatProviderProps, ChatContextValue, Theme } from './context/ChatP
 export { useChatClient } from './hooks/useChatClient';
 export { useChannel } from './hooks/useChannel';
 export type { UseChannelReturn } from './hooks/useChannel';
+export { useChannelListUpdates } from './hooks/useChannelListUpdates';
 
 // Components
 export { Avatar } from './components/Avatar';
