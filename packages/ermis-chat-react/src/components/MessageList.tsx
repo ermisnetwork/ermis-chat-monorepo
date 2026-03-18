@@ -192,6 +192,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
+  const skipLoadMoreRef = useRef(false);
   const currentUserId = client.userID;
 
   const renderers = useMemo(
@@ -209,6 +210,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
   // Load older messages
   const loadMore = useCallback(async () => {
     if (!activeChannel || loadingMore || !hasMore) return;
+    if (skipLoadMoreRef.current) return;
 
     const oldestMessage = messages[0];
     if (!oldestMessage?.id) return;
@@ -252,6 +254,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
     if (!el) return;
 
     const handleScroll = () => {
+      if (skipLoadMoreRef.current) return;
       if (el.scrollTop < 50 && !loadingMore && hasMore) {
         loadMore();
       }
@@ -269,9 +272,17 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
       return;
     }
 
+    // Block load-more during initial scroll-to-bottom
+    skipLoadMoreRef.current = true;
     setMessages([...activeChannel.state.latestMessages]);
     setHasMore(true);
-    setTimeout(scrollToBottom, 50);
+    setTimeout(() => {
+      scrollToBottom();
+      // Allow load-more after scroll settles
+      requestAnimationFrame(() => {
+        skipLoadMoreRef.current = false;
+      });
+    }, 50);
 
     const handleNewMessage = (event: Event) => {
       const el = listRef.current;
