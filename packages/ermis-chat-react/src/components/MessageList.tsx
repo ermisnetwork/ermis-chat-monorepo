@@ -348,16 +348,6 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
           );
         }
 
-        if (messageType === 'signal') {
-          const SignalRenderer = renderers.signal;
-          return (
-            <React.Fragment key={message.id}>
-              {dateSeparator}
-              <SignalRenderer message={message} isOwnMessage={isOwnMessage} />
-            </React.Fragment>
-          );
-        }
-
         // Determine grouping: compare with previous non-system message
         // A date separator also breaks the group
         const prevType = (prevMsg?.type || 'regular') as MessageLabel;

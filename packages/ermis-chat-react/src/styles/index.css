@@ -433,6 +433,14 @@
   font-style: italic;
 }
 
+/* --- Signal messages (call events) --- */
+.ermis-message-list__signal-text {
+  font-size: var(--ermis-font-size-sm);
+  color: inherit;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 /* --- Attachments --- */
 .ermis-attachment-list {
   display: flex;

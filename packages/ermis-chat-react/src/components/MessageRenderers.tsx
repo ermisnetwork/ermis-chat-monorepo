@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { FormatMessageResponse, Attachment, MessageLabel } from '@ermis-network/ermis-chat-sdk';
-import { parseSystemMessage } from '@ermis-network/ermis-chat-sdk';
+import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 
 /* ----------------------------------------------------------
@@ -142,8 +142,32 @@ export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
   );
 };
 
-/** Signal message: hidden or subtle */
-export const SignalMessage: React.FC<MessageRendererProps> = () => null;
+/** Signal message: call events */
+export const SignalMessage: React.FC<MessageRendererProps> = ({ message }) => {
+  const { activeChannel } = useChatClient();
+
+  const userMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    const members = (activeChannel?.state as any)?.members;
+    if (members && typeof members === 'object') {
+      for (const [id, member] of Object.entries(members)) {
+        const m = member as any;
+        const name = m?.user?.name || m?.user_id || id;
+        map[id] = name;
+      }
+    }
+    return map;
+  }, [activeChannel]);
+
+  const rawText = message.text ?? '';
+  const parsedText = rawText ? parseSignalMessage(rawText, userMap) : '';
+
+  return (
+    <span className="ermis-message-list__signal-text">
+      {parsedText || rawText}
+    </span>
+  );
+};
 
 /** Poll message */
 export const PollMessage: React.FC<MessageRendererProps> = ({ message }) => (
