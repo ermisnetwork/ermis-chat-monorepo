@@ -25,7 +25,11 @@ export { ChannelHeader } from './components/ChannelHeader';
 export type { ChannelHeaderProps } from './components/ChannelHeader';
 
 export { MessageList } from './components/MessageList';
-export type { MessageListProps, MessageBubbleProps } from './components/MessageList';
+export type { MessageListProps, MessageBubbleProps, MessageItemProps, SystemMessageItemProps } from './components/MessageList';
+
+export { MessageItem, SystemMessageItem } from './components/MessageItem';
+
+export { formatTime, getDateKey, formatDateLabel, getMessageUserId } from './utils';
 
 export {
   defaultMessageRenderers,
@@ -48,3 +52,9 @@ export type { MentionSuggestionsProps } from './components/MentionSuggestions';
 
 export { useMentions } from './hooks/useMentions';
 export type { MentionMember, MentionPayload, UseMentionsOptions, UseMentionsReturn } from './hooks/useMentions';
+
+export { useScrollToMessage } from './hooks/useScrollToMessage';
+export type { UseScrollToMessageOptions, UseScrollToMessageReturn, ScrollToMessageFn } from './hooks/useScrollToMessage';
+
+export { QuotedMessagePreview } from './components/QuotedMessagePreview';
+export type { QuotedMessagePreviewProps } from './components/QuotedMessagePreview';

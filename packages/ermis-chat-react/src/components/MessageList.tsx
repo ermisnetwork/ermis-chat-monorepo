@@ -2,15 +2,20 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import type { FormatMessageResponse, Event, MessageLabel } from '@ermis-network/ermis-chat-sdk';
 import { formatMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
+import { useScrollToMessage } from '../hooks/useScrollToMessage';
 import { Avatar } from './Avatar';
 import type { AvatarProps } from './Avatar';
+import { MessageItem } from './MessageItem';
+import { SystemMessageItem } from './MessageItem';
 import {
   defaultMessageRenderers,
   type MessageRendererProps,
   type MessageBubbleProps,
 } from './MessageRenderers';
+import { getDateKey, formatDateLabel, getMessageUserId } from '../utils';
 
 export type { MessageBubbleProps } from './MessageRenderers';
+export type { MessageItemProps, SystemMessageItemProps } from './MessageItem';
 
 export type MessageListProps = {
   renderMessage?: (message: FormatMessageResponse, isOwnMessage: boolean) => React.ReactNode;
@@ -23,123 +28,8 @@ export type MessageListProps = {
   loadMoreLimit?: number;
 };
 
-function formatTime(date: Date | string | undefined): string {
-  if (!date) return '';
-  const d = date instanceof Date ? date : new Date(date);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-/** Return a YYYY-MM-DD key for date comparison */
-function getDateKey(date: Date | string | undefined): string {
-  if (!date) return '';
-  const d = date instanceof Date ? date : new Date(date);
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
-/** Format a date into a human-friendly label */
-function formatDateLabel(date: Date | string | undefined): string {
-  if (!date) return '';
-  const d = date instanceof Date ? date : new Date(date);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const diffMs = today.getTime() - msgDay.getTime();
-  const diffDays = Math.round(diffMs / 86400000);
-
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
-
-/**
- * Get the user id from a message, checking multiple possible sources.
- */
-function getMessageUserId(message: FormatMessageResponse): string {
-  return message.user?.id || message.user_id || '';
-}
-
 /* ----------------------------------------------------------
-   Memoized single message item
-   ---------------------------------------------------------- */
-type MessageItemProps = {
-  message: FormatMessageResponse;
-  isOwnMessage: boolean;
-  isFirstInGroup: boolean;
-  AvatarComponent: React.ComponentType<AvatarProps>;
-  MessageBubble: React.ComponentType<MessageBubbleProps>;
-  MessageRenderer: React.ComponentType<MessageRendererProps>;
-};
-
-const MessageItem: React.FC<MessageItemProps> = React.memo(({
-  message,
-  isOwnMessage,
-  isFirstInGroup,
-  AvatarComponent,
-  MessageBubble,
-  MessageRenderer,
-}) => {
-  const userName = message.user?.name || message.user_id;
-  const userAvatar = message.user?.avatar;
-
-  const itemClass = [
-    'ermis-message-list__item',
-    isOwnMessage ? 'ermis-message-list__item--own' : 'ermis-message-list__item--other',
-    isFirstInGroup ? 'ermis-message-list__item--group-start' : 'ermis-message-list__item--group-cont',
-  ].join(' ');
-
-  return (
-    <div className={itemClass}>
-      {/* Avatar area: show avatar only on first message, otherwise placeholder for alignment */}
-      {!isOwnMessage && (
-        <div className="ermis-message-list__item-avatar">
-          {isFirstInGroup
-            ? <AvatarComponent image={userAvatar} name={userName} size={28} />
-            : <div style={{ width: 28 }} />
-          }
-        </div>
-      )}
-      <div className="ermis-message-list__item-content">
-        {!isOwnMessage && isFirstInGroup && (
-          <span className="ermis-message-list__item-user">{userName}</span>
-        )}
-        <MessageBubble message={message} isOwnMessage={isOwnMessage}>
-          <MessageRenderer message={message} isOwnMessage={isOwnMessage} />
-          <span className="ermis-message-list__item-time">
-            {formatTime(message.created_at)}
-          </span>
-        </MessageBubble>
-      </div>
-    </div>
-  );
-});
-MessageItem.displayName = 'MessageItem';
-
-/* ----------------------------------------------------------
-   Memoized system message
-   ---------------------------------------------------------- */
-type SystemMessageItemProps = {
-  message: FormatMessageResponse;
-  isOwnMessage: boolean;
-  SystemRenderer: React.ComponentType<MessageRendererProps>;
-};
-
-const SystemMessageItem: React.FC<SystemMessageItemProps> = React.memo(({
-  message,
-  isOwnMessage,
-  SystemRenderer,
-}) => (
-  <div className="ermis-message-list__system">
-    <SystemRenderer message={message} isOwnMessage={isOwnMessage} />
-  </div>
-));
-SystemMessageItem.displayName = 'SystemMessageItem';
-
-/* ----------------------------------------------------------
-   Date separator
+   Internal sub-components
    ---------------------------------------------------------- */
 const DateSeparator: React.FC<{ label: string }> = React.memo(({ label }) => (
   <div className="ermis-message-list__date-separator">
@@ -150,16 +40,10 @@ const DateSeparator: React.FC<{ label: string }> = React.memo(({ label }) => (
 ));
 (DateSeparator as any).displayName = 'DateSeparator';
 
-/* ----------------------------------------------------------
-   Loading indicator for load-more
-   ---------------------------------------------------------- */
 const LoadMoreSpinner: React.FC = () => (
   <div className="ermis-message-list__loading-more">Loading...</div>
 );
 
-/* ----------------------------------------------------------
-   MessageList
-   ---------------------------------------------------------- */
 const DefaultEmpty = React.memo(() => (
   <div className="ermis-message-list__empty">No messages yet</div>
 ));
@@ -178,6 +62,9 @@ const DefaultBubble: React.FC<MessageBubbleProps> = React.memo(({
 ));
 (DefaultBubble as any).displayName = 'DefaultBubble';
 
+/* ----------------------------------------------------------
+   MessageList
+   ---------------------------------------------------------- */
 export const MessageList: React.FC<MessageListProps> = React.memo(({
   renderMessage,
   className,
@@ -190,10 +77,22 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
   const { client, activeChannel } = useChatClient();
   const [messages, setMessages] = useState<FormatMessageResponse[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadingNewerRef = useRef(false);
   const [hasMore, setHasMore] = useState(true);
+  const [hasNewer, setHasNewer] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const skipLoadMoreRef = useRef(false);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const currentUserId = client.userID;
+
+  const { highlightedId, scrollToMessage } = useScrollToMessage({
+    listRef,
+    activeChannel,
+    setMessages,
+    setHasMore,
+    setHasNewer,
+  });
 
   const renderers = useMemo(
     () => ({ ...defaultMessageRenderers, ...customRenderers }),
@@ -231,7 +130,18 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
 
       if (olderRaw.length > 0) {
         const olderFormatted = olderRaw.map((msg: any) => formatMessage(msg));
-        setMessages((prev) => [...olderFormatted, ...prev]);
+        setMessages((prev) => {
+          const allIds = new Set(prev.map((m) => m.id));
+          const unique = olderFormatted.filter((m: any) => {
+            if (!m.id || allIds.has(m.id)) return false;
+            allIds.add(m.id);
+            return true;
+          });
+          if (unique.length === 0) {
+            setHasMore(false);
+          }
+          return [...unique, ...prev];
+        });
 
         // Preserve scroll position after prepending
         requestAnimationFrame(() => {
@@ -248,21 +158,88 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
     }
   }, [activeChannel, loadingMore, hasMore, messages, loadMoreLimit]);
 
-  // Detect scroll to top
+  // Load newer messages (after a jump)
+  const loadNewer = useCallback(async () => {
+    if (!activeChannel || loadingNewerRef.current || !hasNewer) return;
+
+    const currentMessages = messagesRef.current;
+    const newestMessage = currentMessages[currentMessages.length - 1];
+    if (!newestMessage?.id) return;
+
+    loadingNewerRef.current = true;
+    try {
+      const newerRaw = await activeChannel.queryMessagesGreaterThanId(
+        newestMessage.id,
+        loadMoreLimit,
+      );
+
+      if (newerRaw.length < loadMoreLimit) {
+        setHasNewer(false);
+      }
+
+      if (newerRaw.length > 0) {
+        const newerFormatted = newerRaw.map((msg: any) => formatMessage(msg));
+        setMessages((prev) => {
+          const allIds = new Set(prev.map((m) => m.id));
+          const unique = newerFormatted.filter((m: any) => {
+            if (!m.id || allIds.has(m.id)) return false;
+            allIds.add(m.id);
+            return true;
+          });
+          // All messages are duplicates → we've caught up to latest
+          if (unique.length === 0) {
+            setHasNewer(false);
+          }
+          return [...prev, ...unique];
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load newer messages:', err);
+    } finally {
+      loadingNewerRef.current = false;
+    }
+  }, [activeChannel, hasNewer, loadMoreLimit]);
+
+  // Jump to latest messages
+  const jumpToLatest = useCallback(() => {
+    if (!activeChannel) return;
+    skipLoadMoreRef.current = true;
+    setMessages([...activeChannel.state.latestMessages]);
+    setHasNewer(false);
+    setHasMore(true);
+    setTimeout(() => {
+      scrollToBottom();
+      requestAnimationFrame(() => {
+        skipLoadMoreRef.current = false;
+      });
+    }, 50);
+  }, [activeChannel, scrollToBottom]);
+
+  // Detect scroll to top (load older) and scroll to bottom (load newer)
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
 
     const handleScroll = () => {
       if (skipLoadMoreRef.current) return;
+
+      // Scroll near top → load older
       if (el.scrollTop < 50 && !loadingMore && hasMore) {
         loadMore();
+      }
+
+      // Scroll near bottom → load newer
+      if (hasNewer && !loadingNewerRef.current) {
+        const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (distFromBottom < 50) {
+          loadNewer();
+        }
       }
     };
 
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
-  }, [loadMore, loadingMore, hasMore]);
+  }, [loadMore, loadingMore, hasMore, loadNewer, hasNewer]);
 
   // Subscribe to channel messages
   useEffect(() => {
@@ -276,6 +253,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
     skipLoadMoreRef.current = true;
     setMessages([...activeChannel.state.latestMessages]);
     setHasMore(true);
+    setHasNewer(false);
     setTimeout(() => {
       scrollToBottom();
       // Allow load-more after scroll settles
@@ -378,13 +356,25 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
               message={message}
               isOwnMessage={isOwnMessage}
               isFirstInGroup={isFirstInGroup}
+              isHighlighted={highlightedId === message.id}
               AvatarComponent={AvatarComponent}
               MessageBubble={MessageBubble}
               MessageRenderer={MessageRenderer}
+              onClickQuote={scrollToMessage}
             />
           </React.Fragment>
         );
       })}
+
+      {/* Jump to latest button */}
+      {hasNewer && (
+        <button
+          className="ermis-message-list__jump-latest"
+          onClick={jumpToLatest}
+        >
+          ↓ Jump to latest
+        </button>
+      )}
     </div>
   );
 });
