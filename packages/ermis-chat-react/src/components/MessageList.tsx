@@ -49,11 +49,10 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({
 
   return (
     <div
-      className={`ermis-message-list__item ${
-        isOwnMessage
+      className={`ermis-message-list__item ${isOwnMessage
           ? 'ermis-message-list__item--own'
           : 'ermis-message-list__item--other'
-      }`}
+        }`}
     >
       {!isOwnMessage && (
         <AvatarComponent image={userAvatar} name={userName} size={28} />
@@ -90,9 +89,6 @@ const SystemMessageItem: React.FC<SystemMessageItemProps> = React.memo(({
 }) => (
   <div className="ermis-message-list__system">
     <SystemRenderer message={message} isOwnMessage={isOwnMessage} />
-    <span className="ermis-message-list__system-time">
-      {formatTime(message.created_at)}
-    </span>
   </div>
 ));
 SystemMessageItem.displayName = 'SystemMessageItem';
@@ -110,9 +106,8 @@ const DefaultBubble: React.FC<MessageBubbleProps> = React.memo(({
   children,
 }) => (
   <div
-    className={`ermis-message-bubble ${
-      isOwnMessage ? 'ermis-message-bubble--own' : 'ermis-message-bubble--other'
-    }`}
+    className={`ermis-message-bubble ${isOwnMessage ? 'ermis-message-bubble--own' : 'ermis-message-bubble--other'
+      }`}
   >
     {children}
   </div>

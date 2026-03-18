@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { FormatMessageResponse, Attachment, MessageLabel } from '@ermis-network/ermis-chat-sdk';
+import { parseSystemMessage } from '@ermis-network/ermis-chat-sdk';
+import { useChatClient } from '../hooks/useChatClient';
 
 /* ----------------------------------------------------------
    Attachment renderers
@@ -112,10 +114,33 @@ export const RegularMessage: React.FC<MessageRendererProps> = ({ message }) => (
   </>
 );
 
-/** System message: centered info text */
-export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => (
-  <span className="ermis-message-list__system-text">{message.text}</span>
-);
+/** System message: centered info text, parsed from raw format */
+export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
+  const { activeChannel } = useChatClient();
+
+  const userMap = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    const members = (activeChannel as any)?.state?.members;
+    if (members) {
+      for (const [id, member] of Object.entries<any>(members)) {
+        const name = member?.user?.name || member?.user_id || id;
+        map[id] = name;
+      }
+    }
+    return map;
+  }, [activeChannel]);
+
+  const parsedText = useMemo(
+    () => (message.text ? parseSystemMessage(message.text, userMap) : ''),
+    [message.text, userMap],
+  );
+
+  return (
+    <span className="ermis-message-list__system-text">
+      {parsedText || message.text}
+    </span>
+  );
+};
 
 /** Signal message: hidden or subtle */
 export const SignalMessage: React.FC<MessageRendererProps> = () => null;
