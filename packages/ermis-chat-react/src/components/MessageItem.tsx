@@ -25,12 +25,18 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   const userAvatar = message.user?.avatar;
 
   const quotedMessage = (message as any).quoted_message;
+  const hasAttachments = message.attachments && message.attachments.length > 0;
 
   const itemClass = [
     'ermis-message-list__item',
     isOwnMessage ? 'ermis-message-list__item--own' : 'ermis-message-list__item--other',
     isFirstInGroup ? 'ermis-message-list__item--group-start' : 'ermis-message-list__item--group-cont',
     isHighlighted ? 'ermis-message-list__item--highlighted' : '',
+  ].filter(Boolean).join(' ');
+
+  const contentClass = [
+    'ermis-message-list__item-content',
+    hasAttachments ? 'ermis-message-list__item-content--has-attachments' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -44,7 +50,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
           }
         </div>
       )}
-      <div className="ermis-message-list__item-content">
+      <div className={contentClass}>
         {!isOwnMessage && isFirstInGroup && (
           <span className="ermis-message-list__item-user">{userName}</span>
         )}

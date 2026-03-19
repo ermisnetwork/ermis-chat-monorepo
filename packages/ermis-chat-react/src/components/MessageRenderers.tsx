@@ -7,20 +7,30 @@ import type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '
 export type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
 
 /* ----------------------------------------------------------
-   Attachment renderers
+   Attachment type helpers
    ---------------------------------------------------------- */
 function isImage(attachment: Attachment): boolean {
   return !!(
-    attachment.mime_type?.startsWith('image/') ||
     attachment.type === 'image' ||
-    attachment.image_url
+    (!attachment.type && (attachment.mime_type?.startsWith('image/') || attachment.image_url))
   );
 }
 
 function isVideo(attachment: Attachment): boolean {
-  return !!(attachment.mime_type?.startsWith('video/') || attachment.type === 'video');
+  return !!(attachment.type === 'video' || (!attachment.type && attachment.mime_type?.startsWith('video/')));
 }
 
+function isVoiceRecording(attachment: Attachment): boolean {
+  return attachment.type === 'voiceRecording';
+}
+
+function isLinkPreview(attachment: Attachment): boolean {
+  return attachment.type === 'linkPreview';
+}
+
+/* ----------------------------------------------------------
+   Attachment renderers
+   ---------------------------------------------------------- */
 const ImageAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
   const src = attachment.image_url || attachment.thumb_url || attachment.url;
   if (!src) return null;
@@ -56,10 +66,11 @@ const FileAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
     <a
       className="ermis-attachment ermis-attachment--file"
       href={url}
+      download={name}
       target="_blank"
       rel="noopener noreferrer"
     >
-      <span className="ermis-attachment__file-icon">📎</span>
+      <span className="ermis-attachment__file-icon">⬇️</span>
       <span className="ermis-attachment__file-info">
         <span className="ermis-attachment__file-name">{name}</span>
         {size && (
@@ -72,18 +83,104 @@ const FileAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
   );
 };
 
+const VoiceRecordingAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
+  const src = attachment.asset_url || attachment.url;
+  if (!src) return null;
+
+  const durationSec = attachment.duration ?? 0;
+  const mins = Math.floor(durationSec / 60);
+  const secs = Math.round(durationSec % 60);
+  const durationLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+  return (
+    <div className="ermis-attachment ermis-attachment--voice">
+      <span className="ermis-attachment__voice-icon">🎙️</span>
+      <audio src={src} controls preload="metadata" className="ermis-attachment__voice-player" />
+      <span className="ermis-attachment__voice-duration">{durationLabel}</span>
+    </div>
+  );
+};
+
+const LinkPreviewAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
+  const url = attachment.link_url || attachment.og_scrape_url || attachment.title_link || attachment.url;
+  const title = attachment.title;
+  const description = attachment.text;
+  const image = attachment.image_url || attachment.thumb_url;
+
+  if (!url && !title) return null;
+
+  return (
+    <a
+      className="ermis-attachment ermis-attachment--link-preview"
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {image && (
+        <img
+          className="ermis-attachment__link-image"
+          src={image}
+          alt={title || 'preview'}
+          loading="lazy"
+        />
+      )}
+      <div className="ermis-attachment__link-info">
+        {title && <span className="ermis-attachment__link-title">{title}</span>}
+        {description && <span className="ermis-attachment__link-description">{description}</span>}
+        {url && (
+          <span className="ermis-attachment__link-url">
+            {new URL(url).hostname}
+          </span>
+        )}
+      </div>
+    </a>
+  );
+};
+
 export const MessageAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
   if (isImage(attachment)) return <ImageAttachment attachment={attachment} />;
   if (isVideo(attachment)) return <VideoAttachment attachment={attachment} />;
+  if (isVoiceRecording(attachment)) return <VoiceRecordingAttachment attachment={attachment} />;
+  if (isLinkPreview(attachment)) return <LinkPreviewAttachment attachment={attachment} />;
   return <FileAttachment attachment={attachment} />;
 };
 
 export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = ({ attachments }) => {
   if (!attachments || attachments.length === 0) return null;
+
+  // Group by type
+  const media = attachments.filter((a) => isImage(a) || isVideo(a));
+  const files = attachments.filter((a) => !isImage(a) && !isVideo(a) && !isVoiceRecording(a) && !isLinkPreview(a));
+  const voices = attachments.filter(isVoiceRecording);
+  const links = attachments.filter(isLinkPreview);
+
+  const mediaGridClass = media.length === 1
+    ? 'ermis-attachment-grid ermis-attachment-grid--single'
+    : 'ermis-attachment-grid ermis-attachment-grid--multi';
+
   return (
     <div className="ermis-attachment-list">
-      {attachments.map((att, i) => (
-        <MessageAttachment key={att.id || i} attachment={att} />
+      {/* Media group: images + videos in grid */}
+      {media.length > 0 && (
+        <div className={mediaGridClass}>
+          {media.map((att, i) => (
+            isImage(att)
+              ? <ImageAttachment key={att.id || `img-${i}`} attachment={att} />
+              : <VideoAttachment key={att.id || `vid-${i}`} attachment={att} />
+          ))}
+        </div>
+      )}
+      {/* File group */}
+      {files.map((att, i) => (
+        <FileAttachment key={att.id || `file-${i}`} attachment={att} />
+      ))}
+      {/* Voice recording group */}
+      {voices.map((att, i) => (
+        <VoiceRecordingAttachment key={att.id || `voice-${i}`} attachment={att} />
+      ))}
+      {/* Link preview group */}
+      {links.map((att, i) => (
+        <LinkPreviewAttachment key={att.id || `link-${i}`} attachment={att} />
       ))}
     </div>
   );
@@ -94,8 +191,42 @@ export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = ({ attac
    ---------------------------------------------------------- */
 
 /**
- * Parse message text and render @mentions as highlighted spans.
- * Handles both individual user mentions and @all.
+ * Detect URLs and emails in plain text, wrapping them in <a> tags.
+ * Returns an array of React nodes (strings and link elements).
+ */
+const URL_REGEX = /(https?:\/\/[^\s<>]+|www\.[^\s<>]+|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g;
+
+function linkifyText(text: string, keyPrefix: string): React.ReactNode[] {
+  const parts = text.split(URL_REGEX);
+  if (parts.length === 1) return [text];
+
+  return parts.map((part, i) => {
+    if (URL_REGEX.test(part)) {
+      // Reset lastIndex since we reuse the regex
+      URL_REGEX.lastIndex = 0;
+      const isEmail = part.includes('@') && !part.startsWith('http');
+      const href = isEmail ? `mailto:${part}` : (part.startsWith('http') ? part : `https://${part}`);
+      return (
+        <a
+          key={`${keyPrefix}-link-${i}`}
+          className="ermis-text-link"
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {part}
+        </a>
+      );
+    }
+    // Reset lastIndex
+    URL_REGEX.lastIndex = 0;
+    return part;
+  });
+}
+
+/**
+ * Parse message text: render @mentions as highlighted spans,
+ * and auto-detect URLs/emails in non-mention text parts.
  */
 function renderTextWithMentions(
   text: string,
@@ -105,9 +236,9 @@ function renderTextWithMentions(
   const mentionedUsers: string[] = (message as any).mentioned_users ?? [];
   const mentionedAll: boolean = (message as any).mentioned_all ?? false;
 
-  // If no mentions, return plain text
+  // If no mentions, just linkify the text
   if (mentionedUsers.length === 0 && !mentionedAll) {
-    return text;
+    return linkifyText(text, 'txt');
   }
 
   // Build a list of patterns to replace: @userId → @userName
@@ -135,16 +266,18 @@ function renderTextWithMentions(
   // Map from pattern → label for quick lookup
   const patternToLabel = new Map(replacements.map((r) => [r.pattern, r.label]));
 
-  return parts.map((part, i) => {
+  return parts.flatMap((part, i) => {
     const label = patternToLabel.get(part);
     if (label) {
+      // Mention — render as span, do NOT linkify
       return (
-        <span key={i} className="ermis-mention">
+        <span key={`mention-${i}`} className="ermis-mention">
           {label}
         </span>
       );
     }
-    return part;
+    // Non-mention text — linkify URLs/emails
+    return linkifyText(part, `p${i}`);
   });
 }
 
@@ -167,12 +300,24 @@ export const RegularMessage: React.FC<MessageRendererProps> = ({ message }) => {
     ? renderTextWithMentions(message.text, message, userMap)
     : null;
 
+  const hasAttachments = message.attachments && message.attachments.length > 0;
+
+  if (hasAttachments) {
+    return (
+      <div className="ermis-message-content--with-attachments">
+        {textContent && (
+          <span className="ermis-message-list__item-text">{textContent}</span>
+        )}
+        <AttachmentList attachments={message.attachments} />
+      </div>
+    );
+  }
+
   return (
     <>
       {textContent && (
         <span className="ermis-message-list__item-text">{textContent}</span>
       )}
-      <AttachmentList attachments={message.attachments} />
     </>
   );
 };

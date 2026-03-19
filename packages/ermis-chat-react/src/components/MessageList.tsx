@@ -77,6 +77,8 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
   messagesRef.current = messages;
   const currentUserId = client.userID;
 
+  console.log('---messages---', messages)
+
   const { highlightedId, scrollToMessage } = useScrollToMessage({
     listRef,
     activeChannel,

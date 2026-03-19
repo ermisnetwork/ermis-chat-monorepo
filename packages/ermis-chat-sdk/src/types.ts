@@ -341,6 +341,7 @@ export type Attachment<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     title_link?: string;
     type?: string;
     waveform_data?: Array<number>;
+    link_url?: string;
   };
 
 export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =

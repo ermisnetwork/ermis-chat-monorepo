@@ -1,11 +1,56 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
+import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
 import { Avatar } from './Avatar';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
 export type { ChannelListProps } from '../types';
+
+/**
+ * Build a userId → displayName map from channel members.
+ */
+function buildUserMap(channel: Channel): Record<string, string> {
+  const map: Record<string, string> = {};
+  const members = (channel.state as any)?.members;
+  if (members && typeof members === 'object') {
+    for (const [id, member] of Object.entries<any>(members)) {
+      map[id] = member?.user?.name || member?.user_id || id;
+    }
+  }
+  return map;
+}
+
+/**
+ * Get a human-readable preview string for the last message,
+ * handling regular, system, and signal message types.
+ */
+function getLastMessagePreview(
+  channel: Channel,
+): { text: string; user: string } {
+  const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
+  if (!lastMsg) return { text: '', user: '' };
+
+  const msgType = lastMsg.type || 'regular';
+  const rawText = lastMsg.text ?? '';
+
+  if (msgType === 'system') {
+    const userMap = buildUserMap(channel);
+    return { text: parseSystemMessage(rawText, userMap), user: '' };
+  }
+
+  if (msgType === 'signal') {
+    const userMap = buildUserMap(channel);
+    return { text: parseSignalMessage(rawText, userMap), user: '' };
+  }
+
+  // Regular / other
+  return {
+    text: rawText,
+    user: lastMsg.user?.name || lastMsg.user_id || '',
+  };
+}
 
 /* ----------------------------------------------------------
    Memoized channel list item
@@ -140,11 +185,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
         const unreadCount = (channel.state as any)?.unreadCount ?? 0;
         const hasUnread = unreadCount > 0;
 
-        // Derive last message data here so React.memo on ChannelItem
-        // can detect changes (channel object reference stays the same)
-        const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
-        const lastMessageText = lastMsg?.text ?? '';
-        const lastMessageUser = lastMsg?.user?.name || lastMsg?.user_id || '';
+        // Derive last message preview — handles system/signal parsing
+        const { text: lastMessageText, user: lastMessageUser } = getLastMessagePreview(channel);
 
         if (renderChannel) {
           return (
