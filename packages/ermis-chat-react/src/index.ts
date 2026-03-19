@@ -47,6 +47,9 @@ export type { MessageRendererProps, AttachmentProps } from './components/Message
 export { MessageInput } from './components/MessageInput';
 export type { MessageInputProps } from './components/MessageInput';
 
+export { FilesPreview } from './components/FilesPreview';
+export type { FilePreviewItem, FilesPreviewProps } from './components/FilesPreview';
+
 export { MentionSuggestions } from './components/MentionSuggestions';
 export type { MentionSuggestionsProps } from './components/MentionSuggestions';
 

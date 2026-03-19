@@ -236,3 +236,30 @@ export type UseMentionsReturn = {
   /** Reset mention state (call after send) */
   reset: () => void;
 };
+
+/* ----------------------------------------------------------
+   File preview types (upload attachments)
+   ---------------------------------------------------------- */
+export type FilePreviewItem = {
+  /** Unique ID for keying */
+  id: string;
+  /** Original File object */
+  file: File;
+  /** Blob URL for image/video preview */
+  previewUrl?: string;
+  /** Upload status */
+  status: 'pending' | 'uploading' | 'done' | 'error';
+  /** Error message if upload failed */
+  error?: string;
+  /** URL returned after successful upload */
+  uploadedUrl?: string;
+  /** Thumbnail URL (video only) */
+  thumbUrl?: string;
+  /** File with normalized name */
+  normalizedFile?: File;
+};
+
+export type FilesPreviewProps = {
+  files: FilePreviewItem[];
+  onRemove: (id: string) => void;
+};

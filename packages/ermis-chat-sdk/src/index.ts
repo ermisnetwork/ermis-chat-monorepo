@@ -11,3 +11,5 @@ export * from './auth';
 export { chatCodes, logChatPromiseExecution, formatMessage } from './utils';
 export { parseSystemMessage } from './system_message';
 export { parseSignalMessage } from './signal_message';
+export { normalizeFileName, getAttachmentCategory, isVideoFile, isHeicFile, buildAttachmentPayload } from './attachment_utils';
+export type { VoiceRecordingMeta } from './attachment_utils';

@@ -46,8 +46,31 @@ function getLastMessagePreview(
   }
 
   // Regular / other
+  let displayText = rawText;
+  if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
+    const att = lastMsg.attachments[0];
+    const type = att.type || '';
+    switch (type) {
+      case 'image':
+        displayText = '📷 Photo';
+        break;
+      case 'video':
+        displayText = '🎬 Video';
+        break;
+      case 'voiceRecording':
+        displayText = '🎤 Voice message';
+        break;
+      default:
+        displayText = '📎 File';
+        break;
+    }
+    if (lastMsg.attachments.length > 1) {
+      displayText += ` +${lastMsg.attachments.length - 1}`;
+    }
+  }
+
   return {
-    text: rawText,
+    text: displayText,
     user: lastMsg.user?.name || lastMsg.user_id || '',
   };
 }

@@ -1,4 +1,6 @@
 import { ChannelState } from './channel_state';
+import { normalizeFileName, isVideoFile, buildAttachmentPayload } from './attachment_utils';
+import type { VoiceRecordingMeta } from './attachment_utils';
 import {
   enrichWithUserInfo,
   ensureMembersUserInfoLoaded,
@@ -11,6 +13,7 @@ import {
 import { ErmisChat } from './client';
 import {
   APIResponse,
+  Attachment,
   ChannelAPIResponse,
   ChannelData,
   ChannelQueryOptions,
@@ -150,6 +153,93 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     user?: UserResponse<ErmisChatGenerics>,
   ) {
     return this.getClient().sendFile(`${this._channelURL()}/file`, uri, name, contentType, user);
+  }
+  /**
+   * Pre-process files (normalize names), upload them in parallel,
+   * generate video thumbnails, and build attachment payloads.
+   *
+   * @param files     - Array of File objects to upload
+   * @param options   - Optional voice recording metadata
+   * @returns `attachments` ready for sendMessage, and `failedFiles` for error display
+   */
+  async uploadAndPrepareAttachments(
+    files: File[],
+    options?: {
+      /** Map from file index → voice recording metadata */
+      voiceMetadata?: Map<number, VoiceRecordingMeta>;
+    },
+  ): Promise<{
+    attachments: Attachment[];
+    failedFiles: Array<{ file: File; error: Error }>;
+  }> {
+    const failedFiles: Array<{ file: File; error: Error }> = [];
+
+    // 1. Pre-process: normalize file names
+    const processedFiles = files.map((file) => {
+      const newName = normalizeFileName(file.name);
+      if (newName !== file.name) {
+        return new File([file], newName, { type: file.type, lastModified: file.lastModified });
+      }
+      return file;
+    });
+
+    // 2. Upload all files in parallel
+    const uploadResults = await Promise.allSettled(
+      processedFiles.map((file) =>
+        this.sendFile(file, file.name, file.type),
+      ),
+    );
+
+    // 3. For successful video uploads, generate and upload thumbnails
+    const thumbUrls = new Map<number, string>();
+    const thumbPromises: Promise<void>[] = [];
+
+    for (let i = 0; i < processedFiles.length; i++) {
+      const result = uploadResults[i];
+      if (result.status === 'fulfilled' && isVideoFile(processedFiles[i])) {
+        thumbPromises.push(
+          (async () => {
+            try {
+              const thumbBlob = await this.getThumbBlobVideo(files[i]);
+              if (thumbBlob) {
+                const thumbFile = new File(
+                  [thumbBlob],
+                  `thumb_${processedFiles[i].name}.jpg`,
+                  { type: 'image/jpeg' },
+                );
+                const thumbResp = await this.sendFile(thumbFile, thumbFile.name, 'image/jpeg');
+                thumbUrls.set(i, thumbResp.file);
+              }
+            } catch {
+              // Thumbnail failure is non-critical
+            }
+          })(),
+        );
+      }
+    }
+
+    await Promise.allSettled(thumbPromises);
+
+    // 4. Build attachment payloads from successful uploads
+    const attachments: Attachment[] = [];
+    for (let i = 0; i < processedFiles.length; i++) {
+      const result = uploadResults[i];
+      if (result.status === 'fulfilled') {
+        const uploadedUrl = result.value.file;
+        const thumbUrl = thumbUrls.get(i);
+        const voiceMeta = options?.voiceMetadata?.get(i);
+        attachments.push(
+          buildAttachmentPayload(processedFiles[i], uploadedUrl, thumbUrl, voiceMeta),
+        );
+      } else {
+        failedFiles.push({
+          file: files[i],
+          error: result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
+        });
+      }
+    }
+
+    return { attachments, failedFiles };
   }
 
   async sendEvent(event: Event<ErmisChatGenerics>) {
