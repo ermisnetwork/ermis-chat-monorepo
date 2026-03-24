@@ -1,0 +1,32 @@
+/* ----------------------------------------------------------
+   Chat root
+   ---------------------------------------------------------- */
+.ermis-chat {
+  width: 100%;
+  height: 100%;
+  background-color: var(--ermis-bg-primary);
+  color: var(--ermis-text-primary);
+  overflow: hidden;
+}
+
+/* ----------------------------------------------------------
+   Avatar
+   ---------------------------------------------------------- */
+.ermis-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ermis-radius-full);
+  object-fit: cover;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.ermis-avatar--fallback {
+  background: linear-gradient(135deg, var(--ermis-accent) 0%, var(--ermis-accent-hover) 100%);
+  color: #fff;
+  font-weight: 600;
+  font-family: var(--ermis-font-family);
+  text-transform: uppercase;
+  user-select: none;
+}

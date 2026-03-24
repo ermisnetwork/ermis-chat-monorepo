@@ -1,0 +1,125 @@
+/* ----------------------------------------------------------
+   ChannelHeader
+   ---------------------------------------------------------- */
+.ermis-channel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-md);
+  padding: var(--ermis-spacing-md) var(--ermis-spacing-lg);
+  border-bottom: 1px solid var(--ermis-border);
+  background-color: var(--ermis-bg-secondary);
+  font-family: var(--ermis-font-family);
+}
+
+.ermis-channel-header__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ermis-channel-header__name {
+  font-size: var(--ermis-font-size-base);
+  font-weight: 600;
+  color: var(--ermis-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ----------------------------------------------------------
+   ChannelList
+   ---------------------------------------------------------- */
+.ermis-channel-list {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--ermis-font-family);
+}
+
+.ermis-channel-list__loading {
+  padding: var(--ermis-spacing-lg);
+  color: var(--ermis-text-muted);
+  font-size: var(--ermis-font-size-sm);
+  text-align: center;
+}
+
+.ermis-channel-list__empty {
+  padding: var(--ermis-spacing-lg);
+  color: var(--ermis-text-muted);
+  font-size: var(--ermis-font-size-sm);
+  text-align: center;
+}
+
+.ermis-channel-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-md);
+  padding: var(--ermis-spacing-md) var(--ermis-spacing-lg);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background-color var(--ermis-transition), border-color var(--ermis-transition);
+}
+
+.ermis-channel-list__item:hover {
+  background-color: var(--ermis-bg-hover);
+}
+
+.ermis-channel-list__item--active {
+  background-color: var(--ermis-bg-active);
+  border-left-color: var(--ermis-accent);
+}
+
+.ermis-channel-list__item-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.ermis-channel-list__item-name {
+  font-size: var(--ermis-font-size-sm);
+  font-weight: 500;
+  color: var(--ermis-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ermis-channel-list__item-last-message {
+  font-size: var(--ermis-font-size-xs);
+  color: var(--ermis-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.ermis-channel-list__item-last-message-user {
+  color: var(--ermis-text-secondary);
+}
+
+/* --- Unread channel indicator --- */
+.ermis-channel-list__item--unread .ermis-channel-list__item-name {
+  font-weight: 700;
+  color: var(--ermis-text-primary);
+}
+
+.ermis-channel-list__item--unread .ermis-channel-list__item-last-message {
+  color: var(--ermis-text-secondary);
+  font-weight: 600;
+}
+
+.ermis-channel-list__unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--ermis-radius-full);
+  background-color: #ef4444;
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}

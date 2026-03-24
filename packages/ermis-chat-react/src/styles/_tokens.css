@@ -1,0 +1,92 @@
+/* ============================================================
+   Ermis Chat React – Design Tokens
+   BEM naming: .ermis-{block}__{element}--{modifier}
+   ============================================================ */
+
+/* ----------------------------------------------------------
+   Design Tokens – Dark (default)
+   ---------------------------------------------------------- */
+.ermis-chat,
+.ermis-chat--dark {
+  --ermis-bg-primary: #0a0a0f;
+  --ermis-bg-secondary: #111118;
+  --ermis-bg-hover: rgba(255, 255, 255, 0.04);
+  --ermis-bg-active: rgba(99, 102, 241, 0.12);
+  --ermis-border: rgba(255, 255, 255, 0.08);
+  --ermis-accent: #6366f1;
+  --ermis-accent-hover: #818cf8;
+  --ermis-text-primary: #e5e7eb;
+  --ermis-text-secondary: #9ca3af;
+  --ermis-text-muted: #6b7280;
+
+  /* Message bubbles */
+  --ermis-bubble-own-bg: var(--ermis-accent);
+  --ermis-bubble-own-text: #ffffff;
+  --ermis-bubble-other-bg: #1e1e2a;
+  --ermis-bubble-other-text: var(--ermis-text-primary);
+
+  /* Quote message */
+  --ermis-quote-other-bg: rgba(99, 102, 241, 0.1);
+  --ermis-quote-other-bg-hover: rgba(99, 102, 241, 0.18);
+  --ermis-quote-own-bg: rgba(99, 102, 241, 0.2);
+  --ermis-quote-own-bg-hover: rgba(99, 102, 241, 0.3);
+  --ermis-quote-own-border: rgba(255, 255, 255, 0.4);
+  --ermis-quote-own-author: rgba(255, 255, 255, 0.9);
+  --ermis-quote-own-text: rgba(255, 255, 255, 0.65);
+
+  /* Typography */
+  --ermis-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
+    'Helvetica Neue', sans-serif;
+  --ermis-font-size-xs: 0.75rem;
+  --ermis-font-size-sm: 0.875rem;
+  --ermis-font-size-base: 1rem;
+
+  /* Spacing */
+  --ermis-spacing-xs: 0.25rem;
+  --ermis-spacing-sm: 0.5rem;
+  --ermis-spacing-md: 0.75rem;
+  --ermis-spacing-lg: 1rem;
+
+  /* Radius */
+  --ermis-radius-sm: 0.375rem;
+  --ermis-radius-md: 0.5rem;
+  --ermis-radius-lg: 0.75rem;
+  --ermis-radius-full: 9999px;
+
+  /* Transitions */
+  --ermis-transition: 150ms ease;
+
+  color: var(--ermis-text-primary);
+  font-family: var(--ermis-font-family);
+}
+
+/* ----------------------------------------------------------
+   Design Tokens – Light
+   ---------------------------------------------------------- */
+.ermis-chat--light {
+  --ermis-bg-primary: #ffffff;
+  --ermis-bg-secondary: #f9fafb;
+  --ermis-bg-hover: rgba(0, 0, 0, 0.04);
+  --ermis-bg-active: rgba(99, 102, 241, 0.08);
+  --ermis-border: rgba(0, 0, 0, 0.08);
+  --ermis-accent: #6366f1;
+  --ermis-accent-hover: #4f46e5;
+  --ermis-text-primary: #111827;
+  --ermis-text-secondary: #6b7280;
+  --ermis-text-muted: #9ca3af;
+
+  /* Message bubbles */
+  --ermis-bubble-own-bg: var(--ermis-accent);
+  --ermis-bubble-own-text: #ffffff;
+  --ermis-bubble-other-bg: #f3f4f6;
+  --ermis-bubble-other-text: var(--ermis-text-primary);
+
+  /* Quote message */
+  --ermis-quote-other-bg: rgba(99, 102, 241, 0.08);
+  --ermis-quote-other-bg-hover: rgba(99, 102, 241, 0.14);
+  --ermis-quote-own-bg: rgba(0, 0, 0, 0.25);
+  --ermis-quote-own-bg-hover: rgba(0, 0, 0, 0.4);
+  --ermis-quote-own-border: rgba(255, 255, 255, 0.6);
+  --ermis-quote-own-author: rgba(255, 255, 255, 0.95);
+  --ermis-quote-own-text: rgba(255, 255, 255, 0.8);
+}
