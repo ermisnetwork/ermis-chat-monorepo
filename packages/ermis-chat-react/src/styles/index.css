@@ -25,6 +25,15 @@
   --ermis-bubble-other-bg: #1e1e2a;
   --ermis-bubble-other-text: var(--ermis-text-primary);
 
+  /* Quote message */
+  --ermis-quote-other-bg: rgba(99, 102, 241, 0.1);
+  --ermis-quote-other-bg-hover: rgba(99, 102, 241, 0.18);
+  --ermis-quote-own-bg: rgba(99, 102, 241, 0.2);
+  --ermis-quote-own-bg-hover: rgba(99, 102, 241, 0.3);
+  --ermis-quote-own-border: rgba(255, 255, 255, 0.4);
+  --ermis-quote-own-author: rgba(255, 255, 255, 0.9);
+  --ermis-quote-own-text: rgba(255, 255, 255, 0.65);
+
   /* Typography */
   --ermis-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
     'Helvetica Neue', sans-serif;
@@ -71,6 +80,15 @@
   --ermis-bubble-own-text: #ffffff;
   --ermis-bubble-other-bg: #f3f4f6;
   --ermis-bubble-other-text: var(--ermis-text-primary);
+
+  /* Quote message */
+  --ermis-quote-other-bg: rgba(99, 102, 241, 0.08);
+  --ermis-quote-other-bg-hover: rgba(99, 102, 241, 0.14);
+  --ermis-quote-own-bg: rgba(0, 0, 0, 0.25);
+  --ermis-quote-own-bg-hover: rgba(0, 0, 0, 0.4);
+  --ermis-quote-own-border: rgba(255, 255, 255, 0.6);
+  --ermis-quote-own-author: rgba(255, 255, 255, 0.95);
+  --ermis-quote-own-text: rgba(255, 255, 255, 0.8);
 }
 
 /* ----------------------------------------------------------
@@ -440,25 +458,26 @@
   gap: 2px;
   padding: var(--ermis-spacing-xs) var(--ermis-spacing-sm);
   border-left: 3px solid var(--ermis-accent);
-  background-color: var(--ermis-bg-secondary);
+  background-color: var(--ermis-quote-other-bg);
   border-radius: 0 var(--ermis-radius-sm) var(--ermis-radius-sm) 0;
   cursor: pointer;
   max-width: 100%;
   transition: background-color 0.15s;
+  margin-top: var(--ermis-spacing-sm);
 }
 
 .ermis-quoted-message:hover {
-  background-color: var(--ermis-border);
+  background-color: var(--ermis-quote-other-bg-hover);
 }
 
 .ermis-quoted-message--own {
-  border-left-color: var(--ermis-accent-hover);
-  background-color: rgba(255, 255, 255, 0.85);
+  border-left-color: var(--ermis-quote-own-border);
+  background-color: var(--ermis-quote-own-bg);
   border-radius: var(--ermis-radius-sm);
 }
 
 .ermis-quoted-message--own:hover {
-  background-color: rgba(255, 255, 255, 0.95);
+  background-color: var(--ermis-quote-own-bg-hover);
 }
 
 .ermis-quoted-message__author {
@@ -468,7 +487,7 @@
 }
 
 .ermis-quoted-message--own .ermis-quoted-message__author {
-  color: var(--ermis-accent-hover);
+  color: var(--ermis-quote-own-author);
 }
 
 .ermis-quoted-message__text {
@@ -480,7 +499,7 @@
 }
 
 .ermis-quoted-message--own .ermis-quoted-message__text {
-  color: var(--ermis-text-secondary);
+  color: var(--ermis-quote-own-text);
 }
 
 /* Light theme: same approach works since we darken the accent bg */

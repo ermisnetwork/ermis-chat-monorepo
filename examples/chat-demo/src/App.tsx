@@ -5,7 +5,6 @@ import {
   ChannelList,
   Channel,
   ChannelHeader,
-  MessageList,
   MessageInput,
   VirtualMessageList,
 } from '@ermis-network/ermis-chat-react';
