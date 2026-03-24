@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import type { ChannelProps } from '../types';
 
@@ -17,7 +17,11 @@ export const Channel: React.FC<ChannelProps> = React.memo(({
   className,
   EmptyStateIndicator = DefaultEmpty,
 }) => {
-  const { activeChannel } = useChatClient();
+  const { activeChannel, syncMessages } = useChatClient();
+
+  useEffect(() => {
+    syncMessages();
+  }, [syncMessages])
 
   if (!activeChannel) {
     return <EmptyStateIndicator />;

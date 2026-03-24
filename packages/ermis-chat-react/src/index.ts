@@ -27,6 +27,8 @@ export type { ChannelHeaderProps } from './components/ChannelHeader';
 export { MessageList } from './components/MessageList';
 export type { MessageListProps, MessageBubbleProps, MessageItemProps, SystemMessageItemProps } from './components/MessageList';
 
+export { VirtualMessageList } from './components/VirtualMessageList';
+
 export { MessageItem, SystemMessageItem } from './components/MessageItem';
 
 export { formatTime, getDateKey, formatDateLabel, getMessageUserId } from './utils';

@@ -260,11 +260,23 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  overflow-y: auto;
-  padding: var(--ermis-spacing-lg);
+  padding-top: var(--ermis-spacing-lg);
+  padding-bottom: var(--ermis-spacing-lg);
   font-family: var(--ermis-font-family);
   gap: var(--ermis-spacing-xs);
   position: relative;
+}
+
+.ermis-message-list__vlist {
+  display: flex !important;
+  flex-direction: column !important;
+  padding-left: var(--ermis-spacing-lg);
+  padding-right: var(--ermis-spacing-lg);
+}
+
+/* Push content to bottom when few messages, margin collapses when content overflows */
+.ermis-message-list__vlist > div {
+  margin-top: auto;
 }
 
 /* Jump to latest button */
@@ -281,7 +293,6 @@
   font-weight: 600;
   font-family: var(--ermis-font-family);
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   transition: background-color var(--ermis-transition), transform var(--ermis-transition);
   z-index: 10;
 }
@@ -337,12 +348,32 @@
 
 .ermis-message-list__empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   flex: 1;
+  gap: var(--ermis-spacing-sm);
   color: var(--ermis-text-muted);
-  font-size: var(--ermis-font-size-sm);
   font-family: var(--ermis-font-family);
+  padding: var(--ermis-spacing-lg);
+  user-select: none;
+}
+
+.ermis-message-list__empty-icon {
+  color: var(--ermis-accent);
+  opacity: 0.4;
+  margin-bottom: var(--ermis-spacing-xs);
+}
+
+.ermis-message-list__empty-title {
+  font-size: var(--ermis-font-size-base);
+  font-weight: 600;
+  color: var(--ermis-text-secondary);
+}
+
+.ermis-message-list__empty-subtitle {
+  font-size: var(--ermis-font-size-sm);
+  color: var(--ermis-text-muted);
 }
 
 /* --- Message item (other = left, own = right) --- */
@@ -355,12 +386,12 @@
 
 /* First message in a group: normal top margin */
 .ermis-message-list__item--group-start {
-  margin-top: var(--ermis-spacing-md);
+  padding-top: var(--ermis-spacing-md);
 }
 
 /* Continuation messages in a group: tight spacing */
 .ermis-message-list__item--group-cont {
-  margin-top: 2px;
+  padding-top: 2px;
 }
 
 .ermis-message-list__item--other {
@@ -421,12 +452,13 @@
 }
 
 .ermis-quoted-message--own {
-  border-left-color: rgba(255, 255, 255, 0.5);
-  background-color: rgba(255, 255, 255, 0.1);
+  border-left-color: var(--ermis-accent-hover);
+  background-color: rgba(255, 255, 255, 0.85);
+  border-radius: var(--ermis-radius-sm);
 }
 
 .ermis-quoted-message--own:hover {
-  background-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(255, 255, 255, 0.95);
 }
 
 .ermis-quoted-message__author {
@@ -436,7 +468,7 @@
 }
 
 .ermis-quoted-message--own .ermis-quoted-message__author {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--ermis-accent-hover);
 }
 
 .ermis-quoted-message__text {
@@ -448,13 +480,14 @@
 }
 
 .ermis-quoted-message--own .ermis-quoted-message__text {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--ermis-text-secondary);
 }
+
+/* Light theme: same approach works since we darken the accent bg */
 
 /* Avatar column: fixed width for consistent alignment */
 .ermis-message-list__item-avatar {
   flex-shrink: 0;
-  align-self: flex-end;
 }
 
 .ermis-message-list__item-content {
@@ -537,7 +570,7 @@
   align-items: flex-end;
   padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
   border-radius: var(--ermis-radius-lg);
-  max-width: 100%;
+  width: 100%;
   word-break: break-word;
 }
 

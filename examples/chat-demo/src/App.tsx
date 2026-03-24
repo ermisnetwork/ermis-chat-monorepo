@@ -7,14 +7,15 @@ import {
   ChannelHeader,
   MessageList,
   MessageInput,
+  VirtualMessageList,
 } from '@ermis-network/ermis-chat-react';
 
 // TODO: Replace with your actual credentials
 const API_KEY = 'sXhcPu0JneUbQ6TG2tXePK8MC2tBAHn9';
 const PROJECT_ID = 'ec964975-ae84-4a8e-91a1-222ca3aeeef8';
 const BASE_URL = 'https://api-trieve.ermis.network';
-const USER_ID = '0xc95dfd46d70aba666b96428271d05257a6fc88d8';
-const USER_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiMHhjOTVkZmQ0NmQ3MGFiYTY2NmI5NjQyODI3MWQwNTI1N2E2ZmM4OGQ4IiwiY2xpZW50X2lkIjoiMzNhZTc0NzMtNjMxNS00NDMzLTgyYjAtMmFmYzNhMzk5OWUyIiwiY2hhaW5faWQiOjEsInByb2plY3RfaWQiOiJlYzk2NDk3NS1hZTg0LTRhOGUtOTFhMS0yMjJjYTNhZWVlZjgiLCJhcGlrZXkiOiJzWGhjUHUwSm5lVWJRNlRHMnRYZVBLOE1DMnRCQUhuOSIsImVybWlzIjpmYWxzZSwiZXhwIjoxODczNzU0MDQ0NDE0LCJhZG1pbiI6ZmFsc2UsImdhdGUiOmZhbHNlfQ.23NSivi8JVJQ0GHlwgMx0o5XDBWTMnIK-6XsPJqdxlI';
+const USER_ID = '0xf72d58f7353c2461953302a4b214d09ff33eeba1';
+const USER_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiMHhmNzJkNThmNzM1M2MyNDYxOTUzMzAyYTRiMjE0ZDA5ZmYzM2VlYmExIiwiY2xpZW50X2lkIjoiMzNhZTc0NzMtNjMxNS00NDMzLTgyYjAtMmFmYzNhMzk5OWUyIiwiY2hhaW5faWQiOjEsInByb2plY3RfaWQiOiJlYzk2NDk3NS1hZTg0LTRhOGUtOTFhMS0yMjJjYTNhZWVlZjgiLCJhcGlrZXkiOiJzWGhjUHUwSm5lVWJRNlRHMnRYZVBLOE1DMnRCQUhuOSIsImVybWlzIjpmYWxzZSwiZXhwIjoxODcyMTE1NjA2Mzg4LCJhZG1pbiI6ZmFsc2UsImdhdGUiOmZhbHNlfQ.ag13LQHYxCh8gQseQVx1wFSA12QqFxG6uenmSStBrn8';
 
 function App() {
   const [client, setClient] = useState<ErmisChat | null>(null);
@@ -64,7 +65,8 @@ function App() {
         <div className="flex-1 flex flex-col min-w-0">
           <Channel>
             <ChannelHeader />
-            <MessageList />
+            <VirtualMessageList />
+            {/* <MessageList /> */}
             <MessageInput placeholder="Type a message..." />
           </Channel>
         </div>
