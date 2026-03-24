@@ -26,6 +26,26 @@
   text-overflow: ellipsis;
 }
 
+.ermis-channel-header__subtitle {
+  font-size: var(--ermis-font-size-xs);
+  color: var(--ermis-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ermis-channel-header__info {
+  flex: 1;
+}
+
+.ermis-channel-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /* ----------------------------------------------------------
    ChannelList
    ---------------------------------------------------------- */

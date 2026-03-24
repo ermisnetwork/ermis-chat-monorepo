@@ -48,6 +48,8 @@ export type ChannelProps = {
   className?: string;
   /** Custom component shown when no channel is selected */
   EmptyStateIndicator?: React.ComponentType;
+  /** Replace the default ChannelHeader entirely */
+  HeaderComponent?: React.ComponentType<ChannelHeaderData>;
 };
 
 export type ChannelHeaderProps = {
@@ -55,6 +57,23 @@ export type ChannelHeaderProps = {
   className?: string;
   /** Custom avatar component */
   AvatarComponent?: React.ComponentType<AvatarProps>;
+  /** Override channel name */
+  title?: string;
+  /** Override channel image */
+  image?: string;
+  /** Subtitle text (e.g. member count, online status) */
+  subtitle?: string;
+  /** Render custom content on the right side */
+  renderRight?: (channel: Channel) => React.ReactNode;
+  /** Override default title rendering */
+  renderTitle?: (channel: Channel) => React.ReactNode;
+};
+
+/** Data passed to a fully custom HeaderComponent */
+export type ChannelHeaderData = {
+  channel: Channel;
+  name: string;
+  image?: string;
 };
 
 /* ----------------------------------------------------------

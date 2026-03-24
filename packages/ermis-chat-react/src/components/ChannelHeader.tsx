@@ -7,26 +7,59 @@ export type { ChannelHeaderProps } from '../types';
 
 /**
  * ChannelHeader displays the active channel's avatar and name.
+ *
+ * Customization:
+ * - `title` / `image` — override the channel name and avatar
+ * - `subtitle` — add a subtitle line (e.g. member count)
+ * - `AvatarComponent` — replace the avatar
+ * - `renderTitle(channel)` — fully custom title rendering
+ * - `renderRight(channel)` — render content on the right side
+ *
+ * For a fully custom header, use `Channel`'s `HeaderComponent` prop instead.
  */
 export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   className,
   AvatarComponent = Avatar,
+  title,
+  image,
+  subtitle,
+  renderRight,
+  renderTitle,
 }) => {
   const { activeChannel } = useChatClient();
 
-  const { name, image } = useMemo(() => ({
-    name: activeChannel?.data?.name || activeChannel?.cid || '',
-    image: activeChannel?.data?.image as string | undefined,
-  }), [activeChannel?.data?.name, activeChannel?.data?.image, activeChannel?.cid]);
+  const channelName = useMemo(() =>
+    title || activeChannel?.data?.name || activeChannel?.cid || '',
+    [title, activeChannel?.data?.name, activeChannel?.cid],
+  );
+
+  const channelImage = useMemo(() =>
+    image || (activeChannel?.data?.image as string | undefined),
+    [image, activeChannel?.data?.image],
+  );
 
   if (!activeChannel) return null;
 
   return (
     <div className={`ermis-channel-header${className ? ` ${className}` : ''}`}>
-      <AvatarComponent image={image} name={name} size={32} />
+      <AvatarComponent image={channelImage} name={channelName} size={32} />
+
       <div className="ermis-channel-header__info">
-        <div className="ermis-channel-header__name">{name}</div>
+        {renderTitle ? (
+          renderTitle(activeChannel)
+        ) : (
+          <div className="ermis-channel-header__name">{channelName}</div>
+        )}
+        {subtitle && (
+          <div className="ermis-channel-header__subtitle">{subtitle}</div>
+        )}
       </div>
+
+      {renderRight && (
+        <div className="ermis-channel-header__actions">
+          {renderRight(activeChannel)}
+        </div>
+      )}
     </div>
   );
 });
