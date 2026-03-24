@@ -1,121 +1,153 @@
-import { useState, useCallback, useRef } from 'react';
-import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { FormatMessageResponse, Channel } from '@ermis-network/ermis-chat-sdk';
 import { formatMessage } from '@ermis-network/ermis-chat-sdk';
-import type {
-  ScrollToMessageFn,
-  UseScrollToMessageOptions,
-  UseScrollToMessageReturn,
-} from '../types';
+import type { VListHandle } from 'virtua';
+import { dedupMessages } from './useLoadMessages';
 
-export type { ScrollToMessageFn, UseScrollToMessageOptions, UseScrollToMessageReturn } from '../types';
+export type UseScrollToMessageOptions = {
+  activeChannel: Channel | null;
+  vlistRef: React.RefObject<VListHandle | null>;
+  messagesRef: React.MutableRefObject<FormatMessageResponse[]>;
+  setMessages: React.Dispatch<React.SetStateAction<FormatMessageResponse[]>>;
+  setHasMore: React.Dispatch<React.SetStateAction<boolean>>;
+  setHasNewer: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Getter to access the VList DOM element (scoped to container) */
+  getVListElement: () => HTMLElement | null;
+  scrollToBottom: (smooth: boolean) => void;
+  /** Shared guard ref — blocks scroll-triggered loads during jumps */
+  jumpingRef: React.MutableRefObject<boolean>;
+};
 
-/**
- * Hook that encapsulates logic for scrolling to a specific message
- * and applying a temporary highlight animation.
- *
- * Handles two cases:
- * 1. Message already in DOM → smooth scroll + highlight
- * 2. Message not in DOM → fetch via queryMessagesAroundId → replace state → scroll after render
- */
+export type UseScrollToMessageReturn = {
+  highlightedId: string | null;
+  scrollToMessage: (messageId: string) => void;
+  jumpToLatest: () => void;
+};
+
 export function useScrollToMessage({
-  listRef,
   activeChannel,
+  vlistRef,
+  messagesRef,
   setMessages,
   setHasMore,
   setHasNewer,
+  getVListElement,
+  scrollToBottom,
+  jumpingRef,
 }: UseScrollToMessageOptions): UseScrollToMessageReturn {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Cleanup highlight timer on unmount
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
+
   const highlight = useCallback((messageId: string) => {
-    // Clear any existing highlight timer
-    if (highlightTimerRef.current) {
-      clearTimeout(highlightTimerRef.current);
-    }
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
     setHighlightedId(messageId);
     highlightTimerRef.current = setTimeout(() => {
       setHighlightedId(null);
       highlightTimerRef.current = null;
-    }, 2000);
+    }, 2500);
   }, []);
 
-  const scrollAndHighlight = useCallback(
-    (messageId: string) => {
-      const el = listRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
-
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        highlight(messageId);
-      }
-    },
-    [listRef, highlight],
-  );
-
-  /**
-   * Wait for a DOM element to appear after state update,
-   * then scroll to it. Uses requestAnimationFrame polling.
-   */
-  const waitForDOMAndScroll = useCallback(
-    (messageId: string, maxAttempts = 20) => {
-      let attempt = 0;
-      const check = () => {
-        const el = listRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
-
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          highlight(messageId);
-          return;
-        }
-
-        attempt++;
-        if (attempt < maxAttempts) {
-          requestAnimationFrame(check);
-        }
-      };
-      requestAnimationFrame(check);
-    },
-    [listRef, highlight],
-  );
-
-  const scrollToMessage: ScrollToMessageFn = useCallback(
+  const scrollToMessage = useCallback(
     async (messageId: string) => {
-      // Case 1: Message already in DOM
-      const existingEl = listRef.current?.querySelector(`[data-message-id="${messageId}"]`);
+      // Prevent concurrent calls
+      if (jumpingRef.current) return;
 
-      if (existingEl) {
-        scrollAndHighlight(messageId);
+      // Case 1: message is already in current list
+      const idx = messagesRef.current.findIndex((m) => m.id === messageId);
+      if (idx !== -1) {
+        vlistRef.current?.scrollToIndex(idx, { align: 'center', smooth: true });
+        highlight(messageId);
         return;
       }
 
-      // Case 2: Message not in DOM — fetch around it
+      // Case 2: message NOT in list — fetch around it
       if (!activeChannel) return;
+
+      jumpingRef.current = true;
+
+      const vlistEl = getVListElement();
+      if (vlistEl) {
+        vlistEl.style.transition = 'opacity 150ms ease-out';
+        vlistEl.style.opacity = '0';
+      }
 
       try {
         const rawMessages = await activeChannel.queryMessagesAroundId(messageId, 25);
-
-        if (rawMessages && rawMessages.length > 0) {
-          const formatted = rawMessages.map((msg: any) => formatMessage(msg));
-          // Deduplicate by ID
-          const seen = new Set<string>();
-          const unique = formatted.filter((m: any) => {
-            if (!m.id || seen.has(m.id)) return false;
-            seen.add(m.id);
-            return true;
-          });
-          // Replace messages — bidirectional loading will fill gaps
-          setMessages(unique);
-          setHasMore(true);
-          setHasNewer(true);
-
-          // Wait for React to render the new messages, then scroll
-          waitForDOMAndScroll(messageId);
+        if (!rawMessages || rawMessages.length === 0) {
+          jumpingRef.current = false;
+          if (vlistEl) vlistEl.style.opacity = '1';
+          return;
         }
+
+        const formatted = rawMessages.map((msg: any) => formatMessage(msg));
+        const unique = dedupMessages(formatted);
+
+        setHasMore(true);
+        setHasNewer(true);
+        setMessages(unique);
+
+        // Wait for VList to render, then jump while hidden, then fade in
+        setTimeout(() => {
+          const newIdx = unique.findIndex((m: any) => m.id === messageId);
+          if (newIdx === -1) {
+            jumpingRef.current = false;
+            if (vlistEl) vlistEl.style.opacity = '1';
+            return;
+          }
+
+          vlistRef.current?.scrollToIndex(newIdx, { align: 'center' });
+
+          setTimeout(() => {
+            if (vlistEl) {
+              vlistEl.style.transition = 'opacity 200ms ease-in';
+              vlistEl.style.opacity = '1';
+            }
+            highlight(messageId);
+            setTimeout(() => { jumpingRef.current = false; }, 500);
+          }, 100);
+        }, 200);
       } catch (err) {
         console.error('Failed to fetch messages around ID:', err);
+        jumpingRef.current = false;
+        if (vlistEl) vlistEl.style.opacity = '1';
       }
     },
-    [listRef, activeChannel, scrollAndHighlight, waitForDOMAndScroll, setMessages, setHasMore, setHasNewer],
+    [activeChannel, highlight, setMessages, setHasMore, setHasNewer, getVListElement],
   );
 
-  return { highlightedId, scrollToMessage };
+  const jumpToLatest = useCallback(() => {
+    if (!activeChannel) return;
+    jumpingRef.current = true;
+
+    const vlistEl = getVListElement();
+    if (vlistEl) {
+      vlistEl.style.transition = 'opacity 150ms ease-out';
+      vlistEl.style.opacity = '0';
+    }
+
+    const latestMsgs = [...activeChannel.state.latestMessages];
+    setMessages(latestMsgs);
+    setHasNewer(false);
+    setHasMore(true);
+
+    setTimeout(() => {
+      scrollToBottom(false);
+      setTimeout(() => {
+        if (vlistEl) {
+          vlistEl.style.transition = 'opacity 200ms ease-in';
+          vlistEl.style.opacity = '1';
+        }
+        setTimeout(() => { jumpingRef.current = false; }, 500);
+      }, 100);
+    }, 200);
+  }, [activeChannel, scrollToBottom, getVListElement, setMessages, setHasMore, setHasNewer]);
+
+  return { highlightedId, scrollToMessage, jumpToLatest };
 }

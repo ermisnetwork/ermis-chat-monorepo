@@ -270,8 +270,8 @@
 .ermis-message-list__vlist {
   display: flex !important;
   flex-direction: column !important;
-  padding-left: var(--ermis-spacing-lg);
-  padding-right: var(--ermis-spacing-lg);
+  padding-left: 3rem;
+  padding-right: 3rem;
 }
 
 /* Push content to bottom when few messages, margin collapses when content overflows */

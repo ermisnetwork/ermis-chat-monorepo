@@ -24,8 +24,7 @@ export type { ChannelProps } from './components/Channel';
 export { ChannelHeader } from './components/ChannelHeader';
 export type { ChannelHeaderProps } from './components/ChannelHeader';
 
-export { MessageList } from './components/MessageList';
-export type { MessageListProps, MessageBubbleProps, MessageItemProps, SystemMessageItemProps } from './components/MessageList';
+export type { MessageListProps, MessageBubbleProps, MessageItemProps, SystemMessageItemProps } from './types';
 
 export { VirtualMessageList } from './components/VirtualMessageList';
 
@@ -59,7 +58,13 @@ export { useMentions } from './hooks/useMentions';
 export type { MentionMember, MentionPayload, UseMentionsOptions, UseMentionsReturn } from './hooks/useMentions';
 
 export { useScrollToMessage } from './hooks/useScrollToMessage';
-export type { UseScrollToMessageOptions, UseScrollToMessageReturn, ScrollToMessageFn } from './hooks/useScrollToMessage';
+export type { UseScrollToMessageOptions, UseScrollToMessageReturn } from './hooks/useScrollToMessage';
+
+export { useLoadMessages, dedupMessages } from './hooks/useLoadMessages';
+export type { UseLoadMessagesOptions, UseLoadMessagesReturn } from './hooks/useLoadMessages';
+
+export { useChannelMessages } from './hooks/useChannelMessages';
+export type { UseChannelMessagesOptions } from './hooks/useChannelMessages';
 
 export { QuotedMessagePreview } from './components/QuotedMessagePreview';
 export type { QuotedMessagePreviewProps } from './components/QuotedMessagePreview';
