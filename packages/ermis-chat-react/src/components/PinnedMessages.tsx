@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
@@ -99,6 +99,11 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
   const { activeChannel, client } = useChatClient();
   const [expanded, setExpanded] = useState(false);
   const currentUserId = client.userID;
+
+  // Reset expanded state when switching channels
+  useEffect(() => {
+    setExpanded(false);
+  }, [activeChannel]);
 
   const pinnedMessages = useMemo<FormatMessageResponse[]>(() => {
     if (!activeChannel) return [];
