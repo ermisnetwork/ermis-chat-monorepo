@@ -156,14 +156,32 @@ export type SystemMessageItemProps = {
   SystemRenderer: React.ComponentType<MessageRendererProps>;
 };
 
-/* ----------------------------------------------------------
-   MessageInput types
-   ---------------------------------------------------------- */
+export type SendButtonProps = { disabled: boolean; onClick: () => void };
+export type AttachButtonProps = { disabled: boolean; onClick: () => void };
+
 export type MessageInputProps = {
+  /** Placeholder text */
   placeholder?: string;
+  /** Callback after message is sent */
   onSend?: (text: string) => void;
+  /** Additional CSS class name */
   className?: string;
-  SendButton?: React.ComponentType<{ disabled: boolean; onClick: () => void }>;
+  /** Custom send button component */
+  SendButton?: React.ComponentType<SendButtonProps>;
+  /** Custom attach button component */
+  AttachButton?: React.ComponentType<AttachButtonProps>;
+  /** Custom file preview component */
+  FilesPreviewComponent?: React.ComponentType<FilesPreviewProps>;
+  /** Custom mention suggestions component */
+  MentionSuggestionsComponent?: React.ComponentType<MentionSuggestionsProps>;
+  /** Disable file attachments entirely */
+  disableAttachments?: boolean;
+  /** Disable @mention suggestions (overrides auto-detection) */
+  disableMentions?: boolean;
+  /** Render custom content above the input row (e.g. reply preview) */
+  renderAbove?: () => React.ReactNode;
+  /** Hook called before sending — return false to cancel */
+  onBeforeSend?: (text: string, attachments: FilePreviewItem[]) => boolean | Promise<boolean>;
 };
 
 /* ----------------------------------------------------------

@@ -6,7 +6,7 @@ import type { MentionMember, MessageInputProps, FilePreviewItem } from '../types
 import { MentionSuggestions } from './MentionSuggestions';
 import { FilesPreview } from './FilesPreview';
 
-export type { MessageInputProps } from '../types';
+export type { MessageInputProps, SendButtonProps, AttachButtonProps } from '../types';
 
 let _fileIdCounter = 0;
 function nextFileId(): string {
@@ -27,11 +27,34 @@ const DefaultSendButton: React.FC<{ disabled: boolean; onClick: () => void }> = 
 ));
 DefaultSendButton.displayName = 'DefaultSendButton';
 
+const DefaultAttachButton: React.FC<{ disabled: boolean; onClick: () => void }> = React.memo(({
+  disabled,
+  onClick,
+}) => (
+  <button
+    className="ermis-message-input__attach-btn"
+    onClick={onClick}
+    type="button"
+    aria-label="Attach files"
+    disabled={disabled}
+  >
+    📎
+  </button>
+));
+DefaultAttachButton.displayName = 'DefaultAttachButton';
+
 export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   placeholder = 'Type a message...',
   onSend,
   className,
   SendButton = DefaultSendButton,
+  AttachButton = DefaultAttachButton,
+  FilesPreviewComponent = FilesPreview,
+  MentionSuggestionsComponent = MentionSuggestions,
+  disableAttachments = false,
+  disableMentions = false,
+  renderAbove,
+  onBeforeSend,
 }) => {
   const { client, activeChannel, syncMessages } = useChatClient();
   const editableRef = useRef<HTMLDivElement>(null);
@@ -202,6 +225,12 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
     if (!text && uploadedFiles.length === 0) return;
 
+    // onBeforeSend hook — return false to cancel
+    if (onBeforeSend) {
+      const proceed = await onBeforeSend(text, uploadedFiles);
+      if (!proceed) return;
+    }
+
     try {
       setSending(true);
 
@@ -258,14 +287,14 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     const el = editableRef.current;
     const content = el?.textContent?.trim() ?? '';
     setHasContent(content.length > 0 || files.length > 0);
-    if (isTeamChannel) {
+    if (isTeamChannel && !disableMentions) {
       mentionHandleInput();
     }
-  }, [isTeamChannel, mentionHandleInput, files.length]);
+  }, [isTeamChannel, disableMentions, mentionHandleInput, files.length]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (isTeamChannel) {
+      if (isTeamChannel && !disableMentions) {
         const consumed = mentionHandleKeyDown(e);
         if (consumed) return;
       }
@@ -274,7 +303,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
         handleSend();
       }
     },
-    [isTeamChannel, mentionHandleKeyDown, handleSend],
+    [isTeamChannel, disableMentions, mentionHandleKeyDown, handleSend],
   );
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -289,14 +318,17 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
   return (
     <div className={`ermis-message-input${className ? ` ${className}` : ''}`}>
-      {/* File previews — shows files after sendFile API call */}
-      <FilesPreview files={files} onRemove={handleRemoveFile} />
+      {/* Custom content above input */}
+      {renderAbove?.()}
+
+      {/* File previews */}
+      {!disableAttachments && <FilesPreviewComponent files={files} onRemove={handleRemoveFile} />}
 
       {/* Text input + send row */}
       <div className="ermis-message-input__row">
         <div className="ermis-message-input__editable-wrapper">
-          {isTeamChannel && showSuggestions && (
-            <MentionSuggestions
+          {isTeamChannel && !disableMentions && showSuggestions && (
+            <MentionSuggestionsComponent
               members={filteredMembers}
               highlightIndex={highlightIndex}
               onSelect={selectMention}
@@ -304,27 +336,23 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
           )}
 
           {/* Attach button */}
-          <button
-            className="ermis-message-input__attach-btn"
-            onClick={handleAttachClick}
-            type="button"
-            aria-label="Attach files"
-            disabled={sending}
-          >
-            📎
-          </button>
+          {!disableAttachments && (
+            <AttachButton disabled={sending} onClick={handleAttachClick} />
+          )}
 
           {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="ermis-message-input__file-input"
-            onChange={(e) => {
-              handleFilesSelected(e.target.files);
-              e.target.value = '';
-            }}
-          />
+          {!disableAttachments && (
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="ermis-message-input__file-input"
+              onChange={(e) => {
+                handleFilesSelected(e.target.files);
+                e.target.value = '';
+              }}
+            />
+          )}
 
           <div
             ref={editableRef}
