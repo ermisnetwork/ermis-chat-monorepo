@@ -1,0 +1,117 @@
+/* ----------------------------------------------------------
+   Pinned Messages
+   ---------------------------------------------------------- */
+.ermis-pinned-messages {
+  border-bottom: 1px solid var(--ermis-border);
+  background-color: var(--ermis-bg-secondary);
+  font-family: var(--ermis-font-family);
+}
+
+.ermis-pinned-messages__header {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-xs);
+  padding: var(--ermis-spacing-xs) var(--ermis-spacing-md);
+  font-size: var(--ermis-font-size-xs);
+  color: var(--ermis-text-secondary);
+}
+
+.ermis-pinned-messages__icon {
+  color: var(--ermis-accent);
+  flex-shrink: 0;
+}
+
+.ermis-pinned-messages__label {
+  font-weight: 600;
+  color: var(--ermis-text-primary);
+}
+
+.ermis-pinned-messages__toggle {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--ermis-accent);
+  font-size: var(--ermis-font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--ermis-radius-sm);
+  transition: background-color var(--ermis-transition);
+}
+
+.ermis-pinned-messages__toggle:hover {
+  background-color: var(--ermis-bg-hover);
+}
+
+.ermis-pinned-messages__list {
+  padding: 0 var(--ermis-spacing-md) var(--ermis-spacing-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ermis-pinned-messages__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+  padding: var(--ermis-spacing-xs) var(--ermis-spacing-sm);
+  border-radius: var(--ermis-radius-sm);
+  cursor: pointer;
+  transition: background-color var(--ermis-transition);
+}
+
+.ermis-pinned-messages__item:hover {
+  background-color: var(--ermis-bg-hover);
+}
+
+.ermis-pinned-messages__item-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ermis-pinned-messages__item-user {
+  font-size: var(--ermis-font-size-xs);
+  font-weight: 600;
+  color: var(--ermis-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ermis-pinned-messages__item-text {
+  font-size: var(--ermis-font-size-xs);
+  color: var(--ermis-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* --- Unpin button --- */
+.ermis-pinned-messages__unpin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: none;
+  border-radius: var(--ermis-radius-sm);
+  color: var(--ermis-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--ermis-transition), background-color var(--ermis-transition);
+  opacity: 0;
+}
+
+.ermis-pinned-messages__item:hover .ermis-pinned-messages__unpin-btn {
+  opacity: 1;
+}
+
+.ermis-pinned-messages__unpin-btn:hover {
+  color: var(--ermis-accent);
+  background-color: var(--ermis-bg-hover);
+}

@@ -29,6 +29,9 @@ export type { MessageListProps, MessageBubbleProps, MessageItemProps, SystemMess
 
 export { VirtualMessageList } from './components/VirtualMessageList';
 
+export { PinnedMessages } from './components/PinnedMessages';
+export type { PinnedMessagesProps, PinnedMessageItemProps } from './components/PinnedMessages';
+
 export { MessageItem, SystemMessageItem } from './components/MessageItem';
 
 export { formatTime, getDateKey, formatDateLabel, getMessageUserId } from './utils';

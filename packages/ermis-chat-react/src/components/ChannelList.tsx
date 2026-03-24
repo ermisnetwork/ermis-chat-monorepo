@@ -139,7 +139,7 @@ const DefaultEmpty = React.memo(() => (
 DefaultEmpty.displayName = 'DefaultEmpty';
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
-  filters = { type: ['messaging', 'team'] },
+  filters = { type: ['messaging', 'team'], include_pinned_messages: true },
   sort = [],
   options = { message_limit: 25 },
   renderChannel,
@@ -190,7 +190,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
 
       // Mark as read when user selects a channel
       if ((channel.state as any)?.unreadCount > 0) {
-        channel.markRead().catch(() => {});
+        channel.markRead().catch(() => { });
         // Optimistically reset unread to update UI immediately
         (channel.state as any).unreadCount = 0;
         setChannels((prev) => [...prev]);

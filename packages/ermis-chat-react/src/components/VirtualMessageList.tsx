@@ -14,6 +14,7 @@ import {
 } from './MessageRenderers';
 import { getDateKey, formatDateLabel, getMessageUserId } from '../utils';
 import { QuotedMessagePreview } from './QuotedMessagePreview';
+import { PinnedMessages } from './PinnedMessages';
 import type { MessageListProps } from '../types';
 
 /* ----------------------------------------------------------
@@ -76,6 +77,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   SystemMessageItemComponent = SystemMessageItem,
   JumpToLatestButton = DefaultJumpToLatest,
   QuotedMessagePreviewComponent = QuotedMessagePreview,
+  showPinnedMessages = true,
+  PinnedMessagesComponent = PinnedMessages,
 }) => {
   const { client, activeChannel, messages, setMessages, syncMessages } = useChatClient();
   const vlistRef = useRef<VListHandle>(null);
@@ -216,6 +219,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
   return (
     <div ref={containerRef} className={`ermis-message-list${className ? ` ${className}` : ''}`}>
+      {showPinnedMessages && <PinnedMessagesComponent onClickMessage={scrollToMessage} AvatarComponent={AvatarComponent} />}
+
       {messages.length === 0 && <EmptyStateIndicator />}
 
       <VList

@@ -158,6 +158,10 @@ export type MessageListProps = {
   JumpToLatestButton?: React.ComponentType<JumpToLatestProps>;
   /** Custom quoted message preview inside message items */
   QuotedMessagePreviewComponent?: React.ComponentType<QuotedMessagePreviewProps>;
+  /** Show pinned messages bar (default: true) */
+  showPinnedMessages?: boolean;
+  /** Custom pinned messages component */
+  PinnedMessagesComponent?: React.ComponentType<any>;
 };
 
 /* ----------------------------------------------------------
