@@ -104,6 +104,19 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     clearQuotedMessage: () => setQuotedMessage(null),
   });
 
+  // Clear input when channel changes
+  useEffect(() => {
+    reset();
+    handleEmojiClose();
+    setFiles((prev) => {
+      prev.forEach((f) => {
+        if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
+      });
+      return [];
+    });
+    setHasContent(false);
+  }, [activeChannel, reset, handleEmojiClose, setFiles]);
+
   /* ---------- Input event handlers ---------- */
   const handleInput = useCallback(() => {
     const el = editableRef.current;

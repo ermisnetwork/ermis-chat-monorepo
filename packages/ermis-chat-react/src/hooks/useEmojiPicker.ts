@@ -36,6 +36,7 @@ export function useEmojiPicker({ editableRef, setHasContent }: UseEmojiPickerOpt
 
   const handleEmojiClose = useCallback(() => {
     setEmojiPickerOpen(false);
+    savedRangeRef.current = null;
   }, []);
 
   const toggleEmojiPicker = useCallback(() => {

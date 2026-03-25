@@ -3,6 +3,7 @@ import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
+import { replaceMentionsForPreview } from '../utils';
 import { Avatar } from './Avatar';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
@@ -67,6 +68,15 @@ function getLastMessagePreview(
     if (lastMsg.attachments.length > 1) {
       displayText += ` +${lastMsg.attachments.length - 1}`;
     }
+  }
+
+  // Format mentions if necessary
+  const mentionedUsers = (lastMsg as any).mentioned_users;
+  const mentionedAll = (lastMsg as any).mentioned_all;
+  
+  if (displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
+    const userMap = buildUserMap(channel);
+    displayText = replaceMentionsForPreview(displayText, lastMsg as any, userMap);
   }
 
   return {

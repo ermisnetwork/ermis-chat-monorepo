@@ -45,3 +45,45 @@ export function formatDateLabel(date: Date | string | undefined): string {
 export function getMessageUserId(message: FormatMessageResponse): string {
   return message.user?.id || message.user_id || '';
 }
+
+/**
+ * Replace @user_id with @UserName for plain text previews.
+ * Returns the formatted string.
+ */
+export function replaceMentionsForPreview(
+  text: string,
+  message: FormatMessageResponse,
+  userMap: Record<string, string>
+): string {
+  const mentionedUsers: string[] = (message as any).mentioned_users ?? [];
+  const mentionedAll: boolean = (message as any).mentioned_all ?? false;
+
+  // If no mentions, nothing to replace
+  if (mentionedUsers.length === 0 && !mentionedAll) {
+    return text;
+  }
+
+  const replacements: { pattern: string; label: string }[] = [];
+
+  for (const userId of mentionedUsers) {
+    replacements.push({
+      pattern: `@${userId}`,
+      label: `@${userMap[userId] ?? userId}`,
+    });
+  }
+
+  if (mentionedAll) {
+    replacements.push({ pattern: '@all', label: '@all' });
+  }
+
+  if (replacements.length === 0) return text;
+
+  // Escape special regex characters in the patterns
+  const escaped = replacements.map((r) => r.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(`(${escaped.join('|')})`, 'g');
+
+  // Map pattern back to label for quick lookup
+  const patternToLabel = new Map(replacements.map((r) => [r.pattern, r.label]));
+
+  return text.replace(regex, (match) => patternToLabel.get(match) || match);
+}

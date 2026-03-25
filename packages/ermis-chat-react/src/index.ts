@@ -38,7 +38,7 @@ export type { MessageActionsBoxProps } from './types';
 
 export { useMessageActions } from './hooks/useMessageActions';
 
-export { formatTime, getDateKey, formatDateLabel, getMessageUserId } from './utils';
+export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview } from './utils';
 
 export {
   defaultMessageRenderers,

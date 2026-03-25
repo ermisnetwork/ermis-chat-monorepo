@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { useChatClient } from '../hooks/useChatClient';
+import { replaceMentionsForPreview } from '../utils';
 import type { ReplyPreviewProps } from '../types';
 
 const MAX_PREVIEW_LENGTH = 120;
@@ -34,13 +36,28 @@ function getAttachmentSummary(attachments: any[]): string {
 
   return labels.join(', ');
 }
-
 export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   message,
   onDismiss,
 }) => {
+  const { activeChannel } = useChatClient();
+
+  const userMap = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    const members = (activeChannel as any)?.state?.members;
+    if (members) {
+      for (const [id, member] of Object.entries<any>(members)) {
+        map[id] = member?.user?.name || member?.user_id || id;
+      }
+    }
+    return map;
+  }, [activeChannel]);
+
   const userName = message.user?.name || message.user_id || 'Unknown';
-  const hasText = !!message.text?.trim();
+  
+  const rawText = message.text || '';
+  const formattedText = useMemo(() => replaceMentionsForPreview(rawText, message, userMap), [rawText, message, userMap]);
+  const hasText = !!formattedText.trim();
   const hasAttachments = message.attachments && message.attachments.length > 0;
   const isSticker = message.type === 'sticker';
   const attachmentSummary = hasAttachments ? getAttachmentSummary(message.attachments!) : '';
@@ -56,7 +73,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   } else {
     previewContent = (
       <span className="ermis-message-input__reply-preview-text">
-        {hasText && truncateText(message.text!, MAX_PREVIEW_LENGTH)}
+        {hasText && truncateText(formattedText, MAX_PREVIEW_LENGTH)}
         {hasText && hasAttachments && ' · '}
         {hasAttachments && attachmentSummary}
       </span>

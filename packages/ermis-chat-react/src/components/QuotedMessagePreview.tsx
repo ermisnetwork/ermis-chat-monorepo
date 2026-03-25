@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { useChatClient } from '../hooks/useChatClient';
+import { replaceMentionsForPreview } from '../utils';
 import type { QuotedMessagePreviewProps } from '../types';
 
 export type { QuotedMessagePreviewProps } from '../types';
@@ -15,9 +17,26 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
   isOwnMessage,
   onClick,
 }) => {
+  const { activeChannel } = useChatClient();
+
+  const userMap = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    const members = (activeChannel as any)?.state?.members;
+    if (members) {
+      for (const [id, member] of Object.entries<any>(members)) {
+        map[id] = member?.user?.name || member?.user_id || id;
+      }
+    }
+    return map;
+  }, [activeChannel]);
+
   const authorName = quotedMessage.user?.name || quotedMessage.user?.id || 'Unknown';
-  const previewText = quotedMessage.text
-    ? truncateText(quotedMessage.text, MAX_PREVIEW_LENGTH)
+  
+  const rawText = quotedMessage.text || '';
+  const formattedText = useMemo(() => replaceMentionsForPreview(rawText, quotedMessage as any, userMap), [rawText, quotedMessage, userMap]);
+  
+  const previewText = formattedText
+    ? truncateText(formattedText, MAX_PREVIEW_LENGTH)
     : 'Attachment';
 
   const handleClick = () => {
