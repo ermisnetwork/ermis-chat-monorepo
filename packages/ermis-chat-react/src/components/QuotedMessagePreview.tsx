@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
-import { replaceMentionsForPreview } from '../utils';
+import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import type { QuotedMessagePreviewProps } from '../types';
 
 export type { QuotedMessagePreviewProps } from '../types';
@@ -20,14 +20,7 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
   const { activeChannel } = useChatClient();
 
   const userMap = useMemo<Record<string, string>>(() => {
-    const map: Record<string, string> = {};
-    const members = (activeChannel as any)?.state?.members;
-    if (members) {
-      for (const [id, member] of Object.entries<any>(members)) {
-        map[id] = member?.user?.name || member?.user_id || id;
-      }
-    }
-    return map;
+    return buildUserMap(activeChannel?.state);
   }, [activeChannel]);
 
   const authorName = quotedMessage.user?.name || quotedMessage.user?.id || 'Unknown';

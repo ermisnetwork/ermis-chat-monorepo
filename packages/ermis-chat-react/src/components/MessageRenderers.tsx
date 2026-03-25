@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import type { FormatMessageResponse, Attachment, MessageLabel } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
+import { buildUserMap } from '../utils';
 import type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
 
 export type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
@@ -286,15 +287,8 @@ export const RegularMessage: React.FC<MessageRendererProps> = ({ message }) => {
   const { activeChannel } = useChatClient();
 
   const userMap = useMemo<Record<string, string>>(() => {
-    const map: Record<string, string> = {};
-    const members = (activeChannel as any)?.state?.members;
-    if (members) {
-      for (const [id, member] of Object.entries<any>(members)) {
-        map[id] = member?.user?.name || member?.user_id || id;
-      }
-    }
-    return map;
-  }, [activeChannel]);
+    return buildUserMap(activeChannel?.state);
+  }, [activeChannel?.state]);
 
   const textContent = message.text
     ? renderTextWithMentions(message.text, message, userMap)
@@ -327,16 +321,8 @@ export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
   const { activeChannel } = useChatClient();
 
   const userMap = useMemo<Record<string, string>>(() => {
-    const map: Record<string, string> = {};
-    const members = (activeChannel as any)?.state?.members;
-    if (members) {
-      for (const [id, member] of Object.entries<any>(members)) {
-        const name = member?.user?.name || member?.user_id || id;
-        map[id] = name;
-      }
-    }
-    return map;
-  }, [activeChannel]);
+    return buildUserMap(activeChannel?.state);
+  }, [activeChannel?.state]);
 
   const parsedText = useMemo(
     () => (message.text ? parseSystemMessage(message.text, userMap) : ''),
@@ -354,18 +340,9 @@ export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
 export const SignalMessage: React.FC<MessageRendererProps> = ({ message }) => {
   const { activeChannel } = useChatClient();
 
-  const userMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    const members = (activeChannel?.state as any)?.members;
-    if (members && typeof members === 'object') {
-      for (const [id, member] of Object.entries(members)) {
-        const m = member as any;
-        const name = m?.user?.name || m?.user_id || id;
-        map[id] = name;
-      }
-    }
-    return map;
-  }, [activeChannel]);
+  const userMap = useMemo<Record<string, string>>(() => {
+    return buildUserMap(activeChannel?.state);
+  }, [activeChannel?.state]);
 
   const rawText = message.text ?? '';
   const parsedText = rawText ? parseSignalMessage(rawText, userMap) : '';

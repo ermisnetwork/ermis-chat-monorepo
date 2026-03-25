@@ -9,8 +9,8 @@ import { MentionSuggestions } from './MentionSuggestions';
 import { FilesPreview } from './FilesPreview';
 import { ReplyPreview } from './ReplyPreview';
 import { EditPreview } from './EditPreview';
+import { buildUserMap } from '../utils';
 import type { MentionMember, MessageInputProps, FilePreviewItem } from '../types';
-import type { UserResponse } from '@ermis-network/ermis-chat-sdk';
 
 export type { MessageInputProps, SendButtonProps, AttachButtonProps, EmojiPickerProps, EmojiButtonProps } from '../types';
 
@@ -59,13 +59,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       const mentionedAll: boolean = (editingMessage as any).mentioned_all || false;
 
       // Extract user map locally since we have `activeChannel.state.members`
-      const userMap: Record<string, string> = {};
-      const stateMembers = (activeChannel?.state as any)?.members;
-      if (stateMembers && typeof stateMembers === 'object') {
-        for (const [id, member] of Object.entries<any>(stateMembers)) {
-          userMap[id] = member?.user?.name || member?.user_id || id;
-        }
-      }
+      const userMap = buildUserMap(activeChannel?.state);
 
       const replacements: { pattern: string; html: string }[] = [];
       for (const userId of mentionedUsers) {

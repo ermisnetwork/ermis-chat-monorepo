@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
-import { replaceMentionsForPreview } from '../utils';
+import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 
 const MAX_PREVIEW_LENGTH = 120;
@@ -47,14 +47,7 @@ export const EditPreview: React.FC<{
   const { activeChannel } = useChatClient();
 
   const userMap = useMemo<Record<string, string>>(() => {
-    const map: Record<string, string> = {};
-    const members = (activeChannel as any)?.state?.members;
-    if (members) {
-      for (const [id, member] of Object.entries<any>(members)) {
-        map[id] = member?.user?.name || member?.user_id || id;
-      }
-    }
-    return map;
+    return buildUserMap(activeChannel?.state);
   }, [activeChannel]);
 
   const userName = message.user?.name || message.user_id || 'Unknown';

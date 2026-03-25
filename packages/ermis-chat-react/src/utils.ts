@@ -66,6 +66,7 @@ export function replaceMentionsForPreview(
   const replacements: { pattern: string; label: string }[] = [];
 
   for (const userId of mentionedUsers) {
+    if (!userId) continue;
     replacements.push({
       pattern: `@${userId}`,
       label: `@${userMap[userId] ?? userId}`,
@@ -86,4 +87,19 @@ export function replaceMentionsForPreview(
   const patternToLabel = new Map(replacements.map((r) => [r.pattern, r.label]));
 
   return text.replace(regex, (match) => patternToLabel.get(match) || match);
+}
+
+/**
+ * Common helper to build a dictionary of User ID -> Display Name
+ * from the channel state, used for rendering Mentions and System logs.
+ */
+export function buildUserMap(channelState: any): Record<string, string> {
+  const map: Record<string, string> = {};
+  const members = channelState?.members;
+  if (members && typeof members === 'object') {
+    for (const [id, member] of Object.entries<any>(members)) {
+      map[id] = member?.user?.name || member?.user_id || id;
+    }
+  }
+  return map;
 }

@@ -3,25 +3,11 @@ import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
-import { replaceMentionsForPreview } from '../utils';
+import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import { Avatar } from './Avatar';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
 export type { ChannelListProps, ChannelItemProps } from '../types';
-
-/**
- * Build a userId → displayName map from channel members.
- */
-function buildUserMap(channel: Channel): Record<string, string> {
-  const map: Record<string, string> = {};
-  const members = (channel.state as any)?.members;
-  if (members && typeof members === 'object') {
-    for (const [id, member] of Object.entries<any>(members)) {
-      map[id] = member?.user?.name || member?.user_id || id;
-    }
-  }
-  return map;
-}
 
 /**
  * Get a human-readable preview string for the last message,
@@ -37,12 +23,12 @@ function getLastMessagePreview(
   const rawText = lastMsg.text ?? '';
 
   if (msgType === 'system') {
-    const userMap = buildUserMap(channel);
+    const userMap = buildUserMap(channel.state);
     return { text: parseSystemMessage(rawText, userMap), user: '' };
   }
 
   if (msgType === 'signal') {
-    const userMap = buildUserMap(channel);
+    const userMap = buildUserMap(channel.state);
     return { text: parseSignalMessage(rawText, userMap), user: '' };
   }
 
@@ -75,7 +61,7 @@ function getLastMessagePreview(
   const mentionedAll = (lastMsg as any).mentioned_all;
   
   if (displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
-    const userMap = buildUserMap(channel);
+    const userMap = buildUserMap(channel.state);
     displayText = replaceMentionsForPreview(displayText, lastMsg as any, userMap);
   }
 
