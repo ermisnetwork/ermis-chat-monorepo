@@ -1,9 +1,7 @@
 import React from 'react';
-import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
-import type { AvatarProps } from './Avatar';
-import type { MessageRendererProps, MessageBubbleProps } from './MessageRenderers';
 import type { MessageItemProps, SystemMessageItemProps } from '../types';
 import { QuotedMessagePreview } from './QuotedMessagePreview';
+import { MessageActionsBox } from './MessageActionsBox';
 import { formatTime } from '../utils';
 
 export type { MessageItemProps, SystemMessageItemProps } from '../types';
@@ -21,6 +19,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   MessageRenderer,
   onClickQuote,
   QuotedMessagePreviewComponent = QuotedMessagePreview,
+  MessageActionsBoxComponent = MessageActionsBox,
 }) => {
   const userName = message.user?.name || message.user_id;
   const userAvatar = message.user?.avatar;
@@ -71,12 +70,22 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
             onClick={onClickQuote}
           />
         )}
-        <MessageBubble message={message} isOwnMessage={isOwnMessage}>
-          <MessageRenderer message={message} isOwnMessage={isOwnMessage} />
-          <span className="ermis-message-list__item-time">
-            {formatTime(message.created_at)}
-          </span>
-        </MessageBubble>
+        <div className="ermis-message-list__bubble-wrapper">
+          <MessageBubble message={message} isOwnMessage={isOwnMessage}>
+            <MessageRenderer message={message} isOwnMessage={isOwnMessage} />
+            <span className="ermis-message-list__item-time">
+              {formatTime(message.created_at)}
+            </span>
+          </MessageBubble>
+
+          {/* Actions: hover buttons + dropdown menu */}
+          {message.type !== 'system' && (
+            <MessageActionsBoxComponent
+              message={message}
+              isOwnMessage={isOwnMessage}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

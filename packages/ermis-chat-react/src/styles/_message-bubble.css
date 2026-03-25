@@ -68,6 +68,17 @@
   align-items: flex-end;
 }
 
+.ermis-message-list__bubble-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center; /* Center actions vertically with the bubble */
+  position: relative;
+}
+
+.ermis-message-list__item--own .ermis-message-list__bubble-wrapper {
+  flex-direction: row-reverse;
+}
+
 .ermis-message-list__item-user {
   font-size: var(--ermis-font-size-xs);
   font-weight: 600;
@@ -362,6 +373,7 @@
   font-weight: 600;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -371,6 +383,7 @@
   color: var(--ermis-text-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

@@ -33,6 +33,9 @@ export { PinnedMessages } from './components/PinnedMessages';
 export type { PinnedMessagesProps, PinnedMessageItemProps } from './components/PinnedMessages';
 
 export { MessageItem, SystemMessageItem } from './components/MessageItem';
+export { MessageActionsBox } from './components/MessageActionsBox';
+
+export { useMessageActions } from './hooks/useMessageActions';
 
 export { formatTime, getDateKey, formatDateLabel, getMessageUserId } from './utils';
 

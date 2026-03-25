@@ -1,0 +1,104 @@
+/* ----------------------------------------------------------
+   Message Actions (Context Menu & Hover Button)
+   ---------------------------------------------------------- */
+
+/* Hover button container on the message item */
+.ermis-message-list__actions {
+  opacity: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background-color: var(--ermis-bg-secondary);
+  border: 1px solid var(--ermis-border);
+  border-radius: var(--ermis-radius-sm);
+  padding: 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: opacity 0.2s;
+  margin: 0 var(--ermis-spacing-xs);
+  align-self: center;
+}
+
+.ermis-message-list__item:hover .ermis-message-list__actions,
+.ermis-message-list__actions--active {
+  opacity: 1;
+}
+
+/* Position container for other (left) vs own (right) */
+.ermis-message-list__item--own .ermis-message-list__actions {
+  margin-right: var(--ermis-spacing-sm);
+  flex-direction: row-reverse;
+}
+
+.ermis-message-list__item--other .ermis-message-list__actions {
+  margin-left: var(--ermis-spacing-sm);
+}
+
+/* Individual action buttons */
+.ermis-message-list__actions-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: var(--ermis-radius-sm);
+  padding: 4px;
+  cursor: pointer;
+  color: var(--ermis-text-secondary);
+  transition: background-color var(--ermis-transition), color var(--ermis-transition);
+}
+
+.ermis-message-list__actions-trigger:hover {
+  background-color: var(--ermis-bg-hover);
+  color: var(--ermis-text-primary);
+}
+
+/* Context Menu Box — rendered via Portal into .ermis-chat */
+.ermis-message-actions-box {
+  font-family: var(--ermis-font-family);
+}
+
+.ermis-message-actions-box__menu {
+  background-color: var(--ermis-bg-primary);
+  border: 1px solid var(--ermis-border);
+  border-radius: var(--ermis-radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  padding: var(--ermis-spacing-xs) 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ermis-message-actions-box__item {
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  padding: var(--ermis-spacing-xs) var(--ermis-spacing-md);
+  font-size: var(--ermis-font-size-sm);
+  color: var(--ermis-text-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+  transition: background-color 0.15s;
+}
+
+.ermis-message-actions-box__item:hover {
+  background-color: var(--ermis-bg-hover);
+}
+
+/* Divider */
+.ermis-message-actions-box__divider {
+  height: 1px;
+  background-color: var(--ermis-border);
+  margin: var(--ermis-spacing-xs) 0;
+}
+
+.ermis-message-actions-box__item--danger {
+  color: #e74c3c;
+}
+
+.ermis-message-actions-box__item--danger:hover {
+  background-color: rgba(231, 76, 60, 0.1);
+}

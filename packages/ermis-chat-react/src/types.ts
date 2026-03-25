@@ -158,6 +158,8 @@ export type MessageListProps = {
   JumpToLatestButton?: React.ComponentType<JumpToLatestProps>;
   /** Custom quoted message preview inside message items */
   QuotedMessagePreviewComponent?: React.ComponentType<QuotedMessagePreviewProps>;
+  /** Custom message actions component (hover buttons + dropdown) */
+  MessageActionsBoxComponent?: React.ComponentType<{ message: FormatMessageResponse; isOwnMessage: boolean }>;
   /** Show pinned messages bar (default: true) */
   showPinnedMessages?: boolean;
   /** Custom pinned messages component */
@@ -178,6 +180,11 @@ export type MessageItemProps = {
   onClickQuote?: (messageId: string) => void;
   /** Custom quoted message preview component */
   QuotedMessagePreviewComponent?: React.ComponentType<QuotedMessagePreviewProps>;
+  /** Custom message actions component (hover buttons + dropdown) */
+  MessageActionsBoxComponent?: React.ComponentType<{
+    message: FormatMessageResponse;
+    isOwnMessage: boolean;
+  }>;
 };
 
 export type SystemMessageItemProps = {

@@ -77,6 +77,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   SystemMessageItemComponent = SystemMessageItem,
   JumpToLatestButton = DefaultJumpToLatest,
   QuotedMessagePreviewComponent = QuotedMessagePreview,
+  MessageActionsBoxComponent,
   showPinnedMessages = true,
   PinnedMessagesComponent = PinnedMessages,
 }) => {
@@ -209,6 +210,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             MessageRenderer={MessageRenderer}
             onClickQuote={scrollToMessage}
             QuotedMessagePreviewComponent={QuotedMessagePreviewComponent}
+            MessageActionsBoxComponent={MessageActionsBoxComponent}
           />
         </div>
       );
