@@ -8,7 +8,9 @@ import { DefaultSendButton, DefaultAttachButton, DefaultEmojiButton } from './Me
 import { MentionSuggestions } from './MentionSuggestions';
 import { FilesPreview } from './FilesPreview';
 import { ReplyPreview } from './ReplyPreview';
-import type { MentionMember, MessageInputProps } from '../types';
+import { EditPreview } from './EditPreview';
+import type { MentionMember, MessageInputProps, FilePreviewItem } from '../types';
+import type { UserResponse } from '@ermis-network/ermis-chat-sdk';
 
 export type { MessageInputProps, SendButtonProps, AttachButtonProps, EmojiPickerProps, EmojiButtonProps } from '../types';
 
@@ -27,25 +29,108 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   EmojiPickerComponent,
   EmojiButtonComponent = DefaultEmojiButton,
   ReplyPreviewComponent = ReplyPreview,
+  EditPreviewComponent = EditPreview,
 }) => {
-  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage } = useChatClient();
+  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const editableRef = React.useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
 
   const isTeamChannel = activeChannel?.type === 'team';
 
-  // Auto-focus when channel changes or when reply is selected
+  // Auto-focus when channel changes or when reply/edit is selected
   useEffect(() => {
     if (activeChannel && editableRef.current) {
       editableRef.current.focus();
     }
-  }, [activeChannel, quotedMessage]);
+  }, [activeChannel, quotedMessage, editingMessage]);
 
   /* ---------- Hooks ---------- */
   const {
     files, setFiles, fileInputRef,
     handleFilesSelected, handleRemoveFile, handleAttachClick, cleanupFiles,
   } = useFileUpload({ activeChannel, editableRef, setHasContent });
+
+  // Pre-fill text and legacy attachments when editingMessage is set
+  useEffect(() => {
+    if (editingMessage && editableRef.current) {
+      // 1. Prefill text content
+      const rawText = editingMessage.text || '';
+      const mentionedUsers: string[] = editingMessage.mentioned_users || [];
+      const mentionedAll: boolean = (editingMessage as any).mentioned_all || false;
+
+      // Extract user map locally since we have `activeChannel.state.members`
+      const userMap: Record<string, string> = {};
+      const stateMembers = (activeChannel?.state as any)?.members;
+      if (stateMembers && typeof stateMembers === 'object') {
+        for (const [id, member] of Object.entries<any>(stateMembers)) {
+          userMap[id] = member?.user?.name || member?.user_id || id;
+        }
+      }
+
+      const replacements: { pattern: string; html: string }[] = [];
+      for (const userId of mentionedUsers) {
+        if (!userId) continue;
+        const name = userMap[userId] || userId;
+        const safeName = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        replacements.push({
+          pattern: `@${userId}`,
+          html: `<span class="ermis-message-input__mention-span" data-mention-id="${userId}" contenteditable="false">@${safeName}</span>&nbsp;`,
+        });
+      }
+      if (mentionedAll) {
+        replacements.push({
+          pattern: '@all',
+          html: `<span class="ermis-message-input__mention-span" data-mention-id="__all__" contenteditable="false">@all</span>&nbsp;`,
+        });
+      }
+
+      let innerHTML = rawText
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
+
+      if (replacements.length > 0) {
+        const escapedPatterns = replacements.map((r) => r.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const regex = new RegExp(`(${escapedPatterns.join('|')})`, 'g');
+        const patternToHtml = new Map(replacements.map((r) => [r.pattern, r.html]));
+        innerHTML = innerHTML.replace(regex, (match) => patternToHtml.get(match) || match);
+      }
+
+      editableRef.current.innerHTML = innerHTML;
+
+      // Move cursor to the end
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.selectNodeContents(editableRef.current);
+      range.collapse(false);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+
+      // 2. Prefill existing attachments natively (only user-managed files)
+      if (editingMessage.attachments && editingMessage.attachments.length > 0) {
+        const fileAttachments = editingMessage.attachments.filter((a) => {
+          const type = a.type || 'file';
+          return ['image', 'video', 'file', 'voiceRecording'].includes(type);
+        });
+
+        const existingFiles = fileAttachments.map((att): FilePreviewItem => {
+          return {
+            id: `existing-${Math.random()}`,
+            status: 'done' as const,
+            uploadedUrl: att.asset_url || att.image_url || att.fallback,
+            thumbUrl: att.thumb_url,
+            originalAttachment: att,
+          };
+        });
+        setFiles(existingFiles);
+        setHasContent(true);
+      } else {
+        setFiles([]);
+        setHasContent(!!editingMessage.text);
+      }
+    }
+  }, [editingMessage, setFiles]);
 
   // Cleanup blob URLs on unmount
   useEffect(() => {
@@ -87,6 +172,17 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     editableRef,
   });
 
+  const cancelEdit = useCallback(() => {
+    setEditingMessage(null);
+    cleanupFiles();
+    setFiles([]);
+    setHasContent(false);
+    reset();
+    if (editableRef.current) {
+      editableRef.current.innerHTML = '';
+    }
+  }, [setEditingMessage, cleanupFiles, setFiles, setHasContent, reset]);
+
   const { sending, handleSend } = useMessageSend({
     activeChannel,
     editableRef,
@@ -102,6 +198,8 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     onBeforeSend,
     quotedMessage,
     clearQuotedMessage: () => setQuotedMessage(null),
+    editingMessage,
+    clearEditingMessage: () => setEditingMessage(null),
   });
 
   // Clear input when channel changes
@@ -129,6 +227,16 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (editingMessage) {
+          cancelEdit();
+          return;
+        }
+        if (quotedMessage) {
+          setQuotedMessage(null);
+          return;
+        }
+      }
       if (isTeamChannel && !disableMentions) {
         const consumed = mentionHandleKeyDown(e);
         if (consumed) return;
@@ -138,7 +246,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
         handleSend();
       }
     },
-    [isTeamChannel, disableMentions, mentionHandleKeyDown, handleSend],
+    [isTeamChannel, disableMentions, mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, reset],
   );
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -154,10 +262,18 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   return (
     <div className={`ermis-message-input${className ? ` ${className}` : ''}`}>
       {/* Reply preview */}
-      {quotedMessage && (
+      {quotedMessage && !editingMessage && (
         <ReplyPreviewComponent
           message={quotedMessage}
           onDismiss={() => setQuotedMessage(null)}
+        />
+      )}
+
+      {/* Edit preview */}
+      {editingMessage && (
+        <EditPreviewComponent
+          message={editingMessage}
+          onDismiss={cancelEdit}
         />
       )}
 

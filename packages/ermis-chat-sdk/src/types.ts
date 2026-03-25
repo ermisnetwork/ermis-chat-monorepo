@@ -128,7 +128,7 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     created_at?: string;
     deleted_at?: string;
     latest_reactions?: ReactionResponse<ErmisChatGenerics>[];
-    mentioned_users?: UserResponse<ErmisChatGenerics>[];
+    mentioned_users?: string[];
     own_reactions?: ReactionResponse<ErmisChatGenerics>[] | null;
     pinned_at?: string | null;
     pinned_by?: UserResponse<ErmisChatGenerics> | null;

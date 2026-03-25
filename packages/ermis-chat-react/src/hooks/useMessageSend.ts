@@ -20,6 +20,10 @@ export type UseMessageSendOptions = {
   quotedMessage?: FormatMessageResponse | null;
   /** Clear quoted message after send */
   clearQuotedMessage?: () => void;
+  /** Message being edited */
+  editingMessage?: FormatMessageResponse | null;
+  /** Clear edited message after send */
+  clearEditingMessage?: () => void;
 };
 
 export function useMessageSend({
@@ -37,6 +41,8 @@ export function useMessageSend({
   onBeforeSend,
   quotedMessage,
   clearQuotedMessage,
+  editingMessage,
+  clearEditingMessage,
 }: UseMessageSendOptions) {
   const [sending, setSending] = useState(false);
 
@@ -64,9 +70,21 @@ export function useMessageSend({
 
       // Build attachment payloads from already-uploaded files
       const attachments = uploadedFiles.map((f) => {
-        const fileObj = f.normalizedFile || f.file;
+        if (f.originalAttachment) {
+          return f.originalAttachment;
+        }
+        const fileObj = f.normalizedFile || f.file!;
         return buildAttachmentPayload(fileObj, f.uploadedUrl!, f.thumbUrl);
       });
+
+      // Maintain any non-file system attachments (like linkPreview) from the original message when editing
+      if (editingMessage?.attachments) {
+        const systemAttachments = editingMessage.attachments.filter((a) => {
+          const type = a.type || 'file';
+          return !['image', 'video', 'file', 'voiceRecording'].includes(type);
+        });
+        attachments.push(...systemAttachments);
+      }
 
       // Build message
       const message: Record<string, any> = { text };
@@ -77,12 +95,16 @@ export function useMessageSend({
         message.mentioned_all = payload.mentioned_all;
         message.mentioned_users = payload.mentioned_users;
       }
-      if (quotedMessage?.id) {
-        message.quoted_message_id = quotedMessage.id;
-      }
+      let sendPromise;
 
-      // Start sendMessage (injects optimistic message into SDK state synchronously)
-      const sendPromise = activeChannel.sendMessage(message);
+      if (editingMessage?.id) {
+        sendPromise = activeChannel.editMessage(editingMessage.id, message as any);
+      } else {
+        if (quotedMessage?.id) {
+          message.quoted_message_id = quotedMessage.id;
+        }
+        sendPromise = activeChannel.sendMessage(message as any);
+      }
 
       // Sync React state IMMEDIATELY — optimistic message is already in SDK state
       syncMessages();
@@ -100,6 +122,7 @@ export function useMessageSend({
 
       reset();
       clearQuotedMessage?.();
+      clearEditingMessage?.();
       setHasContent(errorFiles.length > 0);
       onSend?.(payload.text);
     } catch (err) {

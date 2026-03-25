@@ -24,7 +24,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
   onDelete,
   onDeleteForMe,
 }) => {
-  const { setQuotedMessage, activeChannel } = useChatClient();
+  const { setQuotedMessage, setEditingMessage, activeChannel } = useChatClient();
   const [anchorRect, setAnchorRect] = React.useState<DOMRect | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceId = useRef(Math.random().toString(36).slice(2));
@@ -44,6 +44,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
       console.error('Failed to toggle pin', err);
     }
   });
+  const onEditHandler = onEdit ?? ((msg: FormatMessageResponse) => setEditingMessage(msg));
 
   const isOpen = anchorRect !== null;
   const onClose = useCallback(() => setAnchorRect(null), []);
@@ -182,7 +183,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
             </button>
           )}
           {actions.canEdit && (
-            <button className="ermis-message-actions-box__item" onClick={() => { onEdit?.(message); onClose(); }}>
+            <button className="ermis-message-actions-box__item" onClick={() => { onEditHandler(message); onClose(); }}>
               Edit
             </button>
           )}

@@ -180,8 +180,6 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   }
 
   addPinnedMessages(pinnedMessages: MessageResponse<ErmisChatGenerics>[]) {
-    console.log('--pinnedMessages--', pinnedMessages);
-
     for (let i = 0; i < pinnedMessages.length; i += 1) {
       this.addPinnedMessage(pinnedMessages[i]);
     }

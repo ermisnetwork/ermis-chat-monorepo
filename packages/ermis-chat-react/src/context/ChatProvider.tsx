@@ -16,6 +16,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [messages, setMessages] = useState<FormatMessageResponse[]>([]);
   const [quotedMessage, setQuotedMessage] = useState<FormatMessageResponse | null>(null);
+  const [editingMessage, setEditingMessage] = useState<FormatMessageResponse | null>(null);
 
   /** Re-read messages from SDK state into React state */
   const syncMessages = useCallback(() => {
@@ -24,9 +25,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     }
   }, [activeChannel]);
 
-  // Clear reply state when switching channels
+  // Clear reply/edit state when switching channels
   useEffect(() => {
     setQuotedMessage(null);
+    setEditingMessage(null);
   }, [activeChannel]);
 
   const value: ChatContextValue = {
@@ -40,6 +42,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     syncMessages,
     quotedMessage,
     setQuotedMessage,
+    editingMessage,
+    setEditingMessage,
   };
 
   return (

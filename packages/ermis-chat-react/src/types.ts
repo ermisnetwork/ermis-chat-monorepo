@@ -19,6 +19,9 @@ export type ChatContextValue = {
   /** Message being replied to (shown as preview in MessageInput) */
   quotedMessage: FormatMessageResponse | null;
   setQuotedMessage: (message: FormatMessageResponse | null) => void;
+  /** Message being edited (shown as preview in MessageInput and alters send behavior) */
+  editingMessage: FormatMessageResponse | null;
+  setEditingMessage: (message: FormatMessageResponse | null) => void;
 };
 
 export type ChatProviderProps = {
@@ -243,6 +246,8 @@ export type MessageInputProps = {
   EmojiButtonComponent?: React.ComponentType<EmojiButtonProps>;
   /** Custom reply preview component */
   ReplyPreviewComponent?: React.ComponentType<ReplyPreviewProps>;
+  /** Custom edit preview component */
+  EditPreviewComponent?: React.ComponentType<{ message: FormatMessageResponse; onDismiss: () => void; }>;
 };
 
 /* ----------------------------------------------------------
@@ -371,8 +376,8 @@ export type UseMentionsReturn = {
 export type FilePreviewItem = {
   /** Unique ID for keying */
   id: string;
-  /** Original File object */
-  file: File;
+  /** Original File object (optional for existing server attachments) */
+  file?: File;
   /** Blob URL for image/video preview */
   previewUrl?: string;
   /** Upload status */
@@ -385,6 +390,8 @@ export type FilePreviewItem = {
   thumbUrl?: string;
   /** File with normalized name */
   normalizedFile?: File;
+  /** Track original attachments during edits */
+  originalAttachment?: Attachment;
 };
 
 export type FilesPreviewProps = {

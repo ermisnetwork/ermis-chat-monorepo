@@ -29,18 +29,19 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
     if (!activeChannel) return;
 
     try {
-      const normalizedName = normalizeFileName(item.file.name);
-      const fileToUpload = normalizedName !== item.file.name
-        ? new File([item.file], normalizedName, { type: item.file.type, lastModified: item.file.lastModified })
-        : item.file;
+      const file = item.file!;
+      const normalizedName = normalizeFileName(file.name);
+      const fileToUpload = normalizedName !== file.name
+        ? new File([file], normalizedName, { type: file.type, lastModified: file.lastModified })
+        : file;
 
       const response = await activeChannel.sendFile(fileToUpload, fileToUpload.name, fileToUpload.type);
       const uploadedUrl = response.file;
 
       let thumbUrl = '';
-      if (isVideoFile(item.file)) {
+      if (isVideoFile(file)) {
         try {
-          const thumbBlob = await activeChannel.getThumbBlobVideo(item.file);
+          const thumbBlob = await activeChannel.getThumbBlobVideo(file);
           if (thumbBlob) {
             const thumbFile = new File([thumbBlob], `thumb_${normalizedName}.jpg`, { type: 'image/jpeg' });
             const thumbResp = await activeChannel.sendFile(thumbFile, thumbFile.name, 'image/jpeg');

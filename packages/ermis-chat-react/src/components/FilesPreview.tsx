@@ -33,11 +33,17 @@ export const FilesPreview: React.FC<FilesPreviewProps> = React.memo(({ files, on
   return (
     <div className="ermis-files-preview">
       {files.map((item) => {
-        const isHeic = isHeicFile(item.file);
-        const isImage = item.file.type.startsWith('image/') && !isHeic;
-        const isVideo = item.file.type.startsWith('video/');
+        const fileType = item.file?.type || item.originalAttachment?.mime_type || '';
+        const fileName = item.file?.name || item.originalAttachment?.title || 'Unknown file';
+        const fileSize = item.file?.size || item.originalAttachment?.file_size || 0;
+
+        const isHeic = item.file ? isHeicFile(item.file) : (fileType === 'image/heic' || fileType === 'image/heif');
+        const isImage = fileType.startsWith('image/') && !isHeic;
+        const isVideo = fileType.startsWith('video/');
         const isUploading = item.status === 'uploading';
         const hasError = item.status === 'error';
+
+        const previewUrl = item.previewUrl || item.originalAttachment?.image_url || item.originalAttachment?.asset_url;
 
         return (
           <div
@@ -55,28 +61,28 @@ export const FilesPreview: React.FC<FilesPreviewProps> = React.memo(({ files, on
             </button>
 
             {/* Preview content */}
-            {isImage && item.previewUrl ? (
+            {isImage && previewUrl ? (
               <img
                 className="ermis-files-preview__thumb"
-                src={item.previewUrl}
-                alt={item.file.name}
+                src={previewUrl}
+                alt={fileName}
               />
-            ) : isVideo && item.previewUrl ? (
+            ) : isVideo && previewUrl ? (
               <video
                 className="ermis-files-preview__thumb"
-                src={item.previewUrl}
+                src={previewUrl}
                 muted
               />
             ) : (
               <div className="ermis-files-preview__file-icon">
-                <span>{getFileIcon(item.file.type)}</span>
+                <span>{getFileIcon(fileType)}</span>
               </div>
             )}
 
             {/* File info */}
             <div className="ermis-files-preview__info">
-              <span className="ermis-files-preview__name">{item.file.name}</span>
-              <span className="ermis-files-preview__size">{formatFileSize(item.file.size)}</span>
+              <span className="ermis-files-preview__name">{fileName}</span>
+              <span className="ermis-files-preview__size">{formatFileSize(Number(fileSize))}</span>
             </div>
 
             {/* Upload status overlay */}
