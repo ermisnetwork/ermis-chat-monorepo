@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { buildAttachmentPayload } from '@ermis-network/ermis-chat-sdk';
 import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
+import { isUserManagedAttachment } from '../utils';
 import type { FilePreviewItem } from '../types';
 
 export type UseMessageSendOptions = {
@@ -79,10 +80,9 @@ export function useMessageSend({
 
       // Maintain any non-file system attachments (like linkPreview) from the original message when editing
       if (editingMessage?.attachments) {
-        const systemAttachments = editingMessage.attachments.filter((a) => {
-          const type = a.type || 'file';
-          return !['image', 'video', 'file', 'voiceRecording'].includes(type);
-        });
+        const systemAttachments = editingMessage.attachments.filter(
+          (a) => !isUserManagedAttachment(a)
+        );
         attachments.push(...systemAttachments);
       }
 

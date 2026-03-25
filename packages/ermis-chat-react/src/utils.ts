@@ -1,4 +1,5 @@
-import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
+import type { MentionMember } from './types';
+import type { Attachment, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 
 /**
  * Format a Date or date-string to a short time string (HH:MM).
@@ -133,4 +134,13 @@ export function moveCaretAfterNode(node: Node) {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
+}
+
+/**
+ * Checks if a given attachment represents user-managed media (e.g., photo, video, text file, voice)
+ * as opposed to backend-injected automated system cards (like linkPreviews or slash commands).
+ */
+export function isUserManagedAttachment(attachment: Attachment): boolean {
+  const type = attachment.type || 'file';
+  return ['image', 'video', 'file', 'voiceRecording'].includes(type);
 }

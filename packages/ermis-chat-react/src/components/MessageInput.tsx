@@ -9,7 +9,7 @@ import { MentionSuggestions } from './MentionSuggestions';
 import { FilesPreview } from './FilesPreview';
 import { ReplyPreview } from './ReplyPreview';
 import { EditPreview } from './EditPreview';
-import { buildUserMap, replaceMentionsForPreview, moveCaretToEnd } from '../utils';
+import { buildUserMap, replaceMentionsForPreview, moveCaretToEnd, isUserManagedAttachment } from '../utils';
 import { getMentionHtml } from '../hooks/useMentions';
 import type { MentionMember, MessageInputProps, FilePreviewItem } from '../types';
 
@@ -56,8 +56,6 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     if (editingMessage && editableRef.current) {
       // 1. Prefill text content
       const rawText = editingMessage.text || '';
-      const mentionedUsers: string[] = editingMessage.mentioned_users || [];
-      const mentionedAll: boolean = (editingMessage as any).mentioned_all || false;
 
       // Extract user map locally since we have `activeChannel.state.members`
       const userMap = buildUserMap(activeChannel?.state);
@@ -80,10 +78,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
       // 2. Prefill existing attachments natively (only user-managed files)
       if (editingMessage.attachments && editingMessage.attachments.length > 0) {
-        const fileAttachments = editingMessage.attachments.filter((a) => {
-          const type = a.type || 'file';
-          return ['image', 'video', 'file', 'voiceRecording'].includes(type);
-        });
+        const fileAttachments = editingMessage.attachments.filter(isUserManagedAttachment);
 
         const existingFiles = fileAttachments.map((att): FilePreviewItem => {
           return {
