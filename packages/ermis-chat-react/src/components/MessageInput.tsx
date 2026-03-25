@@ -76,25 +76,10 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       // Move cursor to the end
       moveCaretToEnd(editableRef.current);
 
-      // 2. Prefill existing attachments natively (only user-managed files)
-      if (editingMessage.attachments && editingMessage.attachments.length > 0) {
-        const fileAttachments = editingMessage.attachments.filter(isUserManagedAttachment);
-
-        const existingFiles = fileAttachments.map((att): FilePreviewItem => {
-          return {
-            id: `existing-${Math.random()}`,
-            status: 'done' as const,
-            uploadedUrl: att.asset_url || att.image_url || att.fallback,
-            thumbUrl: att.thumb_url,
-            originalAttachment: att,
-          };
-        });
-        setFiles(existingFiles);
-        setHasContent(true);
-      } else {
-        setFiles([]);
-        setHasContent(!!editingMessage.text);
-      }
+      // The API does not support attachment modifications during edits.
+      // Flush any active files and only allow text/mention modifications.
+      setFiles([]);
+      setHasContent(!!editingMessage.text);
     }
   }, [editingMessage, setFiles]);
 
@@ -262,7 +247,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
           {/* Attach button */}
           {!disableAttachments && (
-            <AttachButton disabled={sending} onClick={handleAttachClick} />
+            <AttachButton disabled={sending || !!editingMessage} onClick={handleAttachClick} />
           )}
 
           {/* Hidden file input */}
@@ -276,6 +261,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
                 handleFilesSelected(e.target.files);
                 e.target.value = '';
               }}
+              disabled={!!editingMessage}
             />
           )}
 

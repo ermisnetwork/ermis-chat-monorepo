@@ -69,7 +69,7 @@ export function useMessageSend({
     try {
       setSending(true);
 
-      // Build attachment payloads from already-uploaded files
+      // Build attachment payloads from already-uploaded files (only applied on new messages)
       const attachments = uploadedFiles.map((f) => {
         if (f.originalAttachment) {
           return f.originalAttachment;
@@ -78,19 +78,14 @@ export function useMessageSend({
         return buildAttachmentPayload(fileObj, f.uploadedUrl!, f.thumbUrl);
       });
 
-      // Maintain any non-file system attachments (like linkPreview) from the original message when editing
-      if (editingMessage?.attachments) {
-        const systemAttachments = editingMessage.attachments.filter(
-          (a) => !isUserManagedAttachment(a)
-        );
-        attachments.push(...systemAttachments);
-      }
-
       // Build message
       const message: Record<string, any> = { text };
-      if (attachments.length > 0) {
+
+      // The API does not accept attachment arrays during standard text editing
+      if (!editingMessage && attachments.length > 0) {
         message.attachments = attachments;
       }
+
       if (isTeamChannel) {
         message.mentioned_all = payload.mentioned_all;
         message.mentioned_users = payload.mentioned_users;
@@ -134,7 +129,21 @@ export function useMessageSend({
         editableRef.current?.focus();
       });
     }
-  }, [activeChannel, hasContent, sending, buildPayload, reset, onSend, isTeamChannel, files, onBeforeSend, syncMessages, editableRef, setFiles, setHasContent]);
+  }, [
+    activeChannel,
+    hasContent,
+    sending,
+    buildPayload,
+    reset,
+    onSend,
+    isTeamChannel,
+    files,
+    onBeforeSend,
+    syncMessages,
+    editableRef,
+    setFiles,
+    setHasContent,
+  ]);
 
   return { sending, handleSend };
 }
