@@ -51,11 +51,19 @@ DefaultEmpty.displayName = 'DefaultEmpty';
 
 const DefaultBubble: React.FC<MessageBubbleProps> = React.memo(({
   isOwnMessage,
+  message,
   children,
 }) => (
   <div
     className={`ermis-message-bubble ${isOwnMessage ? 'ermis-message-bubble--own' : 'ermis-message-bubble--other'}`}
   >
+    {message?.pinned && (
+      <div className={`ermis-message-list__pinned-indicator ${isOwnMessage ? 'ermis-message-list__pinned-indicator--own' : 'ermis-message-list__pinned-indicator--other'}`}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+        </svg>
+      </div>
+    )}
     {children}
   </div>
 ));

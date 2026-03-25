@@ -797,6 +797,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    if (state.messages && state.messages.length > 0) {
+      for (const msg of state.messages) {
+        if (!msg.pinned) {
+          const pm = this.state.pinnedMessages?.find((p) => p.id === msg.id);
+          if (pm) {
+            msg.pinned = true;
+            const pmDate = pm.pinned_at || new Date();
+            msg.pinned_at = typeof pmDate === 'string' ? pmDate : pmDate.toISOString();
+          }
+        }
+      }
+      this.state.addMessagesSorted(state.messages, false, true, true, 'current');
+    }
     return state.messages;
   }
 
@@ -815,6 +828,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    if (state.messages && state.messages.length > 0) {
+      for (const msg of state.messages) {
+        if (!msg.pinned) {
+          const pm = this.state.pinnedMessages?.find((p) => p.id === msg.id);
+          if (pm) {
+            msg.pinned = true;
+            const pmDate = pm.pinned_at || new Date();
+            msg.pinned_at = typeof pmDate === 'string' ? pmDate : pmDate.toISOString();
+          }
+        }
+      }
+      this.state.addMessagesSorted(state.messages, false, true, true, 'current');
+    }
     return state.messages;
   }
 
@@ -833,6 +859,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    if (state.messages && state.messages.length > 0) {
+      for (const msg of state.messages) {
+        if (!msg.pinned) {
+          const pm = this.state.pinnedMessages?.find((p) => p.id === msg.id);
+          if (pm) {
+            msg.pinned = true;
+            const pmDate = pm.pinned_at || new Date();
+            msg.pinned_at = typeof pmDate === 'string' ? pmDate : pmDate.toISOString();
+          }
+        }
+      }
+      this.state.addMessagesSorted(state.messages, false, true, true, 'current');
+    }
     return state.messages;
   }
 
@@ -1165,6 +1204,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const user = getUserInfo(event.message.user?.id || '', users);
           event.message.user = user;
           channelState.addPinnedMessage(event.message);
+          channelState.addMessageSorted(event.message, false, false);
         }
         break;
       case 'message.unpinned':
@@ -1172,6 +1212,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const user = getUserInfo(event.message.user?.id || '', users);
           event.message.user = user;
           channelState.removePinnedMessage(event.message);
+          channelState.addMessageSorted(event.message, false, false);
         }
         break;
       case 'channel.truncate':
@@ -1480,16 +1521,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       }
     }
 
+    if (this.state.pinnedMessages) {
+      this.state.pinnedMessages = [];
+    }
+    this.state.addPinnedMessages(state.pinned_messages || []);
+
     const messages = uniqueMessages || [];
     if (!this.state.messages) {
       this.state.initMessages();
     }
     const { messageSet } = this.state.addMessagesSorted(messages, false, true, true, messageSetToAddToIfDoesNotExist);
-
-    if (this.state.pinnedMessages) {
-      this.state.pinnedMessages = [];
-    }
-    this.state.addPinnedMessages(state.pinned_messages || []);
 
     if (state.watcher_count !== undefined) {
       this.state.watcher_count = state.watcher_count;

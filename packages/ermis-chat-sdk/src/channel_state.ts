@@ -150,6 +150,15 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
         }
       }
 
+      // Cross-reference with pinnedMessages to ensure `pinned` and `pinned_at` are accurate
+      if (!message.pinned) {
+        const pinnedMatch = this.pinnedMessages.find((pm) => pm.id === message.id);
+        if (pinnedMatch) {
+          message.pinned = true;
+          message.pinned_at = pinnedMatch.pinned_at || new Date();
+        }
+      }
+
       // update or append the messages...
       const parentID = message.parent_id;
 
@@ -171,6 +180,8 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   }
 
   addPinnedMessages(pinnedMessages: MessageResponse<ErmisChatGenerics>[]) {
+    console.log('--pinnedMessages--', pinnedMessages);
+
     for (let i = 0; i < pinnedMessages.length; i += 1) {
       this.addPinnedMessage(pinnedMessages[i]);
     }

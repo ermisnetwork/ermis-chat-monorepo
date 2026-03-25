@@ -24,14 +24,26 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
   onDelete,
   onDeleteForMe,
 }) => {
-  const { setQuotedMessage } = useChatClient();
+  const { setQuotedMessage, activeChannel } = useChatClient();
   const [anchorRect, setAnchorRect] = React.useState<DOMRect | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceId = useRef(Math.random().toString(36).slice(2));
   const actions = useMessageActions(message, isOwnMessage);
 
-  // Default reply handler: set quoted message in context
+  // Default handlers
   const onReply = onReplyProp ?? ((msg: FormatMessageResponse) => setQuotedMessage(msg));
+  const onPinToggleHandler = onPinToggle ?? (async (msg: FormatMessageResponse, isPinned: boolean) => {
+    if (!activeChannel) return;
+    try {
+      if (isPinned) {
+        await activeChannel.unpinMessage(msg.id!);
+      } else {
+        await activeChannel.pinMessage(msg.id!);
+      }
+    } catch (err) {
+      console.error('Failed to toggle pin', err);
+    }
+  });
 
   const isOpen = anchorRect !== null;
   const onClose = useCallback(() => setAnchorRect(null), []);
@@ -152,7 +164,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
       >
         <div className="ermis-message-actions-box__menu">
           {actions.canPin && (
-            <button className="ermis-message-actions-box__item" onClick={() => { onPinToggle?.(message, actions.isPinned); onClose(); }}>
+            <button className="ermis-message-actions-box__item" onClick={() => { onPinToggleHandler(message, actions.isPinned); onClose(); }}>
               {actions.isPinned ? 'Unpin' : 'Pin'}
             </button>
           )}

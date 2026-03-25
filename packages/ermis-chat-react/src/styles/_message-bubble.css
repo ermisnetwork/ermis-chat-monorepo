@@ -142,6 +142,7 @@
 
 /* --- Message Bubble --- */
 .ermis-message-bubble {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;

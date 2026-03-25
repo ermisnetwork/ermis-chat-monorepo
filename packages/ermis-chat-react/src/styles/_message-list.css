@@ -209,3 +209,26 @@
 .ermis-message--error .ermis-message-bubble {
   border: 1px solid #e74c3c;
 }
+
+/* --- Pinned Message Indicator --- */
+.ermis-message-list__pinned-indicator {
+  position: absolute;
+  top: -5px;
+  color: #e74c3c;
+  z-index: 10;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.ermis-message-list__pinned-indicator--own {
+  left: -10px;
+  transform: rotate(-45deg);
+}
+
+.ermis-message-list__pinned-indicator--other {
+  right: -10px;
+  transform: rotate(45deg);
+}

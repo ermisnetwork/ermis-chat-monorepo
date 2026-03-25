@@ -18,31 +18,38 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
 
   // Only depend on the specific message fields we actually read
   const messageType = message.type;
-  const pinnedAt = message.pinned_at;
+  const isPinnedFlag = message.pinned || !!message.pinned_at;
 
   return useMemo(() => {
     if (!activeChannel) {
       return {
-        canEdit: false, canDelete: false, canDeleteForMe: false,
-        canReply: false, canQuote: false, canPin: false, canCopy: false, isPinned: false
+        canEdit: false,
+        canDelete: false,
+        canDeleteForMe: false,
+        canReply: false,
+        canQuote: false,
+        canPin: false,
+        canCopy: false,
+        isPinned: false,
       };
     }
 
     const currentUserId = client.userID || '';
     const isTeam = activeChannel.type === 'team';
     const role = (activeChannel.state as any)?.members?.[currentUserId]?.role;
-    const isOwnerOrModerator = role === 'owner' || role === 'moderator' || activeChannel.data?.created_by_id === currentUserId;
-    
+    const isOwnerOrModerator =
+      role === 'owner' || role === 'moderator' || activeChannel.data?.created_by_id === currentUserId;
+
     // Member capabilities exist on team channels
-    const capabilities: string[] = isTeam ? ((activeChannel.data as any)?.member_capabilities || []) : [];
+    const capabilities: string[] = isTeam ? (activeChannel.data as any)?.member_capabilities || [] : [];
     const hasCap = (cap: string) => !isTeam || capabilities.includes(cap) || isOwnerOrModerator;
 
     const isSystem = messageType === 'system';
     const isSignal = messageType === 'signal';
-    const isPinned = !!pinnedAt;
+    const isPinned = isPinnedFlag;
 
     const canEdit = !isSystem && !isSignal && isOwnMessage && hasCap('update-own-message');
-    const canDelete = !isSystem && (isOwnMessage && hasCap('delete-own-message') || isOwnerOrModerator);
+    const canDelete = !isSystem && ((isOwnMessage && hasCap('delete-own-message')) || isOwnerOrModerator);
     const canDeleteForMe = !isSystem;
     const canReply = !isSystem && !isSignal && hasCap('send-reply');
     const canQuote = !isSystem && !isSignal && hasCap('quote-message');
@@ -50,5 +57,5 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const canCopy = !isSystem && !isSignal;
 
     return { canEdit, canDelete, canDeleteForMe, canReply, canQuote, canPin, canCopy, isPinned };
-  }, [activeChannel, client.userID, messageType, pinnedAt, isOwnMessage]);
+  }, [activeChannel, client.userID, messageType, isPinnedFlag, isOwnMessage]);
 };
