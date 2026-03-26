@@ -6,6 +6,7 @@ export type UseChannelMessagesOptions = {
   scrollToBottom: (smooth: boolean) => void;
   /** Shared guard ref — blocks scroll-triggered loads during channel switch */
   jumpingRef: React.MutableRefObject<boolean>;
+  isAtBottomRef: React.MutableRefObject<boolean>;
   /** Called to reset load-more state when channel switches */
   onChannelSwitch?: () => void;
 };
@@ -19,9 +20,10 @@ export type UseChannelMessagesOptions = {
 export function useChannelMessages({
   scrollToBottom,
   jumpingRef,
+  isAtBottomRef,
   onChannelSwitch,
 }: UseChannelMessagesOptions): void {
-  const { activeChannel, syncMessages } = useChatClient();
+  const { client, activeChannel, syncMessages } = useChatClient();
   useEffect(() => {
     if (!activeChannel) return;
 
@@ -38,11 +40,16 @@ export function useChannelMessages({
       });
     }, 0);
 
-    const handleNewMessage = (_event: Event) => {
+    const handleNewMessage = (event: Event) => {
       syncMessages();
+
+      const isOwnMessage = event.message?.user?.id === client.userID || event.message?.user_id === client.userID;
+
       // Wait for React to render the new message, then scroll to bottom
       setTimeout(() => {
-        scrollToBottom(true);
+        if (isOwnMessage || isAtBottomRef.current) {
+          scrollToBottom(true);
+        }
       }, 200);
     };
 

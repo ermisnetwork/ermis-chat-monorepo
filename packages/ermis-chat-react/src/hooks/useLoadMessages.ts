@@ -38,6 +38,7 @@ export type UseLoadMessagesReturn = {
   loadMore: () => Promise<void>;
   loadNewer: () => Promise<void>;
   handleScroll: (offset: number) => void;
+  isAtBottomRef: React.MutableRefObject<boolean>;
 };
 
 export function useLoadMessages({
@@ -63,6 +64,7 @@ export function useLoadMessages({
   hasMoreRef.current = hasMore;
   const hasNewerRef = useRef(false);
   hasNewerRef.current = hasNewer;
+  const isAtBottomRef = useRef(true);
 
   // Concurrency guards
   const loadingMoreRef = useRef(false);
@@ -138,8 +140,14 @@ export function useLoadMessages({
       if (!handle) return;
       const { scrollSize, viewportSize } = handle;
 
+      const isBottom = Math.ceil(offset + viewportSize) >= scrollSize - 20;
+      isAtBottomRef.current = isBottom;
+
       // Skip if content doesn't fill the viewport
-      if (scrollSize <= viewportSize) return;
+      if (scrollSize <= viewportSize) {
+        isAtBottomRef.current = true;
+        return;
+      }
 
       if (offset <= LOAD_MORE_THRESHOLD && hasMoreRef.current) {
         loadMore();
@@ -165,5 +173,6 @@ export function useLoadMessages({
     loadMore,
     loadNewer,
     handleScroll,
+    isAtBottomRef,
   };
 }

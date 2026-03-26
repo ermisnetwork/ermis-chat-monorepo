@@ -129,6 +129,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     hasNewer, setHasNewer,
     loadingMoreRef, loadingNewerRef,
     handleScroll,
+    isAtBottomRef,
   } = useLoadMessages({
     vlistRef,
     messagesRef,
@@ -149,6 +150,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   useChannelMessages({
     scrollToBottom,
     jumpingRef,
+    isAtBottomRef,
     onChannelSwitch: useCallback(() => {
       setHasMore(true);
       setHasNewer(false);
