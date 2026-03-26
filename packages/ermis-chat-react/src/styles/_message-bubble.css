@@ -422,3 +422,114 @@
   color: #ef4444;
   font-style: italic;
 }
+
+/* --- Read receipts --- */
+.ermis-read-receipts {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  padding-top: 2px;
+}
+
+.ermis-read-receipts__avatars {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  cursor: default;
+  position: relative;
+}
+
+.ermis-read-receipts__avatar {
+  flex-shrink: 0;
+  border: 1.5px solid var(--ermis-bg-primary, #1a1a2e);
+  border-radius: 50%;
+  box-sizing: content-box;
+}
+
+/* Stack overlapping */
+.ermis-read-receipts__avatar + .ermis-read-receipts__avatar {
+  margin-left: -4px;
+}
+
+.ermis-read-receipts__overflow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--ermis-bg-hover, #2a2a4a);
+  color: var(--ermis-text-muted, #888);
+  font-size: 0.5rem;
+  font-weight: 700;
+  margin-left: -4px;
+  border: 1.5px solid var(--ermis-bg-primary, #1a1a2e);
+  box-sizing: content-box;
+  flex-shrink: 0;
+}
+
+/* Tooltip Wrapper — hidden by default, shown on hover of __avatars */
+.ermis-read-receipts__tooltip-wrapper {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+}
+
+/* Invisible bridge to prevent hover loss when moving mouse from avatar to tooltip */
+.ermis-read-receipts__tooltip-wrapper::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: transparent;
+}
+
+.ermis-read-receipts__avatars:hover .ermis-read-receipts__tooltip-wrapper {
+  display: flex;
+}
+
+/* Inner Tooltip with scrolling and styling */
+.ermis-read-receipts__tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background-color: var(--ermis-bg-secondary, #1e1e3a);
+  border: 1px solid var(--ermis-border, #333);
+  border-radius: var(--ermis-radius-md, 8px);
+  padding: var(--ermis-spacing-xs, 6px) var(--ermis-spacing-sm, 8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  width: 200px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.ermis-read-receipts__tooltip-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm, 8px);
+}
+
+.ermis-read-receipts__tooltip-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ermis-read-receipts__tooltip-name {
+  font-size: var(--ermis-font-size-xs, 0.75rem);
+  color: var(--ermis-text-primary, #e0e0e0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ermis-read-receipts__tooltip-time {
+  font-size: 0.625rem;
+  color: var(--ermis-text-muted, #888);
+  white-space: nowrap;
+}

@@ -12,9 +12,10 @@ import {
   defaultMessageRenderers,
   type MessageBubbleProps,
 } from './MessageRenderers';
-import { getDateKey, formatDateLabel, getMessageUserId } from '../utils';
+import { getDateKey, formatDateLabel, getMessageUserId, formatReadTimestamp } from '../utils';
 import { QuotedMessagePreview } from './QuotedMessagePreview';
 import { PinnedMessages } from './PinnedMessages';
+import { ReadReceipts } from './ReadReceipts';
 import type { MessageListProps } from '../types';
 
 /* ----------------------------------------------------------
@@ -88,8 +89,12 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   MessageActionsBoxComponent,
   showPinnedMessages = true,
   PinnedMessagesComponent = PinnedMessages,
+  showReadReceipts = true,
+  ReadReceiptsComponent = ReadReceipts,
+  ReadReceiptsTooltipComponent,
+  readReceiptsMaxAvatars = 5,
 }) => {
-  const { client, messages } = useChatClient();
+  const { client, messages, readState } = useChatClient();
   const vlistRef = useRef<VListHandle>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -164,6 +169,28 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     [customRenderers],
   );
 
+  /* ---------- Compute read-by map (message.id → readers) ---------- */
+  const readByMap = useMemo(() => {
+    const map: Record<string, Array<{ id: string; name?: string; avatar?: string; last_read?: Date | string }>> = {};
+    if (!readState) return map;
+    for (const userId of Object.keys(readState)) {
+      if (userId === currentUserId) continue; // exclude self
+      const entry = readState[userId];
+      if (entry.last_read_message_id) {
+        if (!map[entry.last_read_message_id]) {
+          map[entry.last_read_message_id] = [];
+        }
+        map[entry.last_read_message_id].push({
+          id: userId,
+          name: entry.user?.name,
+          avatar: entry.user?.avatar,
+          last_read: entry.last_read,
+        });
+      }
+    }
+    return map;
+  }, [readState, currentUserId]);
+
   /* ---------- Memoized message elements ---------- */
   const messageElements = useMemo(() => {
     return messages.map((message, index) => {
@@ -227,10 +254,38 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             QuotedMessagePreviewComponent={QuotedMessagePreviewComponent}
             MessageActionsBoxComponent={MessageActionsBoxComponent}
           />
+          {/* Read receipts — full width, right-aligned */}
+          {showReadReceipts && readByMap[message.id!] && readByMap[message.id!].length > 0 && (
+            <ReadReceiptsComponent
+              readers={readByMap[message.id!]}
+              maxAvatars={readReceiptsMaxAvatars}
+              AvatarComponent={AvatarComponent}
+              TooltipComponent={ReadReceiptsTooltipComponent}
+            />
+          )}
         </div>
       );
     });
-  }, [messages, currentUserId, highlightedId, renderers, renderMessage, AvatarComponent, MessageBubble, scrollToMessage, DateSeparatorComponent, MessageItemComponent, SystemMessageItemComponent, QuotedMessagePreviewComponent]);
+  }, [
+    messages,
+    currentUserId,
+    highlightedId,
+    renderers,
+    renderMessage,
+    AvatarComponent,
+    MessageBubble,
+    scrollToMessage,
+    DateSeparatorComponent,
+    MessageItemComponent,
+    SystemMessageItemComponent,
+    QuotedMessagePreviewComponent,
+    MessageActionsBoxComponent,
+    readByMap,
+    showReadReceipts,
+    ReadReceiptsComponent,
+    ReadReceiptsTooltipComponent,
+    readReceiptsMaxAvatars,
+  ]);
 
   return (
     <div ref={containerRef} className={`ermis-message-list${className ? ` ${className}` : ''}`}>

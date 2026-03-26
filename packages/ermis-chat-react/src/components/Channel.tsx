@@ -25,6 +25,8 @@ export const Channel: React.FC<ChannelProps> = React.memo(({
 }) => {
   const { activeChannel } = useChatClient();
 
+  console.log('---activeChannel---', activeChannel)
+
   const headerData = useMemo(() => {
     if (!activeChannel || !HeaderComponent) return null;
     return {

@@ -1,7 +1,7 @@
 import React, { createContext, useState, useCallback, useEffect } from 'react';
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
-import type { Theme, ChatContextValue, ChatProviderProps } from '../types';
+import type { Theme, ChatContextValue, ChatProviderProps, ReadStateEntry } from '../types';
 
 export type { Theme, ChatContextValue, ChatProviderProps } from '../types';
 
@@ -17,6 +17,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   const [messages, setMessages] = useState<FormatMessageResponse[]>([]);
   const [quotedMessage, setQuotedMessage] = useState<FormatMessageResponse | null>(null);
   const [editingMessage, setEditingMessage] = useState<FormatMessageResponse | null>(null);
+  const [readState, setReadState] = useState<Record<string, ReadStateEntry>>({});
 
   const activeChannel = activeChannelRaw;
 
@@ -26,8 +27,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     setEditingMessage(null);
     if (channel) {
       setMessages([...channel.state.latestMessages]);
+      setReadState({ ...channel.state.read });
     } else {
       setMessages([]);
+      setReadState({});
     }
   }, []);
 
@@ -51,6 +54,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     setQuotedMessage,
     editingMessage,
     setEditingMessage,
+    readState,
+    setReadState,
   };
 
   return (

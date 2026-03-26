@@ -6,6 +6,18 @@ import type { ErmisChat } from '@ermis-network/ermis-chat-sdk';
    ---------------------------------------------------------- */
 export type Theme = 'dark' | 'light';
 
+export type ReadStateEntry = {
+  last_read: Date | string;
+  last_read_message_id?: string;
+  unread_messages: number;
+  user: {
+    id: string;
+    name?: string;
+    avatar?: string;
+  };
+  last_send?: string;
+};
+
 export type ChatContextValue = {
   client: ErmisChat;
   activeChannel: Channel | null;
@@ -22,6 +34,9 @@ export type ChatContextValue = {
   /** Message being edited (shown as preview in MessageInput and alters send behavior) */
   editingMessage: FormatMessageResponse | null;
   setEditingMessage: (message: FormatMessageResponse | null) => void;
+  /** Read state per user — maps userId to their read status */
+  readState: Record<string, ReadStateEntry>;
+  setReadState: React.Dispatch<React.SetStateAction<Record<string, ReadStateEntry>>>;
 };
 
 export type ChatProviderProps = {
@@ -172,6 +187,44 @@ export type MessageListProps = {
   PinnedMessagesComponent?: React.ComponentType<any>;
   /** Custom reply preview component in MessageInput */
   ReplyPreviewComponent?: React.ComponentType<ReplyPreviewProps>;
+  /** Show read receipts (default: true) */
+  showReadReceipts?: boolean;
+  /** Custom read receipts component (replaces the entire read-receipts row) */
+  ReadReceiptsComponent?: React.ComponentType<ReadReceiptsProps>;
+  /** Custom read receipts tooltip component */
+  ReadReceiptsTooltipComponent?: React.ComponentType<ReadReceiptsTooltipProps>;
+  /** Max visible avatars in read receipts before showing +N (default: 5) */
+  readReceiptsMaxAvatars?: number;
+};
+
+/* ----------------------------------------------------------
+   ReadReceipts types
+   ---------------------------------------------------------- */
+export type ReadReceiptUser = {
+  id: string;
+  name?: string;
+  avatar?: string;
+  last_read?: Date | string;
+};
+
+export type ReadReceiptsTooltipProps = {
+  /** All users who have read this message */
+  readers: ReadReceiptUser[];
+  /** Avatar component for rendering user avatars */
+  AvatarComponent: React.ComponentType<AvatarProps>;
+};
+
+export type ReadReceiptsProps = {
+  /** Users who have read the message */
+  readers: ReadReceiptUser[];
+  /** Max number of visible avatars before showing +N overflow (default: 5) */
+  maxAvatars?: number;
+  /** Avatar component for rendering user avatars */
+  AvatarComponent: React.ComponentType<AvatarProps>;
+  /** Custom tooltip component */
+  TooltipComponent?: React.ComponentType<ReadReceiptsTooltipProps>;
+  /** Whether to show the tooltip on hover (default: true) */
+  showTooltip?: boolean;
 };
 
 /* ----------------------------------------------------------
@@ -190,6 +243,8 @@ export type MessageItemProps = {
   QuotedMessagePreviewComponent?: React.ComponentType<QuotedMessagePreviewProps>;
   /** Custom message actions component (hover buttons + dropdown) */
   MessageActionsBoxComponent?: React.ComponentType<MessageActionsBoxProps>;
+  /** Users who have read up to this message */
+  readBy?: Array<{ id: string; name?: string; avatar?: string }>;
 };
 
 export type SystemMessageItemProps = {

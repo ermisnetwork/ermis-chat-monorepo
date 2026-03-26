@@ -29,7 +29,7 @@ export function useChannelMessages({
   isAtBottomRef,
   onChannelSwitch,
 }: UseChannelMessagesOptions): void {
-  const { client, activeChannel, syncMessages } = useChatClient();
+  const { client, activeChannel, syncMessages, setReadState } = useChatClient();
 
   const scheduleScrollToBottom = useCallback(
     (smooth: boolean) => {
@@ -73,11 +73,17 @@ export function useChannelMessages({
       syncMessages();
     };
 
+    const handleMessageRead = (_event: Event) => {
+      // SDK already updated channel.state.read — sync into React state
+      setReadState({ ...activeChannel.state.read });
+    };
+
     const sub1 = activeChannel.on('message.new', handleNewMessage);
     const sub2 = activeChannel.on('message.updated', handleMessageChange);
     const sub3 = activeChannel.on('message.deleted', handleMessageChange);
     const sub4 = activeChannel.on('message.pinned', handleMessageChange);
     const sub5 = activeChannel.on('message.unpinned', handleMessageChange);
+    const sub6 = activeChannel.on('message.read', handleMessageRead);
 
     return () => {
       sub1.unsubscribe();
@@ -85,6 +91,7 @@ export function useChannelMessages({
       sub3.unsubscribe();
       sub4.unsubscribe();
       sub5.unsubscribe();
+      sub6.unsubscribe();
     };
-  }, [activeChannel, scrollToBottom, syncMessages, onChannelSwitch]);
+  }, [activeChannel, scrollToBottom, syncMessages, onChannelSwitch, setReadState]);
 }

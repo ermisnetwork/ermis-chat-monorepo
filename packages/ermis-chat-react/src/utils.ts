@@ -11,6 +11,27 @@ export function formatTime(date: Date | string | undefined): string {
 }
 
 /**
+ * Format a date as "HH:MM, Today", "HH:MM, Yesterday", or "HH:MM, MM/DD/YYYY".
+ */
+export function formatReadTimestamp(date: Date | string | undefined): string {
+  if (!date) return '';
+  const d = date instanceof Date ? date : new Date(date);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffMs = today.getTime() - msgDay.getTime();
+  const diffDays = Math.round(diffMs / 86400000);
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  if (diffDays === 0) return `${time}, Today`;
+  if (diffDays === 1) return `${time}, Yesterday`;
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${time}, ${mm}/${dd}/${yyyy}`;
+}
+
+/**
  * Return a YYYY-M-D key for date comparison (used by date separators).
  */
 export function getDateKey(date: Date | string | undefined): string {
