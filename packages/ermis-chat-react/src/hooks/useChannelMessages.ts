@@ -48,12 +48,15 @@ export function useChannelMessages({
 
     // Block scroll triggers during channel-switch scroll
     jumpingRef.current = true;
-    // Defer scroll outside React lifecycle to avoid virtua flushSync warning
+    // Defer scroll outside React lifecycle to avoid virtua flushSync warning.
+    // Use scheduleScrollToBottom (multiple retries) instead of a single call,
+    // because VList may not have rendered the new messages yet on the first attempt.
     setTimeout(() => {
-      scrollToBottom(false);
-      requestAnimationFrame(() => {
+      scheduleScrollToBottom(false);
+      // Unlock after the last scheduled scroll completes
+      setTimeout(() => {
         jumpingRef.current = false;
-      });
+      }, SCROLL_DELAYS[SCROLL_DELAYS.length - 1] + 100);
     }, 0);
 
     const handleNewMessage = (event: Event) => {
@@ -93,5 +96,5 @@ export function useChannelMessages({
       sub5.unsubscribe();
       sub6.unsubscribe();
     };
-  }, [activeChannel, scrollToBottom, syncMessages, onChannelSwitch, setReadState]);
+  }, [activeChannel, scrollToBottom, scheduleScrollToBottom, syncMessages, onChannelSwitch, setReadState]);
 }

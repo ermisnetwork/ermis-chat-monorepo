@@ -5,10 +5,8 @@
   border-bottom: 1px solid var(--ermis-border);
   background-color: var(--ermis-bg-secondary);
   font-family: var(--ermis-font-family);
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  flex-shrink: 0;
   z-index: 50;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
@@ -60,6 +58,14 @@
   overflow-y: auto;
   transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
   scrollbar-width: thin;
+  /* Overlay on top of VList instead of pushing it down */
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background-color: var(--ermis-bg-secondary);
+  z-index: 49;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .ermis-pinned-messages--expanded .ermis-pinned-messages__list {
