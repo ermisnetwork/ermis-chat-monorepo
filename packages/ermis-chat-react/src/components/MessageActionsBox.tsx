@@ -24,7 +24,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
   onDelete,
   onDeleteForMe,
 }) => {
-  const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel } = useChatClient();
+  const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel, syncMessages } = useChatClient();
   const [anchorRect, setAnchorRect] = React.useState<DOMRect | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceId = useRef(Math.random().toString(36).slice(2));
@@ -46,6 +46,32 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
     }
   });
   const onEditHandler = onEdit ?? ((msg: FormatMessageResponse) => setEditingMessage(msg));
+
+  const onDeleteForEveryoneHandler = onDelete ?? (async (msg: FormatMessageResponse) => {
+    if (!activeChannel) return;
+    try {
+      await activeChannel.deleteMessage(msg.id!);
+    } catch (err) {
+      console.error('Failed to delete message', err);
+    }
+  });
+
+  const onDeleteForMeHandler = onDeleteForMe ?? (async (msg: FormatMessageResponse) => {
+    if (!activeChannel) return;
+    try {
+      // TODO: replace cast once real API is available in SDK types
+      const ch = activeChannel as any;
+      if (ch.deleteMessageForMe) {
+        await ch.deleteMessageForMe(msg.id!);
+        // Sync React state since deleteMessageForMe is local-only (no WS event)
+        syncMessages();
+      } else {
+        console.warn('deleteMessageForMe is not implemented in the current SDK version');
+      }
+    } catch (err) {
+      console.error('Failed to delete message for me', err);
+    }
+  });
 
   const isOpen = anchorRect !== null;
   const onClose = useCallback(() => setAnchorRect(null), []);
@@ -210,13 +236,13 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
           {(actions.canDelete || actions.canDeleteForMe) && <div className="ermis-message-actions-box__divider" />}
 
           {actions.canDeleteForMe && (
-            <button className="ermis-message-actions-box__item ermis-message-actions-box__item--danger" onClick={() => { onDeleteForMe?.(message); onClose(); }}>
+            <button className="ermis-message-actions-box__item ermis-message-actions-box__item--danger" onClick={() => { onDeleteForMeHandler(message); onClose(); }}>
               Delete for me
             </button>
           )}
           {actions.canDelete && (
-            <button className="ermis-message-actions-box__item ermis-message-actions-box__item--danger" onClick={() => { onDelete?.(message); onClose(); }}>
-              Delete message
+            <button className="ermis-message-actions-box__item ermis-message-actions-box__item--danger" onClick={() => { onDeleteForEveryoneHandler(message); onClose(); }}>
+              Delete for everyone
             </button>
           )}
         </div>

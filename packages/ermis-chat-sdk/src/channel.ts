@@ -915,6 +915,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     );
   }
 
+  async deleteMessageForMe(messageId: string) {
+    const message = this.state.messages.find(m => m.id === messageId);
+    if (message) {
+      this.state.removeMessage(message);
+    }
+    return Promise.resolve({
+      message: (message || { id: messageId }) as MessageResponse<ErmisChatGenerics>,
+    });
+  }
+
   async getThumbBlobVideo(file: File): Promise<Blob | null> {
     return new Promise((resolve) => {
       const seekTo = 0.1;

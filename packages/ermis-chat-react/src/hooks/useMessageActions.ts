@@ -51,7 +51,15 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const isPinned = isPinnedFlag;
 
     const canEdit = !isSystem && !isSignal && isOwnMessage && hasCap('update-own-message');
-    const canDelete = !isSystem && ((isOwnMessage && hasCap('delete-own-message')) || isOwnerOrModerator);
+    
+    // Delete for everyone:
+    // + Team channel: only the owner can perform this action
+    // + Messaging channel: only own messages can be deleted
+    const isOwner = role === 'owner' || activeChannel.data?.created_by_id === currentUserId;
+    const canDeleteForEveryoneTeam = isTeam && isOwner;
+    const canDeleteForEveryoneMessaging = !isTeam && isOwnMessage;
+    
+    const canDelete = !isSystem && (canDeleteForEveryoneTeam || canDeleteForEveryoneMessaging);
     const canDeleteForMe = !isSystem;
     const canReply = !isSystem && !isSignal && hasCap('send-reply');
     const canQuote = !isSystem && !isSignal && hasCap('quote-message');
