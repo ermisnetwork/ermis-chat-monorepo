@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
+import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import type { PinnedMessageItemProps, PinnedMessagesProps } from '../types';
 
@@ -14,9 +15,14 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   onUnpin,
   AvatarComponent,
 }) => {
+  const { activeChannel } = useChatClient();
   const userName = message.user?.name || message.user_id || 'Unknown';
   const userAvatar = message.user?.avatar;
   const hasAttachments = message.attachments && message.attachments.length > 0;
+
+  const userMap = useMemo<Record<string, string>>(() => {
+    return buildUserMap(activeChannel?.state);
+  }, [activeChannel?.state]);
 
   let previewText = message.text || '';
   const isSticker = message.type === 'sticker';
@@ -26,6 +32,11 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
     previewText = firstAttach.title || `${firstAttach.type || 'file'}`;
   } else if (isSticker) {
     previewText = 'Sticker';
+  }
+
+  // Convert @userId → @UserName in preview text
+  if (previewText) {
+    previewText = replaceMentionsForPreview(previewText, message, userMap);
   }
 
   // Attachment icon prefix
@@ -97,6 +108,15 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
     setExpanded((prev) => !prev);
   }, []);
 
+  const handleUnpin = useCallback(async (messageId: string) => {
+    if (!activeChannel) return;
+    try {
+      await activeChannel.unpinMessage(messageId);
+    } catch (err) {
+      console.error('Failed to unpin message', err);
+    }
+  }, [activeChannel]);
+
   if (pinnedMessages.length === 0) return null;
 
   const displayedMessages = expanded
@@ -133,6 +153,7 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
             message={msg}
             isOwnMessage={msg.user_id === currentUserId || msg.user?.id === currentUserId}
             onClickMessage={onClickMessage}
+            onUnpin={handleUnpin}
             AvatarComponent={AvatarComponent}
           />
         ))}
