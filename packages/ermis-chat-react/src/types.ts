@@ -249,6 +249,7 @@ export type MessageItemProps = {
   message: FormatMessageResponse;
   isOwnMessage: boolean;
   isFirstInGroup: boolean;
+  isLastInGroup: boolean;
   isHighlighted: boolean;
   AvatarComponent: React.ComponentType<AvatarProps>;
   MessageBubble: React.ComponentType<MessageBubbleProps>;

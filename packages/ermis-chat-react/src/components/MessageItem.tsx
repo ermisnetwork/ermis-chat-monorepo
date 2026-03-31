@@ -9,10 +9,55 @@ export type { MessageItemProps, SystemMessageItemProps } from '../types';
 /* ----------------------------------------------------------
    MessageItem — single regular/signal message row
    ---------------------------------------------------------- */
+/* Inline status icon for own messages (sent / sending / error) */
+const InlineStatusIcon: React.FC<{ status?: string; isOwnMessage: boolean; isLastInGroup: boolean }> = React.memo(({
+  status,
+  isOwnMessage,
+  isLastInGroup,
+}) => {
+  if (!isOwnMessage) return null;
+
+  const isError = status === 'error' || status === 'failed_offline';
+  if (!isLastInGroup && !isError) return null;
+
+  if (isError) {
+    return (
+      <span className="ermis-message-status-icon ermis-message-status-icon--failed" title="Failed to send">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </span>
+    );
+  }
+
+  if (status === 'sending') {
+    return (
+      <span className="ermis-message-status-icon ermis-message-status-icon--sending" title="Sending...">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+      </span>
+    );
+  }
+
+  return (
+    <span className="ermis-message-status-icon ermis-message-status-icon--sent" title="Sent">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    </span>
+  );
+});
+InlineStatusIcon.displayName = 'InlineStatusIcon';
+
 export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   message,
   isOwnMessage,
   isFirstInGroup,
+  isLastInGroup,
   isHighlighted,
   AvatarComponent,
   MessageBubble,
@@ -79,6 +124,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
             <MessageRenderer message={message} isOwnMessage={isOwnMessage} />
             <span className="ermis-message-list__item-time">
               {formatTime(message.created_at)}
+              <InlineStatusIcon status={message.status} isOwnMessage={isOwnMessage} isLastInGroup={isLastInGroup} />
             </span>
           </MessageBubble>
 

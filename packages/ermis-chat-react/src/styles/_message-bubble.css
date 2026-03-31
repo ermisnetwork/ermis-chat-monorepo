@@ -98,6 +98,42 @@
   padding-top: 4px;
   width: 100%;
   text-align: right;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+/* --- Inline message status icon (inside bubble, after timestamp) --- */
+.ermis-message-status-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.ermis-message-status-icon--sent {
+  color: var(--ermis-text-muted);
+  opacity: 0.5;
+}
+
+.ermis-message-bubble--own .ermis-message-status-icon--sent {
+  color: rgba(255, 255, 255, 0.6);
+  opacity: 1;
+}
+
+.ermis-message-status-icon--sending {
+  color: var(--ermis-text-muted);
+  opacity: 0.4;
+}
+
+.ermis-message-bubble--own .ermis-message-status-icon--sending {
+  color: rgba(255, 255, 255, 0.4);
+  opacity: 1;
+}
+
+.ermis-message-status-icon--failed {
+  color: var(--ermis-color-error, #f44336);
 }
 
 .ermis-message-bubble--own .ermis-message-list__item-time {

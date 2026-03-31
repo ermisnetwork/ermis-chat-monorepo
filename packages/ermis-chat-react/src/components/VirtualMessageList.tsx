@@ -273,6 +273,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             message={message}
             isOwnMessage={isOwnMessage}
             isFirstInGroup={isFirstInGroup}
+            isLastInGroup={isLastInGroup}
             isHighlighted={highlightedId === message.id}
             AvatarComponent={AvatarComponent}
             MessageBubble={MessageBubble}
