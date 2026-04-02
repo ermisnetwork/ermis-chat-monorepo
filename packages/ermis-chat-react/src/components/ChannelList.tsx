@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { VList } from 'virtua';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
@@ -134,6 +135,60 @@ const DefaultEmpty = React.memo(() => (
 ));
 DefaultEmpty.displayName = 'DefaultEmpty';
 
+/* ----------------------------------------------------------
+   Virtual Row Component to map channel and defer parsing
+   ---------------------------------------------------------- */
+type ChannelRowProps = {
+  channel: Channel;
+  isActive: boolean;
+  handleSelect: (c: Channel) => void;
+  renderChannel?: (c: Channel, active: boolean) => React.ReactNode;
+  ChannelItemComponent: React.ComponentType<ChannelItemProps>;
+  AvatarComponent: React.ComponentType<any>;
+};
+
+const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
+  channel,
+  isActive,
+  handleSelect,
+  renderChannel,
+  ChannelItemComponent,
+  AvatarComponent,
+}) => {
+  const unreadCount = (channel.state as any)?.unreadCount ?? 0;
+  const hasUnread = unreadCount > 0;
+
+  // Derive last message preview computation is deferred here, 
+  // so it only executes when VList actually mounts this visible item
+  const { text: lastMessageText, user: lastMessageUser } = useMemo(
+    () => getLastMessagePreview(channel),
+    // Recompute if latestMessage changes
+    [channel, channel.state?.latestMessages]
+  );
+
+  if (renderChannel) {
+    return (
+      <div onClick={() => handleSelect(channel)}>
+        {renderChannel(channel, isActive)}
+      </div>
+    );
+  }
+
+  return (
+    <ChannelItemComponent
+      channel={channel}
+      isActive={isActive}
+      hasUnread={hasUnread}
+      unreadCount={unreadCount}
+      lastMessageText={lastMessageText}
+      lastMessageUser={lastMessageUser}
+      onSelect={handleSelect}
+      AvatarComponent={AvatarComponent}
+    />
+  );
+});
+ChannelRow.displayName = 'ChannelRow';
+
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   filters = { type: ['messaging', 'team'], include_pinned_messages: true },
   sort = [],
@@ -199,39 +254,27 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   if (channels.length === 0) return <EmptyStateIndicator />;
 
   return (
-    <div className={`ermis-channel-list${className ? ` ${className}` : ''}`}>
-      {channels.map((channel) => {
-        const isActive = activeChannel?.cid === channel.cid;
-        const unreadCount = (channel.state as any)?.unreadCount ?? 0;
-        const hasUnread = unreadCount > 0;
+    <div className={`ermis-channel-list${className ? ` ${className}` : ''}`} style={{ height: '100%' }}>
+      {/* VList requires its container to have a height to work. */}
+      <VList style={{ height: '100%' }}>
+        {channels.map((channel) => {
+          const isActive = activeChannel?.cid === channel.cid;
 
-        // Derive last message preview — handles system/signal parsing
-        const { text: lastMessageText, user: lastMessageUser } = getLastMessagePreview(channel);
-
-        if (renderChannel) {
           return (
-            <div key={channel.cid} onClick={() => handleSelect(channel)}>
-              {renderChannel(channel, isActive)}
-            </div>
+            <ChannelRow
+              key={channel.cid}
+              channel={channel}
+              isActive={isActive}
+              handleSelect={handleSelect}
+              renderChannel={renderChannel}
+              ChannelItemComponent={ChannelItemComponent}
+              AvatarComponent={AvatarComponent}
+            />
           );
-        }
-
-        return (
-          <ChannelItemComponent
-            key={channel.cid}
-            channel={channel}
-            isActive={isActive}
-            hasUnread={hasUnread}
-            unreadCount={unreadCount}
-            lastMessageText={lastMessageText}
-            lastMessageUser={lastMessageUser}
-            onSelect={handleSelect}
-            AvatarComponent={AvatarComponent}
-          />
-        );
-      })}
+        })}
+      </VList>
     </div>
   );
 });
 
-ChannelList.displayName = 'ChannelList';
+ChannelList.displayName = 'ChannelList';'ChannelList';

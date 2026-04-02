@@ -46,12 +46,16 @@ export const Avatar: React.FC<AvatarProps> = React.memo(({
     borderRadius: '100%', /* Or var(--ermis-radius-full) */
     overflow: 'hidden',
     flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   }), [size]);
 
   const contentStyle = useMemo<React.CSSProperties>(() => ({
     width: '100%',
     height: '100%',
     fontSize: size * 0.4,
+    lineHeight: 1,
   }), [size]);
 
   return (
