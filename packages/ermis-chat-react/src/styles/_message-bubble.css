@@ -73,6 +73,7 @@
   flex-direction: row;
   align-items: center; /* Center actions vertically with the bubble */
   position: relative;
+  width: 100%;
 }
 
 .ermis-message-list__item--own .ermis-message-list__bubble-wrapper {
@@ -288,6 +289,85 @@
 /* If odd number of media in multi-grid, last item spans full width */
 .ermis-attachment-grid--multi > :last-child:nth-child(odd) {
   grid-column: 1 / -1;
+}
+
+/* --- Aspect Ratio Box — prevents CLS (Cumulative Layout Shift) --- */
+.ermis-attachment-aspect-box {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--ermis-radius-md);
+  width: 100%;
+  max-width: 300px;
+  min-height: 120px;
+  background-color: var(--ermis-bg-hover, #2a2a4a);
+}
+
+/* Blurred thumbnail preview (shown while full image loads) */
+.ermis-attachment-blur-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(20px);
+  transform: scale(1.1); /* hide blur edges */
+  z-index: 1;
+}
+
+/* Shimmer animation placeholder (when no thumbnail available) */
+.ermis-attachment-shimmer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  background: linear-gradient(
+    110deg,
+    var(--ermis-bg-hover, #2a2a4a) 30%,
+    var(--ermis-bg-active, #3a3a5a) 50%,
+    var(--ermis-bg-hover, #2a2a4a) 70%
+  );
+  background-size: 200% 100%;
+  animation: ermis-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes ermis-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Full image — hidden until loaded, fades in over blur/shimmer */
+.ermis-attachment-aspect-box .ermis-attachment--image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 2;
+  /* Reset standalone styles inside aspect-box */
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+
+.ermis-attachment-aspect-box .ermis-attachment--image.ermis-attachment--loaded {
+  opacity: 1;
+}
+
+/* Override aspect-box inside grid: remove constraints */
+.ermis-attachment-grid .ermis-attachment-aspect-box {
+  max-width: none;
+  border-radius: 0;
+  min-height: 100px;
 }
 
 .ermis-attachment--image {
@@ -515,7 +595,7 @@
 
 /* Invisible bridge to prevent hover loss when moving mouse from avatar to tooltip */
 .ermis-read-receipts__tooltip-wrapper::after {
-  content: "";
+  content: '';
   position: absolute;
   top: 100%;
   left: 0;

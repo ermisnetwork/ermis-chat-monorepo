@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
+import { preloadImage, isImagePreloaded } from '../utils';
 import type { FormatMessageResponse, Attachment, MessageLabel } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
@@ -32,33 +33,102 @@ function isLinkPreview(attachment: Attachment): boolean {
 /* ----------------------------------------------------------
    Attachment renderers
    ---------------------------------------------------------- */
-const ImageAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
+const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) => {
   const src = attachment.image_url || attachment.thumb_url || attachment.url;
+  const thumbSrc = attachment.thumb_url;
   if (!src) return null;
-  return (
-    <img
-      className="ermis-attachment ermis-attachment--image"
-      src={src}
-      alt={attachment.file_name || attachment.title || 'image'}
-      loading="lazy"
-    />
-  );
-};
 
-const VideoAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
+  const alreadyCached = isImagePreloaded(src);
+  const [loaded, setLoaded] = useState(alreadyCached);
+
+  // Trigger background preload (no-op if already cached)
+  useMemo(() => { preloadImage(src); }, [src]);
+
+  return (
+    <div className="ermis-attachment-aspect-box" style={{ paddingBottom: '75%' }}>
+      {/* Blur placeholder: use thumb if available, otherwise shimmer */}
+      {!loaded && (
+        thumbSrc && thumbSrc !== src ? (
+          <img
+            className="ermis-attachment-blur-preview"
+            src={thumbSrc}
+            alt=""
+            aria-hidden
+          />
+        ) : (
+          <div className="ermis-attachment-shimmer" />
+        )
+      )}
+      <img
+        className={`ermis-attachment ermis-attachment--image${loaded ? ' ermis-attachment--loaded' : ''}`}
+        src={src}
+        alt={attachment.file_name || attachment.title || 'image'}
+        loading="lazy"
+        onLoad={() => setLoaded(true)}
+      />
+    </div>
+  );
+}, (prev, next) => {
+  const prevSrc = prev.attachment.image_url || prev.attachment.thumb_url || prev.attachment.url;
+  const nextSrc = next.attachment.image_url || next.attachment.thumb_url || next.attachment.url;
+  return prevSrc === nextSrc;
+});
+(ImageAttachment as any).displayName = 'ImageAttachment';
+
+const VideoAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) => {
   const src = attachment.asset_url || attachment.url;
+  const posterSrc = attachment.image_url || attachment.thumb_url;
+  const blurThumb = attachment.thumb_url;
   if (!src) return null;
-  return (
-    <video
-      className="ermis-attachment ermis-attachment--video"
-      src={src}
-      controls
-      preload="metadata"
-    />
-  );
-};
 
-const FileAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
+  const alreadyCached = posterSrc ? isImagePreloaded(posterSrc) : true;
+  const [loaded, setLoaded] = useState(alreadyCached);
+
+  useMemo(() => {
+    if (posterSrc) preloadImage(posterSrc);
+  }, [posterSrc]);
+
+  return (
+    <div className="ermis-attachment-aspect-box" style={{ paddingBottom: '75%' }}>
+      {!loaded && (
+        blurThumb && blurThumb !== posterSrc ? (
+          <img
+            className="ermis-attachment-blur-preview"
+            src={blurThumb}
+            alt=""
+            aria-hidden
+          />
+        ) : (
+          <div className="ermis-attachment-shimmer" />
+        )
+      )}
+      {posterSrc && !loaded && (
+        <img
+          src={posterSrc}
+          style={{ display: 'none' }}
+          onLoad={() => setLoaded(true)}
+          alt="poster-loader"
+        />
+      )}
+      <video
+        className={`ermis-attachment ermis-attachment--video${loaded || !posterSrc ? ' ermis-attachment--loaded' : ''}`}
+        src={src}
+        poster={posterSrc}
+        controls
+        preload="metadata"
+        onLoadedData={() => {
+           if (!posterSrc) setLoaded(true);
+        }}
+      />
+    </div>
+  );
+}, (prev, next) => {
+  return (prev.attachment.asset_url || prev.attachment.url) ===
+    (next.attachment.asset_url || next.attachment.url);
+});
+(VideoAttachment as any).displayName = 'VideoAttachment';
+
+const FileAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) => {
   const url = attachment.url || attachment.asset_url;
   const name = attachment.file_name || attachment.title || 'File';
   const size = attachment.file_size;
@@ -82,9 +152,13 @@ const FileAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
       </span>
     </a>
   );
-};
+}, (prev, next) => {
+  return (prev.attachment.url || prev.attachment.asset_url) ===
+    (next.attachment.url || next.attachment.asset_url);
+});
+(FileAttachment as any).displayName = 'FileAttachment';
 
-const VoiceRecordingAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
+const VoiceRecordingAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) => {
   const src = attachment.asset_url || attachment.url;
   if (!src) return null;
 
@@ -100,13 +174,25 @@ const VoiceRecordingAttachment: React.FC<AttachmentProps> = ({ attachment }) => 
       <span className="ermis-attachment__voice-duration">{durationLabel}</span>
     </div>
   );
-};
+}, (prev, next) => {
+  return (prev.attachment.asset_url || prev.attachment.url) ===
+    (next.attachment.asset_url || next.attachment.url);
+});
+(VoiceRecordingAttachment as any).displayName = 'VoiceRecordingAttachment';
 
-const LinkPreviewAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
+const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) => {
   const url = attachment.link_url || attachment.og_scrape_url || attachment.title_link || attachment.url;
   const title = attachment.title;
   const description = attachment.text;
   const image = attachment.image_url || attachment.thumb_url;
+  const blurThumb = attachment.thumb_url;
+
+  const alreadyCached = image ? isImagePreloaded(image) : false;
+  const [loaded, setLoaded] = useState(alreadyCached);
+
+  useMemo(() => {
+    if (image) preloadImage(image);
+  }, [image]);
 
   if (!url && !title) return null;
 
@@ -118,12 +204,28 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
       rel="noopener noreferrer"
     >
       {image && (
-        <img
-          className="ermis-attachment__link-image"
-          src={image}
-          alt={title || 'preview'}
-          loading="lazy"
-        />
+        <div style={{ position: 'relative', width: '100%', minHeight: '120px', backgroundColor: 'var(--ermis-bg-hover, #2a2a4a)', overflow: 'hidden' }}>
+          {!loaded && (
+            blurThumb && blurThumb !== image ? (
+              <img
+                className="ermis-attachment-blur-preview"
+                src={blurThumb}
+                alt=""
+                aria-hidden
+              />
+            ) : (
+              <div className="ermis-attachment-shimmer" />
+            )
+          )}
+          <img
+            className={`ermis-attachment__link-image${loaded ? ' ermis-attachment--loaded' : ''}`}
+            src={image}
+            alt={title || 'preview'}
+            loading="lazy"
+            onLoad={() => setLoaded(true)}
+            style={{ opacity: loaded ? 1 : 0, transition: 'opacity 0.3s ease', display: 'block', width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }}
+          />
+        </div>
       )}
       <div className="ermis-attachment__link-info">
         {title && <span className="ermis-attachment__link-title">{title}</span>}
@@ -136,7 +238,11 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
       </div>
     </a>
   );
-};
+}, (prev, next) => {
+  return (prev.attachment.link_url || prev.attachment.og_scrape_url || prev.attachment.url) ===
+    (next.attachment.link_url || next.attachment.og_scrape_url || next.attachment.url);
+});
+(LinkPreviewAttachment as any).displayName = 'LinkPreviewAttachment';
 
 export const MessageAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
   if (isImage(attachment)) return <ImageAttachment attachment={attachment} />;
@@ -146,7 +252,7 @@ export const MessageAttachment: React.FC<AttachmentProps> = ({ attachment }) => 
   return <FileAttachment attachment={attachment} />;
 };
 
-export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = ({ attachments }) => {
+export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = React.memo(({ attachments }) => {
   if (!attachments || attachments.length === 0) return null;
 
   // Group by type
@@ -185,7 +291,14 @@ export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = ({ attac
       ))}
     </div>
   );
-};
+}, (prev, next) => {
+  // Skip re-render if same attachment array reference
+  if (prev.attachments === next.attachments) return true;
+  if (!prev.attachments || !next.attachments) return false;
+  if (prev.attachments.length !== next.attachments.length) return false;
+  return prev.attachments.every((a, i) => a.id === next.attachments![i].id);
+});
+(AttachmentList as any).displayName = 'AttachmentList';
 
 /* ----------------------------------------------------------
    Message renderers by MessageLabel type
@@ -283,7 +396,7 @@ function renderTextWithMentions(
 }
 
 /** Regular message: text with @mentions + attachments */
-export const RegularMessage: React.FC<MessageRendererProps> = ({ message }) => {
+export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ message }) => {
   const { activeChannel } = useChatClient();
 
   const userMap = useMemo<Record<string, string>>(() => {
@@ -314,7 +427,13 @@ export const RegularMessage: React.FC<MessageRendererProps> = ({ message }) => {
       )}
     </>
   );
-};
+}, (prev, next) => {
+  return prev.message.id === next.message.id &&
+    prev.message.updated_at === next.message.updated_at &&
+    prev.message.text === next.message.text &&
+    prev.isOwnMessage === next.isOwnMessage;
+});
+RegularMessage.displayName = 'RegularMessage';
 
 /** System message: centered info text, parsed from raw format */
 export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
@@ -365,8 +484,28 @@ export const PollMessage: React.FC<MessageRendererProps> = ({ message }) => (
 /** Sticker message */
 export const StickerMessage: React.FC<MessageRendererProps> = ({ message }) => {
   const stickerUrl = (message as any).sticker_url;
+
+  const alreadyCached = stickerUrl ? isImagePreloaded(stickerUrl) : false;
+  const [loaded, setLoaded] = useState(alreadyCached);
+
+  useMemo(() => {
+    if (stickerUrl) preloadImage(stickerUrl);
+  }, [stickerUrl]);
+
   if (stickerUrl) {
-    return <img className="ermis-message-sticker" src={stickerUrl} alt="sticker" />;
+    return (
+      <div style={{ position: 'relative', width: '120px', height: '120px', overflow: 'hidden' }}>
+        {!loaded && <div className="ermis-attachment-shimmer" />}
+        <img
+          className="ermis-message-sticker"
+          src={stickerUrl}
+          alt="sticker"
+          loading="lazy"
+          onLoad={() => setLoaded(true)}
+          style={{ opacity: loaded ? 1 : 0, transition: 'opacity 0.3s ease', position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'contain' }}
+        />
+      </div>
+    );
   }
   return <span className="ermis-message-list__item-text">{message.text}</span>;
 };

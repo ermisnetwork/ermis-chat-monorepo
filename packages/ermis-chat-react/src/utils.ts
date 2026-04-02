@@ -165,3 +165,26 @@ export function isUserManagedAttachment(attachment: Attachment): boolean {
   const type = attachment.type || 'file';
   return ['image', 'video', 'file', 'voiceRecording'].includes(type);
 }
+
+/**
+ * Lightweight in-memory image preloader.
+ */
+const preloadedUrls = new Set<string>();
+const MAX_CACHE_SIZE = 500;
+
+export function preloadImage(url: string): void {
+  if (!url || preloadedUrls.has(url)) return;
+
+  if (preloadedUrls.size >= MAX_CACHE_SIZE) {
+    const first = preloadedUrls.values().next().value;
+    if (first) preloadedUrls.delete(first);
+  }
+
+  const img = new Image();
+  img.src = url;
+  preloadedUrls.add(url);
+}
+
+export function isImagePreloaded(url: string): boolean {
+  return preloadedUrls.has(url);
+}
