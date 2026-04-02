@@ -5,7 +5,8 @@
   "description": "Ermis Chat SDK Monorepo",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "apps/*"
   ],
   "scripts": {
     "build": "yarn build:sdk && yarn build:react",
