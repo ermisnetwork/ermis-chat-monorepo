@@ -184,8 +184,7 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(({ attachmen
   const url = attachment.link_url || attachment.og_scrape_url || attachment.title_link || attachment.url;
   const title = attachment.title;
   const description = attachment.text;
-  const image = attachment.image_url || attachment.thumb_url;
-  const blurThumb = attachment.thumb_url;
+  const image = attachment.image_url;
 
   const alreadyCached = image ? isImagePreloaded(image) : false;
   const [loaded, setLoaded] = useState(alreadyCached);
@@ -194,7 +193,7 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(({ attachmen
     if (image) preloadImage(image);
   }, [image]);
 
-  if (!url && !title) return null;
+  if (!title) return null;
 
   return (
     <a
@@ -205,18 +204,7 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(({ attachmen
     >
       {image && (
         <div style={{ position: 'relative', width: '100%', minHeight: '120px', backgroundColor: 'var(--ermis-bg-hover, #2a2a4a)', overflow: 'hidden' }}>
-          {!loaded && (
-            blurThumb && blurThumb !== image ? (
-              <img
-                className="ermis-attachment-blur-preview"
-                src={blurThumb}
-                alt=""
-                aria-hidden
-              />
-            ) : (
-              <div className="ermis-attachment-shimmer" />
-            )
-          )}
+          {!loaded && <div className="ermis-attachment-shimmer" />}
           <img
             className={`ermis-attachment__link-image${loaded ? ' ermis-attachment--loaded' : ''}`}
             src={image}
@@ -407,7 +395,20 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
     ? renderTextWithMentions(message.text, message, userMap)
     : null;
 
-  const hasAttachments = message.attachments && message.attachments.length > 0;
+  const attachmentsToRender = useMemo(() => {
+    if (!message.attachments || message.attachments.length === 0) return [];
+
+    const text = (message.text || '').trim();
+    const URL_REGEX_STRICT = /^(https?:\/\/[^\s<>]+|www\.[^\s<>]+)$/;
+    const isOnlyUrl = URL_REGEX_STRICT.test(text);
+
+    return message.attachments.filter(att => {
+      if (isLinkPreview(att)) return isOnlyUrl;
+      return true;
+    });
+  }, [message.attachments, message.text]);
+
+  const hasAttachments = attachmentsToRender.length > 0;
 
   if (hasAttachments) {
     return (
@@ -415,7 +416,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
         {textContent && (
           <span className="ermis-message-list__item-text">{textContent}</span>
         )}
-        <AttachmentList attachments={message.attachments} />
+        <AttachmentList attachments={attachmentsToRender} />
       </div>
     );
   }
