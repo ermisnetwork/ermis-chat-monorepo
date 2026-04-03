@@ -1,5 +1,5 @@
 import FormData from 'form-data';
-import { ExtendableGenerics, DefaultGenerics, MessageResponse, FormatMessageResponse } from './types';
+import { ExtendableGenerics, DefaultGenerics, MessageResponse, FormatMessageResponse, ForwardMessage } from './types';
 import { AxiosRequestConfig } from 'axios';
 import { ErmisChat } from './client';
 
@@ -503,4 +503,32 @@ export const replaceCodecNumber = (input: string): string => {
 
   // Nếu có match, thực hiện thay thế
   return input.replace(regex, (match) => map[match]);
+};
+
+export const createForwardMessagePayload = <ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics>(
+  message: FormatMessageResponse<ErmisChatGenerics>,
+  targetCid: string,
+  activeCid: string,
+): ForwardMessage<ErmisChatGenerics> => {
+  const forwardPayload: ForwardMessage<ErmisChatGenerics> = {
+    cid: targetCid,
+    forward_cid: activeCid,
+    forward_message_id: message.id as string,
+  };
+
+  if (
+    message.sticker_url &&
+    (!message.text || message.text === '') &&
+    (!message.attachments || (Array.isArray(message.attachments) && message.attachments.length === 0))
+  ) {
+    forwardPayload.sticker_url = message.sticker_url as string;
+    forwardPayload.text = message.text;
+  } else {
+    forwardPayload.text = message.text || '';
+    if (message.attachments && message.attachments.length > 0) {
+      forwardPayload.attachments = message.attachments.filter((item: any) => item.type !== 'linkPreview');
+    }
+  }
+
+  return forwardPayload;
 };

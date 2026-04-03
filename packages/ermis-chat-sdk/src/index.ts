@@ -8,7 +8,7 @@ export * from './token_manager';
 export * from './types';
 export * from './ermis_call_node';
 export * from './auth';
-export { chatCodes, logChatPromiseExecution, formatMessage } from './utils';
+export { chatCodes, logChatPromiseExecution, formatMessage, createForwardMessagePayload } from './utils';
 export { parseSystemMessage } from './system_message';
 export { parseSignalMessage } from './signal_message';
 export { normalizeFileName, getAttachmentCategory, isVideoFile, isHeicFile, buildAttachmentPayload } from './attachment_utils';

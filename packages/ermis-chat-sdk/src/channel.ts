@@ -35,6 +35,7 @@ import {
   AttachmentResponse,
   PollMessage,
   EditMessage,
+  ForwardMessage,
 } from './types';
 export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   _client: ErmisChat<ErmisChatGenerics>;
@@ -173,10 +174,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     );
   }
 
-  async forwardMessage(message: Message<ErmisChatGenerics>, channel: { type: string; channelID: string }) {
-    if (message.id === undefined) {
-      const id = randomId();
-      message = { ...message, id };
+  async forwardMessage(message: ForwardMessage<ErmisChatGenerics>, channel: { type: string; channelID: string }) {
+    if (!message.id) {
+      message = { ...message, id: randomId() };
     }
 
     return await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(

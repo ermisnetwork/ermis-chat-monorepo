@@ -393,6 +393,16 @@ export type EditMessage = {
   mentioned_users?: string[];
 };
 
+export type ForwardMessage<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
+  cid: string;
+  forward_cid: string;
+  forward_message_id: string;
+  id?: string;
+  text?: string;
+  attachments?: Attachment<ErmisChatGenerics>[];
+  sticker_url?: string;
+};
+
 export type PollMessage = {
   id?: string;
   text: string;

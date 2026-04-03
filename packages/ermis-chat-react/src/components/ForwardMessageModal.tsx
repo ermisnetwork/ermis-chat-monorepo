@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
@@ -102,16 +103,13 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
       const targetChannel = channels.find((c) => c.cid === cid);
       if (!targetChannel) continue;
       try {
-        const forwardPayload: Record<string, any> = {
-          text: message.text || '',
-          forward_cid: activeChannel.cid,
-          forward_message_id: message.id,
-        };
-        // Include attachments if present
-        if (message.attachments && message.attachments.length > 0) {
-          forwardPayload.attachments = message.attachments;
-        }
-        await activeChannel.forwardMessage(forwardPayload as any, {
+        const forwardPayload = createForwardMessagePayload(
+          message,
+          targetChannel.cid as string,
+          activeChannel.cid as string,
+        );
+
+        await activeChannel.forwardMessage(forwardPayload, {
           type: targetChannel.type,
           channelID: targetChannel.id!,
         });

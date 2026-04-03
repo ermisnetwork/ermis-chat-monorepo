@@ -114,13 +114,21 @@ await channel.deleteMessageForMe('message_id');
 
 ## Forwarding Messages
 
-Forward an existing message to another channel:
+Forward an existing message to another channel. You can use the `createForwardMessagePayload` helper function from the SDK to automatically prepare the correct payload, handling edge cases like sticker-only messages and stripping out `linkPreview` attachments.
 
 ```typescript
-await channel.forwardMessage(
-  { text: 'Forwarded content', id: 'original_msg_id' },
-  { type: 'messaging', channelID: 'target_channel_id' },
+import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk';
+
+const forwardPayload = createForwardMessagePayload(
+  message,               // The original message object
+  targetChannel.cid,     // The target channel's CID
+  activeChannel.cid      // The current channel's CID
 );
+
+await activeChannel.forwardMessage(forwardPayload, {
+  type: targetChannel.type,
+  channelID: targetChannel.id,
+});
 ```
 
 ## Pinned Messages
