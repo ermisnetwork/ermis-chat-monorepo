@@ -147,6 +147,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
           const canBan = Boolean(
             (currentUserRole === 'owner' || currentUserRole === 'moder') &&
             isTargetRemovable &&
+            role !== 'pending' &&
             member.user_id !== currentUserId &&
             !member.banned
           );
@@ -154,13 +155,14 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
           const canUnban = Boolean(
             (currentUserRole === 'owner' || currentUserRole === 'moder') &&
             isTargetRemovable &&
+            role !== 'pending' &&
             member.user_id !== currentUserId &&
             member.banned
           );
 
           const canPromote = Boolean(
             currentUserRole === 'owner' &&
-            (role === 'member' || role === 'pending') &&
+            role === 'member' &&
             member.user_id !== currentUserId
           );
 
