@@ -552,6 +552,8 @@ export type MediaTab = 'members' | 'media' | 'links' | 'files';
 export type ChannelInfoMemberItemProps = {
   member: ChannelInfoMember;
   AvatarComponent: React.ComponentType<AvatarProps>;
+  onRemove?: (id: string) => void;
+  canRemove?: boolean;
 };
 
 export type ChannelInfoMediaItemProps = {
@@ -590,6 +592,9 @@ export type ChannelInfoActionsProps = {
   onMuteToggle?: () => void;
   onSearchClick?: () => void;
   onLeaveChannel?: () => void;
+  onDeleteChannel?: () => void;
+  isTeamChannel?: boolean;
+  currentUserRole?: string;
 };
 
 export type ChannelInfoMember = {
@@ -603,7 +608,10 @@ export type ChannelInfoTabsProps = {
   channel: Channel;
   members: ChannelInfoMember[];
   AvatarComponent: React.ComponentType<AvatarProps>;
+  currentUserId?: string;
+  currentUserRole?: string;
   onAddMemberClick?: () => void;
+  onRemoveMember?: (id: string) => void;
 
   /** Custom sub-component overrides */
   MemberItemComponent?: React.ComponentType<ChannelInfoMemberItemProps>;
@@ -644,6 +652,8 @@ export type ChannelInfoProps = {
   onMuteToggle?: () => void;
   onSearchClick?: () => void;
   onLeaveChannel?: () => void;
+  onDeleteChannel?: () => void;
   onAddMemberClick?: () => void;
+  onRemoveMember?: (id: string) => void;
 };
 

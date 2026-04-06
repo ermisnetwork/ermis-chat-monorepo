@@ -1342,7 +1342,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         }
         break;
       case 'member.removed':
-        if (event.user?.id) {
+        if (event.member?.user_id) {
+          delete channelState.members[event.member.user_id];
+        } else if (event.user?.id) {
+          // fallback just in case some legacy payload uses event.user for the removed user
           delete channelState.members[event.user.id];
         }
         break;

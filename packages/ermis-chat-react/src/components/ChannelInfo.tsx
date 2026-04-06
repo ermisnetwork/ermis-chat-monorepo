@@ -233,22 +233,39 @@ const FileListItem: React.FC<{
 (FileListItem as any).displayName = 'FileListItem';
 
 // --- Memoized Member Item ---
-const MemberListItem = React.memo(({ member, AvatarComponent }: { member: any, AvatarComponent: any }) => {
+const MemberListItem = React.memo(({ member, AvatarComponent, onRemove, canRemove }: ChannelInfoMemberItemProps) => {
   if (!member) return null;
   const role = member.channel_role || 'member';
   return (
     <div className="ermis-channel-info__member-item">
-      <AvatarComponent image={member.user.avatar} name={member.user.name || member.user.id} size={36} />
+      <AvatarComponent image={member.user?.avatar} name={member.user?.name || member.user?.id} size={36} />
       <div className="ermis-channel-info__member-info">
-        <span className="ermis-channel-info__member-name">{member.user.name || member.user.id}</span>
+        <span className="ermis-channel-info__member-name">{member.user?.name || member.user?.id}</span>
         <span className={`ermis-channel-info__member-role ermis-channel-info__member-role--${role.toLowerCase()}`}>
           {role.charAt(0).toUpperCase() + role.slice(1)}
         </span>
       </div>
+      {canRemove && onRemove && (
+        <button
+          className="ermis-channel-info__member-remove"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(member.user?.id || member.user_id);
+          }}
+          aria-label="Remove member"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      )}
     </div>
   );
 }, (prev, next) => {
-  return prev.member?.user_id === next.member?.user_id && prev.member?.channel_role === next.member?.channel_role;
+  return prev.member?.user_id === next.member?.user_id &&
+         prev.member?.channel_role === next.member?.channel_role &&
+         prev.canRemove === next.canRemove;
 });
 (MemberListItem as any).displayName = 'MemberListItem';
 
@@ -333,7 +350,9 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
   );
 });
 
-export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({ onMuteToggle, onSearchClick, onLeaveChannel }) => {
+export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
+  onMuteToggle, onSearchClick, onLeaveChannel, onDeleteChannel, isTeamChannel, currentUserRole
+}) => {
   return (
     <div className="ermis-channel-info__actions">
       <button className="ermis-channel-info__action-btn" onClick={onMuteToggle}>
@@ -355,16 +374,30 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         </div>
         <span>Search</span>
       </button>
-      <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onLeaveChannel}>
-        <div className="ermis-channel-info__action-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <polyline points="16 17 21 12 16 7"></polyline>
-            <line x1="21" y1="12" x2="9" y2="12"></line>
-          </svg>
-        </div>
-        <span>Leave</span>
-      </button>
+      {isTeamChannel && (
+        currentUserRole === 'owner' ? (
+          <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onDeleteChannel}>
+            <div className="ermis-channel-info__action-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6V20a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </div>
+            <span>Delete</span>
+          </button>
+        ) : (
+          <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onLeaveChannel}>
+            <div className="ermis-channel-info__action-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </div>
+            <span>Leave</span>
+          </button>
+        )
+      )}
     </div>
   );
 });
@@ -373,7 +406,10 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
   channel,
   members,
   AvatarComponent,
+  currentUserId,
+  currentUserRole,
   onAddMemberClick,
+  onRemoveMember,
   MemberItemComponent,
   MediaItemComponent,
   LinkItemComponent,
@@ -489,7 +525,22 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
           );
         }
         sortedMembers.forEach(member => {
-          items.push(<MemberItem key={member?.user_id} member={member} AvatarComponent={AvatarComponent} />);
+          const role = member.channel_role || 'member';
+          const isRemovable = role === 'member' || role === 'pending';
+          const canRemove = Boolean(
+            (currentUserRole === 'owner' || currentUserRole === 'moder') &&
+            isRemovable &&
+            member.user_id !== currentUserId
+          );
+          items.push(
+            <MemberItem
+              key={member?.user_id}
+              member={member}
+              AvatarComponent={AvatarComponent}
+              onRemove={onRemoveMember}
+              canRemove={canRemove}
+            />
+          );
         });
         return items;
       }
@@ -573,22 +624,76 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     LoadingComponent,
     onMuteToggle,
     onSearchClick,
-    onLeaveChannel,
-    onAddMemberClick
+    onLeaveChannel: onLeaveChannelProp,
+    onDeleteChannel: onDeleteChannelProp,
+    onAddMemberClick,
+    onRemoveMember: onRemoveMemberProp
   } = props;
 
-  const { activeChannel } = useChatClient();
+  const { activeChannel, client } = useChatClient();
   const channel = channelProp || activeChannel;
+
+  const currentUserId = client?.userID;
+  const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
+
+  const handleDeleteChannel = useCallback(async () => {
+    if (onDeleteChannelProp) return onDeleteChannelProp();
+    if (!channel) return;
+    try {
+      await channel.delete();
+    } catch (e) {
+      console.error("Error deleting channel", e);
+    }
+  }, [channel, onDeleteChannelProp]);
+
+  const handleLeaveChannel = useCallback(async () => {
+    if (onLeaveChannelProp) return onLeaveChannelProp();
+    if (!channel || !currentUserId) return;
+    try {
+      await channel.removeMembers([currentUserId]);
+    } catch (e) {
+      console.error("Error leaving channel", e);
+    }
+  }, [channel, currentUserId, onLeaveChannelProp]);
+
+  const handleRemoveMember = useCallback(async (memberId: string) => {
+    if (onRemoveMemberProp) return onRemoveMemberProp(memberId);
+    if (!channel) return;
+    try {
+      await channel.removeMembers([memberId]);
+    } catch (e) {
+      console.error("Error removing member", e);
+    }
+  }, [channel, onRemoveMemberProp]);
 
   const channelName = channel?.data?.name || channel?.cid || 'Unknown Channel';
   const channelImage = channel?.data?.image as string | undefined;
   const channelDescription = channel?.data?.description as string | undefined;
 
+  // Reactivity for real-time member updates since channel.state.members is mutated in-place by the SDK
+  const [memberUpdateCount, setMemberUpdateCount] = useState(0);
+
+  useEffect(() => {
+    if (!channel) return;
+    const updateMembers = () => setMemberUpdateCount(c => c + 1);
+
+    const sub1 = channel.on('member.added', updateMembers);
+    const sub2 = channel.on('member.removed', updateMembers);
+    const sub3 = channel.on('member.updated', updateMembers);
+
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+      sub3.unsubscribe();
+    };
+  }, [channel]);
+
   // Extract members
   const members = useMemo(() => {
     if (!channel?.state?.members) return [];
     return Object.values(channel.state.members);
-  }, [channel?.state?.members]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel?.state?.members, memberUpdateCount]);
 
   const isTeamChannel = channel?.type === 'team';
 
@@ -608,14 +713,20 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
       <ActionsComponent
         onMuteToggle={onMuteToggle}
         onSearchClick={onSearchClick}
-        onLeaveChannel={onLeaveChannel}
+        onLeaveChannel={handleLeaveChannel}
+        onDeleteChannel={handleDeleteChannel}
+        isTeamChannel={isTeamChannel}
+        currentUserRole={currentUserRole}
       />
 
       <TabsComponent
         channel={channel}
         members={members as any}
         AvatarComponent={AvatarComponent}
+        currentUserId={currentUserId}
+        currentUserRole={currentUserRole}
         onAddMemberClick={isTeamChannel ? onAddMemberClick : undefined}
+        onRemoveMember={handleRemoveMember}
         MemberItemComponent={MemberItemComponent}
         MediaItemComponent={MediaItemComponent}
         LinkItemComponent={LinkItemComponent}
