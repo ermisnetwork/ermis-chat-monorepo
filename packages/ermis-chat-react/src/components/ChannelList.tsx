@@ -85,6 +85,14 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   onSelect,
   AvatarComponent,
 }) => {
+  // Subscribe to channel.updated so that when name/image/description change,
+  // we re-render from within (bypasses React.memo which only blocks parent-driven re-renders)
+  const [, forceUpdate] = useState(0);
+  useEffect(() => {
+    const sub = channel.on('channel.updated', () => forceUpdate((c) => c + 1));
+    return () => sub.unsubscribe();
+  }, [channel]);
+
   const name = channel.data?.name || channel.cid;
   const image = channel.data?.image as string | undefined;
   const showUnread = hasUnread && !isActive;
@@ -277,4 +285,4 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   );
 });
 
-ChannelList.displayName = 'ChannelList';'ChannelList';
+ChannelList.displayName = 'ChannelList'; 'ChannelList';

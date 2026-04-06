@@ -608,6 +608,14 @@ export type ChannelInfoCoverProps = {
   channelImage?: string;
   channelDescription?: string;
   AvatarComponent: React.ComponentType<AvatarProps>;
+  /** Whether the current user can edit channel info */
+  canEdit?: boolean;
+  /** Callback when the edit button is clicked */
+  onEditClick?: () => void;
+  /** Whether the channel is public */
+  isPublic?: boolean;
+  /** Whether the channel is a team channel */
+  isTeamChannel?: boolean;
 };
 
 export type ChannelInfoActionsProps = {
@@ -624,6 +632,50 @@ export type ChannelInfoMember = {
   name?: string;
   avatar?: string;
   [key: string]: any;
+};
+
+/** Payload for updating channel profile */
+export type EditChannelData = {
+  name?: string;
+  image?: string;
+  description?: string;
+  public?: boolean;
+};
+
+/** Props for the EditChannelModal */
+export type EditChannelModalProps = {
+  channel: Channel;
+  onClose: () => void;
+  /** Override the default save logic entirely */
+  onSave?: (data: EditChannelData) => Promise<void>;
+  /** Custom avatar component */
+  AvatarComponent: React.ComponentType<AvatarProps>;
+  /** Modal title (default: 'Edit Channel') */
+  title?: string;
+  /** Label for the name input (default: 'Channel Name') */
+  nameLabel?: string;
+  /** Label for the description input (default: 'Description') */
+  descriptionLabel?: string;
+  /** Placeholder for name input */
+  namePlaceholder?: string;
+  /** Placeholder for description input */
+  descriptionPlaceholder?: string;
+  /** Label for the public toggle (default: 'Public Channel') */
+  publicLabel?: string;
+  /** Label for the save button (default: 'Save') */
+  saveLabel?: string;
+  /** Label for the cancel button (default: 'Cancel') */
+  cancelLabel?: string;
+  /** Label shown while saving (default: 'Saving...') */
+  savingLabel?: string;
+  /** Label for the change avatar button (default: 'Change Avatar') */
+  changeAvatarLabel?: string;
+  /** Accept attribute for the file input (default: 'image/*') */
+  imageAccept?: string;
+  /** Max file size in bytes (default: 5MB = 5242880) */
+  maxImageSize?: number;
+  /** Error text for exceeding max size (default: 'Image must be less than 5MB') */
+  maxImageSizeError?: string;
 };
 
 /** Props for the Add Member button rendered at the top of the Members tab */
@@ -723,6 +775,8 @@ export type ChannelInfoProps = {
   TabsComponent?: React.ComponentType<ChannelInfoTabsProps>;
   /** Custom component replacing the entire AddMemberModal */
   AddMemberModalComponent?: React.ComponentType<AddMemberModalProps>;
+  /** Custom component replacing the entire EditChannelModal */
+  EditChannelModalComponent?: React.ComponentType<EditChannelModalProps>;
 
   /** Custom sub-component overrides (passed through to TabsComponent) */
   MemberItemComponent?: React.ComponentType<ChannelInfoMemberItemProps>;
@@ -744,6 +798,23 @@ export type ChannelInfoProps = {
   addMemberButtonLabel?: string;
   /** Custom component for the 'Add Member' button */
   AddMemberButtonComponent?: React.ComponentType<AddMemberButtonProps>;
+
+  /** Edit Channel customization (passed through to EditChannelModal) */
+  /** Override edit channel save logic */
+  onEditChannel?: (data: EditChannelData) => Promise<void>;
+  editChannelModalTitle?: string;
+  editChannelNameLabel?: string;
+  editChannelDescriptionLabel?: string;
+  editChannelNamePlaceholder?: string;
+  editChannelDescriptionPlaceholder?: string;
+  editChannelPublicLabel?: string;
+  editChannelSaveLabel?: string;
+  editChannelCancelLabel?: string;
+  editChannelSavingLabel?: string;
+  editChannelChangeAvatarLabel?: string;
+  editChannelImageAccept?: string;
+  editChannelMaxImageSize?: number;
+  editChannelMaxImageSizeError?: string;
 
   /** Action callbacks */
   onMuteToggle?: () => void;

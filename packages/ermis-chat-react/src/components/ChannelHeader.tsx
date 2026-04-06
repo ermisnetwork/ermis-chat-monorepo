@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
 import type { ChannelHeaderProps } from '../types';
@@ -28,14 +28,25 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
 }) => {
   const { activeChannel } = useChatClient();
 
+  // Force re-render when channel.updated WS event fires
+  const [channelUpdateCount, setChannelUpdateCount] = useState(0);
+
+  useEffect(() => {
+    if (!activeChannel) return;
+    const sub = activeChannel.on('channel.updated', () => setChannelUpdateCount(c => c + 1));
+    return () => sub.unsubscribe();
+  }, [activeChannel]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const channelName = useMemo(() =>
     title || activeChannel?.data?.name || activeChannel?.cid || '',
-    [title, activeChannel?.data?.name, activeChannel?.cid],
+    [title, activeChannel?.data?.name, activeChannel?.cid, channelUpdateCount],
   );
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const channelImage = useMemo(() =>
     image || (activeChannel?.data?.image as string | undefined),
-    [image, activeChannel?.data?.image],
+    [image, activeChannel?.data?.image, channelUpdateCount],
   );
 
   if (!activeChannel) return null;

@@ -47,7 +47,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 16px;
+  padding: 16px;
   text-align: center;
 }
 
@@ -62,11 +62,63 @@
   color: var(--ermis-text-primary);
 }
 
+.ermis-channel-info__name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.ermis-channel-info__name-row .ermis-channel-info__name {
+  margin: 0;
+}
+
+.ermis-channel-info__cover-edit-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--ermis-text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.2s ease, background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.ermis-channel-info__cover-edit-btn:hover {
+  color: var(--ermis-color-primary, #005fff);
+  background-color: var(--ermis-bg-hover);
+}
+
 .ermis-channel-info__description {
   margin: 0;
   font-size: 14px;
   color: var(--ermis-text-secondary);
   line-height: 1.4;
+}
+
+.ermis-channel-info__type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  margin: 4px 0;
+}
+
+.ermis-channel-info__type-badge--public {
+  background: rgba(40, 167, 69, 0.1);
+  color: #28a745;
+}
+
+.ermis-channel-info__type-badge--private {
+  background: rgba(108, 117, 125, 0.1);
+  color: var(--ermis-text-secondary);
 }
 
 .ermis-channel-info__actions {
@@ -610,4 +662,231 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ============================================
+   Edit Channel Modal — Body Content
+   ============================================ */
+
+.ermis-channel-info__edit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Avatar section */
+.ermis-channel-info__edit-avatar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.ermis-channel-info__edit-avatar-wrap {
+  position: relative;
+  cursor: pointer;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.ermis-channel-info__edit-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  border-radius: 50%;
+}
+
+.ermis-channel-info__edit-avatar-wrap:hover .ermis-channel-info__edit-avatar-overlay {
+  opacity: 1;
+}
+
+.ermis-channel-info__edit-avatar-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--ermis-color-primary, #005fff);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.ermis-channel-info__edit-avatar-btn:hover {
+  background-color: var(--ermis-bg-hover);
+}
+
+.ermis-channel-info__edit-avatar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Form fields */
+.ermis-channel-info__edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ermis-channel-info__edit-field--toggle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.ermis-channel-info__edit-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ermis-text-secondary);
+}
+
+.ermis-channel-info__edit-input {
+  background: var(--ermis-bg-secondary);
+  border: 1px solid var(--ermis-border-base);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--ermis-text-primary);
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: inherit;
+}
+
+.ermis-channel-info__edit-input:focus {
+  border-color: var(--ermis-color-primary, #005fff);
+  box-shadow: 0 0 0 2px rgba(0, 95, 255, 0.15);
+}
+
+.ermis-channel-info__edit-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ermis-channel-info__edit-textarea {
+  background: var(--ermis-bg-secondary);
+  border: 1px solid var(--ermis-border-base);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--ermis-text-primary);
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+}
+
+.ermis-channel-info__edit-textarea:focus {
+  border-color: var(--ermis-color-primary, #005fff);
+  box-shadow: 0 0 0 2px rgba(0, 95, 255, 0.15);
+}
+
+.ermis-channel-info__edit-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Toggle switch */
+.ermis-channel-info__edit-toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: var(--ermis-bg-secondary);
+  border: 1px solid var(--ermis-border-base);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.ermis-channel-info__edit-toggle--on {
+  background: var(--ermis-color-primary, #005fff);
+  border-color: var(--ermis-color-primary, #005fff);
+}
+
+.ermis-channel-info__edit-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+  pointer-events: none;
+}
+
+.ermis-channel-info__edit-toggle--on .ermis-channel-info__edit-toggle-thumb {
+  transform: translateX(20px);
+}
+
+.ermis-channel-info__edit-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Error message */
+.ermis-channel-info__edit-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(220, 53, 69, 0.08);
+  border: 1px solid rgba(220, 53, 69, 0.2);
+  border-radius: 8px;
+  color: var(--ermis-color-danger, #dc3545);
+  font-size: 13px;
+}
+
+/* Footer buttons */
+.ermis-channel-info__edit-footer-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.ermis-channel-info__edit-btn {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+  border: none;
+  font-family: inherit;
+}
+
+.ermis-channel-info__edit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ermis-channel-info__edit-btn--cancel {
+  background: transparent;
+  color: var(--ermis-text-secondary);
+  border: 1px solid var(--ermis-border-base);
+}
+
+.ermis-channel-info__edit-btn--cancel:hover:not(:disabled) {
+  background-color: var(--ermis-bg-hover);
+  color: var(--ermis-text-primary);
+}
+
+.ermis-channel-info__edit-btn--save {
+  background: var(--ermis-color-primary, #005fff);
+  color: #fff;
+}
+
+.ermis-channel-info__edit-btn--save:hover:not(:disabled) {
+  opacity: 0.9;
 }

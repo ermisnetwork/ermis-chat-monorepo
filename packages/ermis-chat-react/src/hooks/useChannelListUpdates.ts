@@ -100,16 +100,31 @@ export function useChannelListUpdates(
       }
     };
 
+    // --- channel.updated: re-render to reflect updated name/image/description ---
+    const handleChannelUpdated = (event: Event) => {
+      const eventCid = event.cid || event.channel?.cid;
+      if (!eventCid) return;
+
+      // SDK already mutated channel.data in-place; just flush React state
+      setChannels((prev) => {
+        const idx = prev.findIndex((ch) => ch.cid === eventCid);
+        if (idx < 0) return prev;
+        return [...prev];
+      });
+    };
+
     const sub1 = client.on('message.new', handleNewMessage);
     const sub2 = client.on('message.read', handleMessageRead);
     const sub3 = client.on('channel.deleted', handleChannelDeleted);
     const sub4 = client.on('member.removed', handleMemberRemoved);
+    const sub5 = client.on('channel.updated', handleChannelUpdated);
 
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
       sub3.unsubscribe();
       sub4.unsubscribe();
+      sub5.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }

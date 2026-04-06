@@ -3,11 +3,13 @@ import { useChatClient } from '../../hooks/useChatClient';
 import { Avatar } from '../Avatar';
 import { DefaultChannelInfoTabs } from './ChannelInfoTabs';
 import { AddMemberModal } from './AddMemberModal';
+import { EditChannelModal } from './EditChannelModal';
 import type {
   ChannelInfoProps,
   ChannelInfoHeaderProps,
   ChannelInfoCoverProps,
-  ChannelInfoActionsProps
+  ChannelInfoActionsProps,
+  EditChannelData,
 } from '../../types';
 
 export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.memo(({ title, onClose }) => {
@@ -26,11 +28,38 @@ export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.
 });
 DefaultChannelInfoHeader.displayName = 'DefaultChannelInfoHeader';
 
-export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo(({ channelName, channelImage, channelDescription, AvatarComponent }) => {
+export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo(({ channelName, channelImage, channelDescription, AvatarComponent, canEdit, onEditClick, isPublic, isTeamChannel }) => {
   return (
     <div className="ermis-channel-info__cover">
       <AvatarComponent image={channelImage} name={channelName} size={80} className="ermis-channel-info__avatar" />
-      <h2 className="ermis-channel-info__name">{channelName}</h2>
+      <div className="ermis-channel-info__name-row">
+        <h2 className="ermis-channel-info__name">{channelName}</h2>
+        {canEdit && onEditClick && (
+          <button className="ermis-channel-info__cover-edit-btn" onClick={onEditClick} aria-label="Edit channel">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </button>
+        )}
+      </div>
+      {isTeamChannel && (
+        <span className={`ermis-channel-info__type-badge ${isPublic ? 'ermis-channel-info__type-badge--public' : 'ermis-channel-info__type-badge--private'}`}>
+          {isPublic ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          )}
+          {isPublic ? 'Public' : 'Private'}
+        </span>
+      )}
       {channelDescription && (
         <p className="ermis-channel-info__description">{channelDescription}</p>
       )}
@@ -104,6 +133,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     ActionsComponent = DefaultChannelInfoActions,
     TabsComponent = DefaultChannelInfoTabs,
     AddMemberModalComponent,
+    EditChannelModalComponent,
     MemberItemComponent,
     MediaItemComponent,
     LinkItemComponent,
@@ -130,6 +160,21 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     addMemberAddedLabel,
     addMemberButtonLabel,
     AddMemberButtonComponent,
+    // Edit Channel customization
+    onEditChannel: onEditChannelProp,
+    editChannelModalTitle,
+    editChannelNameLabel,
+    editChannelDescriptionLabel,
+    editChannelNamePlaceholder,
+    editChannelDescriptionPlaceholder,
+    editChannelPublicLabel,
+    editChannelSaveLabel,
+    editChannelCancelLabel,
+    editChannelSavingLabel,
+    editChannelChangeAvatarLabel,
+    editChannelImageAccept,
+    editChannelMaxImageSize,
+    editChannelMaxImageSizeError,
   } = props;
 
   const { activeChannel, client } = useChatClient();
@@ -137,6 +182,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
 
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
+  const isTeamChannel = channel?.type === 'team';
 
   const handleDeleteChannel = useCallback(async () => {
     if (onDeleteChannelProp) return onDeleteChannelProp();
@@ -192,13 +238,28 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     try { await channel.demoteModerators([memberId]); } catch (e) { console.error("Error demoting member", e); }
   }, [channel, onDemoteMemberProp]);
 
-  const channelName = channel?.data?.name || channel?.cid || 'Unknown Channel';
-  const channelImage = channel?.data?.image as string | undefined;
-  const channelDescription = channel?.data?.description as string | undefined;
+  // Reactivity for real-time channel data updates (channel.updated WS event)
+  const [channelUpdateCount, setChannelUpdateCount] = useState(0);
+
+  // Derive channel data from channel.data, reactive to channelUpdateCount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const channelName = useMemo(() => channel?.data?.name || channel?.cid || 'Unknown Channel', [channel?.data?.name, channel?.cid, channelUpdateCount]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const channelImage = useMemo(() => channel?.data?.image as string | undefined, [channel?.data?.image, channelUpdateCount]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const channelDescription = useMemo(() => channel?.data?.description as string | undefined, [channel?.data?.description, channelUpdateCount]);
 
   // Reactivity for real-time member updates since channel.state.members is mutated in-place by the SDK
   const [memberUpdateCount, setMemberUpdateCount] = useState(0);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [showEditChannelModal, setShowEditChannelModal] = useState(false);
+
+  // Permission: only owner or moderator can edit channel info
+  const canEditChannel = isTeamChannel && (currentUserRole === 'owner' || currentUserRole === 'moder');
+
+  const handleEditChannelClick = useCallback(() => {
+    setShowEditChannelModal(true);
+  }, []);
 
   const handleAddMemberClick = useCallback(() => {
     if (onAddMemberClick) return onAddMemberClick();
@@ -208,6 +269,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   useEffect(() => {
     if (!channel) return;
     const updateMembers = () => setMemberUpdateCount(c => c + 1);
+    const updateChannel = () => setChannelUpdateCount(c => c + 1);
 
     const sub1 = channel.on('member.added', updateMembers);
     const sub2 = channel.on('member.removed', updateMembers);
@@ -216,6 +278,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     const sub5 = channel.on('member.demoted', updateMembers);
     const sub6 = channel.on('member.banned', updateMembers);
     const sub7 = channel.on('member.unbanned', updateMembers);
+    const sub8 = channel.on('channel.updated', updateChannel);
 
     return () => {
       sub1.unsubscribe();
@@ -225,6 +288,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
       sub5.unsubscribe();
       sub6.unsubscribe();
       sub7.unsubscribe();
+      sub8.unsubscribe();
     };
   }, [channel]);
 
@@ -235,7 +299,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel?.state?.members, memberUpdateCount]);
 
-  const isTeamChannel = channel?.type === 'team';
+
 
   if (!channel) return null;
 
@@ -248,6 +312,10 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
         channelImage={channelImage}
         channelDescription={channelDescription}
         AvatarComponent={AvatarComponent}
+        canEdit={canEditChannel}
+        onEditClick={handleEditChannelClick}
+        isPublic={Boolean(channel?.data?.public)}
+        isTeamChannel={isTeamChannel}
       />
 
       <ActionsComponent
@@ -296,6 +364,31 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
             addLabel={addMemberAddLabel}
             addingLabel={addMemberAddingLabel}
             addedLabel={addMemberAddedLabel}
+          />
+        );
+      })()}
+
+      {showEditChannelModal && (() => {
+        const EditComp = EditChannelModalComponent || EditChannelModal;
+        return (
+          <EditComp
+            channel={channel}
+            onClose={() => setShowEditChannelModal(false)}
+            onSave={onEditChannelProp}
+            AvatarComponent={AvatarComponent}
+            title={editChannelModalTitle}
+            nameLabel={editChannelNameLabel}
+            descriptionLabel={editChannelDescriptionLabel}
+            namePlaceholder={editChannelNamePlaceholder}
+            descriptionPlaceholder={editChannelDescriptionPlaceholder}
+            publicLabel={editChannelPublicLabel}
+            saveLabel={editChannelSaveLabel}
+            cancelLabel={editChannelCancelLabel}
+            savingLabel={editChannelSavingLabel}
+            changeAvatarLabel={editChannelChangeAvatarLabel}
+            imageAccept={editChannelImageAccept}
+            maxImageSize={editChannelMaxImageSize}
+            maxImageSizeError={editChannelMaxImageSizeError}
           />
         );
       })()}
