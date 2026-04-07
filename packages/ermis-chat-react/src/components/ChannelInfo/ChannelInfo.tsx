@@ -6,6 +6,7 @@ import { DefaultChannelInfoTabs } from './ChannelInfoTabs';
 import { AddMemberModal } from './AddMemberModal';
 import { EditChannelModal } from './EditChannelModal';
 import { MessageSearchPanel } from './MessageSearchPanel';
+import { ChannelSettingsPanel } from './ChannelSettingsPanel';
 import type {
   ChannelInfoProps,
   ChannelInfoHeaderProps,
@@ -70,7 +71,7 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
 DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
-  onMuteToggle, onSearchClick, onLeaveChannel, onDeleteChannel, isTeamChannel, currentUserRole
+  onMuteToggle, onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, isTeamChannel, currentUserRole
 }) => {
   return (
     <div className="ermis-channel-info__actions">
@@ -93,6 +94,17 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         </div>
         <span>Search</span>
       </button>
+      {isTeamChannel && (currentUserRole === 'owner' || currentUserRole === 'moder') && (
+        <button className="ermis-channel-info__action-btn" onClick={onSettingsClick}>
+          <div className="ermis-channel-info__action-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </div>
+          <span>Settings</span>
+        </button>
+      )}
       {isTeamChannel && (
         currentUserRole === 'owner' ? (
           <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onDeleteChannel}>
@@ -256,6 +268,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditChannelModal, setShowEditChannelModal] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
   // Permission: only owner or moderator can edit channel info (banned users cannot)
   const canEditChannel = isTeamChannel && !isBanned && (currentUserRole === 'owner' || currentUserRole === 'moder');
@@ -336,6 +349,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
           <ActionsComponent
             onMuteToggle={onMuteToggle}
             onSearchClick={() => setShowSearchPanel(true)}
+            onSettingsClick={() => setShowSettingsPanel(true)}
             onLeaveChannel={handleLeaveChannel}
             onDeleteChannel={handleDeleteChannel}
             isTeamChannel={isTeamChannel}
@@ -411,12 +425,21 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
       )}
 
       {/* Search Panel — slides over entire ChannelInfo body */}
-      {channel && (
+      {channel && showSearchPanel && (
         <MessageSearchPanel
           isOpen={showSearchPanel}
           onClose={() => setShowSearchPanel(false)}
           channel={channel}
           AvatarComponent={AvatarComponent}
+        />
+      )}
+
+      {/* Settings Panel — slides over entire ChannelInfo body */}
+      {channel && showSettingsPanel && (
+        <ChannelSettingsPanel
+          isOpen={showSettingsPanel}
+          onClose={() => setShowSettingsPanel(false)}
+          channel={channel}
         />
       )}
     </div>

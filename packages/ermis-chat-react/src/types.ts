@@ -624,6 +624,7 @@ export type ChannelInfoCoverProps = {
 export type ChannelInfoActionsProps = {
   onMuteToggle?: () => void;
   onSearchClick?: () => void;
+  onSettingsClick?: () => void;
   onLeaveChannel?: () => void;
   onDeleteChannel?: () => void;
   isTeamChannel?: boolean;
@@ -858,4 +859,17 @@ export type MessageSearchPanelProps = {
   emptyText?: string;
   /** Debounce wait time in ms (default: 500) */
   debounceMs?: number;
+};
+
+/* ----------------------------------------------------------
+   Channel Settings Panel types
+   ---------------------------------------------------------- */
+export type ChannelSettingsPanelProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  channel: Channel;
+  /** Title for the settings panel */
+  title?: string;
+  /** Custom slow mode options */
+  slowModeOptions?: { label: string; value: number }[];
 };

@@ -7,3 +7,4 @@ export * from './LinkListItem';
 export * from './FileListItem';
 export * from './MemberListItem';
 export * from './States';
+export * from './ChannelSettingsPanel';
