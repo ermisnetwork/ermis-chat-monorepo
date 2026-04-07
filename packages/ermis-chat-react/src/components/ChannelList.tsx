@@ -5,6 +5,7 @@ import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-cha
 import { useChatClient } from '../hooks/useChatClient';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
 import { replaceMentionsForPreview, buildUserMap } from '../utils';
+import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
 import { Avatar } from './Avatar';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
@@ -165,31 +166,8 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   AvatarComponent,
   currentUserId,
 }) => {
-  // Track banned state for the current user in this channel
-  const [isBannedInChannel, setIsBannedInChannel] = useState(() => Boolean(channel.state?.membership?.banned));
-
-  useEffect(() => {
-    setIsBannedInChannel(Boolean(channel.state?.membership?.banned));
-
-    const handleBanned = (event: any) => {
-      if (event.member?.user_id === currentUserId) {
-        setIsBannedInChannel(true);
-      }
-    };
-    const handleUnbanned = (event: any) => {
-      if (event.member?.user_id === currentUserId) {
-        setIsBannedInChannel(false);
-      }
-    };
-
-    const sub1 = channel.on('member.banned', handleBanned);
-    const sub2 = channel.on('member.unbanned', handleUnbanned);
-
-    return () => {
-      sub1.unsubscribe();
-      sub2.unsubscribe();
-    };
-  }, [channel, currentUserId]);
+  // Use the new custom hook to handle all row-level realtime updates
+  const { isBannedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
 
   const rawUnreadCount = (channel.state as any)?.unreadCount ?? 0;
   const unreadCount = isBannedInChannel ? 0 : rawUnreadCount;
@@ -199,8 +177,9 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   // so it only executes when VList actually mounts this visible item
   const { text: rawLastMessageText, user: rawLastMessageUser } = useMemo(
     () => getLastMessagePreview(channel),
-    // Recompute if latestMessage changes
-    [channel, channel.state?.latestMessages]
+    // Recompute if latestMessage changes or we get a force update
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [channel, channel.state?.latestMessages, updateCount]
   );
 
   // Hide last message preview when banned
@@ -264,15 +243,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
     loadChannels();
   }, [loadChannels]);
 
-  useEffect(() => {
-    const handleChannelCreated = () => {
-      loadChannels();
-    };
-    const sub = client.on('channel.created', handleChannelCreated);
-    return () => sub.unsubscribe();
-  }, [client, loadChannels]);
-
-  // Real-time: move channel to top on new messages
+  // Real-time: List manipulation (move to top, add, delete)
   useChannelListUpdates(channels, setChannels);
 
   const handleSelect = useCallback(

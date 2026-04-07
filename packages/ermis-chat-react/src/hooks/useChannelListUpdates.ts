@@ -64,22 +64,6 @@ export function useChannelListUpdates(
       });
     };
 
-    // --- message.read: flush UI to clear unread badge ---
-    const handleMessageRead = (event: Event) => {
-      const eventCid = event.cid;
-      if (!eventCid) return;
-
-      // Only care when the current user reads (unreadCount resets)
-      if (event.user?.id !== client.userID) return;
-
-      setChannels((prev) => {
-        const idx = prev.findIndex((ch) => ch.cid === eventCid);
-        if (idx < 0) return prev;
-        // Create a new array reference so ChannelItem re-renders
-        return [...prev];
-      });
-    };
-
     // --- channel.deleted: remove from list and reset active ---
     const handleChannelDeleted = (event: Event) => {
       const eventCid = event.cid || event.channel?.cid;
@@ -105,37 +89,43 @@ export function useChannelListUpdates(
           setActiveChannel(null);
         }
         setChannels((prev) => prev.filter((ch) => ch.cid !== eventCid));
-      } else {
-        // If someone else was removed, just trigger a re-render for UI updates
-        setChannels((prev) => [...prev]);
+      }
+      // Note: We don't trigger a global global re-render here if someone else is removed.
+      // Individual ChannelRow components handle UI updates (e.g., via channel.updated or member.removed events locally).
+    };
+
+    // --- channel.created: fetch channel details and prepend to list ---
+    const handleChannelCreated = async (event: Event) => {
+      const rawChannel = event.channel;
+      if (!rawChannel) return;
+
+      try {
+        // Initialize channel instance and fetch details (messages, members, state)
+        const channelInstance = client.channel(rawChannel.type as string, rawChannel.id as string);
+        await channelInstance.watch();
+
+        setChannels((prev) => {
+          // Double check to prevent duplicates after async pause
+          if (prev.some((c) => c.cid === rawChannel.cid)) {
+            return prev;
+          }
+          return [channelInstance, ...prev];
+        });
+      } catch (err) {
+        console.error('Failed to watch newly created channel:', err);
       }
     };
 
-    // --- channel.updated: re-render to reflect updated name/image/description ---
-    const handleChannelUpdated = (event: Event) => {
-      const eventCid = event.cid || event.channel?.cid;
-      if (!eventCid) return;
-
-      // SDK already mutated channel.data in-place; just flush React state
-      setChannels((prev) => {
-        const idx = prev.findIndex((ch) => ch.cid === eventCid);
-        if (idx < 0) return prev;
-        return [...prev];
-      });
-    };
-
     const sub1 = client.on('message.new', handleNewMessage);
-    const sub2 = client.on('message.read', handleMessageRead);
-    const sub3 = client.on('channel.deleted', handleChannelDeleted);
-    const sub4 = client.on('member.removed', handleMemberRemoved);
-    const sub5 = client.on('channel.updated', handleChannelUpdated);
+    const sub2 = client.on('channel.deleted', handleChannelDeleted);
+    const sub3 = client.on('member.removed', handleMemberRemoved);
+    const sub4 = client.on('channel.created', handleChannelCreated);
 
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
       sub3.unsubscribe();
       sub4.unsubscribe();
-      sub5.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }
