@@ -70,6 +70,8 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   QuotedMessagePreviewComponent = QuotedMessagePreview,
   MessageActionsBoxComponent = MessageActionsBox,
   MessageReactionsComponent = MessageReactions,
+  forwardedLabel = 'Forwarded',
+  editedLabel = 'Edited',
 }) => {
   const { activeChannel, client } = useChatClient();
   const { hasCapability } = useChannelCapabilities();
@@ -152,7 +154,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
           </div>
           <MessageBubble message={message} isOwnMessage={isOwnMessage}>
             {isForwarded && (
-              <span className="ermis-message-list__forwarded-indicator">Forwarded</span>
+              <span className="ermis-message-list__forwarded-indicator">{forwardedLabel}</span>
             )}
             <MessageRenderer message={message} isOwnMessage={isOwnMessage} />
             <span className="ermis-message-list__item-time">
@@ -161,7 +163,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
                   className="ermis-message-list__edited-indicator"
                 // data-tooltip={oldTexts.map((ot: any) => `[${formatTime(ot.created_at)}] ${ot.text}`).join('\n')}
                 >
-                  Edited
+                  {editedLabel}
                 </span>
               )}
               {formatTime(message.created_at)}

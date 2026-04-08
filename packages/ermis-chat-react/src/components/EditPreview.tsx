@@ -42,7 +42,8 @@ export const EditPreview: React.FC<{
 }> = React.memo(({
   message,
   onDismiss,
-}) => {
+  editingMessageLabel = 'Editing message',
+}: any) => {
   console.log('--message--', message)
   const { activeChannel } = useChatClient();
 
@@ -80,7 +81,7 @@ export const EditPreview: React.FC<{
   return (
     <div className="ermis-message-input__reply-preview">
       <div className="ermis-message-input__reply-preview-body">
-        <span className="ermis-message-input__reply-preview-label">Editing message</span>
+        <span className="ermis-message-input__reply-preview-label">{editingMessageLabel}</span>
         <span className="ermis-message-input__reply-preview-user">{userName}</span>
         {previewContent}
       </div>

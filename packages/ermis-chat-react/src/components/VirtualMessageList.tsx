@@ -32,22 +32,22 @@ const DefaultDateSeparator: React.FC<{ label: string }> = React.memo(({ label })
 ));
 (DefaultDateSeparator as any).displayName = 'DefaultDateSeparator';
 
-const DefaultJumpToLatest: React.FC<{ onClick: () => void }> = React.memo(({ onClick }) => (
+const DefaultJumpToLatest = React.memo(({ onClick, label = '↓ Jump to latest' }: any) => (
   <button className="ermis-message-list__jump-latest" onClick={onClick}>
-    ↓ Jump to latest
+    {label}
   </button>
 ));
-(DefaultJumpToLatest as any).displayName = 'DefaultJumpToLatest';
+DefaultJumpToLatest.displayName = 'DefaultJumpToLatest';
 
-const DefaultEmpty = React.memo(() => (
+const DefaultEmpty = React.memo(({ title = 'No messages yet', subtitle = 'Send a message to start the conversation' }: any) => (
   <div className="ermis-message-list__empty">
     <div className="ermis-message-list__empty-icon">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
       </svg>
     </div>
-    <span className="ermis-message-list__empty-title">No messages yet</span>
-    <span className="ermis-message-list__empty-subtitle">Send a message to start the conversation</span>
+    <span className="ermis-message-list__empty-title">{title}</span>
+    <span className="ermis-message-list__empty-subtitle">{subtitle}</span>
   </div>
 ));
 DefaultEmpty.displayName = 'DefaultEmpty';
@@ -98,6 +98,11 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   showTypingIndicator = true,
   TypingIndicatorComponent = TypingIndicator,
   MessageReactionsComponent,
+  emptyTitle = 'No messages yet',
+  emptySubtitle = 'Send a message to start the conversation',
+  jumpToLatestLabel = '↓ Jump to latest',
+  bannedOverlayTitle = 'You have been blocked from this channel',
+  bannedOverlaySubtitle = 'You can no longer read or send messages here',
 }) => {
   const { client, messages, readState, activeChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -335,7 +340,11 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     <div ref={containerRef} className={`ermis-message-list${isBanned ? ' ermis-message-list--banned' : ''}${className ? ` ${className}` : ''}`}>
       {!isBanned && showPinnedMessages && <PinnedMessagesComponent onClickMessage={scrollToMessage} AvatarComponent={AvatarComponent} />}
 
-      {messages.length === 0 && !isBanned && <EmptyStateIndicator />}
+      {messages.length === 0 && !isBanned && (
+        EmptyStateIndicator === DefaultEmpty 
+          ? <DefaultEmpty title={emptyTitle} subtitle={emptySubtitle} /> 
+          : <EmptyStateIndicator />
+      )}
 
       {/* Banned overlay — replaces message content entirely */}
       {isBanned ? (
@@ -346,8 +355,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
               <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
             </svg>
           </div>
-          <span className="ermis-message-list__banned-overlay-title">You have been blocked from this channel</span>
-          <span className="ermis-message-list__banned-overlay-subtitle">You can no longer read or send messages here</span>
+          <span className="ermis-message-list__banned-overlay-title">{bannedOverlayTitle}</span>
+          <span className="ermis-message-list__banned-overlay-subtitle">{bannedOverlaySubtitle}</span>
         </div>
       ) : (
         <VList
@@ -365,7 +374,11 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       {!isBanned && showTypingIndicator && <TypingIndicatorComponent />}
 
       {/* Jump to latest button */}
-      {!isBanned && hasNewer && <JumpToLatestButton onClick={jumpToLatest} />}
+      {!isBanned && hasNewer && (
+        JumpToLatestButton === DefaultJumpToLatest
+          ? <DefaultJumpToLatest onClick={jumpToLatest} label={jumpToLatestLabel} />
+          : <JumpToLatestButton onClick={jumpToLatest} />
+      )}
     </div>
   );
 });

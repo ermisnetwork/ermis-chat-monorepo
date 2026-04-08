@@ -59,6 +59,7 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
   placeholder = 'Search messages...',
   title = 'Search Messages',
   emptyText = 'No messages found',
+  loadingText = 'Searching...',
   debounceMs = 500,
 }) => {
   const { setJumpToMessageId } = useChatClient();
@@ -238,7 +239,7 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
-            <span>Search for messages in this channel</span>
+            <span>{placeholder}</span>
           </div>
         )}
 
@@ -246,7 +247,7 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
         {loading && (
           <div className="ermis-search-panel__loading">
             <div className="ermis-search-panel__spinner" />
-            <span>Searching...</span>
+            <span>{loadingText}</span>
           </div>
         )}
 
@@ -315,7 +316,7 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
         {/* End of results indicator */}
         {!loading && !loadingMore && !hasMore && results.length > 0 && query.trim() && (
           <div className="ermis-search-panel__end-indicator">
-            <span>No more messages</span>
+            <span>{emptyText}</span>
           </div>
         )}
 

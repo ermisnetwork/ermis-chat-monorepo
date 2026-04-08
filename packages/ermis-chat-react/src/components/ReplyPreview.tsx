@@ -39,6 +39,7 @@ function getAttachmentSummary(attachments: any[]): string {
 export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   message,
   onDismiss,
+  replyingToLabel = 'Replying to',
 }) => {
   const { activeChannel } = useChatClient();
 
@@ -76,7 +77,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   return (
     <div className="ermis-message-input__reply-preview">
       <div className="ermis-message-input__reply-preview-body">
-        <span className="ermis-message-input__reply-preview-label">Replying to</span>
+        <span className="ermis-message-input__reply-preview-label">{replyingToLabel}</span>
         <span className="ermis-message-input__reply-preview-user">{userName}</span>
         {previewContent}
       </div>

@@ -33,6 +33,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   EmojiButtonComponent = DefaultEmojiButton,
   ReplyPreviewComponent = ReplyPreview,
   EditPreviewComponent = EditPreview,
+  bannedLabel = 'You have been blocked from this channel',
 }) => {
   const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -361,7 +362,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
             <circle cx="12" cy="12" r="10" />
             <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
           </svg>
-          <span>You have been blocked from this channel</span>
+          <span>{bannedLabel}</span>
         </div>
       </div>
     );

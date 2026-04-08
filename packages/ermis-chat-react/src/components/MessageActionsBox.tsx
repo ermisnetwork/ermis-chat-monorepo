@@ -18,6 +18,12 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
   onCopy,
   onDelete,
   onDeleteForMe,
+  pinLabel = 'Pin',
+  unpinLabel = 'Unpin',
+  editLabel = 'Edit',
+  copyLabel = 'Copy',
+  deleteForMeLabel = 'Delete for me',
+  deleteForEveryoneLabel = 'Delete for everyone',
 }) => {
   const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel } = useChatClient();
   const [anchorRect, setAnchorRect] = React.useState<DOMRect | null>(null);
@@ -135,7 +141,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
               onClick={() => { onPinToggleHandler(message, actions.isPinned); onClose(); }}
               disabled={!actions.hasCapPin}
             >
-              {actions.isPinned ? 'Unpin' : 'Pin'}
+              {actions.isPinned ? unpinLabel : pinLabel}
             </button>
           )}
           {actions.canEdit && (
@@ -144,12 +150,12 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
               onClick={() => { onEditHandler(message); onClose(); }}
               disabled={!actions.hasCapEdit}
             >
-              Edit
+              {editLabel}
             </button>
           )}
           {actions.canCopy && (
             <button className="ermis-dropdown__item" onClick={handleCopy}>
-              Copy
+              {copyLabel}
             </button>
           )}
 
@@ -161,7 +167,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
               onClick={() => { onDeleteForMeHandler(message); onClose(); }}
               disabled={!actions.hasCapDeleteForMe}
             >
-              Delete for me
+              {deleteForMeLabel}
             </button>
           )}
           {actions.canDelete && (
@@ -170,7 +176,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
               onClick={() => { onDeleteForEveryoneHandler(message); onClose(); }}
               disabled={!actions.hasCapDelete}
             >
-              Delete for everyone
+              {deleteForEveryoneLabel}
             </button>
           )}
         </div>

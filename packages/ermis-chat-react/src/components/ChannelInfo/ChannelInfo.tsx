@@ -13,6 +13,7 @@ import type {
   ChannelInfoCoverProps,
   ChannelInfoActionsProps,
 } from '../../types';
+import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData';
 
 export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.memo(({ title, onClose }) => {
   return (
@@ -71,7 +72,8 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
 DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
-  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, isTeamChannel, currentUserRole
+  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, isTeamChannel, currentUserRole,
+  searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', leaveLabel = 'Leave'
 }) => {
   return (
     <div className="ermis-channel-info__actions">
@@ -82,7 +84,7 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </div>
-        <span>Search</span>
+        <span>{searchLabel}</span>
       </button>
       {isTeamChannel && (currentUserRole === 'owner' || currentUserRole === 'moder') && (
         <button className="ermis-channel-info__action-btn" onClick={onSettingsClick}>
@@ -92,7 +94,7 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
             </svg>
           </div>
-          <span>Settings</span>
+          <span>{settingsLabel}</span>
         </button>
       )}
       {isTeamChannel && (
@@ -104,7 +106,7 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
                 <path d="M19 6V20a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
               </svg>
             </div>
-            <span>Delete</span>
+            <span>{deleteLabel}</span>
           </button>
         ) : (
           <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onLeaveChannel}>
@@ -115,7 +117,7 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
                 <line x1="21" y1="12" x2="9" y2="12"></line>
               </svg>
             </div>
-            <span>Leave</span>
+            <span>{leaveLabel}</span>
           </button>
         )
       )}
@@ -137,6 +139,10 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     TabsComponent = DefaultChannelInfoTabs,
     AddMemberModalComponent,
     EditChannelModalComponent,
+    actionsSearchLabel,
+    actionsSettingsLabel,
+    actionsDeleteLabel,
+    actionsLeaveLabel,
     MemberItemComponent,
     MediaItemComponent,
     LinkItemComponent,
@@ -241,19 +247,9 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     try { await channel.demoteModerators([memberId]); } catch (e) { console.error("Error demoting member", e); }
   }, [channel, onDemoteMemberProp]);
 
-  // Reactivity for real-time channel data updates (channel.updated WS event)
-  const [channelUpdateCount, setChannelUpdateCount] = useState(0);
+  const { members } = useChannelMembers(channel);
+  const { channelName, channelImage, channelDescription } = useChannelProfile(channel);
 
-  // Derive channel data from channel.data, reactive to channelUpdateCount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const channelName = useMemo(() => channel?.data?.name || channel?.cid || 'Unknown Channel', [channel?.data?.name, channel?.cid, channelUpdateCount]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const channelImage = useMemo(() => channel?.data?.image as string | undefined, [channel?.data?.image, channelUpdateCount]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const channelDescription = useMemo(() => channel?.data?.description as string | undefined, [channel?.data?.description, channelUpdateCount]);
-
-  // Reactivity for real-time member updates since channel.state.members is mutated in-place by the SDK
-  const [memberUpdateCount, setMemberUpdateCount] = useState(0);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditChannelModal, setShowEditChannelModal] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
@@ -270,39 +266,6 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     if (onAddMemberClick) return onAddMemberClick();
     setShowAddMemberModal(true);
   }, [onAddMemberClick]);
-
-  useEffect(() => {
-    if (!channel) return;
-    const updateMembers = () => setMemberUpdateCount(c => c + 1);
-    const updateChannel = () => setChannelUpdateCount(c => c + 1);
-
-    const sub1 = channel.on('member.added', updateMembers);
-    const sub2 = channel.on('member.removed', updateMembers);
-    const sub3 = channel.on('member.updated', updateMembers);
-    const sub4 = channel.on('member.promoted', updateMembers);
-    const sub5 = channel.on('member.demoted', updateMembers);
-    const sub6 = channel.on('member.banned', updateMembers);
-    const sub7 = channel.on('member.unbanned', updateMembers);
-    const sub8 = channel.on('channel.updated', updateChannel);
-
-    return () => {
-      sub1.unsubscribe();
-      sub2.unsubscribe();
-      sub3.unsubscribe();
-      sub4.unsubscribe();
-      sub5.unsubscribe();
-      sub6.unsubscribe();
-      sub7.unsubscribe();
-      sub8.unsubscribe();
-    };
-  }, [channel]);
-
-  // Extract members
-  const members = useMemo(() => {
-    if (!channel?.state?.members) return [];
-    return Object.values(channel.state.members);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel?.state?.members, memberUpdateCount]);
 
 
 
@@ -342,6 +305,10 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
             onDeleteChannel={handleDeleteChannel}
             isTeamChannel={isTeamChannel}
             currentUserRole={currentUserRole}
+            searchLabel={actionsSearchLabel}
+            settingsLabel={actionsSettingsLabel}
+            deleteLabel={actionsDeleteLabel}
+            leaveLabel={actionsLeaveLabel}
           />
 
           <TabsComponent

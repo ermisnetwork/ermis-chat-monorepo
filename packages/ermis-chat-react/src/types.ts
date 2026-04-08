@@ -209,6 +209,13 @@ export type MessageListProps = {
   TypingIndicatorComponent?: React.ComponentType;
   /** Custom component for message reactions */
   MessageReactionsComponent?: React.ComponentType<MessageReactionsProps>;
+
+  /** I18n Labels */
+  emptyTitle?: string;
+  emptySubtitle?: string;
+  jumpToLatestLabel?: string;
+  bannedOverlayTitle?: string;
+  bannedOverlaySubtitle?: string;
 };
 
 /* ----------------------------------------------------------
@@ -295,6 +302,10 @@ export type MessageItemProps = {
   readBy?: Array<{ id: string; name?: string; avatar?: string }>;
   /** Custom component for message reactions */
   MessageReactionsComponent?: React.ComponentType<MessageReactionsProps>;
+  /** I18n Label for forwarded message */
+  forwardedLabel?: string;
+  /** I18n Label for edited state */
+  editedLabel?: string;
 };
 
 export type SystemMessageItemProps = {
@@ -352,7 +363,9 @@ export type MessageInputProps = {
   /** Custom reply preview component */
   ReplyPreviewComponent?: React.ComponentType<ReplyPreviewProps>;
   /** Custom edit preview component */
-  EditPreviewComponent?: React.ComponentType<{ message: FormatMessageResponse; onDismiss: () => void }>;
+  EditPreviewComponent?: React.ComponentType<{ message: FormatMessageResponse; onDismiss: () => void; editingMessageLabel?: string }>;
+  /** I18n Label for banned state */
+  bannedLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -361,6 +374,7 @@ export type MessageInputProps = {
 export type ReplyPreviewProps = {
   message: FormatMessageResponse;
   onDismiss: () => void;
+  replyingToLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -376,6 +390,14 @@ export type MessageActionsBoxProps = {
   onCopy?: (message: FormatMessageResponse) => void;
   onDelete?: (message: FormatMessageResponse) => void;
   onDeleteForMe?: (message: FormatMessageResponse) => void;
+
+  /** I18n Labels */
+  pinLabel?: string;
+  unpinLabel?: string;
+  editLabel?: string;
+  copyLabel?: string;
+  deleteForMeLabel?: string;
+  deleteForEveryoneLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -628,6 +650,10 @@ export type ChannelInfoActionsProps = {
   onDeleteChannel?: () => void;
   isTeamChannel?: boolean;
   currentUserRole?: string;
+  searchLabel?: string;
+  settingsLabel?: string;
+  deleteLabel?: string;
+  leaveLabel?: string;
 };
 
 export type ChannelInfoMember = {
@@ -819,6 +845,12 @@ export type ChannelInfoProps = {
   editChannelMaxImageSize?: number;
   editChannelMaxImageSizeError?: string;
 
+  /** Action Labels */
+  actionsSearchLabel?: string;
+  actionsSettingsLabel?: string;
+  actionsDeleteLabel?: string;
+  actionsLeaveLabel?: string;
+
   /** Action callbacks */
   onSearchClick?: () => void;
   onLeaveChannel?: () => void;
@@ -849,11 +881,13 @@ export type MessageSearchPanelProps = {
   channel: Channel;
   /** Custom avatar component */
   AvatarComponent?: React.ComponentType<AvatarProps>;
-  /** Placeholder text for the search input */
-  placeholder?: string;
   /** Title for the panel */
   title?: string;
-  /** Text shown when no results are found */
+  /** Search input placeholder */
+  placeholder?: string;
+  /** Text shown when loading */
+  loadingText?: string;
+  /** Text shown when no more messages or no results */
   emptyText?: string;
   /** Debounce wait time in ms (default: 500) */
   debounceMs?: number;
