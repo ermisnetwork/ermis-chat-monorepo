@@ -110,12 +110,6 @@ export function useMessageSend({
       // Instantly injects the `status: 'sending'` message scaffold from SDK into the React map
       syncMessages();
 
-      // Instantly scroll the VirtualMessageList down to reveal this newly injected optimistic object
-      // wait for React to finish rendering the new dom node
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('ermis:scroll-to-bottom', { detail: { smooth: true } }));
-      }, 50);
-
       // --- 1. CLEAR UI IMMEDIATELY (FIRE AND FORGET) ---
       // Clear successful files
       files.forEach((f) => {

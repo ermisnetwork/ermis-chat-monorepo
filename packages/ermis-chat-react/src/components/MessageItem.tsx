@@ -112,11 +112,17 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
         ? 'ermis-message--error'
         : '';
 
+  const isNewMessage = React.useMemo(() => {
+    if (!message.created_at) return false;
+    return Date.now() - new Date(message.created_at).getTime() < 1000;
+  }, [message.created_at]);
+
   const itemClass = [
     'ermis-message-list__item',
     isOwnMessage ? 'ermis-message-list__item--own' : 'ermis-message-list__item--other',
     isFirstInGroup ? 'ermis-message-list__item--group-start' : 'ermis-message-list__item--group-cont',
     isHighlighted ? 'ermis-message-list__item--highlighted' : '',
+    isNewMessage ? 'ermis-message-list__item--new' : '',
     statusClass,
   ].filter(Boolean).join(' ');
 

@@ -33,9 +33,15 @@ export function useChannelMessages({
 
   const scheduleScrollToBottom = useCallback(
     (smooth: boolean) => {
-      SCROLL_DELAYS.forEach((delay) => {
-        setTimeout(() => scrollToBottom(smooth), delay);
-      });
+      if (smooth) {
+        // Trigger smooth scroll exactly once, otherwise browsers will
+        // cancel the smooth animation if called multiple times in a row
+        setTimeout(() => scrollToBottom(true), 100);
+      } else {
+        SCROLL_DELAYS.forEach((delay) => {
+          setTimeout(() => scrollToBottom(false), delay);
+        });
+      }
     },
     [scrollToBottom],
   );
@@ -56,7 +62,7 @@ export function useChannelMessages({
     // Defer scroll outside React lifecycle to avoid virtua flushSync warning
     setTimeout(() => {
       scrollToBottom(false);
-      // Wait long enough for scrollToBottom's internal retries and the browser 
+      // Wait long enough for scrollToBottom's internal retries and the browser
       // to execute the scroll event
       setTimeout(() => {
         jumpingRef.current = false;

@@ -135,17 +135,6 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     handle.scrollToIndex(count - 1, { align: 'end', smooth });
   }, []);
 
-  // Listen for global scroll requests (e.g., optimistic message sends from MessageInput)
-  useEffect(() => {
-    const handleScrollEvent = (e: Event) => {
-      const customEvent = e as CustomEvent;
-
-      scrollToBottom(customEvent.detail?.smooth);
-    };
-    window.addEventListener('ermis:scroll-to-bottom', handleScrollEvent);
-    return () => window.removeEventListener('ermis:scroll-to-bottom', handleScrollEvent);
-  }, [scrollToBottom]);
-
   // Shared guard: skip scroll-triggered loads during jump transitions
   const jumpingRef = useRef(false);
 
@@ -269,7 +258,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
       const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
       const nextType = (nextMsg?.type || 'regular') as MessageLabel;
-      const nextShowDateSeparator = nextMsg 
+      const nextShowDateSeparator = nextMsg
         ? getDateKey(nextMsg.created_at) !== getDateKey(message.created_at)
         : false;
 
@@ -341,8 +330,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       {!isBanned && showPinnedMessages && <PinnedMessagesComponent onClickMessage={scrollToMessage} AvatarComponent={AvatarComponent} />}
 
       {messages.length === 0 && !isBanned && (
-        EmptyStateIndicator === DefaultEmpty 
-          ? <DefaultEmpty title={emptyTitle} subtitle={emptySubtitle} /> 
+        EmptyStateIndicator === DefaultEmpty
+          ? <DefaultEmpty title={emptyTitle} subtitle={emptySubtitle} />
           : <EmptyStateIndicator />
       )}
 

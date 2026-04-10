@@ -170,7 +170,6 @@
   flex-direction: row-reverse;
 }
 
-/* --- Highlight animation for scrolled-to messages --- */
 @keyframes ermis-highlight-fade {
   0% {
     background-color: rgba(99, 102, 241, 0.15);
@@ -178,6 +177,22 @@
   100% {
     background-color: transparent;
   }
+}
+
+/* --- Fade-in animation for new messages --- */
+/* Smooth scroll handles the "slide-up" for the entire list;
+   individual items only need a subtle fade-in. */
+@keyframes ermis-message-fade-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.ermis-message-list__item--new {
+  animation: ermis-message-fade-in 0.35s ease-out forwards;
 }
 
 .ermis-message-list__item--highlighted {
