@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'apps/docs/**' # Chỉ trigger khi có thay đổi trong thư mục docs
+      - 'examples/chat-demo/**'
+      - 'packages/**'
       - '.github/workflows/deploy-docs.yml'
 
 permissions:
@@ -27,6 +29,15 @@ jobs:
 
       - name: Build docs
         run: yarn workspace apps-docs build
+
+      - name: Build Chat Demo
+        env:
+          VITE_BASE_PATH: /ermis-chat-monorepo/demo/
+        run: |
+          cd examples/chat-demo
+          npx vite build
+          cd ../..
+          cp -r examples/chat-demo/dist ./apps/docs/build/demo
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

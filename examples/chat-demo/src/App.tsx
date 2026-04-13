@@ -11,13 +11,17 @@ import {
   type EmojiPickerProps,
 } from '@ermis-network/ermis-chat-react';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
-
-const API_KEY = 'sXhcPu0JneUbQ6TG2tXePK8MC2tBAHn9';
-const PROJECT_ID = 'ec964975-ae84-4a8e-91a1-222ca3aeeef8';
-const BASE_URL = 'https://api-trieve.ermis.network';
-
-const LS_USER_ID_KEY = 'ermis_demo_user_id';
-const LS_USER_TOKEN_KEY = 'ermis_demo_user_token';
+import { LoginForm } from './components/Login/LoginForm';
+import { 
+  DEFAULT_API_KEY, 
+  DEFAULT_PROJECT_ID, 
+  DEFAULT_BASE_URL, 
+  LS_USER_ID_KEY, 
+  LS_USER_TOKEN_KEY, 
+  LS_API_KEY, 
+  LS_PROJECT_ID, 
+  LS_BASE_URL 
+} from './components/Login/constants';
 
 /* -------------------------------------------------------
    Consumer Emoji Picker — wraps emoji-picker-react
@@ -53,149 +57,6 @@ const ConsumerEmojiPicker = ({ onSelect, onClose }: EmojiPickerProps) => {
 };
 
 /* -------------------------------------------------------
-   Login Form
-   ------------------------------------------------------- */
-function LoginForm({ onConnect }: { onConnect: (userId: string, token: string, externalAuth: boolean) => void }) {
-  const [userId, setUserId] = useState(() => localStorage.getItem(LS_USER_ID_KEY) ?? '');
-  const [userToken, setUserToken] = useState(() => localStorage.getItem(LS_USER_TOKEN_KEY) ?? '');
-  const [externalAuth, setExternalAuth] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userId.trim() || !userToken.trim()) {
-      setError('Please enter both User ID and User Token.');
-      return;
-    }
-
-    // Save to localStorage
-    localStorage.setItem(LS_USER_ID_KEY, userId.trim());
-    localStorage.setItem(LS_USER_TOKEN_KEY, userToken.trim());
-
-    setError('');
-    setLoading(true);
-
-    try {
-      await onConnect(userId.trim(), userToken.trim(), externalAuth);
-    } catch (err: any) {
-      setError(err?.message ?? 'Failed to connect. Please check your credentials.');
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-indigo-950">
-      <div className="w-full max-w-md mx-4">
-        {/* Glowing card */}
-        <div className="relative">
-          {/* Glow effect */}
-          <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl blur-lg opacity-30 animate-pulse" />
-
-          <form
-            onSubmit={handleSubmit}
-            className="relative bg-gray-900/80 backdrop-blur-xl border border-gray-700/50 rounded-2xl p-8 shadow-2xl"
-          >
-            {/* Logo / Title */}
-            <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 mb-4 shadow-lg shadow-indigo-500/25">
-                <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-              </div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Ermis Chat Demo</h1>
-              <p className="text-gray-400 text-sm mt-1">Enter your credentials to connect</p>
-            </div>
-
-            {/* User ID */}
-            <div className="mb-5">
-              <label htmlFor="userId" className="block text-sm font-medium text-gray-300 mb-2">
-                User ID
-              </label>
-              <input
-                id="userId"
-                type="text"
-                value={userId}
-                onChange={(e) => setUserId(e.target.value)}
-                placeholder="0x..."
-                className="w-full px-4 py-3 bg-gray-800/60 border border-gray-600/50 rounded-xl text-white placeholder-gray-500 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50
-                           transition-all duration-200"
-              />
-            </div>
-
-            {/* User Token */}
-            <div className="mb-6">
-              <label htmlFor="userToken" className="block text-sm font-medium text-gray-300 mb-2">
-                User Token
-              </label>
-              <textarea
-                id="userToken"
-                value={userToken}
-                onChange={(e) => setUserToken(e.target.value)}
-                placeholder="eyJ..."
-                rows={3}
-                className="w-full px-4 py-3 bg-gray-800/60 border border-gray-600/50 rounded-xl text-white placeholder-gray-500 text-sm resize-none
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50
-                           transition-all duration-200"
-              />
-            </div>
-
-            {/* External Auth Toggle */}
-            <div className="mb-6 flex items-center justify-between">
-              <label htmlFor="externalAuth" className="text-sm font-medium text-gray-300 cursor-pointer">
-                Use External Auth
-              </label>
-              <button
-                type="button"
-                id="externalAuth"
-                role="switch"
-                aria-checked={externalAuth}
-                onClick={() => setExternalAuth(!externalAuth)}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500/50 ${externalAuth ? 'bg-indigo-500' : 'bg-gray-700'
-                  }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${externalAuth ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                />
-              </button>
-            </div>
-
-            {/* Error */}
-            {error && (
-              <div className="mb-4 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
-                {error}
-              </div>
-            )}
-
-            {/* Connect button */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 px-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold rounded-xl
-                         hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed
-                         shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40
-                         transition-all duration-200 cursor-pointer text-sm"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                  Connecting...
-                </span>
-              ) : (
-                'Connect'
-              )}
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------
    Main App
    ------------------------------------------------------- */
 function App() {
@@ -209,21 +70,29 @@ function App() {
   useEffect(() => {
     const savedUserId = localStorage.getItem(LS_USER_ID_KEY);
     const savedToken = localStorage.getItem(LS_USER_TOKEN_KEY);
+    const savedApiKey = localStorage.getItem(LS_API_KEY) ?? DEFAULT_API_KEY;
+    const savedProjectId = localStorage.getItem(LS_PROJECT_ID) ?? DEFAULT_PROJECT_ID;
+    const savedBaseUrl = localStorage.getItem(LS_BASE_URL) ?? DEFAULT_BASE_URL;
 
     if (savedUserId && savedToken) {
       // For auto-connect, we default to false or we'd need to store externalAuth in localStorage too
-      connectChat(savedUserId, savedToken, false);
+      connectChat(savedUserId, savedToken, false, savedApiKey, savedProjectId, savedBaseUrl);
     }
   }, []);
 
-  const connectChat = async (userId: string, token: string, externalAuth: boolean) => {
+  const connectChat = async (userId: string, token: string, externalAuth: boolean, apiKey: string, projectId: string, baseUrl: string) => {
+    let chatClient: ErmisChat | null = null;
     try {
       // Disconnect previous client if any
       if (clientRef.current) {
         await clientRef.current.disconnectUser();
       }
 
-      const chatClient = ErmisChat.getInstance(API_KEY, PROJECT_ID, BASE_URL);
+      chatClient = ErmisChat.getInstance(apiKey, projectId, baseUrl);
+      
+      // Reduce the default WS timeout for the demo app login so invalid connections fail fast instead of hanging
+      chatClient.defaultWSTimeout = 3000;
+
       await chatClient.connectUser({ id: userId }, token, externalAuth);
 
       clientRef.current = chatClient;
@@ -232,6 +101,10 @@ function App() {
       setShowLogin(false);
     } catch (err) {
       console.error('Failed to connect:', err);
+      // Ensure we clean up any background reconnection loops if the initial connect fails
+      if (chatClient) {
+        chatClient.disconnectUser();
+      }
       throw err; // re-throw so LoginForm can display the error
     }
   };

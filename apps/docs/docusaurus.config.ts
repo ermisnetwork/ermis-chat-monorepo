@@ -61,6 +61,12 @@ const config: Config = {
           label: 'React UI Kit',
         },
         {
+          href: 'pathname:///ermis-chat-monorepo/demo/',
+          label: 'Live Demo',
+          target: '_blank',
+          position: 'right',
+        },
+        {
           href: 'https://github.com/ermisnetwork/ermis-chat-monorepo',
           label: 'GitHub',
           position: 'right',
