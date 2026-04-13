@@ -354,3 +354,36 @@
 .ermis-message-input__blocked-banner svg {
   flex-shrink: 0;
 }
+
+/* ----------------------------------------------------------
+   Banners
+   ---------------------------------------------------------- */
+.ermis-message-input__keyword-banner {
+  padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
+  background-color: var(--ermis-bg-danger-light, #fee2e2);
+  border-radius: var(--ermis-radius-md) var(--ermis-radius-md) 0 0;
+  font-size: var(--ermis-font-size-sm, 13px);
+  color: var(--ermis-text-danger, #ef4444);
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+  border-bottom: 1px solid var(--ermis-border-danger, #fca5a5);
+}
+
+.ermis-message-input__permission-banner,
+.ermis-message-input__slow-mode-banner {
+  padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
+  background-color: var(--ermis-bg-secondary);
+  border-radius: var(--ermis-radius-md) var(--ermis-radius-md) 0 0;
+  font-size: var(--ermis-font-size-sm, 13px);
+  color: var(--ermis-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+  border-bottom: 1px solid var(--ermis-border-color);
+}
+
+.ermis-message-input__row--banners-active {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}

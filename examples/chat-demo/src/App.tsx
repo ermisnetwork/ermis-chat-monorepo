@@ -202,7 +202,7 @@ function App() {
   const [client, setClient] = useState<ErmisChat | null>(null);
   const [connected, setConnected] = useState(false);
   const [showLogin, setShowLogin] = useState(true);
-  const [showChannelInfo, setShowChannelInfo] = useState(true);
+  const [showChannelInfo, setShowChannelInfo] = useState(false);
   const clientRef = useRef<ErmisChat | null>(null);
 
   // Auto-connect if credentials exist in localStorage
@@ -259,7 +259,7 @@ function App() {
         {/* Sidebar - Channel List */}
         <div className="w-80 border-r border-gray-800 flex flex-col">
           <div className="flex-1 overflow-y-auto">
-            <ChannelList />
+            <ChannelList onChannelSelect={() => setShowChannelInfo(false)} />
           </div>
           {/* Logout button */}
           <div className="p-3 border-t border-gray-800">
@@ -276,11 +276,13 @@ function App() {
         <div className="flex-1 flex flex-col min-w-0">
           <Channel>
             <ChannelHeader
-              renderRight={() => (
+              renderRight={(_, actionDisabled) => (
                 <button
                   onClick={() => setShowChannelInfo(!showChannelInfo)}
-                  className="p-2 text-gray-400 hover:text-indigo-400 transition-colors"
+                  className="p-2 text-gray-400 hover:text-indigo-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   aria-label="Toggle Channel Info"
+                  disabled={actionDisabled}
+                  title={actionDisabled ? "Features are currently locked" : "Toggle Channel Info"}
                 >
                   <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

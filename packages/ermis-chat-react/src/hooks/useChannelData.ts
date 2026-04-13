@@ -15,6 +15,7 @@ export const useChannelMembers = (channel: Channel | null | undefined) => {
     const sub5 = channel.on('member.demoted', updateMembers);
     const sub6 = channel.on('member.banned', updateMembers);
     const sub7 = channel.on('member.unbanned', updateMembers);
+    const sub8 = channel.on('notification.invite_rejected', updateMembers);
 
     return () => {
       sub1.unsubscribe();
@@ -24,12 +25,13 @@ export const useChannelMembers = (channel: Channel | null | undefined) => {
       sub5.unsubscribe();
       sub6.unsubscribe();
       sub7.unsubscribe();
+      sub8.unsubscribe();
     };
   }, [channel]);
 
   const membersArray = useMemo(() => {
     if (!channel?.state?.members) return [];
-    return Object.values(channel.state.members) as any[];
+    return Object.values(channel.state.members) as Array<Record<string, unknown>>;
   }, [channel?.state?.members, memberUpdateCount]);
 
   return { members: membersArray, memberUpdateCount };

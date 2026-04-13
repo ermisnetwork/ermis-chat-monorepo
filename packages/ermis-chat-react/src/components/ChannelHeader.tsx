@@ -1,5 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
+import { usePendingState } from '../hooks/usePendingState';
+import { useBannedState } from '../hooks/useBannedState';
+import { useBlockedState } from '../hooks/useBlockedState';
 import { Avatar } from './Avatar';
 import type { ChannelHeaderProps } from '../types';
 
@@ -26,7 +29,10 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   renderRight,
   renderTitle,
 }) => {
-  const { activeChannel } = useChatClient();
+  const { activeChannel, client } = useChatClient();
+  const { isPending } = usePendingState(activeChannel, client.userID);
+
+  const actionDisabled = isPending;
 
   // Force re-render when channel.updated WS event fires
   const [channelUpdateCount, setChannelUpdateCount] = useState(0);
@@ -66,9 +72,10 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
         )}
       </div>
 
+      {/* renderRight exposes actionDisabled for consumers to disable UI features natively */}
       {renderRight && (
         <div className="ermis-channel-header__actions">
-          {renderRight(activeChannel)}
+          {renderRight(activeChannel, actionDisabled)}
         </div>
       )}
     </div>

@@ -249,11 +249,11 @@
    ---------------------------------------------------------- */
 
 .ermis-message-list__banned-overlay {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  min-height: calc(100dvh - 8rem);
   gap: var(--ermis-spacing-md);
   user-select: none;
 }
@@ -307,5 +307,110 @@
 }
 
 .ermis-message-list__unblock-btn:active {
+  transform: translateY(0);
+}
+
+/* Pending Overlay */
+.ermis-message-list__pending-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100dvh - 8rem);
+  padding: var(--ermis-spacing-xl);
+}
+
+.ermis-message-list__pending-card {
+  background-color: var(--ermis-bg-elevated, #ffffff);
+  border-radius: var(--ermis-radius-lg, 12px);
+  padding: var(--ermis-spacing-xxl, 32px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 400px;
+  width: 100%;
+}
+
+.ermis-message-list__pending-avatar {
+  margin-bottom: var(--ermis-spacing-lg, 16px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.ermis-message-list__pending-overlay-title {
+  font-family: var(--ermis-font-family, sans-serif);
+  font-size: var(--ermis-font-size-md, 14px);
+  font-weight: 500;
+  color: var(--ermis-text-secondary, #666);
+  margin-bottom: var(--ermis-spacing-xs, 4px);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ermis-message-list__pending-channel-name {
+  font-family: var(--ermis-font-family, sans-serif);
+  font-size: var(--ermis-font-size-xl, 20px);
+  font-weight: 700;
+  color: var(--ermis-text, #333);
+  margin-bottom: var(--ermis-spacing-sm, 8px);
+}
+
+.ermis-message-list__pending-overlay-subtitle {
+  font-family: var(--ermis-font-family, sans-serif);
+  font-size: var(--ermis-font-size-sm, 14px);
+  color: var(--ermis-text-secondary, #666);
+  margin-bottom: var(--ermis-spacing-xl, 24px);
+  line-height: 1.5;
+}
+
+.ermis-message-list__pending-actions {
+  display: flex;
+  gap: var(--ermis-spacing-md, 12px);
+  width: 100%;
+}
+
+.ermis-message-list__accept-btn,
+.ermis-message-list__reject-btn {
+  flex: 1;
+  padding: var(--ermis-spacing-sm, 10px) var(--ermis-spacing-md, 16px);
+  border-radius: var(--ermis-radius-md, 8px);
+  font-family: var(--ermis-font-family, sans-serif);
+  font-size: var(--ermis-font-size-md, 15px);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--ermis-transition, 0.2s ease);
+}
+
+.ermis-message-list__accept-btn {
+  border: none;
+  background-color: var(--ermis-accent, #005fff);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(0, 95, 255, 0.2);
+}
+
+.ermis-message-list__accept-btn:hover {
+  background-color: var(--ermis-accent-hover, #004ecc);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(0, 95, 255, 0.3);
+}
+
+.ermis-message-list__accept-btn:active {
+  transform: translateY(0);
+}
+
+.ermis-message-list__reject-btn {
+  border: 1px solid var(--ermis-danger-border, #fecaca);
+  background-color: var(--ermis-danger-soft, #fef2f2);
+  color: var(--ermis-danger, #ef4444);
+}
+
+.ermis-message-list__reject-btn:hover {
+  background-color: var(--ermis-danger, #ef4444);
+  color: #fff;
+  border-color: var(--ermis-danger, #ef4444);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(239, 68, 68, 0.3);
+}
+.ermis-message-list__reject-btn:active {
   transform: translateY(0);
 }

@@ -4,9 +4,11 @@ import type { MessageLabel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useBannedState } from '../hooks/useBannedState';
 import { useBlockedState } from '../hooks/useBlockedState';
+import { usePendingState } from '../hooks/usePendingState';
 import { useLoadMessages } from '../hooks/useLoadMessages';
 import { useScrollToMessage } from '../hooks/useScrollToMessage';
 import { useChannelMessages } from '../hooks/useChannelMessages';
+import { useChannelProfile } from '../hooks/useChannelData';
 import { Avatar } from './Avatar';
 import { MessageItem } from './MessageItem';
 import { SystemMessageItem } from './MessageItem';
@@ -106,10 +108,18 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   bannedOverlaySubtitle = 'You can no longer read or send messages here',
   blockedOverlayTitle = 'You have blocked this user',
   blockedOverlaySubtitle = 'Unblock to continue the conversation',
+  pendingOverlayTitle = 'You are invited to this channel',
+  pendingOverlaySubtitle = 'Accept the invitation to view messages and interact',
+  pendingAcceptLabel = 'Accept',
+  pendingRejectLabel = 'Reject',
 }) => {
   const { client, messages, readState, activeChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
+  const { isPending } = usePendingState(activeChannel, client.userID);
+
+  const { channelName, channelImage } = useChannelProfile(activeChannel);
+
   const vlistRef = useRef<VListHandle>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -121,7 +131,22 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     return containerRef.current?.querySelector('.ermis-message-list__vlist') ?? null;
   }, []);
 
-  /* ---------- Scroll to bottom helper ---------- */
+  const handleAcceptInvite = useCallback(async () => {
+    if (!activeChannel) return;
+    try {
+      const isPublicTeam = activeChannel.type === 'team' && Boolean(activeChannel.data?.public);
+      const action = isPublicTeam ? 'join' : 'accept';
+      await activeChannel.acceptInvite(action);
+    } catch (e: any) {
+      console.error('Error accepting invite', e);
+    }
+  }, [activeChannel]);
+
+  const handleRejectInvite = useCallback(() => {
+    if (!activeChannel) return;
+    activeChannel.rejectInvite().catch((e: any) => console.error('Error rejecting invite', e));
+  }, [activeChannel]);
+
   const scrollToBottom = useCallback((smooth = false, attempts = 0) => {
     const handle = vlistRef.current;
     if (!handle) return;
@@ -335,49 +360,60 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     <div ref={containerRef} className={`ermis-message-list${isBanned ? ' ermis-message-list--banned' : ''}${blockedClass}${className ? ` ${className}` : ''}`}>
       {!isBanned && !isBlocked && showPinnedMessages && <PinnedMessagesComponent onClickMessage={scrollToMessage} AvatarComponent={AvatarComponent} />}
 
-      {messages.length === 0 && !isBanned && (
+      {messages.length === 0 && !isBanned && !isPending && (
         EmptyStateIndicator === DefaultEmpty
           ? <DefaultEmpty title={emptyTitle} subtitle={emptySubtitle} />
           : <EmptyStateIndicator />
       )}
 
-      {/* Banned/Blocked overlay — replaces message content entirely */}
-      {(isBanned || isBlocked) ? (
-        <div className="ermis-message-list__banned-overlay">
-          <div className="ermis-message-list__banned-overlay-icon">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-            </svg>
+      {/* VList always rendered so virtua keeps its viewport measurement */}
+      <VList
+        key={activeChannel?.cid || 'empty'}
+        ref={vlistRef}
+        shift={shiftMode}
+        onScroll={handleScroll}
+        className="ermis-message-list__vlist"
+      >
+        {isPending && !isBanned && !isBlocked ? (
+          <div className="ermis-message-list__pending-overlay">
+            <div className="ermis-message-list__pending-card">
+              <Avatar image={channelImage} name={channelName} size={64} className="ermis-message-list__pending-avatar" />
+              <span className="ermis-message-list__pending-overlay-title">{pendingOverlayTitle}</span>
+              <div className="ermis-message-list__pending-channel-name">{channelName}</div>
+              <span className="ermis-message-list__pending-overlay-subtitle">{pendingOverlaySubtitle}</span>
+              <div className="ermis-message-list__pending-actions">
+                <button className="ermis-message-list__reject-btn" onClick={handleRejectInvite}>{pendingRejectLabel}</button>
+                <button className="ermis-message-list__accept-btn" onClick={handleAcceptInvite}>{pendingAcceptLabel}</button>
+              </div>
+            </div>
           </div>
-          <span className="ermis-message-list__banned-overlay-title">{isBlocked ? blockedOverlayTitle : bannedOverlayTitle}</span>
-          <span className="ermis-message-list__banned-overlay-subtitle">{isBlocked ? blockedOverlaySubtitle : bannedOverlaySubtitle}</span>
-          {isBlocked && activeChannel && (
-            <button
-              className="ermis-message-list__unblock-btn"
-              onClick={() => { activeChannel.unblockUser().catch((e: any) => console.error('Error unblocking user', e)); }}
-            >
-              Unblock
-            </button>
-          )}
-        </div>
-      ) : (
-        <VList
-          key={activeChannel?.cid || 'empty'}
-          ref={vlistRef}
-          shift={shiftMode}
-          onScroll={handleScroll}
-          className="ermis-message-list__vlist"
-        >
-          {messageElements}
-        </VList>
-      )}
+        ) : (isBanned || isBlocked) && !isPending ? (
+          <div className="ermis-message-list__banned-overlay">
+            <div className="ermis-message-list__banned-overlay-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+              </svg>
+            </div>
+            <span className="ermis-message-list__banned-overlay-title">{isBlocked ? blockedOverlayTitle : bannedOverlayTitle}</span>
+            <span className="ermis-message-list__banned-overlay-subtitle">{isBlocked ? blockedOverlaySubtitle : bannedOverlaySubtitle}</span>
+            {isBlocked && activeChannel && (
+              <button
+                className="ermis-message-list__unblock-btn"
+                onClick={() => { activeChannel.unblockUser().catch((e: any) => console.error('Error unblocking user', e)); }}
+              >
+                Unblock
+              </button>
+            )}
+          </div>
+        ) : messageElements}
+      </VList>
 
       {/* Typing indicator */}
-      {!isBanned && !isBlocked && showTypingIndicator && <TypingIndicatorComponent />}
+      {!isBanned && !isBlocked && !isPending && showTypingIndicator && <TypingIndicatorComponent />}
 
       {/* Jump to latest button */}
-      {!isBanned && !isBlocked && hasNewer && (
+      {!isBanned && !isBlocked && !isPending && hasNewer && (
         JumpToLatestButton === DefaultJumpToLatest
           ? <DefaultJumpToLatest onClick={jumpToLatest} label={jumpToLatestLabel} />
           : <JumpToLatestButton onClick={jumpToLatest} />

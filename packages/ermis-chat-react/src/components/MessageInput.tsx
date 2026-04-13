@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useChatClient } from '../hooks/useChatClient';
 import { useBannedState } from '../hooks/useBannedState';
 import { useBlockedState } from '../hooks/useBlockedState';
+import { usePendingState } from '../hooks/usePendingState';
 import { useMentions } from '../hooks/useMentions';
 import { useFileUpload } from '../hooks/useFileUpload';
 import { useEmojiPicker } from '../hooks/useEmojiPicker';
@@ -36,10 +37,17 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   EditPreviewComponent = EditPreview,
   bannedLabel = 'You have been blocked from this channel',
   blockedLabel = 'You have blocked this user. Unblock to send messages.',
+  linksDisabledLabel = 'Message blocked: Sending links is disabled for members.',
+  keywordBlockedLabel = (match: string) => `Message blocked: Contains restricted word "${match}".`,
+  sendDisabledLabel = 'Sending messages is disabled in this channel.',
+  slowModeLabel = (cooldown: number) => (
+    <>Slow mode is active. You can send another message in <strong>{cooldown}s</strong>.</>
+  ),
 }) => {
   const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
+  const { isPending } = usePendingState(activeChannel, client.userID);
   const editableRef = React.useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
 
@@ -51,8 +59,8 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   useEffect(() => {
     if (!activeChannel) return;
     setMemberMessageCooldown(Number(activeChannel.data?.member_message_cooldown) || 0);
-    const handleUpdate = (event: any) => {
-      const channelData = event?.channel || activeChannel.data;
+    const handleUpdate = (event: Record<string, unknown>) => {
+      const channelData = (event?.channel as Record<string, unknown>) || activeChannel.data;
       setMemberMessageCooldown(Number(channelData?.member_message_cooldown) || 0);
     };
     activeChannel.on('channel.updated', handleUpdate);
@@ -142,7 +150,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       // Basic URL matching config
       const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/[^\s]*)?)/i;
       if (urlRegex.test(text)) {
-        setKeywordError(`Message blocked: Sending links is disabled for members.`);
+        setKeywordError(linksDisabledLabel);
         return false;
       }
     }
@@ -153,7 +161,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       const lowerText = text.toLowerCase();
       const match = words.find(w => lowerText.includes(w.toLowerCase()));
       if (match) {
-        setKeywordError(`Message blocked: Contains restricted word "${match}".`);
+        setKeywordError(keywordBlockedLabel(match));
         // We could also visually shake the input box here
         return false;
       }
@@ -235,9 +243,10 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   const members = useMemo<MentionMember[]>(() => {
     if (!isTeamChannel) return [];
     const list: MentionMember[] = [];
-    const stateMembers = (activeChannel?.state as any)?.members;
+    const stateMembers = activeChannel?.state?.members as Record<string, unknown> | undefined;
     if (stateMembers && typeof stateMembers === 'object') {
-      for (const [id, member] of Object.entries<any>(stateMembers)) {
+      for (const [id, memberVal] of Object.entries(stateMembers)) {
+        const member = memberVal as Record<string, any>;
         list.push({
           id,
           name: member?.user?.name || member?.user_id || id,
@@ -356,6 +365,9 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
   if (!activeChannel) return null;
 
+  // Don't show input for pending invitations at all
+  if (isPending) return null;
+
   // Show banned banner instead of input
   if (isBanned) {
     return (
@@ -414,7 +426,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
       {/* Keyword Error Banner */}
       {keywordError && (
-        <div style={{ padding: '8px 16px', background: 'var(--ermis-bg-danger-light, #fee2e2)', borderRadius: '8px 8px 0 0', fontSize: '13px', color: 'var(--ermis-text-danger, #ef4444)', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--ermis-border-danger, #fca5a5)' }}>
+        <div className="ermis-message-input__keyword-banner">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
           {keywordError}
         </div>
@@ -422,22 +434,22 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
       {/* Permission Disabled Banner */}
       {!canSendMessage && !editingMessage && (
-        <div style={{ padding: '8px 16px', background: 'var(--ermis-bg-secondary)', borderRadius: '8px 8px 0 0', fontSize: '13px', color: 'var(--ermis-text-secondary)', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--ermis-border-color)' }}>
+        <div className="ermis-message-input__permission-banner">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-          Sending messages is disabled in this channel.
+          {sendDisabledLabel}
         </div>
       )}
 
       {/* Slow Mode Cooldown Banner */}
       {canSendMessage && isSlowModeBlocked && !keywordError && (
-        <div style={{ padding: '8px 16px', background: 'var(--ermis-bg-secondary)', borderRadius: '8px 8px 0 0', fontSize: '13px', color: 'var(--ermis-text-secondary)', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--ermis-border-color)' }}>
+        <div className="ermis-message-input__slow-mode-banner">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          Slow mode is active. You can send another message in <strong style={{ color: 'var(--ermis-text-primary)' }}>{cooldown}s</strong>.
+          {typeof slowModeLabel === 'function' ? slowModeLabel(cooldown) : slowModeLabel}
         </div>
       )}
 
       {/* Text input + send row */}
-      <div className="ermis-message-input__row" style={(!canSendMessage || isSlowModeBlocked || keywordError) ? { borderTopLeftRadius: 0, borderTopRightRadius: 0 } : {}}>
+      <div className={`ermis-message-input__row${(!canSendMessage || isSlowModeBlocked || keywordError) ? ' ermis-message-input__row--banners-active' : ''}`}>
         <div className="ermis-message-input__editable-wrapper">
           {canSendMessage && isTeamChannel && !disableMentions && showSuggestions && (
             <MentionSuggestionsComponent

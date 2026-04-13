@@ -95,16 +95,41 @@ export function useChannelMessages({
       // If the current user's block status was updated (meaning we unblocked someone)
       if (event.member?.user_id === client.userID) {
         // Refetch latest messages to fill in any missed during the block period
-        activeChannel.query({ messages: { limit: 30 } })
+        activeChannel
+          .query({ messages: { limit: 30 } })
           .then(() => {
             syncMessages();
             scheduleScrollToBottom(false);
-            activeChannel.markRead().catch(() => {});
+            const isPending =
+              activeChannel.state?.membership?.channel_role === 'pending' ||
+              (activeChannel.state?.membership as any)?.role === 'pending';
+            if (!isPending) {
+              activeChannel.markRead().catch(() => {});
+            }
           })
           .catch((e) => console.error('Failed to sync messages after unblock', e));
       }
     };
 
+    const handleInviteAccepted = (event: Event) => {
+      // Make sure the accepted invite corresponds to the actively opened channel
+      const eventCid =
+        event.cid ||
+        event.channel?.cid ||
+        ((event as any).channel_id ? `${(event as any).channel_type}:${(event as any).channel_id}` : undefined);
+      if (eventCid === activeChannel.cid) {
+        activeChannel
+          .query({ messages: { limit: 30 } })
+          .then(() => {
+            syncMessages();
+            scheduleScrollToBottom(false);
+            activeChannel.markRead().catch(() => {});
+          })
+          .catch((e) => console.error('Failed to sync messages after accepting invite', e));
+      }
+    };
+
+    const client = activeChannel.getClient();
     const sub1 = activeChannel.on('message.new', handleNewMessage);
     const sub2 = activeChannel.on('message.updated', handleMessageChange);
     const sub3 = activeChannel.on('message.deleted', handleMessageChange);
@@ -115,6 +140,7 @@ export function useChannelMessages({
     const sub8 = activeChannel.on('reaction.new', handleMessageChange);
     const sub9 = activeChannel.on('reaction.deleted', handleMessageChange);
     const sub10 = activeChannel.on('member.unblocked', handleUnblocked);
+    const sub11 = client.on('notification.invite_accepted', handleInviteAccepted);
 
     return () => {
       sub1.unsubscribe();
@@ -127,6 +153,7 @@ export function useChannelMessages({
       sub8.unsubscribe();
       sub9.unsubscribe();
       sub10.unsubscribe();
+      sub11.unsubscribe();
     };
   }, [activeChannel, scrollToBottom, scheduleScrollToBottom, syncMessages, onChannelSwitch, setReadState]);
 }

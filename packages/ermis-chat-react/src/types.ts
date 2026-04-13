@@ -93,7 +93,7 @@ export type ChannelHeaderProps = {
   /** Subtitle text (e.g. member count, online status) */
   subtitle?: string;
   /** Render custom content on the right side */
-  renderRight?: (channel: Channel) => React.ReactNode;
+  renderRight?: (channel: Channel, actionDisabled?: boolean) => React.ReactNode;
   /** Override default title rendering */
   renderTitle?: (channel: Channel) => React.ReactNode;
 };
@@ -119,6 +119,12 @@ export type ChannelItemProps = {
   AvatarComponent: React.ComponentType<AvatarProps>;
   /** Whether the current user has blocked this channel (messaging only) */
   isBlocked?: boolean;
+  /** Whether the current user is pending an invitation for this channel */
+  isPending?: boolean;
+  /** Label for the pending channel badge indicator */
+  pendingBadgeLabel?: string;
+  /** Label for the blocked channel badge indicator */
+  blockedBadgeLabel?: string;
 };
 
 export type ChannelListProps = {
@@ -128,11 +134,23 @@ export type ChannelListProps = {
   renderChannel?: (channel: Channel, isActive: boolean) => React.ReactNode;
   onChannelSelect?: (channel: Channel) => void;
   className?: string;
-  LoadingIndicator?: React.ComponentType;
-  EmptyStateIndicator?: React.ComponentType;
+  LoadingIndicator?: React.ComponentType<{ text?: string }>;
+  EmptyStateIndicator?: React.ComponentType<{ text?: string }>;
   AvatarComponent?: React.ComponentType<AvatarProps>;
   /** Replace the default channel list item component */
   ChannelItemComponent?: React.ComponentType<ChannelItemProps>;
+  /** Label for the pending invites accordion header */
+  pendingInvitesLabel?: string | ((count: number) => string);
+  /** Label for the regular channels section header */
+  channelsLabel?: string;
+  /** Label for the pending channel badge indicator */
+  pendingBadgeLabel?: string;
+  /** Label for the loading indicator */
+  loadingLabel?: string;
+  /** Label for the empty state indicator */
+  emptyStateLabel?: string;
+  /** Label for the blocked channel badge hover */
+  blockedBadgeLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -220,6 +238,10 @@ export type MessageListProps = {
   bannedOverlaySubtitle?: string;
   blockedOverlayTitle?: string;
   blockedOverlaySubtitle?: string;
+  pendingOverlayTitle?: string;
+  pendingOverlaySubtitle?: string;
+  pendingAcceptLabel?: string;
+  pendingRejectLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -372,6 +394,14 @@ export type MessageInputProps = {
   bannedLabel?: string;
   /** I18n Label for blocked state (messaging channels) */
   blockedLabel?: string;
+  /** I18n Label for links disabled error */
+  linksDisabledLabel?: string;
+  /** I18n Label for keyword blocked error */
+  keywordBlockedLabel?: (match: string) => string;
+  /** I18n Label for sending capability disabled */
+  sendDisabledLabel?: string;
+  /** I18n Label for slow mode active */
+  slowModeLabel?: (cooldown: number) => React.ReactNode;
 };
 
 /* ----------------------------------------------------------

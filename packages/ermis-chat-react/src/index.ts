@@ -13,6 +13,7 @@ export { useChannelListUpdates } from './hooks/useChannelListUpdates';
 export { useChannelRowUpdates } from './hooks/useChannelRowUpdates';
 export { useBannedState } from './hooks/useBannedState';
 export { useBlockedState } from './hooks/useBlockedState';
+export { usePendingState } from './hooks/usePendingState';
 
 // Components
 export { Avatar } from './components/Avatar';

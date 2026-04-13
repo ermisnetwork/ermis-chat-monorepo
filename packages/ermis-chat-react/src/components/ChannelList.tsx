@@ -6,6 +6,7 @@ import { useChatClient } from '../hooks/useChatClient';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
 import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
+import { usePendingState } from '../hooks/usePendingState';
 import { Avatar } from './Avatar';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
@@ -59,8 +60,9 @@ function getLastMessagePreview(
   }
 
   // Format mentions if necessary
-  const mentionedUsers = (lastMsg as any).mentioned_users;
-  const mentionedAll = (lastMsg as any).mentioned_all;
+  const lastMsgRecord = lastMsg as Record<string, unknown>;
+  const mentionedUsers = lastMsgRecord.mentioned_users as string[] | undefined;
+  const mentionedAll = lastMsgRecord.mentioned_all as boolean | undefined;
 
   if (displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
     const userMap = buildUserMap(channel.state);
@@ -86,6 +88,9 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   onSelect,
   AvatarComponent,
   isBlocked,
+  isPending,
+  pendingBadgeLabel,
+  blockedBadgeLabel,
 }) => {
   // Subscribe to channel.updated so that when name/image/description change,
   // we re-render from within (bypasses React.memo which only blocks parent-driven re-renders)
@@ -108,6 +113,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
     isActive ? 'ermis-channel-list__item--active' : '',
     showUnread ? 'ermis-channel-list__item--unread' : '',
     isBlocked ? 'ermis-channel-list__item--blocked' : '',
+    isPending ? 'ermis-channel-list__item--pending' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -132,25 +138,28 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
         </span>
       )}
       {isBlocked && (
-        <span className="ermis-channel-list__blocked-icon" title="Blocked">
+        <span className="ermis-channel-list__blocked-icon" title={blockedBadgeLabel || "Blocked"}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
             <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
           </svg>
         </span>
       )}
+      {isPending && (
+        <span className="ermis-channel-list__pending-badge">{pendingBadgeLabel || 'Invited'}</span>
+      )}
     </div>
   );
 });
 ChannelItem.displayName = 'ChannelItem';
 
-const DefaultLoading = React.memo(() => (
-  <div className="ermis-channel-list__loading">Loading channels...</div>
+const DefaultLoading = React.memo(({ text }: { text?: string }) => (
+  <div className="ermis-channel-list__loading">{text || 'Loading channels...'}</div>
 ));
 DefaultLoading.displayName = 'DefaultLoading';
 
-const DefaultEmpty = React.memo(() => (
-  <div className="ermis-channel-list__empty">No channels found</div>
+const DefaultEmpty = React.memo(({ text }: { text?: string }) => (
+  <div className="ermis-channel-list__empty">{text || 'No channels found'}</div>
 ));
 DefaultEmpty.displayName = 'DefaultEmpty';
 
@@ -165,6 +174,8 @@ type ChannelRowProps = {
   ChannelItemComponent: React.ComponentType<ChannelItemProps>;
   AvatarComponent: React.ComponentType<any>;
   currentUserId?: string;
+  pendingBadgeLabel?: string;
+  blockedBadgeLabel?: string;
 };
 
 const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
@@ -175,12 +186,16 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   ChannelItemComponent,
   AvatarComponent,
   currentUserId,
+  pendingBadgeLabel,
+  blockedBadgeLabel,
 }) => {
   // Use the new custom hook to handle all row-level realtime updates
   const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
+  const { isPending } = usePendingState(channel, currentUserId);
 
-  const rawUnreadCount = (channel.state as any)?.unreadCount ?? 0;
-  const unreadCount = (isBannedInChannel || isBlockedInChannel) ? 0 : rawUnreadCount;
+  const channelState = channel.state as unknown as Record<string, unknown> | undefined;
+  const rawUnreadCount = (channelState?.unreadCount as number) ?? 0;
+  const unreadCount = (isBannedInChannel || isBlockedInChannel || isPending) ? 0 : rawUnreadCount;
   const hasUnread = unreadCount > 0;
 
   // Derive last message preview computation is deferred here, 
@@ -192,9 +207,9 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
     [channel, channel.state?.latestMessages, updateCount]
   );
 
-  // Hide last message preview when banned or blocked
-  const lastMessageText = (isBannedInChannel || isBlockedInChannel) ? '' : rawLastMessageText;
-  const lastMessageUser = (isBannedInChannel || isBlockedInChannel) ? '' : rawLastMessageUser;
+  // Hide last message preview when banned, blocked, or pending
+  const lastMessageText = (isBannedInChannel || isBlockedInChannel || isPending) ? '' : rawLastMessageText;
+  const lastMessageUser = (isBannedInChannel || isBlockedInChannel || isPending) ? '' : rawLastMessageUser;
 
   if (renderChannel) {
     return (
@@ -215,15 +230,18 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       onSelect={handleSelect}
       AvatarComponent={AvatarComponent}
       isBlocked={isBlockedInChannel}
+      isPending={isPending}
+      pendingBadgeLabel={pendingBadgeLabel}
+      blockedBadgeLabel={blockedBadgeLabel}
     />
   );
 });
 ChannelRow.displayName = 'ChannelRow';
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
-  filters = { type: ['messaging', 'team'], include_pinned_messages: true } as ChannelFilters,
+  filters = { type: ['messaging', 'team'], include_pinned_messages: true } as unknown as ChannelFilters,
   sort = [],
-  options = { message_limit: 25 } as any,
+  options = { message_limit: 25 } as unknown as ChannelListProps['options'],
   renderChannel,
   onChannelSelect,
   className,
@@ -231,17 +249,42 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   EmptyStateIndicator = DefaultEmpty,
   AvatarComponent = Avatar,
   ChannelItemComponent = ChannelItem,
+  pendingInvitesLabel,
+  channelsLabel = 'Channels',
+  pendingBadgeLabel,
+  loadingLabel,
+  emptyStateLabel = 'No channels found',
+  blockedBadgeLabel = 'Blocked',
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isPendingExpanded, setIsPendingExpanded] = useState(true);
+
+  // Group channels into pending and regular
+  const { pendingChannels, regularChannels } = useMemo<{ pendingChannels: Channel[], regularChannels: Channel[] }>(() => {
+    const pending: Channel[] = [];
+    const regular: Channel[] = [];
+    
+    channels.forEach(ch => {
+      const ms = ch.state?.membership as Record<string, unknown> | undefined;
+      const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
+      if (isPending) {
+        pending.push(ch);
+      } else {
+        regular.push(ch);
+      }
+    });
+
+    return { pendingChannels: pending, regularChannels: regular };
+  }, [channels]);
 
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
 
   const loadChannels = useCallback(async () => {
     try {
       setLoading(true);
-      const result = await client.queryChannels(filters, sort, options);
+      const result = await client.queryChannels(filters, sort, options as { message_limit?: number });
       setChannels(result);
     } catch (err) {
       console.error('Failed to load channels:', err);
@@ -262,27 +305,71 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       setActiveChannel(channel);
       onChannelSelect?.(channel);
 
-      // Mark as read when user selects a channel (skip if banned or blocked)
-      const isBannedInChannel = Boolean(channel.state?.membership?.banned);
-      const isBlockedInChannel = channel.type === 'messaging' && Boolean(channel.state?.membership?.blocked);
-      if (!isBannedInChannel && !isBlockedInChannel && (channel.state as any)?.unreadCount > 0) {
+      // Mark as read when user selects a channel (skip if banned, blocked, or pending)
+      const ms = channel.state?.membership as Record<string, unknown> | undefined;
+      const chState = channel.state as unknown as Record<string, unknown> | undefined;
+      const isBannedInChannel = Boolean(ms?.banned);
+      const isBlockedInChannel = channel.type === 'messaging' && Boolean(ms?.blocked);
+      const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
+      
+      if (!isBannedInChannel && !isBlockedInChannel && !isPending && (chState?.unreadCount as number) > 0) {
         channel.markRead().catch(() => { });
         // Optimistically reset unread to update UI immediately
-        (channel.state as any).unreadCount = 0;
+        if (chState) chState.unreadCount = 0;
         setChannels((prev) => [...prev]);
       }
     },
     [setActiveChannel, onChannelSelect, setChannels],
   );
 
-  if (loading) return <LoadingIndicator />;
-  if (channels.length === 0) return <EmptyStateIndicator />;
+  if (loading) return <LoadingIndicator text={loadingLabel} />;
+  if (channels.length === 0) return <EmptyStateIndicator text={emptyStateLabel} />;
 
   return (
-    <div className={`ermis-channel-list${className ? ` ${className}` : ''}`} style={{ height: '100%' }}>
+    <div className={`ermis-channel-list${className ? ` ${className}` : ''}`}>
       {/* VList requires its container to have a height to work. */}
       <VList style={{ height: '100%' }}>
-        {channels.map((channel) => {
+        {pendingChannels.length > 0 && (
+          <div 
+            className="ermis-channel-list__accordion-header" 
+            onClick={() => setIsPendingExpanded(prev => !prev)}
+          >
+            <span>
+              {typeof pendingInvitesLabel === 'function'
+                ? pendingInvitesLabel(pendingChannels.length)
+                : pendingInvitesLabel || `Invites (${pendingChannels.length})`}
+            </span>
+            <svg 
+              className={`ermis-channel-list__accordion-icon ${isPendingExpanded ? 'ermis-channel-list__accordion-icon--expanded' : ''}`}
+              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+            >
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </div>
+        )}
+        {isPendingExpanded && pendingChannels.map((channel: Channel) => {
+          const isActive = activeChannel?.cid === channel.cid;
+          return (
+            <ChannelRow
+              key={channel.cid}
+              channel={channel}
+              isActive={isActive}
+              handleSelect={handleSelect}
+              renderChannel={renderChannel}
+              ChannelItemComponent={ChannelItemComponent}
+              AvatarComponent={AvatarComponent}
+              currentUserId={client.userID}
+              pendingBadgeLabel={pendingBadgeLabel}
+              blockedBadgeLabel={blockedBadgeLabel}
+            />
+          );
+        })}
+        {pendingChannels.length > 0 && regularChannels.length > 0 && (
+          <div className="ermis-channel-list__accordion-header ermis-channel-list__accordion-header--static">
+            <span>{channelsLabel}</span>
+          </div>
+        )}
+        {regularChannels.map((channel: Channel) => {
           const isActive = activeChannel?.cid === channel.cid;
 
           return (
@@ -295,6 +382,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               ChannelItemComponent={ChannelItemComponent}
               AvatarComponent={AvatarComponent}
               currentUserId={client.userID}
+              pendingBadgeLabel={pendingBadgeLabel}
+              blockedBadgeLabel={blockedBadgeLabel}
             />
           );
         })}
