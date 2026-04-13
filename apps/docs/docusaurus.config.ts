@@ -10,9 +10,13 @@ const config: Config = {
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
-  url: 'https://docs.ermis.network',
+  url: 'https://ermisnetwork.github.io',
   // Set the /<baseUrl>/ pathname under which your site is served
-  baseUrl: '/',
+  baseUrl: '/ermis-chat-monorepo/',
+  organizationName: 'ermisnetwork', // Usually your GitHub org/user name.
+  projectName: 'ermis-chat-monorepo', // Usually your repo name.
+  deploymentBranch: 'gh-pages',
+  trailingSlash: false,
 
   onBrokenLinks: 'ignore',
   onBrokenMarkdownLinks: 'warn',
