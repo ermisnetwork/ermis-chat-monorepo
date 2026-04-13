@@ -4,32 +4,38 @@ sidebar_position: 5
 
 # UI Components
 
-Beyond the core structural providers, the UI Kit exposes several standalone **UI Components**. These building blocks are heavily utilized internally but exported explicitly so you can use them when overriding layouts or building completely custom views.
+Beyond the base providers, the UI Kit exposes several standalone **UI Components**. These functional elements are utilized internally but exported explicitly so you can reuse them when building custom views. 
+
+---
 
 ## `<Avatar />`
 
-A versatile avatar component that expertly handles image rendering, fallback initials when images are missing, and customizable sizing.
+A versatile graphic component that handles profile image rendering, fallback initials processing, and uniform sizing.
 
 ### Props
 
 | Prop | Type | Description |
 | ---- | ---- | ----------- |
-| `image` | `string` | The URL of the avatar image. |
-| `name` | `string` | Used to generate fallback initials if `image` is null or fails to load. |
-| `size` | `number` | Square size dimension in pixels (Defaults to `36`). |
-| `className` | `string` | Additional CSS class for styling. |
+| `image` | `string \| null` | Profile image URL. |
+| `name` | `string` | String for initial fallbacks. |
+| `size` | `number` | Dimension in pixels (Default 36). |
+| `className` | `string` | Custom CSS injection. |
 
 ### Example
-
+If an `image` is passed as null or fails to load, `<Avatar />` handles gracefully extracting initials from the `name` prompt automatically.
 ```tsx
 import { Avatar } from '@ermis-network/ermis-chat-react';
 
-export const CustomUserBadge = () => (
-  <Avatar 
-    image="https://example.com/avatar.png"
-    name="Tony Nguyen" 
-    size={48} 
-  />
+export const UserListing = ({ user }) => (
+  <div className="flex items-center space-x-2">
+    <Avatar 
+      image={user.avatarUrl} // Passes null properly
+      name={user.fullName || "Anonymous"} 
+      size={40} 
+      className="shadow-sm border border-gray-100"
+    />
+    <span>{user.fullName}</span>
+  </div>
 );
 ```
 
@@ -37,29 +43,28 @@ export const CustomUserBadge = () => (
 
 ## `<ChannelHeader />`
 
-A preset header component conventionally placed at the top of a `<Channel />`. It displays the active channel's automatically resolved title, avatar, and sub-status (e.g., online member count).
+A preset layout element placed atop the channel container, displaying the active channel metadata.
 
 ### Props
 
 | Prop | Type | Description |
 | ---- | ---- | ----------- |
-| `title` | `string` | Overrides the automatically resolved channel name. |
-| `image` | `string` | Overrides the channel's default avatar image. |
-| `subtitle` | `string` | Subtitle text (useful for member counts or connection status). |
-| `renderRight` | `(channel: Channel) => React.ReactNode` | Render custom UI components like "Video Call" or "Menu" buttons on the far right edge. |
-| `renderTitle` | `(channel: Channel) => React.ReactNode` | Fully replace the central title formatting area. |
-| `AvatarComponent`| `React.ComponentType<AvatarProps>`| Override the left-aligned avatar graphic. |
-| `className` | `string` | Additional CSS class for styling. |
+| `title` | `string` | Contextual title text. |
+| `image` | `string` | Channel image mapping. |
+| `subtitle` | `string` | Minor contextual strings. |
+| `renderRight` | `(channel: Channel) => React.ReactNode` | Anchor rightward nodes. |
+| `renderTitle` | `(channel: Channel) => React.ReactNode` | Bypass central views. |
+| `AvatarComponent`| `React.ComponentType<AvatarProps>`| Override left graphic. |
+| `className` | `string` | Adjust boundary styles. |
 
 ### Example
-
 ```tsx
 import { ChannelHeader } from '@ermis-network/ermis-chat-react';
 
-export const CustomHeader = () => (
+export const CustomHeader = ({ channel }) => (
   <ChannelHeader 
-    renderRight={() => <button className="call-btn">Start Call</button>}
-    subtitle="3 members online"
+    subtitle={`${Object.keys(channel.state.members).length} members online`}
+    renderRight={() => <button className="video-call-btn w-6 h-6">📹</button>}
   />
 );
 ```
@@ -68,45 +73,145 @@ export const CustomHeader = () => (
 
 ## `<TypingIndicator />`
 
-A subtle, localized animated indicator that displays who is currently typing within the active channel. This is typically injected natively at the bottom of `<VirtualMessageList />`, but you can extract and reposition it anywhere in your UI.
+An animated float tracking keystrokes within the group. Mounted at the timeline floor.
 
-*Note*: State is internally managed by `VirtualMessageList` using `useTypingIndicator` unless used outside of typical flows.
+*(Internal Note: State resolves via `VirtualMessageList` linking `useTypingIndicator` unless used manually).*
 
 ### Props
 
 | Prop | Type | Description |
 | ---- | ---- | ----------- |
-| `renderText` | `(users: TypingUser[]) => React.ReactNode` | Custom render function for the typing text. If not provided, default formatting is used. |
+| `renderText` | `(users: TypingUser[]) => React.ReactNode` | Replaces standard maps. |
+
+### Example
+```tsx
+import { TypingIndicator } from '@ermis-network/ermis-chat-react';
+
+export const CustomIndicatorBox = () => (
+   <TypingIndicator 
+      renderText={(users) => {
+         if (users.length === 0) return null;
+         return <span className="text-gray-400 italic">Someone is typing...</span>;
+      }}
+   />
+);
+```
 
 ---
 
 ## `<PinnedMessages />`
 
-A specialized banner typically rendered across the top edge of the message timeline to display messages that moderators have pinned. 
+A sticky header panel mounting pinned message arrays.
 
 ### Props
 
 | Prop | Type | Description |
 | ---- | ---- | ----------- |
-| `onClickMessage`| `(messageId: string) => void` | Event triggered to scroll/jump back down to the original pinned message node when clicked. |
-| `maxCollapsed` | `number` | Determines how many messages to show before stacking and burying the rest under a toggle (Default: `1`). |
-| `PinnedMessageItemComponent` | `React.ComponentType<PinnedMessageItemProps>` | Custom override renderer for the individual pinned alert rows. |
-| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Override the default avatar renderer for messages. |
-| `className` | `string` | Additional CSS class for styling. |
+| `className` | `string` | Framework layout variable. |
+| `onClickMessage`| `(messageId: string) => void` | Event mapping jumps. |
+| `maxCollapsed` | `number` | Limit before grouping. |
+| `PinnedMessageItemComponent` | `React.ComponentType<PinnedMessageItemProps>` | Individual row element. |
+| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Override profile icon. |
 
 ---
 
 ## `<ReadReceipts />`
 
-A lightweight UI component to display small avatars of users who have read a specific message. Includes highly customizable tooltip capabilities when hovering over the avatars.
+A mini status list reflecting user read arrays. Contains floating context labels.
 
 ### Props
 
 | Prop | Type | Description |
 | ---- | ---- | ----------- |
-| `readers` | `ReadContext[]` | Array of read info objects containing user data and timestamps. |
-| `maxAvatars` | `number` | Maximum number of avatars to render before showing an overflow +N indicator (Default: `5`). |
-| `showTooltip` | `boolean` | Whether to display the tooltip on hover (Default: `true`). |
-| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Override for the tiny avatar image representations. |
-| `TooltipComponent` | `React.ComponentType<ReadReceiptsTooltipProps>` | Override for the hover tooltip layout and logic. |
+| `readers` | `ReadReceiptUser[]` | User state references. |
+| `maxAvatars` | `number` | Truncation cutoff number. |
+| `showTooltip` | `boolean` | Activates hover popup. |
+| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Visual element format. |
+| `TooltipComponent` | `React.ComponentType<ReadReceiptsTooltipProps>` | Interface element logic. |
+| `isOwnMessage` | `boolean` | Validates target structure. |
+| `isLastInGroup` | `boolean` | Constraints logic bound. |
+| `status` | `string` | Transmit log variable. |
 
+---
+
+## `<MessageSearchPanel />`
+
+A heavy-duty layout menu designed to securely query entire channel arrays. 
+
+### Core Modal Props
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `isOpen` | `boolean` | Conditional render boundary. |
+| `onClose` | `() => void` | Unmounts visual hierarchy. |
+| `channel` | `Channel` | Exact timeline contexts. |
+| `debounceMs` | `number` | Frame metric limiting HTTP queries (Default 500). |
+
+### Layout Props
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Override visual template. |
+| `title` | `string` | Top bar title. |
+| `placeholder` | `string` | Input box hint. |
+| `loadingText` | `string` | Loading prompt logic. |
+| `emptyText` | `string` | Miss alert boundary. |
+
+### Example
+```tsx
+import { MessageSearchPanel, useChannel } from '@ermis-network/ermis-chat-react';
+
+export const SearchManager = ({ isSearchOpen, closeSearch }) => {
+  const { channel } = useChannel();
+  
+  if (!channel) return null;
+
+  return (
+    <MessageSearchPanel 
+      isOpen={isSearchOpen}
+      onClose={closeSearch}
+      channel={channel}
+      title="Search Conversation"
+      emptyText="No exact messages matched this query."
+    />
+  );
+};
+```
+
+---
+
+## `<ChannelSettingsPanel />`
+
+The central modular control board wrapping configurations cleanly. 
+
+### Props
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `isOpen` | `boolean` | Node tracking visibility. |
+| `onClose` | `() => void` | Removal execution callback. |
+| `channel` | `Channel` | Overrides native context. |
+| `title` | `string` | Header string block. |
+| `slowModeOptions` | `{ label: string, value: number }[]` | Rate cap mapping. |
+
+### Example
+```tsx
+import { ChannelSettingsPanel, useChannel } from '@ermis-network/ermis-chat-react';
+
+export const SettingsManager = ({ isSettingsOpen, closeSettings }) => {
+  const { channel } = useChannel();
+  
+  if (!channel) return null;
+
+  return (
+    <ChannelSettingsPanel 
+      isOpen={isSettingsOpen}
+      onClose={closeSettings}
+      channel={channel}
+      title="Room Preferences"
+      slowModeOptions={[
+        { label: 'Off', value: 0 }, 
+        { label: '5s delay', value: 5 }, 
+        { label: '1m delay', value: 60 }
+      ]}
+    />
+  );
+};
+```

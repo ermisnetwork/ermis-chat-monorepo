@@ -11,32 +11,34 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Easy to Use',
+    title: 'Highly Optimized',
     Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
     description: (
       <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
+        Designed with high performance in mind, our 
+        <strong> Virtualized Lists</strong> architecture handles tens of thousands 
+        of messages without lagging, mirroring native app performance.
       </>
     ),
   },
   {
-    title: 'Focus on What Matters',
+    title: 'Limitless Customization',
     Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
     description: (
       <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
+        Take absolute control of the UI logic with 19+ powerful <code>Custom Hooks</code>. 
+        Override or completely replace any component with your own interface layer seamlessly.
       </>
     ),
   },
   {
-    title: 'Powered by React',
+    title: 'Real-time Synchronization',
     Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
     description: (
       <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
+        Integrated deeply with the <strong>Ermis SDK</strong> to capture and render 
+        Socket Events instantly. Show active typing indicators, presence 
+        states, and read receipts flawlessly.
       </>
     ),
   },

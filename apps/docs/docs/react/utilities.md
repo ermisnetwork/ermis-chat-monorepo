@@ -4,78 +4,218 @@ sidebar_position: 9
 
 # Utility Functions
 
-Beyond heavy layout components and React custom hooks, the Ermis Chat React framework exports a suite of functional utilities that are universally utilized deeply within its architecture. 
+Beyond layouts and hooks, the Ermis Chat React framework exports a suite of specialized functional utilities. These helpers natively power the core platform and are exposed so you can easily maintain parsing synchronicity across your custom components.
 
-It is highly recommended that you incorporate these helpers within your own localized code when replacing date separators or tracking message identification contexts to guarantee format compliance reliably against the core platform.
+---
 
-## Date Formatting
+## Date & Time Formatting
+
+Helpers standardizing temporal structures across the interface.
 
 ### `formatTime(date)`
 `formatTime(date: Date | string | undefined): string`
 
-Formats javascript `Date` objects or ISO strings effectively into a localized time string (`HH:MM AM/PM`). It is predominantly employed to construct timestamps displayed beside user avatars on message rows.
+Translates instances into short localized time strings (`HH:MM`). Commonly used to render message receipt indicators.
 
 ```tsx
 import { formatTime } from '@ermis-network/ermis-chat-react';
 
-const timeStr = formatTime(new Date(message.created_at));
-// => "8:45 AM"
+const stamp = formatTime(new Date()); 
+// => "08:45 AM"
+```
+
+### `formatReadTimestamp(date)`
+`formatReadTimestamp(date: Date | string | undefined): string`
+
+Validates durations natively identifying edge proximities, formatting verbose strings (e.g., "HH:MM, Today" or "HH:MM, MM/DD/YYYY").
+
+```tsx
+import { formatReadTimestamp } from '@ermis-network/ermis-chat-react';
+
+const log = formatReadTimestamp(message.read_at);
+// => "08:45 AM, Yesterday"
 ```
 
 ### `getDateKey(date)`
 `getDateKey(date: Date | string | undefined): string`
 
-Calculates a unique, strictly formatted daily string payload (e.g. `2024-11-23`) from timestamps. The engine heavily employs this mapping to collate isolated messages into continuous blocks that correspond tightly to a specific day logic grouping.
+Calculates a strictly uniform `YYYY-M-D` string payload. Used internally to group disparate timelines into contiguous visual buckets without timezone glitches.
 
 ```tsx
 import { getDateKey } from '@ermis-network/ermis-chat-react';
 
-const groupingId = getDateKey(new Date()); 
+const blockId = getDateKey(message.created_at); 
 // => "2024-11-23"
 ```
 
 ### `formatDateLabel(date)`
 `formatDateLabel(date: Date | string | undefined): string`
 
-Transforms internal timestamps into colloquial descriptive strings prominently utilized for rendering `DateSeparator` horizontal barriers across the Message ListView interface.
+Generates human-friendly barrier labels for timeline markers ("Today", "Yesterday", or "November 23, 2024").
 
 ```tsx
 import { formatDateLabel } from '@ermis-network/ermis-chat-react';
 
-const barrierLabel = formatDateLabel(new Date());
-// => "Today", "Yesterday", or "November 23, 2024"
+const separatorText = formatDateLabel(currentBlock.date);
+```
+
+### `formatRelativeDate(dateStr)`
+`formatRelativeDate(dateStr: string): string`
+
+Provides responsive interval identifiers dynamically (e.g., "3d ago", "Mon 23"). Excellent for Sidebar channel row previews where space is limited.
+
+```tsx
+import { formatRelativeDate } from '@ermis-network/ermis-chat-react';
+
+const shortLog = formatRelativeDate(channel.updated_at);
+// => "3d ago"
 ```
 
 ---
 
-## Message Metadata Helpers
+## User Data & Mentions
+
+Safe extractors and string formatters avoiding manual Regex parsing.
 
 ### `getMessageUserId(message)`
 `getMessageUserId(message: FormatMessageResponse): string`
 
-Safely traces user identification payload attributes across dynamically typed Message variants to obtain the singular source/author ID deterministically.
+Resolves the absolute User ID across heavily nested or historically deprecated message payload structures safely.
 
 ```tsx
 import { getMessageUserId } from '@ermis-network/ermis-chat-react';
 
-const authorId = getMessageUserId(messagePayload);
+const authorId = getMessageUserId(payload);
+```
+
+### `buildUserMap(channelState)`
+`buildUserMap(channelState: any): Record<string, string>`
+
+Traverses the active channel structure generating a flat dictionary translating raw User IDs to their formatted Display Names automatically.
+
+```tsx
+import { buildUserMap, useChannel } from '@ermis-network/ermis-chat-react';
+
+const { channel } = useChannel();
+const map = buildUserMap(channel?.state);
+// => { "user-123": "Tony", "user-456": "Alice" }
 ```
 
 ### `replaceMentionsForPreview(text, message, userMap, [renderWrapper])`
 `replaceMentionsForPreview(text: string, message: FormatMessageResponse, userMap: Record<string, string>, renderWrapper?: Function): string`
 
-Extracts raw payload sequences carrying structured `@uuid` configurations embedded natively by the text buffers, replacing them uniformly with nicely formatted `@Username` syntaxes cleanly meant for sidebar channel previews or push notification derivations.
+Extracts inline UUID mention payloads (e.g., `@user-123`) from text streams and maps them into human-readable strings (`@Tony`) using the generated `userMap`.
 
 ```tsx
 import { replaceMentionsForPreview } from '@ermis-network/ermis-chat-react';
 
-// Example: building a fast user map lookup from channel state
-const userMap = { '12345': 'Tony Nguyen' };
+const readable = replaceMentionsForPreview(rawText, message, map);
+// => "Hello @Tony"
+```
 
-// Parses 'Hello @12345' into 'Hello @Tony Nguyen'
-const cleanPreviewText = replaceMentionsForPreview(
-   rawMessageObject.text, 
-   rawMessageObject,
-   userMap
-);
+---
+
+## DOM & Caret Helpers
+
+Niche methods explicitly resolving ContentEditable cursor tracking.
+
+### `moveCaretToEnd(el)`
+`moveCaretToEnd(el: HTMLElement): void`
+
+Calculates selection ranges natively jumping the browser cursor directly to the terminal end of an active input box container.
+
+```tsx
+import { moveCaretToEnd } from '@ermis-network/ermis-chat-react';
+
+const inputRef = useRef<HTMLDivElement>(null);
+// On mount focus:
+moveCaretToEnd(inputRef.current);
+```
+
+### `moveCaretAfterNode(node)`
+`moveCaretAfterNode(node: Node): void`
+
+Locates a specific injected DOM boundary (like an `@mention` graphic node) and forces the cursor to trail exactly following it.
+
+```tsx
+import { moveCaretAfterNode } from '@ermis-network/ermis-chat-react';
+
+moveCaretAfterNode(insertedBadgeElement);
+```
+
+---
+
+## Media & File Parsing
+
+File handling and network utilities mitigating custom component bugs.
+
+### `isUserManagedAttachment(attachment)`
+`isUserManagedAttachment(attachment: Attachment): boolean`
+
+Filters custom media uploads intelligently versus system-injected cards (like link previews or slash command integrations).
+
+```tsx
+import { isUserManagedAttachment } from '@ermis-network/ermis-chat-react';
+
+const userFiles = message.attachments.filter(isUserManagedAttachment);
+```
+
+### `getDisplayName(fileName)`
+`getDisplayName(fileName: string): string`
+
+Strips ugly encrypted UUID prefixes aggressively prepended by CDNs from the absolute filename.
+
+```tsx
+import { getDisplayName } from '@ermis-network/ermis-chat-react';
+
+const safeText = getDisplayName("1234-uuid-xyz-doc.pdf");
+// => "doc.pdf"
+```
+
+### `formatFileSize(bytes)`
+`formatFileSize(bytes: number): string`
+
+Translates numerical memory weights into rounded readable identifiers.
+
+```tsx
+import { formatFileSize } from '@ermis-network/ermis-chat-react';
+
+const log = formatFileSize(1254000); 
+// => "1.2 MB"
+```
+
+### `extractDomain(url)`
+`extractDomain(url: string): string`
+
+Safely wraps internal URL parsers preventing runtime crashes on malformed edge-case string links.
+
+```tsx
+import { extractDomain } from '@ermis-network/ermis-chat-react';
+
+const anchor = extractDomain("https://github.com/ermisnetwork");
+// => "github.com"
+```
+
+### `preloadImage(url)`
+`preloadImage(url: string): void`
+
+Registers image payloads inside an intelligent 500-item memory cache logic. Drastically smoothing virtual scrolling by negating HTTP waterfall queues visually.
+
+```tsx
+import { preloadImage } from '@ermis-network/ermis-chat-react';
+
+preloadImage("https://cdn.example.com/huge-image.png");
+```
+
+### `isImagePreloaded(url)`
+`isImagePreloaded(url: string): boolean`
+
+Cross-verifies cache signatures deterministically bypassing duplicate HTTP load operations.
+
+```tsx
+import { isImagePreloaded } from '@ermis-network/ermis-chat-react';
+
+if (!isImagePreloaded(url)) {
+   setDisplaySpinner(true);
+}
 ```

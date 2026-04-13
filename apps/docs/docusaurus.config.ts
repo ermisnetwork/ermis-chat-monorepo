@@ -80,7 +80,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Ermis Network. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Ermis Network. All rights reserved.`,
     },
     prism: {
       theme: prismThemes.github,
