@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - main
-    # Chỉ chạy pipeline khi có thay đổi trong packages
+    # Chỉ chạy pipeline khi có thay đổi trong packages hoặc khi tự sửa file workflow này
     paths:
       - 'packages/ermis-chat-react/**'
       - 'packages/ermis-chat-sdk/**'
+      - '.github/workflows/publish-sdks.yml'
 
 jobs:
   publish:
