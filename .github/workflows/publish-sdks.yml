@@ -1,0 +1,42 @@
+name: Publish SDKs to NPM
+
+on:
+  push:
+    branches:
+      - main
+    # Chỉ chạy pipeline khi có thay đổi trong packages
+    paths:
+      - 'packages/ermis-chat-react/**'
+      - 'packages/ermis-chat-sdk/**'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18 # Sử dụng node 18 theo package.json
+          registry-url: 'https://registry.npmjs.org'
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build SDKs
+        run: yarn build
+
+      - name: Publish Ermis Chat SDK Core
+        # Thêm biến môi trường NODE_AUTH_TOKEN trỏ đến NPM_TOKEN
+        # flag --access public để cho phép publish package scoped
+        run: cmd="npm publish --access public" && $cmd || echo "Version already exists or failed to publish"
+        working-directory: packages/ermis-chat-sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish Ermis Chat React UI
+        run: cmd="npm publish --access public" && $cmd || echo "Version already exists or failed to publish"
+        working-directory: packages/ermis-chat-react
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
