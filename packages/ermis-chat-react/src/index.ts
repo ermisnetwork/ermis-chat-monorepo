@@ -127,3 +127,11 @@ export type {
   AddMemberUserItemProps,
   AddMemberButtonProps,
 } from './types';
+
+export { UserPicker } from './components/UserPicker';
+export type {
+  UserPickerProps,
+  UserPickerUser,
+  UserPickerItemProps,
+  UserPickerSelectedBoxProps,
+} from './types';

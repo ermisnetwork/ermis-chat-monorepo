@@ -215,3 +215,44 @@ export const SettingsManager = ({ isSettingsOpen, closeSettings }) => {
   );
 };
 ```
+
+---
+
+## `<UserPicker />`
+
+A versatile, virtualized list component for searching and selecting users. Supports single (`radio`) and multiple (`checkbox`) selection modes, local-first search with remote fallback, and infinite scrolling.
+
+### Props
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `mode` | `'radio' \| 'checkbox'` | Selection mode. |
+| `onSelectionChange` | `(users: UserPickerUser[]) => void` | Callback when selection updates. |
+| `excludeUserIds` | `string[]` | Array of user IDs to show as disabled. |
+| `initialSelectedUsers`| `UserPickerUser[]` | Users pre-selected on component mount. |
+| `pageSize` | `number` | Items per page for infinite scroll (Default 30). |
+| `AvatarComponent` | `React.ComponentType` | Override avatar visual. |
+| `searchPlaceholder` | `string` | Placeholder for search input. |
+| `selectedEmptyLabel`| `string` | Text to show in checkbox mode when no users are selected. |
+
+### Example
+```tsx
+import { UserPicker } from '@ermis-network/ermis-chat-react';
+import { useState } from 'react';
+
+export const AddMembersPanel = ({ existingMemberIds }) => {
+  const [selected, setSelected] = useState([]);
+
+  return (
+    <div className="h-96">
+      <UserPicker 
+        mode="checkbox"
+        excludeUserIds={existingMemberIds}
+        onSelectionChange={(users) => setSelected(users)}
+        searchPlaceholder="Type a name or email..."
+        selectedEmptyLabel="Select users to add..."
+      />
+    </div>
+  );
+};
+```

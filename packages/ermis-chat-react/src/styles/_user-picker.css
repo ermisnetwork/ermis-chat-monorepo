@@ -1,0 +1,268 @@
+/* ============================================================
+   UserPicker – Reusable User Selection Component
+   BEM: .ermis-user-picker__{element}--{modifier}
+   ============================================================ */
+
+/* ---------- Root container ---------- */
+.ermis-user-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ermis-spacing-md, 0.75rem);
+}
+
+/* ---------- Selected Users Chip Box ---------- */
+.ermis-user-picker__selected-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ermis-spacing-xs, 0.25rem);
+  padding: var(--ermis-spacing-sm, 0.5rem);
+  border-radius: var(--ermis-radius-md, 0.5rem);
+  background-color: var(--ermis-bg-secondary, #111118);
+  border: 1px solid var(--ermis-border, rgba(255, 255, 255, 0.08));
+  min-height: 40px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.ermis-user-picker__selected-box:empty {
+  display: none;
+}
+
+.ermis-user-picker__selected-box::-webkit-scrollbar {
+  width: 4px;
+}
+.ermis-user-picker__selected-box::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ermis-user-picker__selected-box::-webkit-scrollbar-thumb {
+  background: var(--ermis-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--ermis-radius-full, 9999px);
+}
+
+.ermis-user-picker__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ermis-spacing-xs, 0.25rem);
+  padding: 2px 8px 2px 2px;
+  border-radius: var(--ermis-radius-full, 9999px);
+  background-color: var(--ermis-bg-active, rgba(99, 102, 241, 0.12));
+  color: var(--ermis-text-primary, #e5e7eb);
+  font-size: var(--ermis-font-size-xs, 0.75rem);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color var(--ermis-transition, 150ms ease);
+  animation: ermis-user-picker-chip-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ermis-user-picker-chip-in {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.ermis-user-picker__chip:hover {
+  background-color: var(--ermis-accent, #6366f1);
+  color: #ffffff;
+}
+
+.ermis-user-picker__chip-name {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ermis-user-picker__chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  border-radius: var(--ermis-radius-full, 9999px);
+  opacity: 0.7;
+  transition: opacity var(--ermis-transition, 150ms ease);
+}
+
+.ermis-user-picker__chip-remove:hover {
+  opacity: 1;
+}
+
+.ermis-user-picker__selected-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  color: var(--ermis-text-muted, #6b7280);
+  font-size: var(--ermis-font-size-xs, 0.75rem);
+}
+
+/* ---------- Search Input ---------- */
+.ermis-user-picker__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ermis-user-picker__search svg {
+  position: absolute;
+  left: 12px;
+  color: var(--ermis-text-muted, #6b7280);
+  pointer-events: none;
+}
+
+.ermis-user-picker__search input {
+  width: 100%;
+  padding: 10px 12px 10px 38px;
+  border-radius: var(--ermis-radius-md, 0.5rem);
+  border: 1px solid var(--ermis-border, rgba(255, 255, 255, 0.08));
+  background-color: var(--ermis-bg-secondary, #111118);
+  color: var(--ermis-text-primary, #e5e7eb);
+  font-size: var(--ermis-font-size-sm, 0.875rem);
+  font-family: inherit;
+  transition: border-color var(--ermis-transition, 150ms ease), box-shadow var(--ermis-transition, 150ms ease);
+  outline: none;
+}
+
+.ermis-user-picker__search input::placeholder {
+  color: var(--ermis-text-muted, #6b7280);
+}
+
+.ermis-user-picker__search input:focus {
+  border-color: var(--ermis-accent, #6366f1);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+/* ---------- List Container ---------- */
+.ermis-user-picker__list {
+  overflow: hidden;
+  height: 360px;
+  border-radius: var(--ermis-radius-md, 0.5rem);
+}
+
+/* ---------- User Row ---------- */
+.ermis-user-picker__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-md, 0.75rem);
+  padding: 8px 12px;
+  border-radius: var(--ermis-radius-md, 0.5rem);
+  cursor: pointer;
+  transition: background-color var(--ermis-transition, 150ms ease);
+  user-select: none;
+}
+
+.ermis-user-picker__item:hover {
+  background-color: var(--ermis-bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.ermis-user-picker__item--selected {
+  background-color: var(--ermis-bg-active, rgba(99, 102, 241, 0.12));
+}
+
+.ermis-user-picker__item--selected:hover {
+  background-color: var(--ermis-bg-active, rgba(99, 102, 241, 0.12));
+}
+
+.ermis-user-picker__item--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ---------- Radio / Checkbox ---------- */
+.ermis-user-picker__input {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border: 2px solid var(--ermis-border, rgba(255, 255, 255, 0.08));
+  background: transparent;
+  transition: all var(--ermis-transition, 150ms ease);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ermis-user-picker__input--radio {
+  border-radius: var(--ermis-radius-full, 9999px);
+}
+
+.ermis-user-picker__input--checkbox {
+  border-radius: var(--ermis-radius-sm, 0.375rem);
+}
+
+.ermis-user-picker__input--checked {
+  background-color: var(--ermis-accent, #6366f1);
+  border-color: var(--ermis-accent, #6366f1);
+}
+
+.ermis-user-picker__input--checked svg {
+  color: #ffffff;
+}
+
+/* ---------- User Info ---------- */
+.ermis-user-picker__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ermis-user-picker__name {
+  font-size: var(--ermis-font-size-sm, 0.875rem);
+  font-weight: 500;
+  color: var(--ermis-text-primary, #e5e7eb);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ermis-user-picker__detail {
+  font-size: var(--ermis-font-size-xs, 0.75rem);
+  color: var(--ermis-text-muted, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Loading / Empty ---------- */
+.ermis-user-picker__loading,
+.ermis-user-picker__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 0;
+  color: var(--ermis-text-muted, #6b7280);
+  font-size: var(--ermis-font-size-sm, 0.875rem);
+}
+
+.ermis-user-picker__load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+  color: var(--ermis-text-muted, #6b7280);
+  font-size: var(--ermis-font-size-xs, 0.75rem);
+}
+
+/* ---------- Spinner keyframes ---------- */
+.ermis-user-picker__spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--ermis-border, rgba(255, 255, 255, 0.08));
+  border-top-color: var(--ermis-accent, #6366f1);
+  border-radius: var(--ermis-radius-full, 9999px);
+  animation: ermis-user-picker-spin 0.6s linear infinite;
+  margin-right: var(--ermis-spacing-sm, 0.5rem);
+}
+
+@keyframes ermis-user-picker-spin {
+  to { transform: rotate(360deg); }
+}

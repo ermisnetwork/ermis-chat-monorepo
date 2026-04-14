@@ -953,3 +953,69 @@ export type ChannelSettingsPanelProps = {
   /** Custom slow mode options */
   slowModeOptions?: { label: string; value: number }[];
 };
+
+/* ----------------------------------------------------------
+   UserPicker types
+   ---------------------------------------------------------- */
+
+/** Individual user item in UserPicker */
+export type UserPickerUser = {
+  id: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  avatar?: string;
+  [key: string]: any;
+};
+
+/** Props for each user row in UserPicker */
+export type UserPickerItemProps = {
+  user: UserPickerUser;
+  selected: boolean;
+  disabled: boolean;
+  mode: 'radio' | 'checkbox';
+  onToggle: (user: UserPickerUser) => void;
+  AvatarComponent: React.ComponentType<AvatarProps>;
+};
+
+/** Props for the selected users chip box */
+export type UserPickerSelectedBoxProps = {
+  users: UserPickerUser[];
+  onRemove: (userId: string) => void;
+  AvatarComponent: React.ComponentType<AvatarProps>;
+  /** Label when no users selected */
+  emptyLabel?: string;
+};
+
+/** Main UserPicker props */
+export type UserPickerProps = {
+  /** Selection mode: 'radio' for single, 'checkbox' for multi */
+  mode: 'radio' | 'checkbox';
+  /** Called whenever selection changes */
+  onSelectionChange?: (users: UserPickerUser[]) => void;
+  /** User IDs to exclude from the list (e.g. existing members) */
+  excludeUserIds?: string[];
+  /** Users that are pre-selected on mount */
+  initialSelectedUsers?: UserPickerUser[];
+  /** Page size for queryUsers (default: 30) */
+  pageSize?: number;
+  /** Custom avatar component */
+  AvatarComponent?: React.ComponentType<AvatarProps>;
+  /** Custom user item component (replaces the default row) */
+  UserItemComponent?: React.ComponentType<UserPickerItemProps>;
+  /** Custom selected box component (checkbox mode only) */
+  SelectedBoxComponent?: React.ComponentType<UserPickerSelectedBoxProps>;
+  /** Custom search input component */
+  SearchInputComponent?: React.ComponentType<{
+    value: string;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    placeholder: string;
+  }>;
+
+  /** I18n labels */
+  searchPlaceholder?: string;
+  loadingText?: string;
+  emptyText?: string;
+  loadingMoreText?: string;
+  selectedEmptyLabel?: string;
+};
