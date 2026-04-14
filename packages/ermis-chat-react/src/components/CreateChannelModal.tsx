@@ -84,7 +84,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         const targetUserId = selectedUsers[0].id;
         createdChannel = client.channel('messaging', {
           members: [currentUserId, targetUserId],
-        });
+        } as any);
         await createdChannel.create();
       } else {
         // Group Channel
