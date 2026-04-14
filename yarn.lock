@@ -1996,6 +1996,27 @@
   dependencies:
     tslib "^2.4.0"
 
+"@ermis-network/ermis-chat-react@1.0.0":
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/@ermis-network/ermis-chat-react/-/ermis-chat-react-1.0.0.tgz#302e76bd38bd7f249c27c5ad0d4c8c8aa6532d21"
+  integrity sha512-1ApSKM7KF1+EisOHD18KtbGZ3jH4v/dzf+o4ZTmRYNs/HIUR+IVD/c9zlkOHZQgzyr3dZ3HKBzcurpgwdHtbhQ==
+  dependencies:
+    "@ermis-network/ermis-chat-sdk" "1.0.0"
+    virtua "^0.48.8"
+
+"@ermis-network/ermis-chat-sdk@1.0.0":
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/@ermis-network/ermis-chat-sdk/-/ermis-chat-sdk-1.0.0.tgz#36506ee1cd3d65eaf4b66f848c26c37afacbe520"
+  integrity sha512-PWNXVgMAEi9+Y8HG/Mje6rQ/9vFiKMPkvnsa0NAc+DXMeX2cepxWejt5akmDhoijfnk4yV31i2d11+mqGxtqQw==
+  dependencies:
+    "@types/event-source-polyfill" "^1.0.5"
+    "@types/ws" "^7.4.0"
+    axios "^1.6.0"
+    event-source-polyfill "^1.0.31"
+    form-data "^4.0.0"
+    isomorphic-ws "^4.0.1"
+    ws "^7.4.4"
+
 "@esbuild/aix-ppc64@0.27.4":
   version "0.27.4"
   resolved "https://registry.yarnpkg.com/@esbuild/aix-ppc64/-/aix-ppc64-0.27.4.tgz#4c585002f7ad694d38fe0e8cbf5cfd939ccff327"

@@ -26,6 +26,9 @@
       "require": "./dist/index.cjs"
     }
   },
+  "bin": {
+    "ermis-init-call": "./bin/init-call.js"
+  },
   "jsdelivr": "./dist/index.browser.full-bundle.min.js",
   "license": "SEE LICENSE IN LICENSE",
   "keywords": [
@@ -40,7 +43,9 @@
     "/dist",
     "/src",
     "readme.md",
-    "license"
+    "license",
+    "/bin",
+    "/public"
   ],
   "dependencies": {
     "@types/event-source-polyfill": "^1.0.5",
