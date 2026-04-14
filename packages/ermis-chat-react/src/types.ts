@@ -1019,3 +1019,37 @@ export type UserPickerProps = {
   loadingMoreText?: string;
   selectedEmptyLabel?: string;
 };
+
+/* ----------------------------------------------------------
+   Create Channel Modal Props
+   ---------------------------------------------------------- */
+
+export type CreateChannelModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess?: (channel: any) => void; // Uses 'any' or 'Channel' based on context
+
+  /** Override visual components */
+  AvatarComponent?: React.ComponentType<AvatarProps>;
+  UserItemComponent?: React.ComponentType<UserPickerItemProps>;
+
+  /** i18n labels */
+  title?: string;
+  directTabLabel?: string;
+  groupTabLabel?: string;
+  groupNameLabel?: string;
+  groupNamePlaceholder?: string;
+  groupDescriptionLabel?: string;
+  groupDescriptionPlaceholder?: string;
+  groupPublicLabel?: string;
+  groupAvatarLabel?: string;
+  userSearchPlaceholder?: string;
+  cancelButtonLabel?: string;
+  createButtonLabel?: string;
+  creatingButtonLabel?: string;
+
+  /** File upload configuration for group channel images */
+  imageAccept?: string;
+  maxImageSize?: number; // bytes
+  maxImageSizeError?: string;
+};

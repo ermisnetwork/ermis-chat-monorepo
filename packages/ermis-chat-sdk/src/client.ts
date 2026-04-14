@@ -1192,11 +1192,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return await this.post<APIResponse>(this.baseURL + `/channels/${channelType}/${channelId}/unpin`);
   }
 
+  channel(type: string, custom?: ChannelData<ErmisChatGenerics>): Channel<ErmisChatGenerics>;
+  channel(type: string, id: string, custom?: ChannelData<ErmisChatGenerics>): Channel<ErmisChatGenerics>;
   channel(
     channelType: string,
-    channelID: string,
-    custom: ChannelData<ErmisChatGenerics> = {} as ChannelData<ErmisChatGenerics>,
-  ) {
+    channelIDOrCustom?: string | ChannelData<ErmisChatGenerics>,
+    custom?: ChannelData<ErmisChatGenerics>,
+  ): Channel<ErmisChatGenerics> {
     if (!this.userID) {
       throw Error('Call connectUser before creating a channel');
     }
@@ -1205,11 +1207,20 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       throw Error(`Invalid channel group ${channelType}, can't contain the : character`);
     }
 
-    return this.getChannelById(channelType, channelID, custom);
+    let channelID: string | undefined = undefined;
+    let customData = custom || ({} as ChannelData<ErmisChatGenerics>);
+
+    if (typeof channelIDOrCustom === 'string') {
+      channelID = channelIDOrCustom;
+    } else if (typeof channelIDOrCustom === 'object' && channelIDOrCustom !== null) {
+      customData = channelIDOrCustom as ChannelData<ErmisChatGenerics>;
+    }
+
+    return this.getChannelById(channelType, channelID, customData);
   }
 
-  getChannelById = (channelType: string, channelID: string, custom: ChannelData<ErmisChatGenerics>) => {
-    const cid = `${channelType}:${channelID}`;
+  getChannelById = (channelType: string, channelID: string | undefined, custom: ChannelData<ErmisChatGenerics>) => {
+    const cid = `${channelType}:${channelID || ''}`;
     if (cid in this.activeChannels && !this.activeChannels[cid].disconnected) {
       const channel = this.activeChannels[cid];
       if (Object.keys(custom).length > 0) {

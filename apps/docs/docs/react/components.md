@@ -376,3 +376,68 @@ export const SettingsSidebar = () => (
   />
 );
 ```
+
+---
+
+## `<CreateChannelModal />`
+
+A standalone modal component that handles the creation of Direct messages and Group channels seamlessly.
+
+### Core Configs
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `isOpen` | `boolean` | Controls whether the modal is visible. |
+| `onClose` | `() => void` | Event triggered when closing the modal or canceling. |
+| `onSuccess` | `(channel: Channel) => void` | Event executed when a channel is successfully created. |
+
+### Component Overrides
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Override standard avatar graphics. |
+| `UserItemComponent` | `React.ComponentType<UserPickerItemProps>` | Individual user mapping row element override in the user picker. |
+
+### Localization (I18n)
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `title` | `string` | Modal header title text (default: 'New Message'). |
+| `directTabLabel` | `string` | Label for Direct messaging tab. |
+| `groupTabLabel` | `string` | Label for Group channel tab. |
+| `groupNameLabel` | `string` | Label above the channel name field. |
+| `groupNamePlaceholder` | `string` | Hint text for channel name. |
+| `groupDescriptionLabel` | `string` | Label above the description field. |
+| `groupDescriptionPlaceholder` | `string` | Hint text for description. |
+| `groupPublicLabel` | `string` | Associated label for the channel visibility toggle. |
+| `userSearchPlaceholder` | `string` | Placeholder for the user search input. |
+| `cancelButtonLabel` | `string` | Text for the cancel action button. |
+| `createButtonLabel` | `string` | Text for the create channel submit button. |
+| `creatingButtonLabel` | `string` | Loading state text for the submit button. |
+
+### Example
+
+```tsx
+import { useState } from 'react';
+import { CreateChannelModal } from '@ermis-network/ermis-chat-react';
+
+export const Navbar = () => {
+  const [isModalOpen, setModalOpen] = useState(false);
+
+  return (
+    <>
+      <button onClick={() => setModalOpen(true)}>Create Channel</button>
+      
+      <CreateChannelModal
+        isOpen={isModalOpen}
+        onClose={() => setModalOpen(false)}
+        onSuccess={(channel) => {
+          console.log('Channel generated:', channel.id);
+          setModalOpen(false);
+        }}
+        title="Start a Chat"
+      />
+    </>
+  );
+};
+```

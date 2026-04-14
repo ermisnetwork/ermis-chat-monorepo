@@ -8,19 +8,20 @@ import {
   MessageInput,
   VirtualMessageList,
   ChannelInfo,
+  CreateChannelModal,
   type EmojiPickerProps,
 } from '@ermis-network/ermis-chat-react';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import { LoginForm } from './components/Login/LoginForm';
-import { 
-  DEFAULT_API_KEY, 
-  DEFAULT_PROJECT_ID, 
-  DEFAULT_BASE_URL, 
-  LS_USER_ID_KEY, 
-  LS_USER_TOKEN_KEY, 
-  LS_API_KEY, 
-  LS_PROJECT_ID, 
-  LS_BASE_URL 
+import {
+  DEFAULT_API_KEY,
+  DEFAULT_PROJECT_ID,
+  DEFAULT_BASE_URL,
+  LS_USER_ID_KEY,
+  LS_USER_TOKEN_KEY,
+  LS_API_KEY,
+  LS_PROJECT_ID,
+  LS_BASE_URL
 } from './components/Login/constants';
 
 /* -------------------------------------------------------
@@ -64,6 +65,7 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [showLogin, setShowLogin] = useState(true);
   const [showChannelInfo, setShowChannelInfo] = useState(false);
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
   const clientRef = useRef<ErmisChat | null>(null);
 
   // Auto-connect if credentials exist in localStorage
@@ -89,7 +91,7 @@ function App() {
       }
 
       chatClient = ErmisChat.getInstance(apiKey, projectId, baseUrl);
-      
+
       // Reduce the default WS timeout for the demo app login so invalid connections fail fast instead of hanging
       chatClient.defaultWSTimeout = 3000;
 
@@ -131,6 +133,19 @@ function App() {
       <div className="flex h-screen">
         {/* Sidebar - Channel List */}
         <div className="w-80 border-r border-gray-800 flex flex-col">
+          <div className="p-4 border-b border-gray-800 flex justify-between items-center">
+            <h2 className="font-semibold">CHAT DEMO</h2>
+            <button
+              onClick={() => setShowCreateChannel(true)}
+              className="p-1 text-gray-400 hover:text-indigo-400 transition-colors cursor-pointer"
+              title="New Channel"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+          </div>
           <div className="flex-1 overflow-y-auto">
             <ChannelList onChannelSelect={() => setShowChannelInfo(false)} />
           </div>
@@ -173,6 +188,15 @@ function App() {
           <div className="w-90 border-l border-gray-800 flex flex-col bg-white">
             <ChannelInfo onClose={() => setShowChannelInfo(false)} />
           </div>
+        )}
+
+        {/* Create Channel Modal */}
+        {showCreateChannel && (
+          <CreateChannelModal
+            isOpen={showCreateChannel}
+            onClose={() => setShowCreateChannel(false)}
+            onSuccess={() => setShowCreateChannel(false)}
+          />
         )}
       </div>
     </ChatProvider>

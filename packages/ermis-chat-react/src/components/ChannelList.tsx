@@ -35,6 +35,11 @@ function getLastMessagePreview(
     return { text: parseSignalMessage(rawText, userMap), user: '' };
   }
 
+  // Display 'Sticker' if message is a sticker
+  if (msgType === 'sticker' || (lastMsg as Record<string, unknown>).sticker_url) {
+    return { text: 'Sticker', user: lastMsg.user?.name || lastMsg.user_id || '' };
+  }
+
   // Regular / other
   let displayText = rawText;
   if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {

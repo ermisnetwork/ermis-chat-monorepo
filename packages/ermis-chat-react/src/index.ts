@@ -135,3 +135,6 @@ export type {
   UserPickerItemProps,
   UserPickerSelectedBoxProps,
 } from './types';
+
+export { CreateChannelModal } from './components/CreateChannelModal';
+export type { CreateChannelModalProps } from './types';
