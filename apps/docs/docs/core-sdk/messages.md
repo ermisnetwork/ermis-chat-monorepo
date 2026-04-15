@@ -314,14 +314,25 @@ const text = parseSystemMessage(message.text, userMap);
 
 Signal messages represent audio/video call events. They are stored as regular messages with a coded text format.
 
-Use `parseSignalMessage` to display them:
+Use `parseSignalMessage` to parse them into a structured object containing the display text, call duration, call type, and color:
 
 ```typescript
 import { parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 
-const text = parseSignalMessage(message.text, userMap);
-// e.g. "📞 Jane started an audio call."
+const result = parseSignalMessage(message.text, client.userID);
+// result = { text, duration, callType, color }
 ```
+
+The function returns a `SignalMessageResult` object:
+
+| Property   | Type                       | Description                                                    |
+| ---------- | -------------------------- | -------------------------------------------------------------- |
+| `text`     | `string`                   | Human-readable description (e.g. "Incoming audio call...")     |
+| `duration` | `string`                   | Formatted call duration (e.g. "2 min, 15 sec"), empty if none  |
+| `callType` | `'audio' \| 'video' \| ''` | The type of call                                               |
+| `color`    | `string`                   | Suggested display color (`#54D62C` for success, `#FF4842` for missed/rejected) |
+
+The displayed text is **perspective-aware** — it changes based on whether the current user (`myUserId`) is the caller or the recipient.
 
 ### Signal Message Types
 
@@ -337,3 +348,4 @@ const text = parseSignalMessage(message.text, userMap);
 | `8`  | Video call rejected |
 | `9`  | Audio call busy     |
 | `10` | Video call busy     |
+

@@ -224,11 +224,96 @@
 }
 
 /* --- Signal messages (call events) --- */
+.ermis-signal-message {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+  padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
+  border-radius: var(--ermis-radius-md);
+  background-color: var(--ermis-signal-bg);
+  min-width: 180px;
+}
+
+.ermis-signal-message__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--ermis-radius-full);
+}
+
+.ermis-signal-message__icon--success {
+  background-color: rgba(84, 214, 44, 0.12);
+  color: var(--ermis-signal-success);
+}
+
+.ermis-signal-message__icon--missed {
+  background-color: rgba(255, 72, 66, 0.12);
+  color: var(--ermis-signal-missed);
+}
+
+.ermis-signal-message__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ermis-signal-message__text {
+  font-size: var(--ermis-font-size-sm);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.ermis-signal-message__text--success {
+  color: var(--ermis-signal-success);
+}
+
+.ermis-signal-message__text--missed {
+  color: var(--ermis-signal-missed);
+}
+
+.ermis-signal-message__duration {
+  font-size: var(--ermis-font-size-xs);
+  color: var(--ermis-text-muted);
+  line-height: 1.3;
+}
+
+/* Legacy class kept for backward compatibility */
 .ermis-message-list__signal-text {
   font-size: var(--ermis-font-size-sm);
   color: inherit;
   line-height: 1.5;
   word-break: break-word;
+}
+
+/* --- Signal message inside own bubble (accent bg) --- */
+.ermis-message-bubble--own .ermis-signal-message {
+  background-color: var(--ermis-signal-own-bg);
+}
+
+.ermis-message-bubble--own .ermis-signal-message__icon--success {
+  background-color: rgba(134, 239, 172, 0.2);
+  color: var(--ermis-signal-own-success);
+}
+
+.ermis-message-bubble--own .ermis-signal-message__icon--missed {
+  background-color: rgba(252, 165, 165, 0.2);
+  color: var(--ermis-signal-own-missed);
+}
+
+.ermis-message-bubble--own .ermis-signal-message__text--success {
+  color: var(--ermis-signal-own-success);
+}
+
+.ermis-message-bubble--own .ermis-signal-message__text--missed {
+  color: var(--ermis-signal-own-missed);
+}
+
+.ermis-message-bubble--own .ermis-signal-message__duration {
+  color: var(--ermis-signal-own-duration);
 }
 
 /* --- Attachments --- */

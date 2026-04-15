@@ -1,96 +1,146 @@
 /**
- * Convert duration in seconds to mm:ss format.
+ * Call type constants for signal messages.
  */
-function formatDuration(durationSec: string): string {
-  const sec = parseInt(durationSec, 10);
-  if (isNaN(sec) || sec < 0) return durationSec;
-  const minutes = Math.floor(sec / 60);
-  const seconds = sec % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+export const CallType = {
+  AUDIO: 'audio',
+  VIDEO: 'video',
+} as const;
+
+export type CallTypeValue = (typeof CallType)[keyof typeof CallType];
+
+/**
+ * Result of parsing a signal message.
+ */
+export interface SignalMessageResult {
+  text: string;
+  duration: string;
+  callType: CallTypeValue | '';
+  color: string;
 }
 
 /**
- * Resolve a user ID to a display name using the provided map.
- * Falls back to the raw userId if no entry is found.
+ * Format duration from milliseconds to "X min, Y sec" format.
  */
-function resolveUser(userId: string, userMap: Record<string, string>): string {
-  return userMap[userId] ?? userId;
+function formatDuration(durationMs: string): string {
+  if (!durationMs) return '';
+  const ms = parseInt(durationMs, 10);
+  if (isNaN(ms) || ms <= 0) return '';
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes} min, ${seconds} sec`;
 }
 
 /**
- * Parse a raw signal message string into a human-readable English sentence.
+ * Parse a raw signal message string into a structured object
+ * containing text, duration, call type, and color.
  *
  * Signal messages represent call events. The raw format is:
- * `"<formatId> <userID> [<param1> <param2> ...]"`
+ * `"<formatId> <callerId> [<enderId> <duration>]"`
  *
- * @param value   - Raw signal message string from the server
- * @param userMap - Mapping of user IDs → display names
- * @returns         Parsed English text, or the original string if unknown
+ * @param value    - Raw signal message string from the server
+ * @param myUserId - The current user's ID (from client.userID)
+ * @returns          Parsed signal message object, or null if input is empty
  */
 export function parseSignalMessage(
   value: string,
-  userMap: Record<string, string>,
-): string {
-  if (!value || typeof value !== 'string') return value ?? '';
+  myUserId: string,
+): SignalMessageResult | null {
+  if (!value || typeof value !== 'string') return null;
 
   const trimmed = value.trim();
-  if (!trimmed) return '';
+  if (!trimmed) return null;
 
   const parts = trimmed.split(' ');
-  const formatId = parts[0];
-  const userId = parts[1] ?? '';
-  const userName = userId ? resolveUser(userId, userMap) : 'User';
+  const number = parseInt(parts[0], 10);
+  const callerId = parts[1] ?? '';
+  const isMe = myUserId === callerId;
 
-  switch (formatId) {
-    // 1: Audio call started
-    case '1':
-      return `📞 ${userName} started an audio call.`;
+  let enderId = '';
+  let duration = '';
+  let callType: CallTypeValue | '' = '';
+  let color = '';
 
-    // 2: Audio call missed
-    case '2':
-      return `📞 Missed audio call from ${userName}.`;
-
-    // 3: Audio call ended (caller_id ender_id duration)
-    case '3': {
-      const enderId = parts[2] ?? '';
-      const duration = parts[3] ?? '0';
-      const enderName = enderId ? resolveUser(enderId, userMap) : 'User';
-      return `📞 Audio call by ${userName}, ended by ${enderName}. Duration: ${formatDuration(duration)}.`;
-    }
-
-    // 4: Video call started
-    case '4':
-      return `📹 ${userName} started a video call.`;
-
-    // 5: Video call missed
-    case '5':
-      return `📹 Missed video call from ${userName}.`;
-
-    // 6: Video call ended (caller_id ender_id duration)
-    case '6': {
-      const enderId = parts[2] ?? '';
-      const duration = parts[3] ?? '0';
-      const enderName = enderId ? resolveUser(enderId, userMap) : 'User';
-      return `📹 Video call by ${userName}, ended by ${enderName}. Duration: ${formatDuration(duration)}.`;
-    }
-
-    // 7: Audio call rejected
-    case '7':
-      return `📞 Audio call from ${userName} was rejected.`;
-
-    // 8: Video call rejected
-    case '8':
-      return `📹 Video call from ${userName} was rejected.`;
-
-    // 9: Audio call busy
-    case '9':
-      return `📞 Audio call from ${userName} — recipient was busy.`;
-
-    // 10: Video call busy
-    case '10':
-      return `📹 Video call from ${userName} — recipient was busy.`;
-
-    default:
-      return trimmed;
+  if (number === 3 || number === 6) {
+    enderId = parts[2] ?? '';
+    duration = parts[3] === '0' ? '' : (parts[3] ?? '');
   }
+
+  let text: string;
+  switch (number) {
+    case 1: // AudioCallStarted
+      text = isMe ? 'Calling...' : 'Incoming audio call...';
+      callType = CallType.AUDIO;
+      color = '#54D62C';
+      break;
+    case 2: // AudioCallMissed
+      text = isMe ? 'Outgoing audio call' : 'You missed audio call';
+      callType = CallType.AUDIO;
+      color = '#FF4842';
+      break;
+    case 3: // AudioCallEnded
+      if (duration) {
+        text = isMe ? 'Outgoing audio call' : 'Incoming audio call';
+        color = '#54D62C';
+      } else {
+        if (enderId === myUserId) {
+          text = 'You cancel audio call';
+        } else {
+          text = 'You missed audio call';
+        }
+        color = '#FF4842';
+      }
+      callType = CallType.AUDIO;
+      break;
+    case 4: // VideoCallStarted
+      text = isMe ? 'Calling...' : 'Incoming video call...';
+      callType = CallType.VIDEO;
+      color = '#54D62C';
+      break;
+    case 5: // VideoCallMissed
+      text = isMe ? 'Outgoing video call' : 'You missed video call';
+      callType = CallType.VIDEO;
+      color = '#FF4842';
+      break;
+    case 6: // VideoCallEnded
+      if (duration) {
+        text = isMe ? 'Outgoing video call' : 'Incoming video call';
+        color = '#54D62C';
+      } else {
+        if (enderId === myUserId) {
+          text = 'You cancel video call';
+        } else {
+          text = 'You missed video call';
+        }
+        color = '#FF4842';
+      }
+      callType = CallType.VIDEO;
+      break;
+    case 7: // AudioCallRejected
+      text = isMe ? 'Recipient rejected audio call' : 'You rejected audio call';
+      callType = CallType.AUDIO;
+      color = '#FF4842';
+      break;
+    case 8: // VideoCallRejected
+      text = isMe ? 'Recipient rejected video call' : 'You rejected video call';
+      callType = CallType.VIDEO;
+      color = '#FF4842';
+      break;
+    case 9: // AudioCallBusy
+      text = isMe ? 'Recipient was busy' : 'You missed audio call';
+      callType = CallType.AUDIO;
+      color = '#FF4842';
+      break;
+    case 10: // VideoCallBusy
+      text = isMe ? 'Recipient was busy' : 'You missed video call';
+      callType = CallType.VIDEO;
+      color = '#FF4842';
+      break;
+    default:
+      text = trimmed;
+      callType = '';
+      color = '';
+  }
+
+  return { text, duration: formatDuration(duration), callType, color };
 }

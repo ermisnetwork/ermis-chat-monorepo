@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { preloadImage, isImagePreloaded } from '../utils';
 import type { FormatMessageResponse, Attachment, MessageLabel } from '@ermis-network/ermis-chat-sdk';
-import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
+import { parseSystemMessage, parseSignalMessage, CallType } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { buildUserMap } from '../utils';
 import type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
@@ -482,19 +482,46 @@ export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
 
 /** Signal message: call events */
 export const SignalMessage: React.FC<MessageRendererProps> = ({ message }) => {
-  const { activeChannel } = useChatClient();
-
-  const userMap = useMemo<Record<string, string>>(() => {
-    return buildUserMap(activeChannel?.state);
-  }, [activeChannel?.state]);
+  const { client } = useChatClient();
 
   const rawText = message.text ?? '';
-  const parsedText = rawText ? parseSignalMessage(rawText, userMap) : '';
+  const result = rawText ? parseSignalMessage(rawText, client.userID || '') : null;
+
+  if (!result) {
+    return (
+      <span className="ermis-message-list__signal-text">
+        {rawText}
+      </span>
+    );
+  }
+
+  const isSuccess = result.color === '#54D62C';
+  const colorModifier = isSuccess ? 'success' : 'missed';
+  const isAudio = result.callType === CallType.AUDIO;
 
   return (
-    <span className="ermis-message-list__signal-text">
-      {parsedText || rawText}
-    </span>
+    <div className="ermis-signal-message">
+      <div className={`ermis-signal-message__icon ermis-signal-message__icon--${colorModifier}`}>
+        {isAudio ? (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+          </svg>
+        ) : (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7" />
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+          </svg>
+        )}
+      </div>
+      <div className="ermis-signal-message__body">
+        <span className={`ermis-signal-message__text ermis-signal-message__text--${colorModifier}`}>
+          {result.text}
+        </span>
+        {result.duration && (
+          <span className="ermis-signal-message__duration">{result.duration}</span>
+        )}
+      </div>
+    </div>
   );
 };
 

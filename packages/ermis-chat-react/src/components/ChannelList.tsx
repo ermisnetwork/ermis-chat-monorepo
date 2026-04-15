@@ -18,6 +18,7 @@ export type { ChannelListProps, ChannelItemProps } from '../types';
  */
 function getLastMessagePreview(
   channel: Channel,
+  myUserId?: string,
 ): { text: string; user: string } {
   const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
   if (!lastMsg) return { text: '', user: '' };
@@ -31,8 +32,8 @@ function getLastMessagePreview(
   }
 
   if (msgType === 'signal') {
-    const userMap = buildUserMap(channel.state);
-    return { text: parseSignalMessage(rawText, userMap), user: '' };
+    const result = parseSignalMessage(rawText, myUserId || '');
+    return { text: result?.text || rawText, user: '' };
   }
 
   // Display 'Sticker' if message is a sticker
@@ -206,7 +207,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   // Derive last message preview computation is deferred here, 
   // so it only executes when VList actually mounts this visible item
   const { text: rawLastMessageText, user: rawLastMessageUser } = useMemo(
-    () => getLastMessagePreview(channel),
+    () => getLastMessagePreview(channel, currentUserId),
     // Recompute if latestMessage changes or we get a force update
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [channel, channel.state?.latestMessages, updateCount]

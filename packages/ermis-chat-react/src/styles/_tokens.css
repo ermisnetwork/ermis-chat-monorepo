@@ -62,6 +62,15 @@
   /* Transitions */
   --ermis-transition: 150ms ease;
 
+  /* Signal messages (call events) */
+  --ermis-signal-success: #54D62C;
+  --ermis-signal-missed: #FF4842;
+  --ermis-signal-bg: rgba(255, 255, 255, 0.04);
+  --ermis-signal-own-success: #86EFAC;
+  --ermis-signal-own-missed: #FCA5A5;
+  --ermis-signal-own-bg: rgba(255, 255, 255, 0.12);
+  --ermis-signal-own-duration: rgba(255, 255, 255, 0.6);
+
   /* Call UI */
   --ermis-call-bg: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
   --ermis-call-glass: rgba(255, 255, 255, 0.06);
@@ -107,6 +116,15 @@
   --ermis-quote-own-border: rgba(255, 255, 255, 0.6);
   --ermis-quote-own-author: rgba(255, 255, 255, 0.95);
   --ermis-quote-own-text: rgba(255, 255, 255, 0.8);
+
+  /* Signal messages (call events) */
+  --ermis-signal-success: #229A16;
+  --ermis-signal-missed: #B72136;
+  --ermis-signal-bg: rgba(0, 0, 0, 0.03);
+  --ermis-signal-own-success: #86EFAC;
+  --ermis-signal-own-missed: #FCA5A5;
+  --ermis-signal-own-bg: rgba(255, 255, 255, 0.12);
+  --ermis-signal-own-duration: rgba(255, 255, 255, 0.6);
 
   /* Call UI */
   --ermis-call-bg: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 50%, #dee2e6 100%);
