@@ -8,7 +8,7 @@
 .ermis-modal-search svg {
   position: absolute;
   left: 12px;
-  color: var(--ermis-text-secondary, #666666);
+  color: var(--ermis-text-secondary);
   pointer-events: none;
 }
 
@@ -16,23 +16,17 @@
   width: 100%;
   padding: 10px 12px 10px 36px;
   border-radius: 8px;
-  border: 1px solid var(--ermis-border-color, #cccccc);
-  background-color: var(--ermis-bg-base, #f9f9f9);
-  color: var(--ermis-text-primary, #000000);
+  border: 1px solid var(--ermis-border);
+  background-color: var(--ermis-bg-secondary);
+  color: var(--ermis-text-primary);
   font-size: 14px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
   outline: none;
 }
 
-[data-theme='dark'] .ermis-modal-search input {
-  background-color: var(--ermis-bg-base, #121212);
-  border: 1px solid var(--ermis-border-color, #444444);
-  color: var(--ermis-text-primary, #ffffff);
-}
-
 .ermis-modal-search input:focus {
-  border-color: var(--ermis-primary-color, #005fff);
-  box-shadow: 0 0 0 2px rgba(0, 95, 255, 0.2);
+  border-color: var(--ermis-accent);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
 .ermis-modal-user-list {
@@ -52,17 +46,14 @@
   background: transparent;
 }
 .ermis-modal-user-list::-webkit-scrollbar-thumb {
-  background-color: var(--ermis-border-color, #cccccc);
+  background-color: var(--ermis-border);
   border-radius: 3px;
-}
-[data-theme='dark'] .ermis-modal-user-list::-webkit-scrollbar-thumb {
-  background-color: var(--ermis-border-color, #444444);
 }
 
 .ermis-modal-loading,
 .ermis-modal-empty {
   text-align: center;
-  color: var(--ermis-text-secondary, #666666);
+  color: var(--ermis-text-secondary);
   padding: 32px 0;
   font-size: 14px;
 }
@@ -76,11 +67,7 @@
 }
 
 .ermis-modal-user-item:hover {
-  background-color: var(--ermis-bg-hover, #f0f0f0);
-}
-
-[data-theme='dark'] .ermis-modal-user-item:hover {
-  background-color: var(--ermis-bg-hover, #2a2a2a);
+  background-color: var(--ermis-bg-hover);
 }
 
 .ermis-modal-user-info {
@@ -93,15 +80,11 @@
 .ermis-modal-user-name {
   font-size: 14px;
   font-weight: 500;
-  color: var(--ermis-text-primary, #000000);
-}
-
-[data-theme='dark'] .ermis-modal-user-name {
-  color: var(--ermis-text-primary, #ffffff);
+  color: var(--ermis-text-primary);
 }
 
 .ermis-modal-add-btn {
-  background-color: var(--ermis-primary-color, #005fff);
+  background-color: var(--ermis-accent);
   color: #ffffff;
   border: none;
   border-radius: 6px;
@@ -113,7 +96,7 @@
 }
 
 .ermis-modal-add-btn:hover:not(:disabled) {
-  background-color: var(--ermis-primary-hover, #004ecc);
+  background-color: var(--ermis-accent-hover);
 }
 
 .ermis-modal-add-btn:disabled {

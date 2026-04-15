@@ -320,7 +320,7 @@
 }
 
 .ermis-message-list__pending-card {
-  background-color: var(--ermis-bg-elevated, #ffffff);
+  background-color: var(--ermis-bg-primary);
   border-radius: var(--ermis-radius-lg, 12px);
   padding: var(--ermis-spacing-xxl, 32px);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
@@ -341,7 +341,7 @@
   font-family: var(--ermis-font-family, sans-serif);
   font-size: var(--ermis-font-size-md, 14px);
   font-weight: 500;
-  color: var(--ermis-text-secondary, #666);
+  color: var(--ermis-text-secondary);
   margin-bottom: var(--ermis-spacing-xs, 4px);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -351,14 +351,14 @@
   font-family: var(--ermis-font-family, sans-serif);
   font-size: var(--ermis-font-size-xl, 20px);
   font-weight: 700;
-  color: var(--ermis-text, #333);
+  color: var(--ermis-text-primary);
   margin-bottom: var(--ermis-spacing-sm, 8px);
 }
 
 .ermis-message-list__pending-overlay-subtitle {
   font-family: var(--ermis-font-family, sans-serif);
   font-size: var(--ermis-font-size-sm, 14px);
-  color: var(--ermis-text-secondary, #666);
+  color: var(--ermis-text-secondary);
   margin-bottom: var(--ermis-spacing-xl, 24px);
   line-height: 1.5;
 }
@@ -383,13 +383,13 @@
 
 .ermis-message-list__accept-btn {
   border: none;
-  background-color: var(--ermis-accent, #005fff);
+  background-color: var(--ermis-accent);
   color: #fff;
   box-shadow: 0 4px 10px rgba(0, 95, 255, 0.2);
 }
 
 .ermis-message-list__accept-btn:hover {
-  background-color: var(--ermis-accent-hover, #004ecc);
+  background-color: var(--ermis-accent-hover);
   transform: translateY(-2px);
   box-shadow: 0 6px 14px rgba(0, 95, 255, 0.3);
 }
@@ -399,15 +399,15 @@
 }
 
 .ermis-message-list__reject-btn {
-  border: 1px solid var(--ermis-danger-border, #fecaca);
-  background-color: var(--ermis-danger-soft, #fef2f2);
-  color: var(--ermis-danger, #ef4444);
+  border: 1px solid var(--ermis-color-danger);
+  background-color: var(--ermis-bg-hover);
+  color: var(--ermis-color-danger);
 }
 
 .ermis-message-list__reject-btn:hover {
-  background-color: var(--ermis-danger, #ef4444);
+  background-color: var(--ermis-color-danger);
   color: #fff;
-  border-color: var(--ermis-danger, #ef4444);
+  border-color: var(--ermis-color-danger);
   transform: translateY(-2px);
   box-shadow: 0 6px 14px rgba(239, 68, 68, 0.3);
 }

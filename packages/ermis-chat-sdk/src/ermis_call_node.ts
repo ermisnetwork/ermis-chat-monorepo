@@ -335,26 +335,44 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     const mediaConstraints = await this.getMediaConstraints();
 
     try {
-      // Request the media stream with the determined constraints
       const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-      if (this.callStatus === CallStatus.ENDED) {
-        // If the call has ended, stop the local stream tracks
-        stream.getTracks().forEach((track) => track.stop());
-        this.destroy();
-        return;
+      return this.applyLocalStream(stream);
+    } catch (error: any) {
+      console.warn('Error getting user media:', error?.message);
+
+      // Video call: try fallback to audio-only (camera not available)
+      if (this.callType === 'video' && mediaConstraints.video) {
+        try {
+          const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
+            audio: mediaConstraints.audio,
+            video: false,
+          });
+          this.setConnectionMessage('Camera not available, using audio only');
+          return this.applyLocalStream(audioOnlyStream);
+        } catch {
+          // Audio fallback also failed
+        }
       }
-      if (this.onLocalStream) {
-        this.onLocalStream(stream);
+
+      // No device found at all — report error
+      if (typeof this.onError === 'function') {
+        this.onError('No microphone or camera found. Please check your device.');
       }
-      this.localStream = stream;
-      return stream;
-    } catch (error) {
-      console.error('Error getting user media:', error);
-      // if (typeof this.onError === 'function') {
-      //   this.onError('Unable to access microphone/camera');
-      // }
       return null;
     }
+  }
+
+  private applyLocalStream(stream: MediaStream) {
+    if (this.callStatus === CallStatus.ENDED) {
+      stream.getTracks().forEach((track) => track.stop());
+      this.destroy();
+      return;
+    }
+    if (this.onLocalStream) {
+      this.onLocalStream(stream);
+    }
+    this.localStream = stream;
+    return stream;
   }
 
   private setConnectionMessage(message: string | null) {
@@ -415,22 +433,11 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
           this.isDestroyed = false;
           this.callStatus = '';
           this.callType = is_video ? 'video' : 'audio';
-          await this.startLocalStream();
-          if (this.callStatus === CallStatus.ENDED) return;
+
           this.setUserInfo(cid, eventUserId);
           this.setCallStatus(CallStatus.RINGING);
           this.cid = cid || '';
           this.metadata = metadata || {};
-
-          console.log('----metadata---', metadata);
-          if (eventUserId !== this.userID) {
-            await this.initialize();
-          }
-
-          if (this.localStream && this.mediaSender && this.mediaReceiver) {
-            this.mediaSender?.initEncoders(this.localStream);
-            this.mediaReceiver?.initDecoders(this.callType);
-          }
 
           if (typeof this.onCallEvent === 'function') {
             this.onCallEvent({
@@ -441,6 +448,18 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
               receiverInfo: this.receiverInfo,
               metadata: this.metadata,
             });
+          }
+
+          await this.startLocalStream();
+          if (this.callStatus === CallStatus.ENDED) return;
+
+          if (eventUserId !== this.userID) {
+            await this.initialize();
+          }
+
+          if (this.localStream && this.mediaSender && this.mediaReceiver) {
+            this.mediaSender?.initEncoders(this.localStream);
+            this.mediaReceiver?.initDecoders(this.callType);
           }
 
           if (eventUserId === this.userID) {
@@ -782,29 +801,40 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   public async stopScreenShare() {
     const mediaConstraints = await this.getMediaConstraints();
 
-    const cameraStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-    const cameraTrack = cameraStream.getVideoTracks()[0];
+    try {
+      // Only request video; we already have an active audio track in localStream
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: mediaConstraints.video,
+        audio: false,
+      });
+      const cameraTrack = cameraStream.getVideoTracks()[0];
 
-    // Replace video track in localStream
-    if (this.localStream) {
-      // Stop old track (screen)
-      this.localStream.getVideoTracks().forEach((track) => track.stop());
-      // Replace with camera track
-      this.localStream.removeTrack(this.localStream.getVideoTracks()[0]);
-      this.localStream.addTrack(cameraTrack);
-    } else {
-      this.localStream = cameraStream;
-    }
+      // Replace video track in localStream
+      if (this.localStream) {
+        // Stop old screen tracks
+        this.localStream.getVideoTracks().forEach((track) => {
+          track.stop();
+          this.localStream?.removeTrack(track);
+        });
+        
+        // Add new camera track
+        this.localStream.addTrack(cameraTrack);
+      } else {
+        this.localStream = cameraStream;
+      }
 
-    // Call callback if UI needs to update
-    if (this.onLocalStream) {
-      this.onLocalStream(this.localStream);
-      this.mediaSender?.replaceVideoTrack(this.localStream.getVideoTracks()[0]);
-    }
+      // Call callback if UI needs to update
+      if (this.onLocalStream) {
+        this.onLocalStream(this.localStream);
+        this.mediaSender?.replaceVideoTrack(this.localStream.getVideoTracks()[0]);
+      }
 
-    // Call callback when screen sharing stops
-    if (typeof this.onScreenShareChange === 'function') {
-      this.onScreenShareChange(false);
+      // Call callback when screen sharing stops
+      if (typeof this.onScreenShareChange === 'function') {
+        this.onScreenShareChange(false);
+      }
+    } catch (error) {
+      console.error('Error stopping screen share and reverting to camera:', error);
     }
   }
 

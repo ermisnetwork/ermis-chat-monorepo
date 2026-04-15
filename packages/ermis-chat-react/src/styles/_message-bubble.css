@@ -139,7 +139,7 @@
 }
 
 .ermis-message-status-icon--failed {
-  color: var(--ermis-color-error, #f44336);
+  color: var(--ermis-color-danger);
 }
 
 .ermis-message-bubble--own .ermis-message-list__item-time {
@@ -304,7 +304,7 @@
   width: 100%;
   max-width: 300px;
   min-height: 120px;
-  background-color: var(--ermis-bg-hover, #2a2a4a);
+  background-color: var(--ermis-bg-hover);
 }
 
 /* Blurred thumbnail preview (shown while full image loads) */
@@ -328,12 +328,7 @@
   width: 100%;
   height: 100%;
   z-index: 1;
-  background: linear-gradient(
-    110deg,
-    var(--ermis-bg-hover, #2a2a4a) 30%,
-    var(--ermis-bg-active, #3a3a5a) 50%,
-    var(--ermis-bg-hover, #2a2a4a) 70%
-  );
+  background: linear-gradient(110deg, var(--ermis-bg-hover) 30%, var(--ermis-bg-active) 50%, var(--ermis-bg-hover) 70%);
   background-size: 200% 100%;
   animation: ermis-shimmer 1.5s ease-in-out infinite;
 }
@@ -552,17 +547,29 @@
   padding-top: 2px;
 }
 
+@keyframes ermis-receipt-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.5) translateY(5px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 .ermis-read-receipts__avatars {
   display: flex;
   flex-direction: row;
   align-items: center;
   cursor: default;
   position: relative;
+  animation: ermis-receipt-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
 .ermis-read-receipts__avatar {
   flex-shrink: 0;
-  border: 1.5px solid var(--ermis-bg-primary, #1a1a2e);
+  border: 1.5px solid var(--ermis-bg-primary);
   border-radius: 50%;
   box-sizing: content-box;
 }
@@ -579,12 +586,12 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background-color: var(--ermis-bg-hover, #2a2a4a);
-  color: var(--ermis-text-muted, #888);
+  background-color: var(--ermis-bg-hover);
+  color: var(--ermis-text-muted);
   font-size: 0.5rem;
   font-weight: 700;
   margin-left: -4px;
-  border: 1.5px solid var(--ermis-bg-primary, #1a1a2e);
+  border: 1.5px solid var(--ermis-bg-primary);
   box-sizing: content-box;
   flex-shrink: 0;
 }
@@ -618,8 +625,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background-color: var(--ermis-bg-secondary, #1e1e3a);
-  border: 1px solid var(--ermis-border, #333);
+  background-color: var(--ermis-bg-secondary);
+  border: 1px solid var(--ermis-border);
   border-radius: var(--ermis-radius-md, 8px);
   padding: var(--ermis-spacing-xs, 6px) var(--ermis-spacing-sm, 8px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
@@ -643,7 +650,7 @@
 
 .ermis-read-receipts__tooltip-name {
   font-size: var(--ermis-font-size-xs, 0.75rem);
-  color: var(--ermis-text-primary, #e0e0e0);
+  color: var(--ermis-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -651,6 +658,6 @@
 
 .ermis-read-receipts__tooltip-time {
   font-size: 0.625rem;
-  color: var(--ermis-text-muted, #888);
+  color: var(--ermis-text-muted);
   white-space: nowrap;
 }

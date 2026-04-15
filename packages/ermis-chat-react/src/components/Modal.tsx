@@ -9,6 +9,7 @@ export const Modal: React.FC<ModalProps> = ({
   footer,
   maxWidth = '480px',
   hideCloseButton = false,
+  closeOnOutsideClick = true,
 }) => {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -21,7 +22,7 @@ export const Modal: React.FC<ModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="ermis-modal-overlay" onClick={onClose}>
+    <div className="ermis-modal-overlay" onClick={closeOnOutsideClick ? onClose : undefined}>
       <div 
         className="ermis-modal-content" 
         style={{ maxWidth }} 

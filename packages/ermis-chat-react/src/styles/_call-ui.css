@@ -1,0 +1,743 @@
+/* ============================================================
+   Ermis Call UI – Premium Call Experience
+   BEM naming: .ermis-call-ui__{element}--{modifier}
+   ============================================================ */
+
+.ermis-call-ui {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+/* Fullscreen mode */
+.ermis-call-ui--fullscreen {
+  background: #000000;
+  justify-content: center;
+  height: 100%;
+}
+
+.ermis-call-ui--fullscreen .ermis-call-ui__video-container {
+  aspect-ratio: auto;
+  height: 100%;
+  border-radius: 0;
+}
+
+.ermis-call-ui--fullscreen .ermis-call-ui__audio-container {
+  flex: 1;
+  border-radius: 0;
+  justify-content: center;
+}
+
+/* Hidden audio element (replaces inline style={{ display: 'none' }}) */
+.ermis-call-ui__audio--hidden {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ============================================================
+   RINGING STATE
+   ============================================================ */
+.ermis-call-ui__ringing {
+  text-align: center;
+  padding: 2.5rem var(--ermis-spacing-lg) 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--ermis-call-bg);
+  border-radius: var(--ermis-radius-lg);
+  min-height: 340px;
+  width: 100%;
+}
+
+/* -- Avatar Pulse Container -- */
+.ermis-call-ui__ringing-avatar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--ermis-spacing-lg);
+}
+
+/* Pulse rings */
+.ermis-call-ui__ringing-avatar::before,
+.ermis-call-ui__ringing-avatar::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid var(--ermis-call-pulse);
+  animation: ermis-call-pulse 2s ease-out infinite;
+}
+
+.ermis-call-ui__ringing-avatar::before {
+  width: 110px;
+  height: 110px;
+}
+
+.ermis-call-ui__ringing-avatar::after {
+  width: 130px;
+  height: 130px;
+  animation-delay: 0.6s;
+}
+
+@keyframes ermis-call-pulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+/* Floating avatar effect */
+.ermis-call-ui__ringing-avatar-inner {
+  position: relative;
+  z-index: 2;
+  animation: ermis-call-float 3s ease-in-out infinite;
+}
+
+@keyframes ermis-call-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+/* -- Name & Status -- */
+.ermis-call-ui__ringing-name {
+  margin: 0 0 var(--ermis-spacing-xs);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--ermis-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.ermis-call-ui__ringing-status {
+  color: var(--ermis-text-secondary);
+  margin: 0 0 var(--ermis-spacing-sm);
+  font-size: var(--ermis-font-size-sm);
+  font-weight: 400;
+}
+
+/* -- Call Type Badge -- */
+.ermis-call-ui__type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: var(--ermis-radius-full);
+  background: var(--ermis-call-glass);
+  border: 1px solid var(--ermis-call-glass-border);
+  color: var(--ermis-text-secondary);
+  font-size: var(--ermis-font-size-xs);
+  font-weight: 500;
+  text-transform: capitalize;
+  margin-bottom: 1.5rem;
+}
+
+.ermis-call-ui__type-badge svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.8;
+}
+
+/* -- Ringing Action Buttons -- */
+.ermis-call-ui__ringing-actions {
+  display: flex;
+  justify-content: center;
+  gap: 2.5rem;
+  width: 100%;
+}
+
+.ermis-call-ui__ringing-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+}
+
+.ermis-call-ui__action-circle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--ermis-transition), box-shadow var(--ermis-transition),
+    background-color var(--ermis-transition);
+  color: #ffffff;
+}
+
+.ermis-call-ui__action-circle:hover {
+  transform: scale(1.1);
+}
+
+.ermis-call-ui__action-circle:active {
+  transform: scale(0.95);
+}
+
+.ermis-call-ui__action-circle--reject {
+  background-color: var(--ermis-color-danger);
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.35);
+}
+
+.ermis-call-ui__action-circle--reject:hover {
+  background-color: var(--ermis-color-danger-hover);
+  box-shadow: 0 6px 28px rgba(239, 68, 68, 0.45);
+}
+
+.ermis-call-ui__action-circle--accept {
+  background-color: var(--ermis-color-success);
+  box-shadow: 0 4px 20px rgba(34, 197, 94, 0.35);
+}
+
+.ermis-call-ui__action-circle--accept:hover {
+  background-color: var(--ermis-color-success-hover);
+  box-shadow: 0 6px 28px rgba(34, 197, 94, 0.45);
+}
+
+.ermis-call-ui__action-circle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ermis-call-ui__action-label {
+  font-size: var(--ermis-font-size-xs);
+  color: var(--ermis-text-secondary);
+  font-weight: 500;
+}
+
+/* ============================================================
+   ACTIVE CALL STATE
+   ============================================================ */
+.ermis-call-ui__active {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0;
+}
+
+/* -- Video Layout -- */
+.ermis-call-ui__video-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: #000000;
+  border-radius: var(--ermis-radius-lg);
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.ermis-call-ui__video-remote {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ermis-call-ui__video-local {
+  position: absolute;
+  bottom: 72px;
+  right: 16px;
+  width: 140px;
+  aspect-ratio: 16 / 9;
+  background-color: #1a1a2e;
+  border-radius: var(--ermis-radius-md);
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+  transition: transform var(--ermis-transition), box-shadow var(--ermis-transition);
+}
+
+.ermis-call-ui__video-local:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.ermis-call-ui__video-local-stream {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+/* Remote peer muted mic badge */
+.ermis-call-ui__remote-muted-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.85);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.ermis-call-ui__remote-muted-badge svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Audio call: badge positioned relative to the avatar wrapper */
+.ermis-call-ui__audio-avatar-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.ermis-call-ui__remote-muted-badge--audio {
+  position: absolute;
+  top: auto;
+  left: auto;
+  bottom: 2px;
+  right: 2px;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--ermis-bg-secondary);
+}
+
+/* Glassmorphism controls overlay for video */
+.ermis-call-ui__video-controls-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: var(--ermis-spacing-md) var(--ermis-spacing-lg);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+}
+
+/* -- Audio Layout -- */
+.ermis-call-ui__audio-container {
+  text-align: center;
+  padding: 2.5rem var(--ermis-spacing-lg) 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--ermis-call-bg);
+  border-radius: var(--ermis-radius-lg);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Audio wave visualizer */
+.ermis-call-ui__audio-waves {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 40px;
+  margin-bottom: var(--ermis-spacing-lg);
+  margin-top: var(--ermis-spacing-sm);
+}
+
+.ermis-call-ui__audio-wave-bar {
+  width: 3px;
+  border-radius: var(--ermis-radius-full);
+  background-color: var(--ermis-accent);
+  opacity: 0.6;
+  animation: ermis-call-wave 1.2s ease-in-out infinite;
+}
+
+.ermis-call-ui__audio-wave-bar:nth-child(1) {
+  height: 12px;
+  animation-delay: 0s;
+}
+.ermis-call-ui__audio-wave-bar:nth-child(2) {
+  height: 20px;
+  animation-delay: 0.1s;
+}
+.ermis-call-ui__audio-wave-bar:nth-child(3) {
+  height: 32px;
+  animation-delay: 0.2s;
+}
+.ermis-call-ui__audio-wave-bar:nth-child(4) {
+  height: 24px;
+  animation-delay: 0.3s;
+}
+.ermis-call-ui__audio-wave-bar:nth-child(5) {
+  height: 36px;
+  animation-delay: 0.15s;
+}
+.ermis-call-ui__audio-wave-bar:nth-child(6) {
+  height: 28px;
+  animation-delay: 0.25s;
+}
+.ermis-call-ui__audio-wave-bar:nth-child(7) {
+  height: 18px;
+  animation-delay: 0.35s;
+}
+.ermis-call-ui__audio-wave-bar:nth-child(8) {
+  height: 30px;
+  animation-delay: 0.05s;
+}
+.ermis-call-ui__audio-wave-bar:nth-child(9) {
+  height: 14px;
+  animation-delay: 0.4s;
+}
+
+@keyframes ermis-call-wave {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* Active call info */
+.ermis-call-ui__active-name {
+  margin: var(--ermis-spacing-md) 0 var(--ermis-spacing-xs);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--ermis-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.ermis-call-ui__active-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+  color: var(--ermis-text-secondary);
+  font-size: var(--ermis-font-size-sm);
+  margin-bottom: var(--ermis-spacing-sm);
+}
+
+.ermis-call-ui__active-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--ermis-color-success);
+  animation: ermis-call-status-blink 2s ease-in-out infinite;
+}
+
+@keyframes ermis-call-status-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.ermis-call-ui__timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--ermis-text-secondary);
+  font-size: var(--ermis-font-size-sm);
+}
+
+/* ============================================================
+   CONTROLS BAR
+   ============================================================ */
+.ermis-call-ui__controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--ermis-spacing-md);
+  padding: var(--ermis-spacing-md) var(--ermis-spacing-lg);
+  background: var(--ermis-call-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--ermis-call-glass-border);
+  border-radius: var(--ermis-radius-full);
+  margin-top: var(--ermis-spacing-lg);
+}
+
+/* For video mode, controls float inside the video overlay */
+.ermis-call-ui__video-controls-overlay .ermis-call-ui__controls {
+  margin-top: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.ermis-call-ui__controls-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--ermis-call-glass-border);
+  margin: 0 var(--ermis-spacing-xs);
+}
+
+/* Control buttons — circular icons */
+.ermis-call-ui__control-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background-color: var(--ermis-call-glass);
+  color: var(--ermis-text-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--ermis-transition);
+  position: relative;
+}
+
+.ermis-call-ui__control-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ermis-call-ui__control-btn:hover {
+  background-color: var(--ermis-bg-hover);
+  transform: scale(1.08);
+}
+
+.ermis-call-ui__control-btn:active {
+  transform: scale(0.95);
+}
+
+/* Tooltip on hover */
+.ermis-call-ui__control-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 4px 10px;
+  background: var(--ermis-bg-primary);
+  color: var(--ermis-text-primary);
+  font-size: var(--ermis-font-size-xs);
+  border-radius: var(--ermis-radius-sm);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: all var(--ermis-transition);
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--ermis-call-glass-border);
+}
+
+.ermis-call-ui__control-btn:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Video overlay tooltips need light text */
+.ermis-call-ui__video-controls-overlay .ermis-call-ui__control-btn {
+  color: #ffffff;
+}
+
+.ermis-call-ui__video-controls-overlay .ermis-call-ui__control-btn::after {
+  background: rgba(0, 0, 0, 0.8);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Muted state */
+.ermis-call-ui__control-btn--muted {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--ermis-color-danger);
+}
+
+.ermis-call-ui__control-btn--muted:hover {
+  background-color: rgba(239, 68, 68, 0.25);
+}
+
+.ermis-call-ui__video-controls-overlay .ermis-call-ui__control-btn--muted {
+  background-color: rgba(239, 68, 68, 0.3);
+  color: #ffffff;
+}
+
+/* Active state (screen sharing) */
+.ermis-call-ui__control-btn--active {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: var(--ermis-color-success);
+}
+
+.ermis-call-ui__control-btn--active:hover {
+  background-color: rgba(34, 197, 94, 0.25);
+}
+
+.ermis-call-ui__video-controls-overlay .ermis-call-ui__control-btn--active {
+  background-color: rgba(34, 197, 94, 0.3);
+  color: #ffffff;
+}
+
+/* End call button — always solid danger */
+.ermis-call-ui__control-btn--danger {
+  background-color: var(--ermis-color-danger);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(239, 68, 68, 0.3);
+}
+
+.ermis-call-ui__control-btn--danger:hover {
+  background-color: var(--ermis-color-danger-hover);
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
+}
+
+/* ============================================================
+   ACTION GROUPS & DEVICE SELECTORS
+   ============================================================ */
+.ermis-call-ui__action-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.ermis-call-ui__device-select {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  width: 160px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ermis-bg-primary);
+  color: var(--ermis-text-primary);
+  border: 1px solid var(--ermis-call-glass-border);
+  border-radius: var(--ermis-radius-md);
+  padding: 6px 8px;
+  font-size: var(--ermis-font-size-xs);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  outline: none;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transition: all var(--ermis-transition);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ermis-call-ui__action-group:hover .ermis-call-ui__device-select {
+  opacity: 1;
+  visibility: visible;
+}
+
+.ermis-call-ui__device-select:focus {
+  border-color: var(--ermis-accent);
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Video overlay device selects */
+.ermis-call-ui__video-controls-overlay .ermis-call-ui__device-select {
+  background: rgba(0, 0, 0, 0.85);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* ============================================================
+   ERROR STATE
+   ============================================================ */
+.ermis-call-ui__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem var(--ermis-spacing-lg);
+  text-align: center;
+  background: var(--ermis-call-bg);
+  border-radius: var(--ermis-radius-lg);
+  min-height: 280px;
+  width: 100%;
+}
+
+.ermis-call-ui__error-icon {
+  animation: ermis-call-shake 0.6s ease-in-out;
+  margin-bottom: var(--ermis-spacing-md);
+}
+
+@keyframes ermis-call-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-8px);
+  }
+  30% {
+    transform: translateX(8px);
+  }
+  45% {
+    transform: translateX(-6px);
+  }
+  60% {
+    transform: translateX(6px);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+  90% {
+    transform: translateX(3px);
+  }
+}
+
+.ermis-call-ui__error-text {
+  margin: 0 0 var(--ermis-spacing-lg);
+  color: var(--ermis-text-primary);
+  font-weight: 500;
+  font-size: 1.1rem;
+  line-height: 1.5;
+  max-width: 320px;
+}
+
+.ermis-call-ui__error-dismiss {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-sm);
+  padding: 12px 28px;
+  border-radius: var(--ermis-radius-full);
+  border: none;
+  font-weight: 600;
+  font-size: var(--ermis-font-size-base);
+  cursor: pointer;
+  transition: all var(--ermis-transition);
+  background-color: var(--ermis-color-danger);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(239, 68, 68, 0.3);
+}
+
+.ermis-call-ui__error-dismiss:hover {
+  background-color: var(--ermis-color-danger-hover);
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
+  transform: scale(1.02);
+}
+
+.ermis-call-ui__error-dismiss:active {
+  transform: scale(0.98);
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  .ermis-call-ui__ringing-avatar::before,
+  .ermis-call-ui__ringing-avatar::after,
+  .ermis-call-ui__ringing-avatar-inner,
+  .ermis-call-ui__audio-wave-bar,
+  .ermis-call-ui__active-status-dot,
+  .ermis-call-ui__error-icon {
+    animation: none;
+  }
+
+  .ermis-call-ui__action-circle:hover,
+  .ermis-call-ui__control-btn:hover,
+  .ermis-call-ui__error-dismiss:hover {
+    transform: none;
+  }
+}

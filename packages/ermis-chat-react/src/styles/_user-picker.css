@@ -17,7 +17,7 @@
   gap: var(--ermis-spacing-xs, 0.25rem);
   padding: var(--ermis-spacing-sm, 0.5rem);
   border-radius: var(--ermis-radius-md, 0.5rem);
-  background-color: var(--ermis-bg-secondary, #111118);
+  background-color: var(--ermis-bg-secondary);
   border: 1px solid var(--ermis-border, rgba(255, 255, 255, 0.08));
   min-height: 40px;
   max-height: 120px;
@@ -46,7 +46,7 @@
   padding: 2px 8px 2px 2px;
   border-radius: var(--ermis-radius-full, 9999px);
   background-color: var(--ermis-bg-active, rgba(99, 102, 241, 0.12));
-  color: var(--ermis-text-primary, #e5e7eb);
+  color: var(--ermis-text-primary);
   font-size: var(--ermis-font-size-xs, 0.75rem);
   font-weight: 500;
   line-height: 1;
@@ -61,7 +61,7 @@
 }
 
 .ermis-user-picker__chip:hover {
-  background-color: var(--ermis-accent, #6366f1);
+  background-color: var(--ermis-accent);
   color: #ffffff;
 }
 
@@ -96,7 +96,7 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  color: var(--ermis-text-muted, #6b7280);
+  color: var(--ermis-text-muted);
   font-size: var(--ermis-font-size-xs, 0.75rem);
 }
 
@@ -110,7 +110,7 @@
 .ermis-user-picker__search svg {
   position: absolute;
   left: 12px;
-  color: var(--ermis-text-muted, #6b7280);
+  color: var(--ermis-text-muted);
   pointer-events: none;
 }
 
@@ -119,8 +119,8 @@
   padding: 10px 12px 10px 38px;
   border-radius: var(--ermis-radius-md, 0.5rem);
   border: 1px solid var(--ermis-border, rgba(255, 255, 255, 0.08));
-  background-color: var(--ermis-bg-secondary, #111118);
-  color: var(--ermis-text-primary, #e5e7eb);
+  background-color: var(--ermis-bg-secondary);
+  color: var(--ermis-text-primary);
   font-size: var(--ermis-font-size-sm, 0.875rem);
   font-family: inherit;
   transition: border-color var(--ermis-transition, 150ms ease), box-shadow var(--ermis-transition, 150ms ease);
@@ -128,11 +128,11 @@
 }
 
 .ermis-user-picker__search input::placeholder {
-  color: var(--ermis-text-muted, #6b7280);
+  color: var(--ermis-text-muted);
 }
 
 .ermis-user-picker__search input:focus {
-  border-color: var(--ermis-accent, #6366f1);
+  border-color: var(--ermis-accent);
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
@@ -197,8 +197,8 @@
 }
 
 .ermis-user-picker__input--checked {
-  background-color: var(--ermis-accent, #6366f1);
-  border-color: var(--ermis-accent, #6366f1);
+  background-color: var(--ermis-accent);
+  border-color: var(--ermis-accent);
 }
 
 .ermis-user-picker__input--checked svg {
@@ -217,7 +217,7 @@
 .ermis-user-picker__name {
   font-size: var(--ermis-font-size-sm, 0.875rem);
   font-weight: 500;
-  color: var(--ermis-text-primary, #e5e7eb);
+  color: var(--ermis-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -225,7 +225,7 @@
 
 .ermis-user-picker__detail {
   font-size: var(--ermis-font-size-xs, 0.75rem);
-  color: var(--ermis-text-muted, #6b7280);
+  color: var(--ermis-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -238,7 +238,7 @@
   align-items: center;
   justify-content: center;
   padding: 32px 0;
-  color: var(--ermis-text-muted, #6b7280);
+  color: var(--ermis-text-muted);
   font-size: var(--ermis-font-size-sm, 0.875rem);
 }
 
@@ -247,7 +247,7 @@
   align-items: center;
   justify-content: center;
   padding: 12px 0;
-  color: var(--ermis-text-muted, #6b7280);
+  color: var(--ermis-text-muted);
   font-size: var(--ermis-font-size-xs, 0.75rem);
 }
 
@@ -257,7 +257,7 @@
   width: 16px;
   height: 16px;
   border: 2px solid var(--ermis-border, rgba(255, 255, 255, 0.08));
-  border-top-color: var(--ermis-accent, #6366f1);
+  border-top-color: var(--ermis-accent);
   border-radius: var(--ermis-radius-full, 9999px);
   animation: ermis-user-picker-spin 0.6s linear infinite;
   margin-right: var(--ermis-spacing-sm, 0.5rem);

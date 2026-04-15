@@ -43,6 +43,8 @@ export type ChatContextValue = {
   /** Message ID to jump/scroll to (set by search, cleared after scroll) */
   jumpToMessageId: string | null;
   setJumpToMessageId: (id: string | null) => void;
+  /** Indicates whether the direct call feature is enabled */
+  enableCall?: boolean;
 };
 
 export type ChatProviderProps = {
@@ -50,6 +52,61 @@ export type ChatProviderProps = {
   children: React.ReactNode;
   /** Initial theme, defaults to 'dark' */
   initialTheme?: Theme;
+  /** Enable direct call feature (Audio/Video). If enabled, configures internal CallProvider */
+  enableCall?: boolean;
+  /** Provide session ID to be used for call nodes */
+  callSessionId?: string;
+  /** Override the WebAssembly module path for Call Nodes */
+  callWasmPath?: string;
+  /** Override the relay URL for Call Nodes */
+  callRelayUrl?: string;
+  /** Custom Component to completely replace the default Call UI */
+  CallUIComponent?: React.ComponentType;
+  /** Path to the mp3 file for incoming call ringing */
+  incomingCallAudioPath?: string;
+  /** Path to the mp3 file for outgoing call ringing */
+  outgoingCallAudioPath?: string;
+};
+
+/* ----------------------------------------------------------
+   Call UI types
+   ---------------------------------------------------------- */
+export type ErmisCallUIProps = {
+  incomingCallTitle?: (callType: string) => string;
+  outgoingCallTitle?: (callType: string) => string;
+  ongoingCallTitle?: (callType: string) => string;
+  isCallingYouLabel?: string;
+  ringingLabel?: string;
+  rejectCallLabel?: string;
+  acceptCallLabel?: string;
+  endCallLabel?: string;
+  cancelLabel?: string;
+  toggleMicTitle?: string;
+  toggleVideoTitle?: string;
+  shareScreenTitle?: string;
+  stopScreenShareTitle?: string;
+  /** Label shown during an active call (default: "Connected") */
+  connectedLabel?: string;
+  /** Label for the audio call type badge (default: "Audio Call") */
+  audioCallBadgeLabel?: string;
+  /** Label for the video call type badge (default: "Video Call") */
+  videoCallBadgeLabel?: string;
+  /** Tooltip for the fullscreen button (default: "Fullscreen") */
+  fullscreenTitle?: string;
+  /** Tooltip for the exit fullscreen button (default: "Exit Fullscreen") */
+  exitFullscreenTitle?: string;
+  AvatarComponent?: React.ComponentType<any>;
+  MicIcon?: React.ComponentType;
+  MicOffIcon?: React.ComponentType;
+  VideoIcon?: React.ComponentType;
+  VideoOffIcon?: React.ComponentType;
+  PhoneIcon?: React.ComponentType;
+  ScreenShareIcon?: React.ComponentType;
+  ScreenShareOffIcon?: React.ComponentType;
+  FullscreenIcon?: React.ComponentType;
+  ExitFullscreenIcon?: React.ComponentType;
+  incomingCallAudioPath?: string;
+  outgoingCallAudioPath?: string;
 };
 
 /* ----------------------------------------------------------
@@ -96,6 +153,10 @@ export type ChannelHeaderProps = {
   renderRight?: (channel: Channel, actionDisabled?: boolean) => React.ReactNode;
   /** Override default title rendering */
   renderTitle?: (channel: Channel) => React.ReactNode;
+  /** Custom renderer for Audio Call button */
+  renderAudioCallButton?: (onClick: () => void, disabled: boolean) => React.ReactNode;
+  /** Custom renderer for Video Call button */
+  renderVideoCallButton?: (onClick: () => void, disabled: boolean) => React.ReactNode;
 };
 
 /** Data passed to a fully custom HeaderComponent */
@@ -591,6 +652,7 @@ export interface ModalProps {
   footer?: React.ReactNode;
   maxWidth?: string;
   hideCloseButton?: boolean;
+  closeOnOutsideClick?: boolean;
 }
 
 /* ----------------------------------------------------------

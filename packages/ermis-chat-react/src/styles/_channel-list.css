@@ -161,15 +161,15 @@
 
 /* --- Pending channel indicator --- */
 .ermis-channel-list__item--pending {
-  border-left: 3px solid var(--ermis-color-amber-500, #f59e0b);
-  background-color: var(--ermis-color-amber-50, #fffbeb);
+  border-left: 3px solid var(--ermis-color-danger);
+  background-color: var(--ermis-bg-hover);
 }
 
 .ermis-channel-list__pending-badge {
   display: inline-flex;
   padding: 3px 6px;
-  background-color: var(--ermis-color-amber-100, #fef3c7);
-  color: var(--ermis-color-amber-700, #b45309);
+  background-color: var(--ermis-bg-hover);
+  color: var(--ermis-color-danger);
   border-radius: 6px;
   font-size: 0.6rem;
   font-weight: 600;
@@ -186,7 +186,7 @@
   padding: 16px 12px 6px 16px;
   background-color: transparent;
   cursor: pointer;
-  color: var(--ermis-text-muted, #65676b);
+  color: var(--ermis-text-muted);
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -196,7 +196,7 @@
 }
 
 .ermis-channel-list__accordion-header:hover {
-  color: var(--ermis-accent, #005fff);
+  color: var(--ermis-accent);
 }
 
 .ermis-channel-list__accordion-header--static {
@@ -204,7 +204,7 @@
 }
 
 .ermis-channel-list__accordion-header--static:hover {
-  color: var(--ermis-text-muted, #65676b);
+  color: var(--ermis-text-muted);
 }
 
 .ermis-channel-list__accordion-icon {

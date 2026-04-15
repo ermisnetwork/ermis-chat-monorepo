@@ -1,6 +1,8 @@
 import React, { createContext, useState, useCallback } from 'react';
 import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import type { Theme, ChatContextValue, ChatProviderProps, ReadStateEntry } from '../types';
+import { ErmisCallProvider } from '../components/ErmisCallProvider';
+import { ErmisCallUI } from '../components/ErmisCallUI';
 
 export type { Theme, ChatContextValue, ChatProviderProps } from '../types';
 
@@ -10,6 +12,13 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   client,
   children,
   initialTheme = 'light',
+  enableCall = false,
+  callSessionId,
+  callWasmPath,
+  callRelayUrl,
+  CallUIComponent,
+  incomingCallAudioPath,
+  outgoingCallAudioPath,
 }) => {
   const [activeChannelRaw, setActiveChannelRaw] = useState<Channel | null>(null);
   const [theme, setTheme] = useState<Theme>(initialTheme);
@@ -61,13 +70,40 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     setForwardingMessage,
     jumpToMessageId,
     setJumpToMessageId,
+    enableCall,
   };
 
-  return (
+  const CallUIView = CallUIComponent ? <CallUIComponent /> : (
+    <ErmisCallUI
+      incomingCallAudioPath={incomingCallAudioPath}
+      outgoingCallAudioPath={outgoingCallAudioPath}
+    />
+  );
+
+  const content = (
     <ChatContext.Provider value={value}>
       <div className={`ermis-chat ermis-chat--${theme}`}>
         {children}
+        {enableCall && CallUIView}
       </div>
     </ChatContext.Provider>
   );
+
+  if (enableCall) {
+    if (!callSessionId) {
+      console.warn('ErmisChat React: enableCall is true but callSessionId is missing.');
+    }
+    return (
+      <ErmisCallProvider
+        client={client}
+        sessionId={callSessionId || ''}
+        wasmPath={callWasmPath}
+        relayUrl={callRelayUrl}
+      >
+        {content}
+      </ErmisCallProvider>
+    );
+  }
+
+  return content;
 };

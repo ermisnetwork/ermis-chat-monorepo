@@ -344,7 +344,7 @@
   justify-content: center;
   gap: var(--ermis-spacing-sm);
   padding: var(--ermis-spacing-md) var(--ermis-spacing-lg);
-  color: var(--ermis-text-secondary, #9ca3af);
+  color: var(--ermis-text-secondary);
   font-size: var(--ermis-font-size-sm);
   font-weight: 500;
   user-select: none;
@@ -360,14 +360,14 @@
    ---------------------------------------------------------- */
 .ermis-message-input__keyword-banner {
   padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
-  background-color: var(--ermis-bg-danger-light, #fee2e2);
+  background-color: var(--ermis-bg-hover);
   border-radius: var(--ermis-radius-md) var(--ermis-radius-md) 0 0;
   font-size: var(--ermis-font-size-sm, 13px);
-  color: var(--ermis-text-danger, #ef4444);
+  color: var(--ermis-color-danger);
   display: flex;
   align-items: center;
   gap: var(--ermis-spacing-sm);
-  border-bottom: 1px solid var(--ermis-border-danger, #fca5a5);
+  border-bottom: 1px solid var(--ermis-color-danger);
 }
 
 .ermis-message-input__permission-banner,

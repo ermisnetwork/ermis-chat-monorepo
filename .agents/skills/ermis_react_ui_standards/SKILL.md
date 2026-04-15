@@ -14,6 +14,10 @@ When modifying, maintaining, or adding features to the Ermis Chat React SDK UI K
 ## 2. CSS & Aesthetic Engineering
 - **Vanilla CSS & BEM Mandatory:** TailwindCSS is strictly **PROHIBITED** within the SDK Core to prevent styling conflicts with consumer applications. Instead, use standard Vanilla CSS abiding completely by the **BEM Methodology** prefixed with the SDK tag (e.g. `.ermis-message-list__actions-trigger`).
 - **CSS Variables Only:** All colors, paddings, typography lengths must map to the `--ermis-xxx` tokens defined globally in `_tokens.css`.
+- **Theme-Driven Styling (CRITICAL):** The SDK uses **class-based theming** via `.ermis-chat--dark` and `.ermis-chat--light` applied on the root container. All `--ermis-xxx` tokens automatically switch values between these classes. Therefore:
+  - **NEVER** use `[data-theme='dark']`, `[data-theme='light']`, or any `data-*` attribute selectors for theming — they do not exist in the SDK.
+  - **NEVER** hardcode light/dark fallback values (e.g. `var(--ermis-bg-surface, #ffffff)` with a separate `[data-theme='dark']` override). Instead, use the token directly without fallback: `var(--ermis-bg-primary)`.
+  - **NEVER** write separate dark-mode override blocks. If you need a color that changes per theme, define a new token in `_tokens.css` under both `.ermis-chat--dark` and `.ermis-chat--light`, then reference it.
 - **"Defensive UI" Paradigm:** Do not hide actions or buttons when a user lacks permission (e.g., Delete/Edit messages). Provide resilient layouts by maintaining the element in the DOM but rendering it in a `:disabled` state via CSS pseudo-classes.
 - **NO Inline Styling:** Refrain from embedding inline logic like `style={{ opacity: 0.5 }}` directly into JSX elements. Always pass states to CSS using class modifiers (e.g., `.ermis-btn--disabled` or generic node `:disabled` selectors).
 

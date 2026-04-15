@@ -14,12 +14,16 @@
 }
 
 @keyframes ermis-modal-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .ermis-modal-content {
-  background-color: var(--ermis-bg-surface, #ffffff);
+  background-color: var(--ermis-bg-primary);
   border-radius: 12px;
   width: 90%;
   max-width: 480px;
@@ -29,48 +33,41 @@
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   animation: ermis-modal-slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  border: 1px solid var(--ermis-border-color, #eaeaea);
-}
-
-[data-theme='dark'] .ermis-modal-content {
-  background-color: var(--ermis-bg-surface, #1e1e1e);
-  border: 1px solid var(--ermis-border-color, #333333);
+  border: 1px solid var(--ermis-border);
 }
 
 @keyframes ermis-modal-slide-up {
-  from { opacity: 0; transform: translateY(20px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .ermis-modal-header {
   padding: 16px 20px;
-  border-bottom: 1px solid var(--ermis-border-color, #eaeaea);
+  border-bottom: 1px solid var(--ermis-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
 }
 
-[data-theme='dark'] .ermis-modal-header {
-  border-bottom: 1px solid var(--ermis-border-color, #333333);
-}
-
 .ermis-modal-header h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: var(--ermis-text-primary, #000000);
-}
-
-[data-theme='dark'] .ermis-modal-header h3 {
-  color: var(--ermis-text-primary, #ffffff);
+  color: var(--ermis-text-primary);
 }
 
 .ermis-modal-close {
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--ermis-text-secondary, #666666);
+  color: var(--ermis-text-secondary);
   padding: 4px;
   border-radius: 4px;
   display: flex;
@@ -80,13 +77,8 @@
 }
 
 .ermis-modal-close:hover {
-  background-color: var(--ermis-bg-hover, #f0f0f0);
-  color: var(--ermis-text-primary, #000000);
-}
-
-[data-theme='dark'] .ermis-modal-close:hover {
-  background-color: var(--ermis-bg-hover, #2a2a2a);
-  color: var(--ermis-text-primary, #ffffff);
+  background-color: var(--ermis-bg-hover);
+  color: var(--ermis-text-primary);
 }
 
 .ermis-modal-body {
@@ -99,15 +91,10 @@
 
 .ermis-modal-footer {
   padding: 16px 20px;
-  border-top: 1px solid var(--ermis-border-color, #eaeaea);
+  border-top: 1px solid var(--ermis-border);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
   flex-shrink: 0;
-  background-color: var(--ermis-bg-base, #f9f9f9);
-}
-
-[data-theme='dark'] .ermis-modal-footer {
-  border-top: 1px solid var(--ermis-border-color, #333333);
-  background-color: var(--ermis-bg-base, #121212);
+  background-color: var(--ermis-bg-secondary);
 }

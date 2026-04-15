@@ -78,7 +78,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -89,7 +89,7 @@
 }
 
 .ermis-channel-info__cover-edit-btn:hover {
-  color: var(--ermis-color-primary, #005fff);
+  color: var(--ermis-accent);
   background-color: var(--ermis-bg-hover);
 }
 
@@ -144,7 +144,7 @@
 }
 
 .ermis-channel-info__action-btn--danger {
-  color: var(--ermis-color-danger, #dc3545);
+  color: var(--ermis-color-danger);
 }
 
 .ermis-channel-info__action-btn:hover {
@@ -152,7 +152,7 @@
 }
 
 .ermis-channel-info__action-btn--danger:hover {
-  color: var(--ermis-color-danger, #dc3545);
+  color: var(--ermis-color-danger);
   opacity: 0.8;
 }
 
@@ -203,7 +203,7 @@
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 600;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   letter-spacing: 0.5px;
 }
 
@@ -258,16 +258,16 @@
 }
 
 .ermis-channel-info__member-role--owner {
-  color: var(--ermis-color-danger, #ff4d4f);
+  color: var(--ermis-color-danger);
 }
 .ermis-channel-info__member-role--moder {
-  color: var(--ermis-color-primary, #005fff);
+  color: var(--ermis-accent);
 }
 .ermis-channel-info__member-role--member {
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
 }
 .ermis-channel-info__member-role--pending {
-  color: var(--ermis-color-warning, #faad14);
+  color: var(--ermis-color-danger);
 }
 
 .ermis-channel-info__add-member-wrap {
@@ -282,7 +282,7 @@
   background: transparent;
   border: 1px dashed var(--ermis-border-base);
   border-radius: 8px;
-  color: var(--ermis-color-primary, #005fff);
+  color: var(--ermis-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -294,7 +294,7 @@
 
 .ermis-channel-info__add-member-btn:hover {
   background-color: var(--ermis-bg-hover);
-  border-color: var(--ermis-color-primary, #005fff);
+  border-color: var(--ermis-accent);
 }
 
 /* ============================================
@@ -328,7 +328,7 @@
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   font-size: 13px;
   font-weight: 500;
   transition: color 0.2s ease, border-color 0.2s ease;
@@ -340,8 +340,8 @@
 }
 
 .ermis-channel-info__media-tab--active {
-  color: var(--ermis-color-primary, #005fff);
-  border-bottom-color: var(--ermis-color-primary, #005fff);
+  color: var(--ermis-accent);
+  border-bottom-color: var(--ermis-accent);
 }
 
 .ermis-channel-info__media-tab-label {
@@ -363,7 +363,7 @@
 }
 
 .ermis-channel-info__media-tab--active .ermis-channel-info__media-tab-count {
-  background: var(--ermis-color-primary, #005fff);
+  background: var(--ermis-accent);
   color: #fff;
 }
 
@@ -503,7 +503,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   overflow: hidden;
 }
 
@@ -532,7 +532,7 @@
 
 .ermis-channel-info__link-domain {
   font-size: 12px;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -540,7 +540,7 @@
 
 .ermis-channel-info__link-date {
   font-size: 11px;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -578,7 +578,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   gap: 1px;
 }
 
@@ -587,7 +587,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.3px;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   line-height: 1;
 }
 
@@ -613,18 +613,18 @@
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
 }
 
 .ermis-channel-info__file-meta-dot {
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
 }
 
 .ermis-channel-info__file-download {
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   padding: 6px;
   border-radius: 6px;
   display: flex;
@@ -636,7 +636,7 @@
 
 .ermis-channel-info__file-download:hover {
   background-color: var(--ermis-bg-secondary);
-  color: var(--ermis-color-primary, #005fff);
+  color: var(--ermis-accent);
 }
 
 /* ============================================
@@ -650,7 +650,7 @@
   justify-content: center;
   padding: 40px 16px;
   gap: 12px;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
   font-size: 13px;
 }
 
@@ -662,7 +662,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--ermis-text-tertiary);
+  color: var(--ermis-text-muted);
 }
 
 .ermis-channel-info__media-loading {
@@ -676,7 +676,7 @@
   width: 24px;
   height: 24px;
   border: 2px solid var(--ermis-border-base);
-  border-top-color: var(--ermis-color-primary, #005fff);
+  border-top-color: var(--ermis-accent);
   border-radius: 50%;
   animation: ermis-spin 0.7s linear infinite;
 }
@@ -733,7 +733,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--ermis-color-primary, #005fff);
+  color: var(--ermis-accent);
   font-size: 13px;
   font-weight: 500;
   padding: 4px 8px;
@@ -783,7 +783,7 @@
 }
 
 .ermis-channel-info__edit-input:focus {
-  border-color: var(--ermis-color-primary, #005fff);
+  border-color: var(--ermis-accent);
   box-shadow: 0 0 0 2px rgba(0, 95, 255, 0.15);
 }
 
@@ -807,7 +807,7 @@
 }
 
 .ermis-channel-info__edit-textarea:focus {
-  border-color: var(--ermis-color-primary, #005fff);
+  border-color: var(--ermis-accent);
   box-shadow: 0 0 0 2px rgba(0, 95, 255, 0.15);
 }
 
@@ -831,8 +831,8 @@
 }
 
 .ermis-channel-info__edit-toggle--on {
-  background: var(--ermis-color-primary, #005fff);
-  border-color: var(--ermis-color-primary, #005fff);
+  background: var(--ermis-accent);
+  border-color: var(--ermis-accent);
 }
 
 .ermis-channel-info__edit-toggle-thumb {
@@ -865,7 +865,7 @@
   background: rgba(220, 53, 69, 0.08);
   border: 1px solid rgba(220, 53, 69, 0.2);
   border-radius: 8px;
-  color: var(--ermis-color-danger, #dc3545);
+  color: var(--ermis-color-danger);
   font-size: 13px;
 }
 
@@ -906,7 +906,7 @@
 }
 
 .ermis-channel-info__edit-btn--save {
-  background: var(--ermis-color-primary, #005fff);
+  background: var(--ermis-accent);
   color: #fff;
 }
 
