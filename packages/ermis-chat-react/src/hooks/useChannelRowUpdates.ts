@@ -58,6 +58,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
     };
     const sub10 = channel.on('member.blocked', handleBlocked);
     const sub11 = channel.on('member.unblocked', handleUnblocked);
+    const sub12 = channel.on('channel.topic.created', handleUpdate);
 
     return () => {
       sub1.unsubscribe();
@@ -71,6 +72,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub9.unsubscribe();
       sub10.unsubscribe();
       sub11.unsubscribe();
+      sub12.unsubscribe();
     };
   }, [channel, currentUserId]);
 

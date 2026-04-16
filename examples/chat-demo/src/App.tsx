@@ -152,7 +152,10 @@ function App() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
-            <ChannelList onChannelSelect={() => setShowChannelInfo(false)} />
+            <ChannelList
+              onChannelSelect={() => setShowChannelInfo(false)}
+            // TopicEmojiPickerComponent={ConsumerEmojiPicker}
+            />
           </div>
           {/* Logout button */}
           <div className="p-3 border-t border-gray-800">

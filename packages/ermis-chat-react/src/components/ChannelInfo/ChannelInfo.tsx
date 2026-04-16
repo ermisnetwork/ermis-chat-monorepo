@@ -32,10 +32,22 @@ export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.
 });
 DefaultChannelInfoHeader.displayName = 'DefaultChannelInfoHeader';
 
-export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo(({ channelName, channelImage, channelDescription, AvatarComponent, canEdit, onEditClick, isPublic, isTeamChannel }) => {
+export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo(({ channelName, channelImage, channelDescription, AvatarComponent, canEdit, onEditClick, isPublic, isTeamChannel, parentChannelName, isTopic }) => {
+  const renderAvatar = () => {
+    if (isTopic && channelImage && channelImage.startsWith('emoji://')) {
+      const emoji = channelImage.replace('emoji://', '');
+      return (
+        <div className="ermis-channel-info__topic-emoji-avatar">
+          {emoji}
+        </div>
+      );
+    }
+    return <AvatarComponent image={channelImage} name={channelName} size={80} className="ermis-channel-info__avatar" />;
+  };
+
   return (
     <div className="ermis-channel-info__cover">
-      <AvatarComponent image={channelImage} name={channelName} size={80} className="ermis-channel-info__avatar" />
+      {renderAvatar()}
       <div className="ermis-channel-info__name-row">
         <h2 className="ermis-channel-info__name">{channelName}</h2>
         {canEdit && onEditClick && (
@@ -47,6 +59,11 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
           </button>
         )}
       </div>
+      {parentChannelName && (
+        <div className="ermis-channel-info__parent-name">
+          {parentChannelName}
+        </div>
+      )}
       {isTeamChannel && (
         <span className={`ermis-channel-info__type-badge ${isPublic ? 'ermis-channel-info__type-badge--public' : 'ermis-channel-info__type-badge--private'}`}>
           {isPublic ? (
@@ -75,7 +92,7 @@ DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
   onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel,
   onBlockUser, onUnblockUser,
-  isTeamChannel, isBlocked, currentUserRole,
+  isTeamChannel, isTopic, isBlocked, currentUserRole,
   searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', leaveLabel = 'Leave',
   blockLabel = 'Block', unblockLabel = 'Unblock'
 }) => {
@@ -126,7 +143,7 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         )
       )}
       {/* Block/Unblock — messaging (1-1) channels only */}
-      {!isTeamChannel && (
+      {!isTeamChannel && !isTopic && (
         isBlocked ? (
           <button className="ermis-channel-info__action-btn" onClick={onUnblockUser}>
             <div className="ermis-channel-info__action-icon">
@@ -160,7 +177,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     className = '',
     AvatarComponent = Avatar,
     onClose,
-    title = 'Channel Info',
+    title: titleProp,
     HeaderComponent = DefaultChannelInfoHeader,
     CoverComponent = DefaultChannelInfoCover,
     ActionsComponent = DefaultChannelInfoActions,
@@ -216,6 +233,10 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     onUnblockUser: onUnblockUserProp,
     actionsBlockLabel,
     actionsUnblockLabel,
+    // Settings panel customizations
+    settingsWorkspaceTopicsTitle,
+    settingsTopicsFeatureName,
+    settingsTopicsFeatureDescription,
   } = props;
 
   const { activeChannel, client } = useChatClient();
@@ -226,6 +247,20 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
   const isTeamChannel = channel?.type === 'team';
+  const isTopic = Boolean(channel?.data?.parent_cid) || channel?.type === 'topic';
+  const title = titleProp !== undefined ? titleProp : (isTopic ? 'Topic Info' : 'Channel Info');
+
+  const parentCid = channel?.data?.parent_cid as string | undefined;
+  const parentChannel = parentCid && client ? client.activeChannels[parentCid] : undefined;
+  let parentChannelName = parentChannel?.data?.name || (parentCid ? 'Unknown' : undefined);
+
+  // If this is the proxy 'general' channel, its real name is the parent team name
+  if (channel?.type === 'team' && channel?.data?.name === 'general' && channel.cid) {
+    const realChannelName = client?.activeChannels[channel.cid]?.data?.name;
+    if (realChannelName && realChannelName !== 'general') {
+      parentChannelName = realChannelName;
+    }
+  }
 
   const handleDeleteChannel = useCallback(async () => {
     if (onDeleteChannelProp) return onDeleteChannelProp();
@@ -330,6 +365,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
         onEditClick={handleEditChannelClick}
         isPublic={Boolean(channel?.data?.public)}
         isTeamChannel={isTeamChannel}
+        parentChannelName={parentChannelName}
+        isTopic={isTopic}
       />
 
       {isBanned ? (
@@ -352,6 +389,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
             onBlockUser={handleBlockUser}
             onUnblockUser={handleUnblockUser}
             isTeamChannel={isTeamChannel}
+            isTopic={isTopic}
             isBlocked={isBlocked}
             currentUserRole={currentUserRole}
             searchLabel={actionsSearchLabel}
@@ -446,6 +484,9 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
           isOpen={showSettingsPanel}
           onClose={() => setShowSettingsPanel(false)}
           channel={channel}
+          workspaceTopicsTitle={settingsWorkspaceTopicsTitle}
+          topicsFeatureName={settingsTopicsFeatureName}
+          topicsFeatureDescription={settingsTopicsFeatureDescription}
         />
       )}
     </div>

@@ -60,17 +60,53 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
     [image, activeChannel?.data?.image, channelUpdateCount],
   );
 
+  const teamName = useMemo(() => {
+    if (!activeChannel) return undefined;
+    
+    // If it's a topic, derive from parent_cid
+    const parentCid = activeChannel.data?.parent_cid as string | undefined;
+    if (parentCid && client.activeChannels[parentCid]) {
+      return client.activeChannels[parentCid].data?.name || client.activeChannels[parentCid].cid;
+    }
+
+    // If it's a topics-enabled team channel (the general proxy), the proxy overrides data.name.
+    // We can pull the original name from the SDK cache.
+    if (activeChannel.type === 'team' && activeChannel.data?.topics_enabled) {
+      const rawChannel = client.activeChannels[activeChannel.cid];
+      if (rawChannel && rawChannel.data?.name && rawChannel.data.name !== activeChannel.data?.name) {
+        return rawChannel.data.name;
+      }
+    }
+    
+    return undefined;
+  }, [activeChannel, client.activeChannels]);
+
   if (!activeChannel) return null;
 
   return (
     <div className={`ermis-channel-header${className ? ` ${className}` : ''}`}>
-      <AvatarComponent image={channelImage} name={channelName} size={32} />
+      {activeChannel.data?.parent_cid ? (
+        <div className="ermis-channel-header__topic-avatar">
+          {channelImage && typeof channelImage === 'string' && channelImage.startsWith('emoji://') 
+            ? channelImage.replace('emoji://', '') 
+            : '#'}
+        </div>
+      ) : (
+        <AvatarComponent image={channelImage} name={teamName || channelName} size={32} />
+      )}
 
       <div className="ermis-channel-header__info">
         {renderTitle ? (
           renderTitle(activeChannel)
         ) : (
-          <div className="ermis-channel-header__name">{channelName}</div>
+          <div className="ermis-channel-header__title-container">
+            {teamName && (
+              <div className="ermis-channel-header__team-name">
+                {teamName}
+              </div>
+            )}
+            <div className="ermis-channel-header__name">{channelName}</div>
+          </div>
         )}
         {subtitle && (
           <div className="ermis-channel-header__subtitle">{subtitle}</div>

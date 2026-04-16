@@ -11,6 +11,7 @@ import { Avatar } from './Avatar';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
 export type { ChannelListProps, ChannelItemProps } from '../types';
+import { CreateTopicModal } from './CreateTopicModal';
 
 /**
  * Get a human-readable preview string for the last message,
@@ -19,26 +20,28 @@ export type { ChannelListProps, ChannelItemProps } from '../types';
 function getLastMessagePreview(
   channel: Channel,
   myUserId?: string,
-): { text: string; user: string } {
+): { text: string; user: string; timestamp?: string | Date } {
   const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
   if (!lastMsg) return { text: '', user: '' };
+
+  const timestamp = lastMsg.created_at;
 
   const msgType = lastMsg.type || 'regular';
   const rawText = lastMsg.text ?? '';
 
   if (msgType === 'system') {
     const userMap = buildUserMap(channel.state);
-    return { text: parseSystemMessage(rawText, userMap), user: '' };
+    return { text: parseSystemMessage(rawText, userMap), user: '', timestamp };
   }
 
   if (msgType === 'signal') {
     const result = parseSignalMessage(rawText, myUserId || '');
-    return { text: result?.text || rawText, user: '' };
+    return { text: result?.text || rawText, user: '', timestamp };
   }
 
   // Display 'Sticker' if message is a sticker
   if (msgType === 'sticker' || (lastMsg as Record<string, unknown>).sticker_url) {
-    return { text: 'Sticker', user: lastMsg.user?.name || lastMsg.user_id || '' };
+    return { text: 'Sticker', user: lastMsg.user?.name || lastMsg.user_id || '', timestamp };
   }
 
   // Regular / other
@@ -78,6 +81,7 @@ function getLastMessagePreview(
   return {
     text: displayText,
     user: lastMsg.user?.name || lastMsg.user_id || '',
+    timestamp,
   };
 }
 
@@ -91,6 +95,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   unreadCount,
   lastMessageText,
   lastMessageUser,
+  lastMessageTimestamp,
   onSelect,
   AvatarComponent,
   isBlocked,
@@ -110,6 +115,17 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   const image = channel.data?.image as string | undefined;
   const showUnread = hasUnread && !isActive;
 
+  const timestampText = useMemo(() => {
+    if (!lastMessageTimestamp) return null;
+    const d = new Date(lastMessageTimestamp);
+    if (isNaN(d.getTime())) return null;
+    const today = new Date();
+    const isToday = d.toDateString() === today.toDateString();
+    return isToday 
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }, [lastMessageTimestamp]);
+
   const handleClick = useCallback(() => {
     onSelect(channel);
   }, [channel, onSelect]);
@@ -126,34 +142,41 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
     <div className={itemClass} onClick={handleClick}>
       <AvatarComponent image={image} name={name} size={40} />
       <div className="ermis-channel-list__item-content">
-        <div className="ermis-channel-list__item-name">{name}</div>
-        {lastMessageText && (
+        <div className="ermis-channel-list__item-top-row">
+          <div className="ermis-channel-list__item-name">{name}</div>
+          {timestampText && <div className="ermis-channel-list__item-timestamp">{timestampText}</div>}
+        </div>
+        
+        <div className="ermis-channel-list__item-bottom-row">
           <div className="ermis-channel-list__item-last-message">
-            {lastMessageUser && (
+            {lastMessageUser && lastMessageText && (
               <span className="ermis-channel-list__item-last-message-user">
                 {lastMessageUser}:{' '}
               </span>
             )}
-            <span>{lastMessageText}</span>
+            {lastMessageText && <span>{lastMessageText}</span>}
           </div>
-        )}
+
+          <div className="ermis-channel-list__item-badges">
+            {showUnread && unreadCount > 0 && (
+              <span className="ermis-channel-list__unread-badge">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+            {isBlocked && (
+              <span className="ermis-channel-list__blocked-icon" title={blockedBadgeLabel || "Blocked"}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                </svg>
+              </span>
+            )}
+            {isPending && (
+              <span className="ermis-channel-list__pending-badge">{pendingBadgeLabel || 'Invited'}</span>
+            )}
+          </div>
+        </div>
       </div>
-      {showUnread && unreadCount > 0 && (
-        <span className="ermis-channel-list__unread-badge">
-          {unreadCount > 99 ? '99+' : unreadCount}
-        </span>
-      )}
-      {isBlocked && (
-        <span className="ermis-channel-list__blocked-icon" title={blockedBadgeLabel || "Blocked"}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-          </svg>
-        </span>
-      )}
-      {isPending && (
-        <span className="ermis-channel-list__pending-badge">{pendingBadgeLabel || 'Invited'}</span>
-      )}
     </div>
   );
 });
@@ -204,9 +227,8 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   const unreadCount = (isBannedInChannel || isBlockedInChannel || isPending) ? 0 : rawUnreadCount;
   const hasUnread = unreadCount > 0;
 
-  // Derive last message preview computation is deferred here, 
-  // so it only executes when VList actually mounts this visible item
-  const { text: rawLastMessageText, user: rawLastMessageUser } = useMemo(
+  // Derive last message preview computation
+  const { text: rawLastMessageText, user: rawLastMessageUser, timestamp: rawLastMessageTimestamp } = useMemo(
     () => getLastMessagePreview(channel, currentUserId),
     // Recompute if latestMessage changes or we get a force update
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -216,6 +238,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   // Hide last message preview when banned, blocked, or pending
   const lastMessageText = (isBannedInChannel || isBlockedInChannel || isPending) ? '' : rawLastMessageText;
   const lastMessageUser = (isBannedInChannel || isBlockedInChannel || isPending) ? '' : rawLastMessageUser;
+  const lastMessageTimestamp = (isBannedInChannel || isBlockedInChannel || isPending) ? null : rawLastMessageTimestamp;
 
   if (renderChannel) {
     return (
@@ -233,6 +256,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       unreadCount={unreadCount}
       lastMessageText={lastMessageText}
       lastMessageUser={lastMessageUser}
+      lastMessageTimestamp={lastMessageTimestamp}
       onSelect={handleSelect}
       AvatarComponent={AvatarComponent}
       isBlocked={isBlockedInChannel}
@@ -243,6 +267,125 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   );
 });
 ChannelRow.displayName = 'ChannelRow';
+
+export const ChannelTopicGroup = React.memo(({
+  channel,
+  activeChannel,
+  handleSelect,
+  renderChannel,
+  ChannelItemComponent,
+  AvatarComponent,
+  GeneralTopicAvatarComponent,
+  TopicAvatarComponent,
+  currentUserId,
+  pendingBadgeLabel,
+  blockedBadgeLabel,
+  generalTopicLabel,
+  onAddTopic,
+}: any) => {
+  const { updateCount } = useChannelRowUpdates(channel, currentUserId);
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  const handleToggle = useCallback(() => setIsExpanded((prev) => !prev), []);
+
+  const userRole = channel.state?.members?.[currentUserId]?.channel_role;
+  const hasTopicAddPermission = Boolean(userRole === 'owner' || userRole === 'moder');
+
+  const topics = channel.state?.topics || [];
+  const name = channel.data?.name || channel.cid;
+  const image = channel.data?.image as string | undefined;
+
+  const GeneralAvatar = useCallback(() => (
+    <div className="ermis-channel-list__topic-hashtag">#</div>
+  ), []);
+
+  const TopicEmojiAvatar = useCallback(({ image }: any) => {
+    let emoji = '💬';
+    if (image && typeof image === 'string' && image.startsWith('emoji://')) {
+      emoji = image.replace('emoji://', '');
+    }
+    return <div className="ermis-channel-list__topic-hashtag">{emoji}</div>;
+  }, []);
+
+  const generalChannelProxy = useMemo(() => {
+    return new Proxy(channel, {
+      get(target, prop, receiver) {
+        if (prop === 'data') {
+          return { ...target.data, name: generalTopicLabel || 'general' };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+    });
+  }, [channel, generalTopicLabel]);
+
+  return (
+    <div className="ermis-channel-list__topic-group">
+      <div 
+        className={`ermis-channel-list__topic-header ${isExpanded ? 'ermis-channel-list__topic-header--expanded' : ''}`} 
+        onClick={handleToggle}
+      >
+        <AvatarComponent image={image} name={name} size={40} />
+        <div className="ermis-channel-list__topic-header-name">{name}</div>
+        
+        {hasTopicAddPermission && (
+          <button 
+            className="ermis-channel-list__add-topic-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddTopic?.(channel);
+            }}
+            title="Create topic"
+            type="button"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+        )}
+
+        <svg 
+          className="ermis-channel-list__accordion-icon"
+          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+        >
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </div>
+
+      {isExpanded && (
+        <div className="ermis-channel-list__topic-sublist">
+          <ChannelRow
+            channel={generalChannelProxy as any}
+            isActive={activeChannel?.cid === channel.cid}
+            handleSelect={handleSelect}
+            renderChannel={renderChannel}
+            ChannelItemComponent={ChannelItemComponent}
+            AvatarComponent={GeneralTopicAvatarComponent || GeneralAvatar}
+            currentUserId={currentUserId}
+            pendingBadgeLabel={pendingBadgeLabel}
+            blockedBadgeLabel={blockedBadgeLabel}
+          />
+          {topics.map((topicChannel: any) => (
+            <ChannelRow
+              key={topicChannel.cid}
+              channel={topicChannel}
+              isActive={activeChannel?.cid === topicChannel.cid}
+              handleSelect={handleSelect}
+              renderChannel={renderChannel}
+              ChannelItemComponent={ChannelItemComponent}
+              AvatarComponent={TopicAvatarComponent || TopicEmojiAvatar}
+              currentUserId={currentUserId}
+              pendingBadgeLabel={pendingBadgeLabel}
+              blockedBadgeLabel={blockedBadgeLabel}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+ChannelTopicGroup.displayName = 'ChannelTopicGroup';
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   filters = { type: ['messaging', 'team'], include_pinned_messages: true } as unknown as ChannelFilters,
@@ -261,11 +404,26 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   loadingLabel,
   emptyStateLabel = 'No channels found',
   blockedBadgeLabel = 'Blocked',
+  ChannelTopicGroupComponent,
+  GeneralTopicAvatarComponent,
+  TopicAvatarComponent,
+  generalTopicLabel = 'general',
+  onAddTopic,
+  TopicEmojiPickerComponent,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPendingExpanded, setIsPendingExpanded] = useState(true);
+  const [addingTopicForChannel, setAddingTopicForChannel] = useState<Channel | null>(null);
+
+  const handleAddTopicClick = useCallback((channel: Channel) => {
+    if (onAddTopic) {
+      onAddTopic(channel);
+    } else {
+      setAddingTopicForChannel(channel);
+    }
+  }, [onAddTopic]);
 
   // Group channels into pending and regular
   const { pendingChannels, regularChannels } = useMemo<{ pendingChannels: Channel[], regularChannels: Channel[] }>(() => {
@@ -377,6 +535,29 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
         )}
         {regularChannels.map((channel: Channel) => {
           const isActive = activeChannel?.cid === channel.cid;
+          const isTeamWithTopics = channel.type === 'team' && channel.data?.topics_enabled;
+
+          if (isTeamWithTopics) {
+            const GroupComponent = ChannelTopicGroupComponent || ChannelTopicGroup;
+            return (
+              <GroupComponent
+                key={channel.cid}
+                channel={channel}
+                activeChannel={activeChannel}
+                handleSelect={handleSelect}
+                renderChannel={renderChannel}
+                ChannelItemComponent={ChannelItemComponent}
+                AvatarComponent={AvatarComponent}
+                GeneralTopicAvatarComponent={GeneralTopicAvatarComponent}
+                TopicAvatarComponent={TopicAvatarComponent}
+                currentUserId={client.userID}
+                pendingBadgeLabel={pendingBadgeLabel}
+                blockedBadgeLabel={blockedBadgeLabel}
+                generalTopicLabel={generalTopicLabel}
+                onAddTopic={handleAddTopicClick}
+              />
+            );
+          }
 
           return (
             <ChannelRow
@@ -394,6 +575,14 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
           );
         })}
       </VList>
+      {addingTopicForChannel && (
+        <CreateTopicModal
+          isOpen={true}
+          onClose={() => setAddingTopicForChannel(null)}
+          parentChannel={addingTopicForChannel}
+          EmojiPickerComponent={TopicEmojiPickerComponent}
+        />
+      )}
     </div>
   );
 });

@@ -19,7 +19,7 @@ export { usePendingState } from './hooks/usePendingState';
 export { Avatar } from './components/Avatar';
 export type { AvatarProps } from './components/Avatar';
 
-export { ChannelList, ChannelItem } from './components/ChannelList';
+export { ChannelList, ChannelItem, ChannelTopicGroup } from './components/ChannelList';
 export type { ChannelListProps, ChannelItemProps } from './components/ChannelList';
 
 export { Channel } from './components/Channel';
@@ -93,6 +93,8 @@ export type { ReplyPreviewProps } from './types';
 
 export { ForwardMessageModal } from './components/ForwardMessageModal';
 export type { ForwardMessageModalProps, ForwardChannelItemProps } from './components/ForwardMessageModal';
+
+export { CreateTopicModal } from './components/CreateTopicModal';
 
 export { TypingIndicator } from './components/TypingIndicator';
 export type { TypingIndicatorProps } from './components/TypingIndicator';

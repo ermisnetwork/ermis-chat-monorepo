@@ -74,6 +74,27 @@
   margin: 0;
 }
 
+.ermis-channel-info__parent-name {
+  font-size: 13px;
+  color: var(--ermis-accent);
+  margin-top: -4px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.ermis-channel-info__topic-emoji-avatar {
+  font-size: 48px;
+  line-height: 80px;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ermis-bg-secondary);
+  border-radius: 50%;
+  margin-bottom: 16px;
+}
+
 .ermis-channel-info__cover-edit-btn {
   background: transparent;
   border: none;

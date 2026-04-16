@@ -609,8 +609,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   dispatchEvent = (event: Event<ErmisChatGenerics>) => {
     if (!event.received_at) event.received_at = new Date();
 
-    // If the event is channel.created, handle it asynchronously
-    if (event.type === 'channel.created') {
+    // If the event is channel.created or channel.topic.created, handle it asynchronously
+    if (event.type === 'channel.created' || event.type === 'channel.topic.created') {
       this._handleChannelCreatedEvent(event).then(() => {
         this._afterDispatchEvent(event);
       });
@@ -788,6 +788,26 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         });
       }
     }
+
+    if (event.type === 'message.new' && event.channel_type === 'topic') {
+      postListenerCallbacks.push(() => {
+        const parentCid = event.parent_cid || event.channel?.parent_cid;
+        if (parentCid && this.activeChannels[parentCid]) {
+          const parentChannel = this.activeChannels[parentCid];
+          if (parentChannel.state.topics) {
+            parentChannel.state.topics.sort((a, b) => {
+              const aLatest = a.state?.latestMessages?.[a.state.latestMessages.length - 1]?.created_at;
+              const bLatest = b.state?.latestMessages?.[b.state.latestMessages.length - 1]?.created_at;
+              const aTime = aLatest ? new Date(aLatest).getTime() : 0;
+              const bTime = bLatest ? new Date(bLatest).getTime() : 0;
+              return bTime - aTime;
+            });
+            parentChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: parentChannel.data } as any);
+          }
+        }
+      });
+    }
+
 
     if (event.type === 'connection.recovered') {
       postListenerCallbacks.push(() => {

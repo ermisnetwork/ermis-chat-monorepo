@@ -47,7 +47,7 @@ export const useChannelProfile = (channel: Channel | null | undefined) => {
     return () => sub.unsubscribe();
   }, [channel]);
 
-  const channelName = useMemo(() => channel?.data?.name || channel?.cid || 'Unknown Channel', [channel?.data?.name, channel?.cid, channelUpdateCount]);
+  const channelName = useMemo(() => channel?.data?.name || channel?.cid || 'Unknown Channel', [channel?.data?.name, channel?.cid, channel?.type, channelUpdateCount]);
   const channelImage = useMemo(() => channel?.data?.image as string | undefined, [channel?.data?.image, channelUpdateCount]);
   const channelDescription = useMemo(() => channel?.data?.description as string | undefined, [channel?.data?.description, channelUpdateCount]);
 

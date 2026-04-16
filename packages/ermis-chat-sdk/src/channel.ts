@@ -36,6 +36,7 @@ import {
   PollMessage,
   EditMessage,
   ForwardMessage,
+  CreateTopicData,
 } from './types';
 /**
  * Represents a Channel in the Ermis Network.
@@ -728,7 +729,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
   };
 
-  async createTopic(data: any) {
+  async createTopic(data: CreateTopicData) {
     const project_id = this._client.projectId;
     const uuid = randomId();
     const topicID = `${project_id}:${uuid}`;
@@ -1392,6 +1393,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           delete channelState.members[event.user.id];
         }
         break;
+      case 'channel.topic.enabled':
+        if (channel.data) {
+          channel.data.topics_enabled = true;
+        }
+        channelState.topics = channelState.topics || [];
+        break;
+      case 'channel.topic.disabled':
+        if (channel.data) {
+          channel.data.topics_enabled = false;
+        }
+        channelState.topics = [];
+        break;
       case 'channel.updated':
         if (event.channel) {
           channel.data = {
@@ -1547,7 +1560,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         const topic = this.getClient().channel(event.channel_type || '', event.channel_id || '');
         topic.data = event.channel;
         topic._initializeState(topicState, 'latest');
-        channelState.topics?.unshift(topic);
+        
+        if (!channelState.topics) {
+          channelState.topics = [];
+        }
+        if (!channelState.topics.some((t) => t.cid === topic.cid)) {
+          channelState.topics.push(topic);
+        }
         break;
       case 'channel.topic.closed':
         if (channel.data) {

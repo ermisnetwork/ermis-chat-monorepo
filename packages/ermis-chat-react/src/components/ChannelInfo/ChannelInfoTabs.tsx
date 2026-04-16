@@ -32,10 +32,18 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
   LoadingComponent,
 }) => {
   const isMessaging = channel?.type === 'messaging';
+  const isTopic = Boolean(channel?.data?.parent_cid);
+  
   const { isBanned } = useBannedState(channel, currentUserId);
   const { isBlocked } = useBlockedState(channel, currentUserId);
 
-  const availableTabs: MediaTab[] = isMessaging ? MESSAGING_TABS : ALL_TABS;
+  const availableTabs: MediaTab[] = useMemo(() => {
+    let tabs = isMessaging ? MESSAGING_TABS : ALL_TABS;
+    if (isTopic) {
+      tabs = tabs.filter(t => t !== 'members');
+    }
+    return tabs;
+  }, [isMessaging, isTopic]);
 
   const [activeTab, setActiveTab] = useState<MediaTab>(availableTabs[0]);
   const contentTab = useDeferredValue(activeTab);
@@ -45,7 +53,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
   useEffect(() => {
     setActiveTab(availableTabs[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel?.cid]);
+  }, [channel?.cid, availableTabs]);
 
   // Resolve sub-components with defaults
   const MemberItem = MemberItemComponent || MemberListItem;

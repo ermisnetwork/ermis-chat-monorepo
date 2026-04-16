@@ -1,4 +1,13 @@
-import type { FormatMessageResponse, MessageLabel, Attachment, Channel, ChannelFilters, ChannelSort, ChannelQueryOptions, UserCallInfo } from '@ermis-network/ermis-chat-sdk';
+import type {
+  FormatMessageResponse,
+  MessageLabel,
+  Attachment,
+  Channel,
+  ChannelFilters,
+  ChannelSort,
+  ChannelQueryOptions,
+  UserCallInfo,
+} from '@ermis-network/ermis-chat-sdk';
 import type { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
 /* ----------------------------------------------------------
@@ -306,6 +315,7 @@ export type ChannelItemProps = {
   unreadCount: number;
   lastMessageText: string;
   lastMessageUser: string;
+  lastMessageTimestamp?: Date | string | null;
   onSelect: (channel: Channel) => void;
   AvatarComponent: React.ComponentType<AvatarProps>;
   /** Whether the current user has blocked this channel (messaging only) */
@@ -342,6 +352,18 @@ export type ChannelListProps = {
   emptyStateLabel?: string;
   /** Label for the blocked channel badge hover */
   blockedBadgeLabel?: string;
+  /** Custom component for rendering topic group */
+  ChannelTopicGroupComponent?: React.ComponentType<any>;
+  /** Custom avatar component for general topic */
+  GeneralTopicAvatarComponent?: React.ComponentType<any>;
+  /** Custom avatar component for other topics */
+  TopicAvatarComponent?: React.ComponentType<any>;
+  /** Name for the general topic (default: "general") */
+  generalTopicLabel?: string;
+  /** Handler when Add Topic button is clicked on a team channel */
+  onAddTopic?: (channel: Channel) => void;
+  /** Optional custom emoji picker for CreateTopicModal */
+  TopicEmojiPickerComponent?: React.ComponentType<any>;
 };
 
 /* ----------------------------------------------------------
@@ -580,7 +602,11 @@ export type MessageInputProps = {
   /** Custom reply preview component */
   ReplyPreviewComponent?: React.ComponentType<ReplyPreviewProps>;
   /** Custom edit preview component */
-  EditPreviewComponent?: React.ComponentType<{ message: FormatMessageResponse; onDismiss: () => void; editingMessageLabel?: string }>;
+  EditPreviewComponent?: React.ComponentType<{
+    message: FormatMessageResponse;
+    onDismiss: () => void;
+    editingMessageLabel?: string;
+  }>;
   /** I18n Label for banned state */
   bannedLabel?: string;
   /** I18n Label for blocked state (messaging channels) */
@@ -867,6 +893,10 @@ export type ChannelInfoCoverProps = {
   onEditClick?: () => void;
   /** Whether the channel is public */
   isPublic?: boolean;
+  /** Name of the parent channel (if this is a topic) */
+  parentChannelName?: string;
+  /** Whether the channel is a topic */
+  isTopic?: boolean;
   /** Whether the channel is a team channel */
   isTeamChannel?: boolean;
 };
@@ -879,6 +909,7 @@ export type ChannelInfoActionsProps = {
   onBlockUser?: () => void;
   onUnblockUser?: () => void;
   isTeamChannel?: boolean;
+  isTopic?: boolean;
   isBlocked?: boolean;
   currentUserRole?: string;
   searchLabel?: string;
@@ -988,7 +1019,11 @@ export type AddMemberModalProps = {
   /** Custom user item component (replaces the default row) */
   UserItemComponent?: React.ComponentType<AddMemberUserItemProps>;
   /** Custom search input component */
-  SearchInputComponent?: React.ComponentType<{ value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; placeholder: string }>;
+  SearchInputComponent?: React.ComponentType<{
+    value: string;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    placeholder: string;
+  }>;
 };
 
 export type ChannelInfoTabsProps = {
@@ -1101,6 +1136,11 @@ export type ChannelInfoProps = {
   /** I18n labels for block/unblock actions */
   actionsBlockLabel?: string;
   actionsUnblockLabel?: string;
+
+  /** Settings Panel Topics Labels */
+  settingsWorkspaceTopicsTitle?: string;
+  settingsTopicsFeatureName?: string;
+  settingsTopicsFeatureDescription?: string;
 };
 
 /* ----------------------------------------------------------
@@ -1144,6 +1184,10 @@ export type ChannelSettingsPanelProps = {
   title?: string;
   /** Custom slow mode options */
   slowModeOptions?: { label: string; value: number }[];
+  /** I18n labels for Topics settings */
+  workspaceTopicsTitle?: string;
+  topicsFeatureName?: string;
+  topicsFeatureDescription?: string;
 };
 
 /* ----------------------------------------------------------
@@ -1244,4 +1288,23 @@ export type CreateChannelModalProps = {
   imageAccept?: string;
   maxImageSize?: number; // bytes
   maxImageSizeError?: string;
+};
+
+export type CreateTopicModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess?: (channel: Channel) => void;
+  /** Inject external emoji picker component */
+  EmojiPickerComponent?: React.ComponentType<{ onSelect: (emoji: any) => void;[key: string]: any }>;
+  /** Parent team channel to create topic under, will use activeChannel if not provided */
+  parentChannel?: Channel;
+
+  /** i18n labels */
+  title?: string;
+  nameLabel?: string;
+  namePlaceholder?: string;
+  emojiLabel?: string;
+  cancelButtonLabel?: string;
+  createButtonLabel?: string;
+  creatingButtonLabel?: string;
 };

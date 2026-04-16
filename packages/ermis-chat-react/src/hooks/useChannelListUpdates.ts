@@ -37,7 +37,8 @@ export function useChannelListUpdates(
         const isBannedInActive = Boolean(active.state?.membership?.banned);
         const isBlockedInActive = active.type === 'messaging' && Boolean(active.state?.membership?.blocked);
         const isPendingActive =
-          active.state?.membership?.channel_role === 'pending' || (active.state?.membership as Record<string, unknown>)?.role === 'pending';
+          active.state?.membership?.channel_role === 'pending' ||
+          (active.state?.membership as Record<string, unknown>)?.role === 'pending';
 
         if (!isBannedInActive && !isBlockedInActive && !isPendingActive) {
           active.markRead().catch(() => {
@@ -121,7 +122,10 @@ export function useChannelListUpdates(
         // we optimistically inject the membership so it instantly jumps into pending invites!
         // We DO NOT do this for channel.created, because in channel.created, event.member is the creator (owner).
         if (!forceWatch && event.type === 'member.added' && event.member && channelInstance.state) {
-          channelInstance.state.membership = { ...channelInstance.state.membership, ...event.member } as unknown as Record<string, unknown>;
+          channelInstance.state.membership = {
+            ...channelInstance.state.membership,
+            ...event.member,
+          } as unknown as Record<string, unknown>;
         }
 
         // If the caller requested an explicit api call (e.g. for channel.created)
@@ -183,7 +187,9 @@ export function useChannelListUpdates(
           const eventCid =
             event.cid ||
             event.channel?.cid ||
-            ((event as Record<string, unknown>).channel_id ? `${(event as Record<string, unknown>).channel_type}:${(event as Record<string, unknown>).channel_id}` : undefined);
+            ((event as Record<string, unknown>).channel_id
+              ? `${(event as Record<string, unknown>).channel_type}:${(event as Record<string, unknown>).channel_id}`
+              : undefined);
 
           if (eventCid && event.member) {
             const targetChannel = prev.find((c) => c.cid === eventCid);
@@ -201,6 +207,11 @@ export function useChannelListUpdates(
       }
     };
 
+    // --- channel.topic.enabled / disabled / created: force re-render so ChannelList toggles Accordion UI or inserts new topic ---
+    const handleTopicUpdate = (event: Event) => {
+      setChannels((prev) => [...prev]);
+    };
+
     const sub1 = client.on('message.new', handleNewMessage);
     const sub2 = client.on('channel.deleted', handleChannelDeleted);
     const sub3 = client.on('member.removed', handleMemberRemoved);
@@ -209,6 +220,9 @@ export function useChannelListUpdates(
     const sub6 = client.on('notification.added_to_channel', handleMemberAdded);
     const sub7 = client.on('notification.invite_rejected', handleMemberRemoved);
     const sub8 = client.on('notification.invite_accepted', handleMemberUpdated);
+    const sub9 = client.on('channel.topic.enabled', handleTopicUpdate);
+    const sub10 = client.on('channel.topic.disabled', handleTopicUpdate);
+    const sub11 = client.on('channel.topic.created', handleTopicUpdate);
 
     return () => {
       sub1.unsubscribe();
@@ -219,6 +233,9 @@ export function useChannelListUpdates(
       sub6.unsubscribe();
       sub7.unsubscribe();
       sub8.unsubscribe();
+      sub9.unsubscribe();
+      sub10.unsubscribe();
+      sub11.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }

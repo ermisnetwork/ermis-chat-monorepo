@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Panel } from '../Panel';
+import { useChatClient } from '../../hooks/useChatClient';
 import type { ChannelSettingsPanelProps } from '../../types';
 
 export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.memo(({
@@ -16,9 +17,18 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
     { label: '15m', value: 900000 },
     { label: '1h', value: 3600000 },
   ],
+  workspaceTopicsTitle = 'Workspace Topics',
+  topicsFeatureName = 'Topics',
+  topicsFeatureDescription = 'Enable sub-channels and discussions',
 }) => {
   // Config state
+  const { client } = useChatClient();
+  const currentUserId = client?.userID;
+  const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
+  const isOwner = currentUserRole === 'owner';
+
   const [slowMode, setSlowMode] = useState<number>(0);
+  const [topicsEnabled, setTopicsEnabled] = useState<boolean>(false);
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({
     'send-message': true,
     'send-links': true,
@@ -43,6 +53,7 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
       console.log('---syncData---', dataToSync);
       setSlowMode((dataToSync?.member_message_cooldown as number) || 0);
       setKeywords((dataToSync?.filter_words as string[]) || []);
+      setTopicsEnabled(dataToSync?.topics_enabled === true);
 
       const caps = dataToSync?.member_capabilities as string[] || [];
       setCapabilities({
@@ -86,6 +97,7 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
 
   // Compute dirty state
   const isSlowModeChanged = slowMode !== ((channel?.data?.member_message_cooldown as number) || 0);
+  const isTopicsChanged = topicsEnabled !== (channel?.data?.topics_enabled === true);
 
   const currentKeywordsSorted = [...keywords].sort().join(',');
   const originalKeywordsSorted = [...((channel?.data?.filter_words as string[]) || [])].sort().join(',');
@@ -104,7 +116,7 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
   };
   const isCapabilitiesChanged = Object.keys(capabilities).some(k => capabilities[k] !== initialCapabilities[k]);
 
-  const isDirty = isSlowModeChanged || isKeywordsChanged || isCapabilitiesChanged;
+  const isDirty = isSlowModeChanged || isKeywordsChanged || isCapabilitiesChanged || isTopicsChanged;
 
   const handleAddNewKeyword = () => {
     if (newKeyword.trim()) {
@@ -176,6 +188,15 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
         // Use _update instead of update to safely construct root-level payloads
         await (channel as any)._update(payload);
       }
+
+      if (isTopicsChanged) {
+        if (topicsEnabled) {
+          await channel.enableTopics();
+        } else {
+          await channel.disableTopics();
+        }
+      }
+
       onClose();
     } catch (err: any) {
       setError(err?.message || 'Failed to update settings');
@@ -421,6 +442,72 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
             )}
           </div>
         </section>
+
+        {/* Section 3: Features */}
+        {channel?.type === 'team' && (
+          <section
+            className="ermis-settings-panel__section"
+            style={{
+              background: 'var(--ermis-bg-primary)',
+              padding: '16px',
+              borderRadius: '12px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+              border: '1px solid var(--ermis-border-color)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '8px' }}>
+              <div style={{ background: 'rgba(168, 85, 247, 0.1)', padding: '4px', borderRadius: '8px', color: '#a855f7' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                  <polyline points="2 17 12 22 22 17"></polyline>
+                  <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+              </div>
+              <h4 style={{ fontSize: '14px', color: 'var(--ermis-text-primary)', fontWeight: 600, margin: 0 }}>
+                {workspaceTopicsTitle}
+              </h4>
+            </div>
+
+            <div className="ermis-settings-panel__toggles" style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ background: 'var(--ermis-bg-secondary)', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--ermis-border-color)' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--ermis-text-primary)' }}>
+                      {topicsFeatureName}
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--ermis-text-secondary)', marginTop: '2px' }}>
+                      {topicsFeatureDescription}
+                    </span>
+                    {!isOwner && (
+                      <span style={{ fontSize: '11px', color: 'var(--ermis-color-danger)', marginTop: '4px', fontWeight: 500 }}>
+                        Only channel owner can change this.
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={topicsEnabled}
+                    className={`ermis-channel-info__edit-toggle ${topicsEnabled ? 'ermis-channel-info__edit-toggle--on' : ''}`}
+                    onClick={() => isOwner && setTopicsEnabled(!topicsEnabled)}
+                    disabled={isSaving || !isOwner}
+                    style={{ transform: 'scale(0.85)', transformOrigin: 'right center', cursor: (!isOwner || isSaving) ? 'not-allowed' : 'pointer' }}
+                  >
+                    <span className="ermis-channel-info__edit-toggle-thumb" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
 
       </div>
 

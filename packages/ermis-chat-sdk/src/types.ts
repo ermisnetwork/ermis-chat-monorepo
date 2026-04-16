@@ -58,6 +58,7 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     member_capabilities?: string[];
     is_pinned?: boolean;
     topics_enabled?: boolean;
+    parent_cid?: string;
     is_closed_topic?: boolean;
   };
 
@@ -265,6 +266,7 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   message?: MessageResponse<ErmisChatGenerics>;
   online?: boolean;
   parent_id?: string;
+  parent_cid?: string;
   reaction?: ReactionResponse<ErmisChatGenerics>;
   received_at?: string | Date;
   unread_messages?: number;
@@ -298,6 +300,12 @@ export type ChannelFilters = {
   parent_cid?: string;
   parent_id?: string;
   include_parent?: boolean;
+};
+
+export type CreateTopicData = {
+  name: string;
+  image?: string;
+  [key: string]: any;
 };
 
 export type ChannelSort = {
