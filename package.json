@@ -20,13 +20,9 @@
     "eslint-fix": "eslint --fix '**/*.{js,ts,tsx}' --max-warnings 0 --ignore-path .eslintignore",
     "lint": "yarn prettier && yarn eslint",
     "lint-fix": "yarn prettier-fix && yarn eslint-fix",
-    "changeset": "changeset",
-    "version-packages": "changeset version",
-    "release": "yarn build && changeset publish",
-    "patch": "node scripts/quick-patch.mjs"
+    "bump": "node scripts/bump-version.js"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.1",
     "eslint": "7.21.0",
     "eslint-config-prettier": "^8.1.0",
     "eslint-plugin-prettier": "^3.3.1",

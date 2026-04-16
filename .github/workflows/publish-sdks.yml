@@ -29,15 +29,15 @@ jobs:
       - name: Install Dependencies
         run: yarn install
 
-      - name: Create Release Pull Request or Publish to npm
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          # Thư viện này tự chạy yarn release (có lệnh yarn build tự động bên trong)
-          publish: yarn release
-          version: yarn version-packages
-          commit: "chore(release): version packages"
-          title: "chore(release): version packages"
+      - name: Build SDK and React
+        run: yarn build
+
+      - name: Publish SDK to NPM
+        run: cd packages/ermis-chat-sdk && npm publish --access public
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish React UI to NPM
+        run: cd packages/ermis-chat-react && npm publish --access public
+        env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
