@@ -20,7 +20,7 @@
     "/src"
   ],
   "dependencies": {
-    "@ermis-network/ermis-chat-sdk": "1.0.0",
+    "@ermis-network/ermis-chat-sdk": "1.0.3",
     "virtua": "^0.48.8"
   },
   "peerDependencies": {
