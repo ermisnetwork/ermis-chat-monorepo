@@ -53,39 +53,69 @@ import {
 function isString(x: unknown): x is string {
   return typeof x === 'string' || x instanceof String;
 }
+/**
+ * The ErmisChat Client represents the connection securely established between your application
+ * and the Ermis core servers. It acts as the primary access point for real-time messaging,
+ * presence updates, call management, and channel querying.
+ *
+ * It is highly recommended to instantiate this class as a Singleton via `ErmisChat.getInstance()`.
+ */
 export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   private static _instance?: unknown | ErmisChat; // type is undefined|ErmisChat, unknown is due to TS limitations with statics
 
+  /** A map of active channels currently tracked by the client, keyed by Channel ID. */
   activeChannels: {
     [key: string]: Channel<ErmisChatGenerics>;
   };
+  /** The internal configured Axios instance used for REST API requests. */
   axiosInstance: AxiosInstance;
+  /** The primary base URL for REST API communication. */
   baseURL?: string;
+  /** The specific base URL for standard user-focused REST calls. */
   userBaseURL?: string;
+  /** True when the SDK is executed inside a browser environment. */
   browser: boolean;
   cleaningIntervalRef?: NodeJS.Timeout;
   clientID?: string;
   apiKey: string;
   projectId: string;
+  /** Internal mapped registry of event listeners. */
   listeners: Record<string, Array<(event: Event<ErmisChatGenerics>) => void>>;
   logger: Logger;
+  /** Whether the client should automatically fetch missing messages upon unexpected disconnects. */
   recoverStateOnReconnect?: boolean;
+  /** True when the SDK is executed in a NodeJS environment constraint. */
   node: boolean;
+  /** Custom options passed during client initialization. */
   options: ErmisChatOptions;
   setUserPromise: ConnectAPIResponse<ErmisChatGenerics> | null;
+  /** Centralized global state orchestrating user and client metadata. */
   state: ClientState<ErmisChatGenerics>;
   tokenManager: TokenManager<ErmisChatGenerics>;
+  /** The globally authenticated current user object. */
   user?: UserResponse<ErmisChatGenerics>;
   userAgent?: string;
+  /** The unique ID of the current authenticated user. */
   userID?: string;
+  /** The configured WebSocket endpoint base URL for realtime subscriptions. */
   wsBaseURL?: string;
+  /** The active WebSocket connection controller. */
   wsConnection: StableWSConnection<ErmisChatGenerics> | null;
   wsPromise: ConnectAPIResponse<ErmisChatGenerics> | null;
+  /** Tracks consecutive REST API failures for exponential backoff purposes. */
   consecutiveFailures: number;
   defaultWSTimeout: number;
 
   private eventSource: EventSourcePolyfill | null = null;
 
+  /**
+   * Initializes a new Ermis Chat Client instance.
+   *
+   * @param apiKey    - Your public Ermis Network API Key.
+   * @param projectId - Your specific Project UUID pointing to the app config.
+   * @param baseURL   - The API base endpoint assigned to your project.
+   * @param options   - Additional connection rules and configuration options.
+   */
   constructor(apiKey: string, projectId: string, baseURL: string, options?: ErmisChatOptions) {
     this.apiKey = apiKey;
     this.projectId = projectId;
@@ -132,6 +162,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.recoverStateOnReconnect = this.options.recoverStateOnReconnect;
   }
 
+  /**
+   * Retrieves the globally registered Singleton instance of the ErmisChat client.
+   * If the instance lacks existence, it initializes a new one.
+   *
+   * @param key       - Your public Ermis Network API Key.
+   * @param projectId - Your specific Project UUID.
+   * @param baseURL   - The API base endpoint.
+   * @param options   - Connection options.
+   * @returns           The shared ErmisChat client instance.
+   */
   public static getInstance<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics>(
     key: string,
     projectId: string,
@@ -190,6 +230,15 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return await response.json();
   }
 
+  /**
+   * Connects a user to the Ermis network and establishes the WebSocket connection.
+   * This is the primary method to authenticate your client application.
+   *
+   * @param user                - The User object containing `id`, `name`, and optional `avatar`.
+   * @param userTokenOrProvider - The JWT token or an async token provider function.
+   * @param extenal_auth        - Set to `true` to use your custom backend external authentication flow.
+   * @returns                     A promise resolving to the API connection response once authenticated.
+   */
   connectUser = async (
     user: UserResponse<ErmisChatGenerics>,
     userTokenOrProvider: string | null,
@@ -305,6 +354,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   _setupConnection = this.openConnection;
 
+  /**
+   * Gracefully disconnects the current user, terminates the WebSocket connection,
+   * cleans up listeners, and resets the client's internal references.
+   *
+   * @param timeout - Optional timeout in milliseconds before forcing the disconnect.
+   */
   disconnectUser = async (timeout?: number) => {
     this.logger('info', 'client:disconnect() - Disconnecting the client', {
       tags: ['connection', 'client'],
@@ -332,7 +387,21 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   disconnect = this.disconnectUser;
 
+  /**
+   * Attaches an event listener to the client connection.
+   * Listeners can be scoped to specific event types (e.g. `message.new`) or listen to `all` events.
+   *
+   * @param callback - The handler invoked when the event is emitted.
+   * @returns An object containing an `unsubscribe` method to detach the listener.
+   */
   on(callback: EventHandler<ErmisChatGenerics>): { unsubscribe: () => void };
+  /**
+   * Attaches an event listener filtered by a specific event type.
+   *
+   * @param eventType - The specific event name to listen for (e.g., `'notification.message_new'`).
+   * @param callback  - The handler invoked when the event is emitted.
+   * @returns An object containing an `unsubscribe` method to detach the listener.
+   */
   on(eventType: string, callback: EventHandler<ErmisChatGenerics>): { unsubscribe: () => void };
   on(
     callbackOrString: EventHandler<ErmisChatGenerics> | string,
@@ -357,7 +426,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     };
   }
 
+  /**
+   * Detaches a previously registered general event listener.
+   * @param callback - The original handler reference to remove.
+   */
   off(callback: EventHandler<ErmisChatGenerics>): void;
+  /**
+   * Detaches a previously registered event listener scoped to a specific event type.
+   * @param eventType - The specific event name.
+   * @param callback  - The original handler reference to remove.
+   */
   off(eventType: string, callback: EventHandler<ErmisChatGenerics>): void;
   off(callbackOrString: EventHandler<ErmisChatGenerics> | string, callbackOrNothing?: EventHandler<ErmisChatGenerics>) {
     const key = callbackOrNothing ? (callbackOrString as string) : 'all';
@@ -1035,6 +1113,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return response;
   }
 
+  /**
+   * Queries the API for a list of channels based on provided search filters and sort conditions.
+   * Also hydrates these channels into the local SDK state memory.
+   *
+   * @param filterConditions - Specific criteria to filter channels (e.g. `{ type: 'messaging', members: { $in: ['user1'] } }`).
+   * @param sort             - The sorting hierarchy applied to the channel results.
+   * @param options          - Pagination and message limit parameters.
+   * @param stateOptions     - Defines whether to skip state initialization or offline usage.
+   * @returns                  An array of hydrated and locally manageable `Channel` objects.
+   */
   async queryChannels(
     filterConditions: ChannelFilters,
     sort: ChannelSort = [],
@@ -1192,7 +1280,23 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return await this.post<APIResponse>(this.baseURL + `/channels/${channelType}/${channelId}/unpin`);
   }
 
+  /**
+   * Creates or instantiates an interactive `Channel` object locally based on type and custom data.
+   * This does NOT immediately ping the API unless `channel.watch()` or `channel.create()` is subsequently called.
+   *
+   * @param type   - The strict channel type descriptor (e.g., `'messaging'`, `'team'`, `'livestream'`).
+   * @param custom - Initial metadata or specific members to include in the channel.
+   * @returns        A newly instantiated `Channel` object.
+   */
   channel(type: string, custom?: ChannelData<ErmisChatGenerics>): Channel<ErmisChatGenerics>;
+  /**
+   * Creates or instantiates an interactive `Channel` object locally using a specific ID.
+   *
+   * @param type   - The strict channel type descriptor.
+   * @param id     - The unique identifer (UUID / slug) for the channel.
+   * @param custom - Initial metadata or specific members to include in the channel.
+   * @returns        A newly instantiated `Channel` object.
+   */
   channel(type: string, id: string, custom?: ChannelData<ErmisChatGenerics>): Channel<ErmisChatGenerics>;
   channel(
     channelType: string,

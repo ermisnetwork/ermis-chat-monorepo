@@ -26,18 +26,30 @@ type ChannelReadStatus<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
 /**
  * ChannelState - A container class for the channel state.
+ * This class synchronously binds to a `Channel` and holds the single source of truth for
+ * messages, read status, watchers, and typing indicators locally on the client.
  */
 export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   _channel: Channel<ErmisChatGenerics>;
+  /** The current count of users actively watching (having an open WebSocket) this channel. */
   watcher_count: number;
+  /** A dictionary of active typing events gracefully keyed by the user's ID. */
   typing: Record<string, Event<ErmisChatGenerics>>;
+  /** A dictionary of read states mapped per user's ID detailing the last viewed message. */
   read: ChannelReadStatus<ErmisChatGenerics>;
+  /** The locally cached array of pinned messages across the channel. */
   pinnedMessages: Array<ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>>;
+  /** A directory of users actively watching the channel, keyed by User ID. */
   watchers: Record<string, UserResponse<ErmisChatGenerics>>;
+  /** A comprehensive directory mapping user IDs to their member status in the channel. */
   members: Record<string, ChannelMemberResponse<ErmisChatGenerics>>;
+  /** The count of messages not yet read by the currently authenticated user. */
   unreadCount: number;
+  /** Information detailing the authenticated user's own membership relation to this channel. */
   membership: ChannelMembership<ErmisChatGenerics>;
+  /** Timestamp indicating when the very last message was created in this chat. */
   last_message_at: Date | null;
+  /** Designates if the local channel state is entirely synchronized with the backend history. */
   isUpToDate: boolean;
   messageSets: {
     isCurrent: boolean;
@@ -78,6 +90,15 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     this.messageSets[index].messages = messages;
   }
 
+  /**
+   * Pushes a new message directly into the sorted array of the local tracking state.
+   * Useful to achieve optimistic UI updates locally.
+   *
+   * @param newMessage                      - The message context payload to insert.
+   * @param timestampChanged                - Specifies if the underlying `created_at` timestamp mutated.
+   * @param addIfDoesNotExist               - Append it strictly if its ID doesn't already exist.
+   * @param messageSetToAddToIfDoesNotExist - Specifies which message set scope to manipulate.
+   */
   addMessageSorted(
     newMessage: MessageResponse<ErmisChatGenerics>,
     timestampChanged = false,
@@ -356,6 +377,12 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     return { removed: result.length < msgArray.length, result };
   };
 
+  /**
+   * Refreshes internal user references cascading across all presently active messages.
+   * Invoked instantly whenever an underlying user's profile metadata updates (e.g. name or avatar changes).
+   *
+   * @param user - The newly formatted and populated User details object.
+   */
   updateUserMessages = (user: UserResponse<ErmisChatGenerics>) => {
     const _updateUserMessages = (
       messages: Array<ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>>,

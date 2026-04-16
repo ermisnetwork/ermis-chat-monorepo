@@ -37,6 +37,11 @@ import {
   EditMessage,
   ForwardMessage,
 } from './types';
+/**
+ * Represents a Channel in the Ermis Network.
+ * Channels handle chat sessions, livestream messages, teams, or video calls.
+ * This class abstracts and exposes all API operations you can perform on a specific channel instance.
+ */
 export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   _client: ErmisChat<ErmisChatGenerics>;
   type: string;
@@ -53,6 +58,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   isTyping: boolean;
   disconnected: boolean;
 
+  /**
+   * Initializes a new Channel class instance.
+   * Normally you should not call this directly; use `client.channel(type, id)` instead.
+   *
+   * @param client - The shared ErmisChat client instance initializing this channel.
+   * @param type   - The type of channel (`messaging`, `team`, `livestream`, etc.).
+   * @param id     - The unique ID of the channel.
+   * @param data   - Initial arbitrary metadata stored within this channel.
+   */
   constructor(
     client: ErmisChat<ErmisChatGenerics>,
     type: string,
@@ -88,6 +102,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this._client;
   }
 
+  /**
+   * Sends a message to this channel.
+   * By default, it pushes the message eagerly (optimistically) to the local UI state before the server replies.
+   *
+   * @param message - The constructed text/attachment object payload representing the message.
+   * @returns       A Promise resolving to the exact API response encompassing message details.
+   */
   async sendMessage(message: Message<ErmisChatGenerics>) {
     // 1. Generate ID upfront
     if (!message.id) {
@@ -391,6 +412,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this.getClient().post<APIResponse>(url);
   }
 
+  /**
+   * Directly invites or adds registered users into this channel.
+   *
+   * @param members - Array of user IDs explicitly selected to be added.
+   */
   async addMembers(members: string[]) {
     return await this._update({ add_members: members });
   }
@@ -469,6 +495,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     };
   }
 
+  /**
+   * Expels specified currently participating users out of the channel.
+   *
+   * @param members - Array of user IDs to strictly remove from this chat.
+   */
   async removeMembers(members: string[]) {
     return await this._update({ remove_members: members });
   }
@@ -569,6 +600,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return messageSlice[0];
   }
 
+  /**
+   * Emits a mark-read event, updating the backend that the authenticated user has viewed up to the latest known message.
+   * @returns Successful acknowledgement from the server.
+   */
   async markRead() {
     return await this.getClient().post(this._channelURL() + '/read');
   }
@@ -585,6 +620,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this.state.clean();
   }
 
+  /**
+   * Subscribes to realtime events (WebSocket) for this channel, grabs the latest available metadata,
+   * loads the most recent messages, and initializes the local state.
+   *
+   * @param options - Pagination limits like `{ watch: true, presence: true, state: true }`.
+   * @returns         The synchronized comprehensive channel state.
+   */
   async watch(options?: ChannelQueryOptions) {
     // Make sure we wait for the connect promise if there is a pending one
     await this.getClient().wsPromise;

@@ -22,7 +22,8 @@
     "lint-fix": "yarn prettier-fix && yarn eslint-fix",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "yarn build && changeset publish"
+    "release": "yarn build && changeset publish",
+    "patch": "node scripts/quick-patch.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.1",
