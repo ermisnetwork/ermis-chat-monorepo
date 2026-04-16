@@ -146,3 +146,11 @@ export { useCallContext } from './hooks/useCallContext';
 export { ErmisCallProvider } from './components/ErmisCallProvider';
 export type { ErmisCallProviderProps } from './components/ErmisCallProvider';
 export { ErmisCallUI } from './components/ErmisCallUI';
+export type {
+  ErmisCallUIProps,
+  ErmisCallRingingProps,
+  ErmisCallConnectedAudioProps,
+  ErmisCallConnectedVideoProps,
+  ErmisCallErrorProps,
+  ErmisCallControlsBarProps,
+} from './types';

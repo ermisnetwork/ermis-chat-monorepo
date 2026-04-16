@@ -29,6 +29,9 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   renderTitle,
   renderAudioCallButton,
   renderVideoCallButton,
+  audioCallTitle = 'Audio Call',
+  videoCallTitle = 'Video Call',
+  CallBadgeComponent,
 }) => {
   const { activeChannel, client, enableCall } = useChatClient();
   const { isPending } = usePendingState(activeChannel, client.userID);
@@ -85,7 +88,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
                 className="ermis-btn ermis-btn--icon"
                 disabled={actionDisabled}
                 onClick={() => callContext.createCall('audio', activeChannel.cid || '')}
-                title="Audio Call"
+                title={audioCallTitle}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
@@ -100,7 +103,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
                 className="ermis-btn ermis-btn--icon"
                 disabled={actionDisabled}
                 onClick={() => callContext.createCall('video', activeChannel.cid || '')}
-                title="Video Call"
+                title={videoCallTitle}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="23 7 16 12 23 17 23 7"></polygon>
@@ -109,6 +112,10 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
               </button>
             )}
           </>
+        )}
+        {/* C8: Active call badge */}
+        {enableCall && callContext && callContext.callStatus && CallBadgeComponent && (
+          <CallBadgeComponent callType={callContext.callType} />
         )}
         {renderRight && renderRight(activeChannel, actionDisabled)}
       </div>

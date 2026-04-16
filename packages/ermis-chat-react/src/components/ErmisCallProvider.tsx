@@ -1,21 +1,22 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { CallStatus, ErmisCallNode, type UserCallInfo, type CallEventData } from '@ermis-network/ermis-chat-sdk';
 import { ErmisCallContext } from '../context/ErmisCallContext';
+import type { ErmisCallProviderProps } from '../types';
 
-export interface ErmisCallProviderProps {
-  children: React.ReactNode;
-  client: any;
-  sessionId: string;
-  wasmPath?: string;
-  relayUrl?: string;
-}
+export type { ErmisCallProviderProps } from '../types';
 
 export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
   children,
   client,
   sessionId,
   wasmPath = '/ermis_call_node_wasm_bg.wasm',
-  relayUrl = 'https://iroh-relay.ermis.network:8443'
+  relayUrl = 'https://iroh-relay.ermis.network:8443',
+  onCallStart,
+  onCallEnd,
+  onCallError,
+  onIncomingCall,
+  onCallAccepted,
+  onCallRejected,
 }) => {
   const [callNode, setCallNode] = useState<ErmisCallNode | null>(null);
   const [callStatus, setCallStatus] = useState<CallStatus | ''>('');
@@ -36,6 +37,34 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
   const [isRemoteMicMuted, setIsRemoteMicMuted] = useState(false);
   const [isRemoteVideoMuted, setIsRemoteVideoMuted] = useState(false);
 
+  // Call duration timer (C7 — exposed via context)
+  const [callDuration, setCallDuration] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startTimer = useCallback(() => {
+    setCallDuration(0);
+    timerRef.current = setInterval(() => {
+      setCallDuration((prev) => prev + 1);
+    }, 1000);
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setCallDuration(0);
+  }, []);
+
+  useEffect(() => {
+    if (callStatus === CallStatus.CONNECTED) {
+      startTimer();
+    } else {
+      stopTimer();
+    }
+    return () => stopTimer();
+  }, [callStatus, startTimer, stopTimer]);
+
   useEffect(() => {
     if (!client || !sessionId) return;
 
@@ -49,9 +78,17 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
       setCallType(data.callType);
       setCallerInfo(data.callerInfo);
       setReceiverInfo(data.receiverInfo);
+      // C1: Lifecycle callback — incoming call
+      if (data.type === 'incoming' && data.callerInfo) {
+        onIncomingCall?.(data.callerInfo);
+      }
     };
 
-    node.onError = (error: string) => setErrorMessage(error);
+    node.onError = (error: string) => {
+      setErrorMessage(error);
+      // C1: Lifecycle callback — error
+      onCallError?.(error);
+    };
     node.onDeviceChange = (audio, video) => {
       setAudioDevices(audio);
       setVideoDevices(video);
@@ -109,7 +146,7 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
       };
       cleanup();
     };
-  }, [client, sessionId, wasmPath, relayUrl]);
+  }, [client, sessionId, wasmPath, relayUrl, onIncomingCall, onCallError]);
 
   const createCall = useCallback(async (type: 'audio' | 'video', cid: string) => {
     if (!callNode) return;
@@ -117,25 +154,34 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     setIsIncoming(false);
     setCallStatus(CallStatus.RINGING);
     await callNode.createCall(type, cid);
-  }, [callNode]);
+    // C1: Lifecycle callback — call started
+    onCallStart?.(type, cid);
+  }, [callNode, onCallStart]);
 
   const acceptCall = useCallback(async () => {
     if (callNode) await callNode.acceptCall();
-  }, [callNode]);
+    // C1: Lifecycle callback — call accepted
+    onCallAccepted?.();
+  }, [callNode, onCallAccepted]);
 
   const rejectCall = useCallback(async () => {
     if (callNode) await callNode.rejectCall();
     setCallStatus('');
     setIsIncoming(false);
-  }, [callNode]);
+    // C1: Lifecycle callback — call rejected
+    onCallRejected?.();
+  }, [callNode, onCallRejected]);
 
   const endCall = useCallback(async () => {
     if (callNode) await callNode.endCall();
+    // C1: Lifecycle callback — call ended (capture duration before reset)
+    const duration = callDuration;
     setCallStatus('');
     setIsIncoming(false);
     setLocalStream(null);
     setRemoteStream(null);
-  }, [callNode]);
+    onCallEnd?.(duration);
+  }, [callNode, callDuration, onCallEnd]);
 
   const toggleScreenShare = useCallback(async () => {
     if (!callNode) return;
@@ -219,7 +265,8 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     clearError,
     isRemoteMicMuted,
     isRemoteVideoMuted,
-    upgradeCall
+    upgradeCall,
+    callDuration,
   };
 
   return (
@@ -228,3 +275,5 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     </ErmisCallContext.Provider>
   );
 };
+
+ErmisCallProvider.displayName = 'ErmisCallProvider';

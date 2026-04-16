@@ -19,6 +19,12 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   CallUIComponent,
   incomingCallAudioPath,
   outgoingCallAudioPath,
+  onCallStart,
+  onCallEnd,
+  onCallError,
+  onIncomingCall,
+  onCallAccepted,
+  onCallRejected,
 }) => {
   const [activeChannelRaw, setActiveChannelRaw] = useState<Channel | null>(null);
   const [theme, setTheme] = useState<Theme>(initialTheme);
@@ -99,6 +105,12 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
         sessionId={callSessionId || ''}
         wasmPath={callWasmPath}
         relayUrl={callRelayUrl}
+        onCallStart={onCallStart}
+        onCallEnd={onCallEnd}
+        onCallError={onCallError}
+        onIncomingCall={onIncomingCall}
+        onCallAccepted={onCallAccepted}
+        onCallRejected={onCallRejected}
       >
         {content}
       </ErmisCallProvider>

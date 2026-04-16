@@ -49,6 +49,45 @@ export const AppBuilder = ({ userToken }) => {
 };
 ```
 
+### Call Configuration
+
+To enable 1-on-1 audio and video calls, set `enableCall` to `true` and provide a `callSessionId`.
+
+:::caution
+Before enabling calls, you **must** run `npx ermis-init-call` to copy the required WebAssembly and audio files into your `public/` directory. See [Audio & Video Calls](./calls.md) for details.
+:::
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `enableCall` | `boolean` | `false` | Enables the call feature. |
+| `callSessionId` | `string` | — | Unique session ID for the call node (required when `enableCall` is `true`). |
+| `callWasmPath` | `string` | `'/ermis_call_node_wasm_bg.wasm'` | Path to the WASM module. |
+| `callRelayUrl` | `string` | `'https://iroh-relay.ermis.network:8443'` | Relay server URL. |
+| `CallUIComponent` | `React.ComponentType` | `ErmisCallUI` | Replace the entire default call UI. |
+| `incomingCallAudioPath` | `string` | `'/call_incoming.mp3'` | Audio file for incoming call ringtone. |
+| `outgoingCallAudioPath` | `string` | `'/call_outgoing.mp3'` | Audio file for outgoing call ringtone. |
+| `onCallStart` | `(type, cid) => void` | — | Called when a call is initiated. |
+| `onCallEnd` | `(duration) => void` | — | Called when a call ends. |
+| `onCallError` | `(error) => void` | — | Called when a call error occurs. |
+| `onIncomingCall` | `(callerInfo) => void` | — | Called on incoming call. |
+| `onCallAccepted` | `() => void` | — | Called when call is accepted. |
+| `onCallRejected` | `() => void` | — | Called when call is rejected. |
+
+```tsx
+<ChatProvider
+  client={chatClient}
+  enableCall={true}
+  callSessionId="my-session-id"
+  onCallEnd={(duration) => console.log(`Call lasted ${duration}s`)}
+>
+  <YourAppLayout />
+</ChatProvider>
+```
+
+:::tip
+For the full Call API reference including `ErmisCallUI` props, `useCallContext` hook, component slots, and CSS theming, see the dedicated [Audio & Video Calls](./calls.md) page.
+:::
+
 ---
 
 ## `<ChannelList />`

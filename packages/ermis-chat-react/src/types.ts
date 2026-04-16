@@ -1,4 +1,4 @@
-import type { FormatMessageResponse, MessageLabel, Attachment, Channel, ChannelFilters, ChannelSort, ChannelQueryOptions } from '@ermis-network/ermis-chat-sdk';
+import type { FormatMessageResponse, MessageLabel, Attachment, Channel, ChannelFilters, ChannelSort, ChannelQueryOptions, UserCallInfo } from '@ermis-network/ermis-chat-sdk';
 import type { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
 /* ----------------------------------------------------------
@@ -66,12 +66,49 @@ export type ChatProviderProps = {
   incomingCallAudioPath?: string;
   /** Path to the mp3 file for outgoing call ringing */
   outgoingCallAudioPath?: string;
+  /** Called when a call is initiated by the local user */
+  onCallStart?: (callType: 'audio' | 'video', cid: string) => void;
+  /** Called when a call ends (includes duration in seconds) */
+  onCallEnd?: (duration: number) => void;
+  /** Called when a call error occurs */
+  onCallError?: (error: string) => void;
+  /** Called when an incoming call is received */
+  onIncomingCall?: (callerInfo: UserCallInfo) => void;
+  /** Called when the local user accepts an incoming call */
+  onCallAccepted?: () => void;
+  /** Called when the local user rejects an incoming call */
+  onCallRejected?: () => void;
 };
+
+/* ----------------------------------------------------------
+   Call Provider types
+   ---------------------------------------------------------- */
+export interface ErmisCallProviderProps {
+  children: React.ReactNode;
+  client: ErmisChat;
+  sessionId: string;
+  wasmPath?: string;
+  relayUrl?: string;
+  /** Called when a call is initiated by the local user */
+  onCallStart?: (callType: 'audio' | 'video', cid: string) => void;
+  /** Called when a call ends (includes duration in seconds) */
+  onCallEnd?: (duration: number) => void;
+  /** Called when a call error occurs */
+  onCallError?: (error: string) => void;
+  /** Called when an incoming call is received */
+  onIncomingCall?: (callerInfo: UserCallInfo) => void;
+  /** Called when the local user accepts an incoming call */
+  onCallAccepted?: () => void;
+  /** Called when the local user rejects an incoming call */
+  onCallRejected?: () => void;
+}
 
 /* ----------------------------------------------------------
    Call UI types
    ---------------------------------------------------------- */
 export type ErmisCallUIProps = {
+  /** Additional CSS class name */
+  className?: string;
   incomingCallTitle?: (callType: string) => string;
   outgoingCallTitle?: (callType: string) => string;
   ongoingCallTitle?: (callType: string) => string;
@@ -95,7 +132,13 @@ export type ErmisCallUIProps = {
   fullscreenTitle?: string;
   /** Tooltip for the exit fullscreen button (default: "Exit Fullscreen") */
   exitFullscreenTitle?: string;
-  AvatarComponent?: React.ComponentType<any>;
+  /** Tooltip for the upgrade call button (default: "Request Video Upgrade") */
+  upgradeCallTitle?: string;
+  /** If true, suppress incoming call UI — useful for "Do Not Disturb" mode */
+  suppressIncomingCalls?: boolean;
+  /** Called on each second tick of the call duration timer */
+  onCallDurationChange?: (seconds: number) => void;
+  AvatarComponent?: React.ComponentType<AvatarProps>;
   MicIcon?: React.ComponentType;
   MicOffIcon?: React.ComponentType;
   VideoIcon?: React.ComponentType;
@@ -105,8 +148,89 @@ export type ErmisCallUIProps = {
   ScreenShareOffIcon?: React.ComponentType;
   FullscreenIcon?: React.ComponentType;
   ExitFullscreenIcon?: React.ComponentType;
+  /** Custom icon for the upgrade call button (audio → video) */
+  UpgradeCallIcon?: React.ComponentType;
   incomingCallAudioPath?: string;
   outgoingCallAudioPath?: string;
+  /** Replace the entire Ringing state view */
+  RingingComponent?: React.ComponentType<ErmisCallRingingProps>;
+  /** Replace the entire Connected Audio state view */
+  ConnectedAudioComponent?: React.ComponentType<ErmisCallConnectedAudioProps>;
+  /** Replace the entire Connected Video state view */
+  ConnectedVideoComponent?: React.ComponentType<ErmisCallConnectedVideoProps>;
+  /** Replace the entire Error state view */
+  ErrorComponent?: React.ComponentType<ErmisCallErrorProps>;
+  /** Replace the controls bar */
+  ControlsBarComponent?: React.ComponentType<ErmisCallControlsBarProps>;
+};
+
+/* ----------------------------------------------------------
+   Call sub-component prop types (for component slots)
+   ---------------------------------------------------------- */
+
+/** Props for the Ringing state view */
+export type ErmisCallRingingProps = {
+  peerInfo?: UserCallInfo;
+  callType: string;
+  isIncoming: boolean;
+  acceptCall: () => Promise<void>;
+  rejectCall: () => Promise<void>;
+  endCall: () => Promise<void>;
+  AvatarComponent: React.ComponentType<AvatarProps>;
+  isCallingYouLabel: string;
+  ringingLabel: string;
+  rejectCallLabel: string;
+  acceptCallLabel: string;
+  endCallLabel: string;
+  audioCallBadgeLabel: string;
+  videoCallBadgeLabel: string;
+};
+
+/** Props for the Connected Audio state view */
+export type ErmisCallConnectedAudioProps = {
+  peerInfo?: UserCallInfo;
+  callDuration: number;
+  isRemoteMicMuted: boolean;
+  AvatarComponent: React.ComponentType<AvatarProps>;
+  connectedLabel: string;
+  renderControls: () => React.ReactNode;
+};
+
+/** Props for the Connected Video state view */
+export type ErmisCallConnectedVideoProps = {
+  localVideoRef: React.RefObject<HTMLVideoElement | null>;
+  remoteVideoRef: React.RefObject<HTMLVideoElement | null>;
+  isRemoteMicMuted: boolean;
+  renderControls: () => React.ReactNode;
+};
+
+/** Props for the Error state view */
+export type ErmisCallErrorProps = {
+  errorMessage: string;
+  clearError: () => void;
+  cancelLabel: string;
+  PhoneIcon: React.ComponentType;
+};
+
+/** Props for the Controls bar */
+export type ErmisCallControlsBarProps = {
+  callType: string;
+  toggleMic: () => void;
+  toggleVideo: () => void;
+  toggleScreenShare: () => Promise<void>;
+  toggleFullscreen: () => void;
+  upgradeCall: () => Promise<void>;
+  endCall: () => Promise<void>;
+  isMicMuted: boolean;
+  isVideoMuted: boolean;
+  isScreenSharing: boolean;
+  isFullscreen: boolean;
+  audioDevices: MediaDeviceInfo[];
+  videoDevices: MediaDeviceInfo[];
+  selectedAudioDeviceId: string;
+  selectedVideoDeviceId: string;
+  switchAudioDevice: (id: string) => Promise<void>;
+  switchVideoDevice: (id: string) => Promise<void>;
 };
 
 /* ----------------------------------------------------------
@@ -157,6 +281,12 @@ export type ChannelHeaderProps = {
   renderAudioCallButton?: (onClick: () => void, disabled: boolean) => React.ReactNode;
   /** Custom renderer for Video Call button */
   renderVideoCallButton?: (onClick: () => void, disabled: boolean) => React.ReactNode;
+  /** I18n label for the audio call button tooltip (default: "Audio Call") */
+  audioCallTitle?: string;
+  /** I18n label for the video call button tooltip (default: "Video Call") */
+  videoCallTitle?: string;
+  /** Custom component to show when a call is active (e.g. "Call in progress" badge) */
+  CallBadgeComponent?: React.ComponentType<{ callType: string }>;
 };
 
 /** Data passed to a fully custom HeaderComponent */

@@ -40,6 +40,41 @@ export const GlobalHeader = () => {
 };
 ```
 
+### `useCallContext`
+
+Retrieves the call state and actions from `ErmisCallProvider`. Must be used within a component tree that has `enableCall={true}` on `ChatProvider`.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| None | `N/A` | Does not accept arguments. |
+
+**Returns:** `CallContextValue` (Includes `callStatus`, `callType`, `callDuration`, `createCall`, `acceptCall`, `endCall`, `toggleMic`, `toggleVideo`...)
+
+**Example:**
+```tsx
+import { useCallContext } from '@ermis-network/ermis-chat-react';
+
+export const CallStatusBadge = () => {
+  const { callStatus, callType, callDuration } = useCallContext();
+
+  if (!callStatus) return null;
+
+  const mins = Math.floor(callDuration / 60).toString().padStart(2, '0');
+  const secs = (callDuration % 60).toString().padStart(2, '0');
+
+  return (
+    <div className="call-badge">
+      {callType === 'video' ? '📹' : '📞'}
+      {callStatus === 'connected' ? `${mins}:${secs}` : 'Ringing...'}
+    </div>
+  );
+};
+```
+
+:::tip
+For the full `CallContextValue` API reference with all properties and actions, see [Audio & Video Calls — useCallContext](./calls.md#usecallcontext-hook).
+:::
+
 ### `useChannel`
 
 Extracts the specific channel context when rendering inside a `<Channel />` component wrapper.

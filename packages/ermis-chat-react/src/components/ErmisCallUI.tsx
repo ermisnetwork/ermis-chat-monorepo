@@ -12,10 +12,11 @@ const formatDuration = (totalSeconds: number): string => {
   return `${m}:${s}`;
 };
 
-export const ErmisCallUI: React.FC<ErmisCallUIProps> = ({
-  incomingCallTitle = (type) => `Incoming ${type} call`,
-  outgoingCallTitle = (type) => `Outgoing ${type} call`,
-  ongoingCallTitle = (type) => `Ongoing ${type} Call`,
+export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
+  className,
+  incomingCallTitle = (type: string) => `Incoming ${type} call`,
+  outgoingCallTitle = (type: string) => `Outgoing ${type} call`,
+  ongoingCallTitle = (type: string) => `Ongoing ${type} Call`,
   isCallingYouLabel = 'is calling you...',
   ringingLabel = 'Ringing...',
   rejectCallLabel = 'Reject',
@@ -31,6 +32,9 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = ({
   videoCallBadgeLabel = 'Video Call',
   fullscreenTitle = 'Fullscreen',
   exitFullscreenTitle = 'Exit Fullscreen',
+  upgradeCallTitle = 'Request Video Upgrade',
+  suppressIncomingCalls = false,
+  onCallDurationChange,
   AvatarComponent = Avatar,
   MicIcon: PropMicIcon,
   MicOffIcon: PropMicOffIcon,
@@ -41,8 +45,14 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = ({
   ScreenShareOffIcon: PropScreenShareOffIcon,
   FullscreenIcon: PropFullscreenIcon,
   ExitFullscreenIcon: PropExitFullscreenIcon,
+  UpgradeCallIcon: PropUpgradeCallIcon,
   incomingCallAudioPath = '/call_incoming.mp3',
   outgoingCallAudioPath = '/call_outgoing.mp3',
+  RingingComponent: CustomRingingComponent,
+  ConnectedAudioComponent: CustomConnectedAudioComponent,
+  ConnectedVideoComponent: CustomConnectedVideoComponent,
+  ErrorComponent: CustomErrorComponent,
+  ControlsBarComponent: CustomControlsBarComponent,
 }) => {
   const {
     callStatus,
@@ -70,7 +80,8 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = ({
     switchVideoDevice,
     clearError,
     isRemoteMicMuted,
-    upgradeCall
+    upgradeCall,
+    callDuration,
   } = useCallContext();
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -97,33 +108,12 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleChange);
   }, []);
 
-  // Call duration timer
-  const [callDuration, setCallDuration] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const startTimer = useCallback(() => {
-    setCallDuration(0);
-    timerRef.current = setInterval(() => {
-      setCallDuration((prev) => prev + 1);
-    }, 1000);
-  }, []);
-
-  const stopTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    setCallDuration(0);
-  }, []);
-
+  // C5: Notify consumer of duration changes
   useEffect(() => {
-    if (callStatus === CallStatus.CONNECTED) {
-      startTimer();
-    } else {
-      stopTimer();
+    if (callDuration > 0) {
+      onCallDurationChange?.(callDuration);
     }
-    return () => stopTimer();
-  }, [callStatus, startTimer, stopTimer]);
+  }, [callDuration, onCallDurationChange]);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -155,6 +145,9 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = ({
   }, [callStatus]);
 
   if (!callStatus && !errorMessage) return null;
+
+  // C3: Suppress incoming call UI (DND mode)
+  if (suppressIncomingCalls && isIncoming && callStatus === CallStatus.RINGING) return null;
 
   const isOpen = callStatus === CallStatus.RINGING || callStatus === CallStatus.CONNECTED || !!errorMessage;
   if (!isOpen) return null;
@@ -244,108 +237,377 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = ({
     </svg>
   ));
 
+  // C4: Upgrade call icon (defaults to FinalVideoIcon)
+  const FinalUpgradeCallIcon = PropUpgradeCallIcon || FinalVideoIcon;
+
   /* ================================================================
      Shared Controls Bar — used by both audio and video active states
      ================================================================ */
-  const renderControls = () => (
-    <div className="ermis-call-ui__controls">
-      {/* Mic */}
-      <div className="ermis-call-ui__action-group">
-        <button
-          onClick={toggleMic}
-          className={`ermis-call-ui__control-btn ${isMicMuted ? 'ermis-call-ui__control-btn--muted' : ''}`}
-          data-tooltip={toggleMicTitle}
-        >
-          {isMicMuted ? <FinalMicOffIcon /> : <FinalMicIcon />}
-        </button>
-        {audioDevices.length > 0 && (
-          <select
-            className="ermis-call-ui__device-select"
-            value={selectedAudioDeviceId}
-            onChange={(e) => switchAudioDevice(e.target.value)}
-          >
-            {audioDevices.map(d => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>
-            ))}
-          </select>
-        )}
-      </div>
+  const renderControls = () => {
+    // C6: Allow consumer to replace controls bar entirely
+    if (CustomControlsBarComponent) {
+      return (
+        <CustomControlsBarComponent
+          callType={callType}
+          toggleMic={toggleMic}
+          toggleVideo={toggleVideo}
+          toggleScreenShare={toggleScreenShare}
+          toggleFullscreen={toggleFullscreen}
+          upgradeCall={upgradeCall}
+          endCall={endCall}
+          isMicMuted={isMicMuted}
+          isVideoMuted={isVideoMuted}
+          isScreenSharing={isScreenSharing}
+          isFullscreen={isFullscreen}
+          audioDevices={audioDevices}
+          videoDevices={videoDevices}
+          selectedAudioDeviceId={selectedAudioDeviceId}
+          selectedVideoDeviceId={selectedVideoDeviceId}
+          switchAudioDevice={switchAudioDevice}
+          switchVideoDevice={switchVideoDevice}
+        />
+      );
+    }
 
-      {/* Video controls */}
-      {callType === 'video' ? (
+    return (
+      <div className="ermis-call-ui__controls">
+        {/* Mic */}
         <div className="ermis-call-ui__action-group">
           <button
-            onClick={toggleVideo}
-            className={`ermis-call-ui__control-btn ${isVideoMuted ? 'ermis-call-ui__control-btn--muted' : ''}`}
-            data-tooltip={toggleVideoTitle}
+            onClick={toggleMic}
+            className={`ermis-call-ui__control-btn ${isMicMuted ? 'ermis-call-ui__control-btn--muted' : ''}`}
+            data-tooltip={toggleMicTitle}
           >
-            {isVideoMuted ? <FinalVideoOffIcon /> : <FinalVideoIcon />}
+            {isMicMuted ? <FinalMicOffIcon /> : <FinalMicIcon />}
           </button>
-          {videoDevices.length > 0 && (
+          {audioDevices.length > 0 && (
             <select
               className="ermis-call-ui__device-select"
-              value={selectedVideoDeviceId}
-              onChange={(e) => switchVideoDevice(e.target.value)}
+              value={selectedAudioDeviceId}
+              onChange={(e) => switchAudioDevice(e.target.value)}
             >
-              {videoDevices.map(d => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || 'Camera'}</option>
+              {audioDevices.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>
               ))}
             </select>
           )}
         </div>
-      ) : (
+
+        {/* Video controls */}
+        {callType === 'video' ? (
+          <div className="ermis-call-ui__action-group">
+            <button
+              onClick={toggleVideo}
+              className={`ermis-call-ui__control-btn ${isVideoMuted ? 'ermis-call-ui__control-btn--muted' : ''}`}
+              data-tooltip={toggleVideoTitle}
+            >
+              {isVideoMuted ? <FinalVideoOffIcon /> : <FinalVideoIcon />}
+            </button>
+            {videoDevices.length > 0 && (
+              <select
+                className="ermis-call-ui__device-select"
+                value={selectedVideoDeviceId}
+                onChange={(e) => switchVideoDevice(e.target.value)}
+              >
+                {videoDevices.map(d => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || 'Camera'}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        ) : (
+          <div className="ermis-call-ui__action-group">
+            <button
+              onClick={upgradeCall}
+              className="ermis-call-ui__control-btn"
+              data-tooltip={upgradeCallTitle}
+            >
+              <FinalUpgradeCallIcon />
+            </button>
+          </div>
+        )}
+
+        {/* Screen Share */}
+        {callType === 'video' && typeof navigator.mediaDevices?.getDisplayMedia === 'function' && (
+          <div className="ermis-call-ui__action-group">
+            <button
+              onClick={toggleScreenShare}
+              className={`ermis-call-ui__control-btn ${isScreenSharing ? 'ermis-call-ui__control-btn--active' : ''}`}
+              data-tooltip={isScreenSharing ? stopScreenShareTitle : shareScreenTitle}
+            >
+              {isScreenSharing ? <FinalScreenShareIcon /> : <FinalScreenShareOffIcon />}
+            </button>
+          </div>
+        )}
+
+        {/* Fullscreen */}
         <div className="ermis-call-ui__action-group">
           <button
-            onClick={upgradeCall}
+            onClick={toggleFullscreen}
             className="ermis-call-ui__control-btn"
-            data-tooltip="Request Video Upgrade"
+            data-tooltip={isFullscreen ? exitFullscreenTitle : fullscreenTitle}
           >
-            <FinalVideoIcon />
+            {isFullscreen ? <FinalExitFullscreenIcon /> : <FinalFullscreenIcon />}
           </button>
         </div>
-      )}
 
-      {/* Screen Share */}
-      {callType === 'video' && typeof navigator.mediaDevices?.getDisplayMedia === 'function' && (
-        <div className="ermis-call-ui__action-group">
-          <button
-            onClick={toggleScreenShare}
-            className={`ermis-call-ui__control-btn ${isScreenSharing ? 'ermis-call-ui__control-btn--active' : ''}`}
-            data-tooltip={isScreenSharing ? stopScreenShareTitle : shareScreenTitle}
-          >
-            {isScreenSharing ? <FinalScreenShareIcon /> : <FinalScreenShareOffIcon />}
-          </button>
-        </div>
-      )}
+        {/* Separator before end call */}
+        <div className="ermis-call-ui__controls-separator" />
 
-      {/* Fullscreen */}
-      <div className="ermis-call-ui__action-group">
+        {/* End Call */}
         <button
-          onClick={toggleFullscreen}
-          className="ermis-call-ui__control-btn"
-          data-tooltip={isFullscreen ? exitFullscreenTitle : fullscreenTitle}
+          onClick={endCall}
+          className="ermis-call-ui__control-btn ermis-call-ui__control-btn--danger"
+          data-tooltip={endCallLabel}
         >
-          {isFullscreen ? <FinalExitFullscreenIcon /> : <FinalFullscreenIcon />}
+          <FinalPhoneIcon />
         </button>
       </div>
+    );
+  };
 
-      {/* Separator before end call */}
-      <div className="ermis-call-ui__controls-separator" />
+  /* ================================================================
+     Render ringing state
+     ================================================================ */
+  const renderRinging = () => {
+    // C6: Allow consumer to replace ringing view entirely
+    if (CustomRingingComponent) {
+      return (
+        <CustomRingingComponent
+          peerInfo={peerInfo}
+          callType={callType}
+          isIncoming={isIncoming}
+          acceptCall={acceptCall}
+          rejectCall={rejectCall}
+          endCall={endCall}
+          AvatarComponent={AvatarComponent}
+          isCallingYouLabel={isCallingYouLabel}
+          ringingLabel={ringingLabel}
+          rejectCallLabel={rejectCallLabel}
+          acceptCallLabel={acceptCallLabel}
+          endCallLabel={endCallLabel}
+          audioCallBadgeLabel={audioCallBadgeLabel}
+          videoCallBadgeLabel={videoCallBadgeLabel}
+        />
+      );
+    }
 
-      {/* End Call */}
-      <button
-        onClick={endCall}
-        className="ermis-call-ui__control-btn ermis-call-ui__control-btn--danger"
-        data-tooltip={endCallLabel}
-      >
-        <FinalPhoneIcon />
-      </button>
-    </div>
-  );
+    return (
+      <div className="ermis-call-ui__ringing">
+        {/* Avatar with pulse rings */}
+        <div className="ermis-call-ui__ringing-avatar">
+          <div className="ermis-call-ui__ringing-avatar-inner">
+            <AvatarComponent
+              image={peerInfo?.avatar}
+              name={peerInfo?.name}
+              size={88}
+            />
+          </div>
+        </div>
+
+        <h3 className="ermis-call-ui__ringing-name">
+          {peerInfo?.name}
+        </h3>
+        <p className="ermis-call-ui__ringing-status">
+          {isIncoming ? isCallingYouLabel : ringingLabel}
+        </p>
+
+        {/* Call type badge */}
+        <div className="ermis-call-ui__type-badge">
+          {callType === 'video' ? <FinalVideoIcon /> : <FinalPhoneIcon />}
+          {callType === 'video' ? videoCallBadgeLabel : audioCallBadgeLabel}
+        </div>
+
+        {/* Action buttons */}
+        <div className="ermis-call-ui__ringing-actions">
+          {isIncoming ? (
+            <>
+              <div className="ermis-call-ui__ringing-action">
+                <button
+                  onClick={rejectCall}
+                  className="ermis-call-ui__action-circle ermis-call-ui__action-circle--reject"
+                >
+                  <FinalPhoneIcon />
+                </button>
+                <span className="ermis-call-ui__action-label">{rejectCallLabel}</span>
+              </div>
+              <div className="ermis-call-ui__ringing-action">
+                <button
+                  onClick={acceptCall}
+                  className="ermis-call-ui__action-circle ermis-call-ui__action-circle--accept"
+                >
+                  {callType === 'video' ? <FinalVideoIcon /> : <FinalPhoneIcon />}
+                </button>
+                <span className="ermis-call-ui__action-label">{acceptCallLabel}</span>
+              </div>
+            </>
+          ) : (
+            <div className="ermis-call-ui__ringing-action">
+              <button
+                onClick={endCall}
+                className="ermis-call-ui__action-circle ermis-call-ui__action-circle--reject"
+              >
+                <FinalPhoneIcon />
+              </button>
+              <span className="ermis-call-ui__action-label">{endCallLabel}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  /* ================================================================
+     Render connected state
+     ================================================================ */
+  const renderConnected = () => {
+    if (callType === 'video') {
+      // C6: Allow consumer to replace connected video view
+      if (CustomConnectedVideoComponent) {
+        return (
+          <CustomConnectedVideoComponent
+            localVideoRef={localVideoRef}
+            remoteVideoRef={remoteVideoRef}
+            isRemoteMicMuted={isRemoteMicMuted}
+            renderControls={renderControls}
+          />
+        );
+      }
+
+      return (
+        <div className="ermis-call-ui__active">
+          <div className="ermis-call-ui__video-container">
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="ermis-call-ui__video-remote"
+            />
+            <div className="ermis-call-ui__video-local">
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="ermis-call-ui__video-local-stream"
+              />
+            </div>
+            {/* Remote mic muted indicator */}
+            {isRemoteMicMuted && (
+              <div className="ermis-call-ui__remote-muted-badge">
+                <FinalMicOffIcon />
+              </div>
+            )}
+            {/* Glassmorphism controls overlay */}
+            <div className="ermis-call-ui__video-controls-overlay">
+              {renderControls()}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Audio call
+    // C6: Allow consumer to replace connected audio view
+    if (CustomConnectedAudioComponent) {
+      return (
+        <CustomConnectedAudioComponent
+          peerInfo={peerInfo}
+          callDuration={callDuration}
+          isRemoteMicMuted={isRemoteMicMuted}
+          AvatarComponent={AvatarComponent}
+          connectedLabel={connectedLabel}
+          renderControls={renderControls}
+        />
+      );
+    }
+
+    return (
+      <div className="ermis-call-ui__active">
+        <div className="ermis-call-ui__audio-container">
+          <div className="ermis-call-ui__audio-avatar-wrapper">
+            <AvatarComponent
+              image={peerInfo?.avatar}
+              name={peerInfo?.name}
+              size={100}
+            />
+            {/* Remote mic muted indicator */}
+            {isRemoteMicMuted && (
+              <div className="ermis-call-ui__remote-muted-badge ermis-call-ui__remote-muted-badge--audio">
+                <FinalMicOffIcon />
+              </div>
+            )}
+          </div>
+          <h3 className="ermis-call-ui__active-name">
+            {peerInfo?.name}
+          </h3>
+
+          {/* Status + Timer */}
+          <div className="ermis-call-ui__active-status">
+            <span className="ermis-call-ui__active-status-dot" />
+            <span>{connectedLabel}</span>
+            <span className="ermis-call-ui__timer">
+              {formatDuration(callDuration)}
+            </span>
+          </div>
+
+          {/* Audio wave visualizer */}
+          <div className="ermis-call-ui__audio-waves">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <span key={i} className="ermis-call-ui__audio-wave-bar" />
+            ))}
+          </div>
+
+          <audio ref={remoteAudioRef} autoPlay className="ermis-call-ui__audio--hidden" />
+
+          {/* Controls bar */}
+          {renderControls()}
+        </div>
+      </div>
+    );
+  };
+
+  /* ================================================================
+     Render error state
+     ================================================================ */
+  const renderError = () => {
+    if (!errorMessage) return null;
+
+    // C6: Allow consumer to replace error view
+    if (CustomErrorComponent) {
+      return (
+        <CustomErrorComponent
+          errorMessage={errorMessage}
+          clearError={clearError}
+          cancelLabel={cancelLabel}
+          PhoneIcon={FinalPhoneIcon}
+        />
+      );
+    }
+
+    return (
+      <div className="ermis-call-ui__error">
+        <div className="ermis-call-ui__error-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--ermis-color-danger)" strokeWidth="2" width="56" height="56">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+        </div>
+        <p className="ermis-call-ui__error-text">{errorMessage}</p>
+        <button
+          className="ermis-call-ui__error-dismiss"
+          onClick={clearError}
+        >
+          <FinalPhoneIcon /> {cancelLabel}
+        </button>
+      </div>
+    );
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={endCall} title={title} hideCloseButton closeOnOutsideClick={false} maxWidth={modalMaxWidth}>
-      <div className={`ermis-call-ui ${isFullscreen ? 'ermis-call-ui--fullscreen' : ''}`} ref={callContainerRef}>
+      <div className={`ermis-call-ui ${isFullscreen ? 'ermis-call-ui--fullscreen' : ''}${className ? ` ${className}` : ''}`} ref={callContainerRef}>
         {/* Ringing audio */}
         {(incomingCallAudioPath || outgoingCallAudioPath) && (
           <audio
@@ -357,167 +619,16 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = ({
         )}
 
         {/* ============ ERROR STATE ============ */}
-        {errorMessage && (
-          <div className="ermis-call-ui__error">
-            <div className="ermis-call-ui__error-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="var(--ermis-color-danger)" strokeWidth="2" width="56" height="56">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-            </div>
-            <p className="ermis-call-ui__error-text">{errorMessage}</p>
-            <button
-              className="ermis-call-ui__error-dismiss"
-              onClick={clearError}
-            >
-              <FinalPhoneIcon /> {cancelLabel}
-            </button>
-          </div>
-        )}
+        {errorMessage && renderError()}
 
         {/* ============ RINGING STATE ============ */}
-        {!errorMessage && callStatus === CallStatus.RINGING && (
-          <div className="ermis-call-ui__ringing">
-            {/* Avatar with pulse rings */}
-            <div className="ermis-call-ui__ringing-avatar">
-              <div className="ermis-call-ui__ringing-avatar-inner">
-                <AvatarComponent
-                  image={peerInfo?.avatar}
-                  name={peerInfo?.name}
-                  size={88}
-                />
-              </div>
-            </div>
-
-            <h3 className="ermis-call-ui__ringing-name">
-              {peerInfo?.name}
-            </h3>
-            <p className="ermis-call-ui__ringing-status">
-              {isIncoming ? isCallingYouLabel : ringingLabel}
-            </p>
-
-            {/* Call type badge */}
-            <div className="ermis-call-ui__type-badge">
-              {callType === 'video' ? <FinalVideoIcon /> : <FinalPhoneIcon />}
-              {callType === 'video' ? videoCallBadgeLabel : audioCallBadgeLabel}
-            </div>
-
-            {/* Action buttons */}
-            <div className="ermis-call-ui__ringing-actions">
-              {isIncoming ? (
-                <>
-                  <div className="ermis-call-ui__ringing-action">
-                    <button
-                      onClick={rejectCall}
-                      className="ermis-call-ui__action-circle ermis-call-ui__action-circle--reject"
-                    >
-                      <FinalPhoneIcon />
-                    </button>
-                    <span className="ermis-call-ui__action-label">{rejectCallLabel}</span>
-                  </div>
-                  <div className="ermis-call-ui__ringing-action">
-                    <button
-                      onClick={acceptCall}
-                      className="ermis-call-ui__action-circle ermis-call-ui__action-circle--accept"
-                    >
-                      {callType === 'video' ? <FinalVideoIcon /> : <FinalPhoneIcon />}
-                    </button>
-                    <span className="ermis-call-ui__action-label">{acceptCallLabel}</span>
-                  </div>
-                </>
-              ) : (
-                <div className="ermis-call-ui__ringing-action">
-                  <button
-                    onClick={endCall}
-                    className="ermis-call-ui__action-circle ermis-call-ui__action-circle--reject"
-                  >
-                    <FinalPhoneIcon />
-                  </button>
-                  <span className="ermis-call-ui__action-label">{endCallLabel}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        {!errorMessage && callStatus === CallStatus.RINGING && renderRinging()}
 
         {/* ============ CONNECTED STATE ============ */}
-        {!errorMessage && callStatus === CallStatus.CONNECTED && (
-          <div className="ermis-call-ui__active">
-            {callType === 'video' ? (
-              /* --- Video Call Layout --- */
-              <div className="ermis-call-ui__video-container">
-                <video
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  className="ermis-call-ui__video-remote"
-                />
-                <div className="ermis-call-ui__video-local">
-                  <video
-                    ref={localVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="ermis-call-ui__video-local-stream"
-                  />
-                </div>
-                {/* Remote mic muted indicator */}
-                {isRemoteMicMuted && (
-                  <div className="ermis-call-ui__remote-muted-badge">
-                    <FinalMicOffIcon />
-                  </div>
-                )}
-                {/* Glassmorphism controls overlay */}
-                <div className="ermis-call-ui__video-controls-overlay">
-                  {renderControls()}
-                </div>
-              </div>
-            ) : (
-              /* --- Audio Call Layout --- */
-              <div className="ermis-call-ui__audio-container">
-                <div className="ermis-call-ui__audio-avatar-wrapper">
-                  <AvatarComponent
-                    image={peerInfo?.avatar}
-                    name={peerInfo?.name}
-                    size={100}
-                  />
-                  {/* Remote mic muted indicator */}
-                  {isRemoteMicMuted && (
-                    <div className="ermis-call-ui__remote-muted-badge ermis-call-ui__remote-muted-badge--audio">
-                      <FinalMicOffIcon />
-                    </div>
-                  )}
-                </div>
-                <h3 className="ermis-call-ui__active-name">
-                  {peerInfo?.name}
-                </h3>
-
-                {/* Status + Timer */}
-                <div className="ermis-call-ui__active-status">
-                  <span className="ermis-call-ui__active-status-dot" />
-                  <span>{connectedLabel}</span>
-                  <span className="ermis-call-ui__timer">
-                    {formatDuration(callDuration)}
-                  </span>
-                </div>
-
-                {/* Audio wave visualizer */}
-                <div className="ermis-call-ui__audio-waves">
-                  {Array.from({ length: 9 }).map((_, i) => (
-                    <span key={i} className="ermis-call-ui__audio-wave-bar" />
-                  ))}
-                </div>
-
-                <audio ref={remoteAudioRef} autoPlay className="ermis-call-ui__audio--hidden" />
-
-                {/* Controls bar */}
-                {renderControls()}
-              </div>
-            )}
-          </div>
-        )}
+        {!errorMessage && callStatus === CallStatus.CONNECTED && renderConnected()}
       </div>
     </Modal>
   );
-};
+});
+
+ErmisCallUI.displayName = 'ErmisCallUI';

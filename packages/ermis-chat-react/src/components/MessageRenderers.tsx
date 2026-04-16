@@ -495,7 +495,7 @@ export const SignalMessage: React.FC<MessageRendererProps> = ({ message }) => {
     );
   }
 
-  const isSuccess = result.color === '#54D62C';
+  const isSuccess = !!result.duration;
   const colorModifier = isSuccess ? 'success' : 'missed';
   const isAudio = result.callType === CallType.AUDIO;
 
