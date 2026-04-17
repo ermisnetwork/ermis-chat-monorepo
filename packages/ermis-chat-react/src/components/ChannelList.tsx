@@ -136,7 +136,6 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
     'ermis-channel-list__item',
     isActive ? 'ermis-channel-list__item--active' : '',
     showUnread ? 'ermis-channel-list__item--unread' : '',
-    isBlocked ? 'ermis-channel-list__item--blocked' : '',
     isPending ? 'ermis-channel-list__item--pending' : '',
   ].filter(Boolean).join(' ');
 
@@ -161,6 +160,15 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
           {isPending && (
             <span className="ermis-channel-list__pending-badge">{pendingBadgeLabel || 'Invited'}</span>
           )}
+
+          {isBlocked && (
+            <span className="ermis-channel-list__blocked-icon" title={blockedBadgeLabel || "Blocked"}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+              </svg>
+            </span>
+          )}
         </div>
         <div className="ermis-channel-list__item-bottom-row">
           {!isClosedTopic && lastMessageText && (
@@ -177,19 +185,11 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
           {!isClosedTopic && (
             <div className="ermis-channel-list__item-badges">
               {showUnread && unreadCount > 0 && (
-              <span className="ermis-channel-list__unread-badge">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
-            {isBlocked && (
-              <span className="ermis-channel-list__blocked-icon" title={blockedBadgeLabel || "Blocked"}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-                </svg>
-              </span>
-            )}
-          </div>
+                <span className="ermis-channel-list__unread-badge">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -242,7 +242,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
 
   const channelState = channel.state as unknown as Record<string, unknown> | undefined;
   const rawUnreadCount = (channelState?.unreadCount as number) ?? 0;
-  
+
   const isClosedTopic = channel.data?.is_closed_topic === true;
 
   // Render logic continues...

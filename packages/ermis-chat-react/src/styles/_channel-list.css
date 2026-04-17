@@ -221,11 +221,6 @@
   flex-shrink: 0;
 }
 
-/* --- Blocked channel indicator --- */
-.ermis-channel-list__item--blocked {
-  opacity: 0.5;
-}
-
 .ermis-channel-list__blocked-icon {
   display: inline-flex;
   align-items: center;
