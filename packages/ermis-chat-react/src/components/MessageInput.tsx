@@ -35,7 +35,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   EmojiButtonComponent = DefaultEmojiButton,
   ReplyPreviewComponent = ReplyPreview,
   EditPreviewComponent = EditPreview,
-  bannedLabel = 'You have been blocked from this channel',
+  bannedLabel = 'You have been banned from this channel',
   blockedLabel = 'You have blocked this user. Unblock to send messages.',
   linksDisabledLabel = 'Message blocked: Sending links is disabled for members.',
   keywordBlockedLabel = (match: string) => `Message blocked: Contains restricted word "${match}".`,

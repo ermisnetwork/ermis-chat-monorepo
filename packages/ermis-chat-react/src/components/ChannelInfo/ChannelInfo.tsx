@@ -412,17 +412,16 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
         isTopic={isTopic}
       />
 
-      {isBanned ? (
+      {isBanned && (
         <div className="ermis-channel-info__banned-banner">
-          <div className="ermis-channel-info__banned-banner-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-            </svg>
-          </div>
-          <span className="ermis-channel-info__banned-banner-text">You have been blocked from this channel</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+          </svg>
+          <span className="ermis-channel-info__banned-banner-text">You have been banned from this channel</span>
         </div>
-      ) : (
+      )}
+      {!isBanned && (
         <>
           <ActionsComponent
             onSearchClick={() => setShowSearchPanel(true)}

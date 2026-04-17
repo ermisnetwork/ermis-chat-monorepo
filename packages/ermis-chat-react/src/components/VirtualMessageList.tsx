@@ -21,6 +21,9 @@ import { QuotedMessagePreview } from './QuotedMessagePreview';
 import { PinnedMessages } from './PinnedMessages';
 import { ReadReceipts } from './ReadReceipts';
 import { TypingIndicator } from './TypingIndicator';
+import { PendingOverlay } from './PendingOverlay';
+import { BannedOverlay } from './BannedOverlay';
+import { ClosedTopicOverlay } from './ClosedTopicOverlay';
 import type { MessageListProps } from '../types';
 
 /* ----------------------------------------------------------
@@ -104,7 +107,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   emptyTitle = 'No messages yet',
   emptySubtitle = 'Send a message to start the conversation',
   jumpToLatestLabel = '↓ Jump to latest',
-  bannedOverlayTitle = 'You have been blocked from this channel',
+  bannedOverlayTitle = 'You have been banned from this channel',
   bannedOverlaySubtitle = 'You can no longer read or send messages here',
   blockedOverlayTitle = 'You have blocked this user',
   blockedOverlaySubtitle = 'Unblock to continue the conversation',
@@ -219,6 +222,20 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       loadingNewerRef.current = false;
     }, [setHasMore, setHasNewer]),
   });
+
+  const hasOverlay = Boolean(isClosedTopic || isPending || isBanned || isBlocked);
+  const prevOverlayRef = useRef(hasOverlay);
+
+  useEffect(() => {
+    if (prevOverlayRef.current && !hasOverlay) {
+      // Transitioned from having an overlay to normal view.
+      // Give VList a moment to measure its new DOM size via ResizeObserver, then jump to the bottom.
+      setTimeout(() => scrollToBottom(false), 50);
+      setTimeout(() => scrollToBottom(false), 200);
+      setTimeout(() => scrollToBottom(false), 500);
+    }
+    prevOverlayRef.current = hasOverlay;
+  }, [hasOverlay, scrollToBottom]);
 
   const renderers = useMemo(
     () => ({ ...defaultMessageRenderers, ...customRenderers }),
@@ -362,19 +379,57 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     readReceiptsMaxAvatars,
   ]);
 
-  const blockedClass = isBlocked ? ' ermis-message-list--blocked' : '';
+  if (isBanned || isBlocked) {
+    return (
+      <BannedOverlay
+        isBlocked={isBlocked}
+        blockedTitle={blockedOverlayTitle}
+        bannedTitle={bannedOverlayTitle}
+        blockedSubtitle={blockedOverlaySubtitle}
+        bannedSubtitle={bannedOverlaySubtitle}
+        onUnblock={() => { activeChannel?.unblockUser().catch((e: any) => console.error('Error unblocking user', e)); }}
+      />
+    );
+  }
+
+  if (isPending) {
+    return (
+      <PendingOverlay
+        channelImage={channelImage}
+        channelName={channelName}
+        title={pendingOverlayTitle}
+        subtitle={pendingOverlaySubtitle}
+        rejectLabel={pendingRejectLabel}
+        acceptLabel={pendingAcceptLabel}
+        onReject={handleRejectInvite}
+        onAccept={handleAcceptInvite}
+        AvatarComponent={AvatarComponent}
+      />
+    );
+  }
+
+  if (isClosedTopic) {
+    return (
+      <ClosedTopicOverlay
+        title={closedTopicOverlayTitle}
+        subtitle={closedTopicOverlaySubtitle}
+        canManageTopic={Boolean(canManageTopic && activeChannel && parentChannel)}
+        reopenLabel={closedTopicReopenLabel}
+        onReopen={() => { parentChannel?.reopenTopic(activeChannel!.cid).catch((e: any) => console.error('Error reopening topic', e)); }}
+      />
+    );
+  }
 
   return (
-    <div ref={containerRef} className={`ermis-message-list${isBanned ? ' ermis-message-list--banned' : ''}${blockedClass}${className ? ` ${className}` : ''}`}>
-      {!isBanned && !isBlocked && showPinnedMessages && <PinnedMessagesComponent onClickMessage={scrollToMessage} AvatarComponent={AvatarComponent} />}
+    <div ref={containerRef} className={`ermis-message-list${className ? ` ${className}` : ''}`}>
+      {showPinnedMessages && <PinnedMessagesComponent onClickMessage={scrollToMessage} AvatarComponent={AvatarComponent} />}
 
-      {messages.length === 0 && !isBanned && !isPending && (
+      {messages.length === 0 && (
         EmptyStateIndicator === DefaultEmpty
           ? <DefaultEmpty title={emptyTitle} subtitle={emptySubtitle} />
           : <EmptyStateIndicator />
       )}
 
-      {/* VList always rendered so virtua keeps its viewport measurement */}
       <VList
         key={activeChannel?.cid || 'empty'}
         ref={vlistRef}
@@ -382,65 +437,14 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         onScroll={handleScroll}
         className="ermis-message-list__vlist"
       >
-        {isPending && !isBanned && !isBlocked ? (
-          <div className="ermis-message-list__pending-overlay">
-            <div className="ermis-message-list__pending-card">
-              <Avatar image={channelImage} name={channelName} size={64} className="ermis-message-list__pending-avatar" />
-              <span className="ermis-message-list__pending-overlay-title">{pendingOverlayTitle}</span>
-              <div className="ermis-message-list__pending-channel-name">{channelName}</div>
-              <span className="ermis-message-list__pending-overlay-subtitle">{pendingOverlaySubtitle}</span>
-              <div className="ermis-message-list__pending-actions">
-                <button className="ermis-message-list__reject-btn" onClick={handleRejectInvite}>{pendingRejectLabel}</button>
-                <button className="ermis-message-list__accept-btn" onClick={handleAcceptInvite}>{pendingAcceptLabel}</button>
-              </div>
-            </div>
-          </div>
-        ) : (isBanned || isBlocked) && !isPending ? (
-          <div className="ermis-message-list__banned-overlay">
-            <div className="ermis-message-list__banned-overlay-icon">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-              </svg>
-            </div>
-            <span className="ermis-message-list__banned-overlay-title">{isBlocked ? blockedOverlayTitle : bannedOverlayTitle}</span>
-            <span className="ermis-message-list__banned-overlay-subtitle">{isBlocked ? blockedOverlaySubtitle : bannedOverlaySubtitle}</span>
-            {isBlocked && activeChannel && (
-              <button
-                className="ermis-message-list__unblock-btn"
-                onClick={() => { activeChannel.unblockUser().catch((e: any) => console.error('Error unblocking user', e)); }}
-              >
-                Unblock
-              </button>
-            )}
-          </div>
-        ) : isClosedTopic && !isPending && !isBanned && !isBlocked ? (
-          <div className="ermis-message-list__closed-overlay">
-            <div className="ermis-message-list__closed-overlay-icon">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-            </div>
-            <span className="ermis-message-list__closed-overlay-title">{closedTopicOverlayTitle}</span>
-            <span className="ermis-message-list__closed-overlay-subtitle">{closedTopicOverlaySubtitle}</span>
-            {canManageTopic && activeChannel && parentChannel && (
-              <button
-                className="ermis-message-list__reopen-btn"
-                onClick={() => { parentChannel.reopenTopic(activeChannel.cid).catch((e: any) => console.error('Error reopening topic', e)); }}
-              >
-                {closedTopicReopenLabel}
-              </button>
-            )}
-          </div>
-        ) : messageElements}
+        {messageElements}
       </VList>
 
       {/* Typing indicator */}
-      {!isBanned && !isBlocked && !isPending && showTypingIndicator && <TypingIndicatorComponent />}
+      {showTypingIndicator && <TypingIndicatorComponent />}
 
       {/* Jump to latest button */}
-      {!isBanned && !isBlocked && !isPending && hasNewer && (
+      {hasNewer && (
         JumpToLatestButton === DefaultJumpToLatest
           ? <DefaultJumpToLatest onClick={jumpToLatest} label={jumpToLatestLabel} />
           : <JumpToLatestButton onClick={jumpToLatest} />

@@ -329,17 +329,7 @@
   transform: translateY(0);
 }
 
-/* ----------------------------------------------------------
-   Blocked State (messaging channels — user-initiated block)
-   Messages remain visible but actions are disabled.
-   ---------------------------------------------------------- */
-.ermis-message-list--blocked .ermis-message-actions {
-  display: none;
-}
 
-.ermis-message-list--blocked .ermis-message-reactions__add-btn {
-  display: none;
-}
 
 /* Unblock button inside blocked overlay */
 .ermis-message-list__unblock-btn {
