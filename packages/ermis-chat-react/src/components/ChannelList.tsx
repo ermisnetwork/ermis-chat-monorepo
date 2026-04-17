@@ -102,6 +102,8 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   isPending,
   pendingBadgeLabel,
   blockedBadgeLabel,
+  isClosedTopic,
+  closedTopicIcon,
 }) => {
   // Subscribe to channel.updated so that when name/image/description change,
   // we re-render from within (bypasses React.memo which only blocks parent-driven re-renders)
@@ -144,14 +146,24 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-top-row">
           <div className="ermis-channel-list__item-name">{name}</div>
-          {timestampText && <div className="ermis-channel-list__item-timestamp">{timestampText}</div>}
+          {isClosedTopic && (
+            <span className="ermis-channel-list__closed-icon">
+              {closedTopicIcon || (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              )}
+            </span>
+          )}
+          {!isClosedTopic && timestampText && <div className="ermis-channel-list__item-timestamp">{timestampText}</div>}
 
           {isPending && (
             <span className="ermis-channel-list__pending-badge">{pendingBadgeLabel || 'Invited'}</span>
           )}
         </div>
         <div className="ermis-channel-list__item-bottom-row">
-          {lastMessageText && (
+          {!isClosedTopic && lastMessageText && (
             <div className="ermis-channel-list__item-last-message">
               {lastMessageUser && (
                 <span className="ermis-channel-list__item-last-message-user">
@@ -162,8 +174,9 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
             </div>
           )}
 
-          <div className="ermis-channel-list__item-badges">
-            {showUnread && unreadCount > 0 && (
+          {!isClosedTopic && (
+            <div className="ermis-channel-list__item-badges">
+              {showUnread && unreadCount > 0 && (
               <span className="ermis-channel-list__unread-badge">
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
@@ -177,6 +190,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
               </span>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>
@@ -207,6 +221,7 @@ type ChannelRowProps = {
   currentUserId?: string;
   pendingBadgeLabel?: string;
   blockedBadgeLabel?: string;
+  closedTopicIcon?: React.ReactNode;
 };
 
 const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
@@ -219,6 +234,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   currentUserId,
   pendingBadgeLabel,
   blockedBadgeLabel,
+  closedTopicIcon,
 }) => {
   // Use the new custom hook to handle all row-level realtime updates
   const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
@@ -226,6 +242,10 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
 
   const channelState = channel.state as unknown as Record<string, unknown> | undefined;
   const rawUnreadCount = (channelState?.unreadCount as number) ?? 0;
+  
+  const isClosedTopic = channel.data?.is_closed_topic === true;
+
+  // Render logic continues...
   const unreadCount = (isBannedInChannel || isBlockedInChannel || isPending) ? 0 : rawUnreadCount;
   const hasUnread = unreadCount > 0;
 
@@ -265,6 +285,8 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       isPending={isPending}
       pendingBadgeLabel={pendingBadgeLabel}
       blockedBadgeLabel={blockedBadgeLabel}
+      isClosedTopic={isClosedTopic}
+      closedTopicIcon={closedTopicIcon}
     />
   );
 });
@@ -284,6 +306,7 @@ export const ChannelTopicGroup = React.memo(({
   blockedBadgeLabel,
   generalTopicLabel,
   onAddTopic,
+  closedTopicIcon,
 }: any) => {
   const { updateCount } = useChannelRowUpdates(channel, currentUserId);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -367,6 +390,7 @@ export const ChannelTopicGroup = React.memo(({
             currentUserId={currentUserId}
             pendingBadgeLabel={pendingBadgeLabel}
             blockedBadgeLabel={blockedBadgeLabel}
+            closedTopicIcon={closedTopicIcon}
           />
           {topics.map((topicChannel: any) => (
             <ChannelRow
@@ -380,6 +404,7 @@ export const ChannelTopicGroup = React.memo(({
               currentUserId={currentUserId}
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
+              closedTopicIcon={closedTopicIcon}
             />
           ))}
         </div>
@@ -412,6 +437,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   generalTopicLabel = 'general',
   onAddTopic,
   TopicEmojiPickerComponent,
+  closedTopicIcon,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -527,6 +553,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               currentUserId={client.userID}
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
+              closedTopicIcon={closedTopicIcon}
             />
           );
         })}
@@ -557,6 +584,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 blockedBadgeLabel={blockedBadgeLabel}
                 generalTopicLabel={generalTopicLabel}
                 onAddTopic={handleAddTopicClick}
+                closedTopicIcon={closedTopicIcon}
               />
             );
           }
@@ -573,6 +601,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               currentUserId={client.userID}
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
+              closedTopicIcon={closedTopicIcon}
             />
           );
         })}

@@ -838,6 +838,34 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       });
     }
 
+    if (event.type === 'channel.topic.closed' || event.type === 'channel.topic.reopen') {
+      postListenerCallbacks.push(() => {
+        const isClosed = event.type === 'channel.topic.closed';
+        const parentCid = event.parent_cid;
+        if (parentCid && this.activeChannels[parentCid]) {
+          const parentChannel = this.activeChannels[parentCid];
+          if (parentChannel.state?.topics) {
+            const topicIndex = parentChannel.state.topics.findIndex((t: any) => t.cid === event.cid || t.channel?.cid === event.cid);
+            if (topicIndex !== -1) {
+              const t = parentChannel.state.topics[topicIndex] as any;
+              if (t.data) t.data.is_closed_topic = isClosed;
+              else if (t.channel) t.channel.is_closed_topic = isClosed;
+              else t.is_closed_topic = isClosed;
+            }
+            parentChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: parentChannel.data } as any);
+          }
+        }
+
+        if (event.cid && this.activeChannels[event.cid]) {
+          const topicChannel = this.activeChannels[event.cid];
+          if (topicChannel.data) {
+            topicChannel.data.is_closed_topic = isClosed;
+          }
+          topicChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: topicChannel.data } as any);
+        }
+      });
+    }
+
 
 
     if (event.type === 'connection.recovered') {

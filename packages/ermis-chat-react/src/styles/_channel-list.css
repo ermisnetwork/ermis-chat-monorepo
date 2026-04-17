@@ -162,6 +162,27 @@
   flex: 1;
 }
 
+.ermis-channel-list__item-closed-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ermis-font-size-xs);
+  color: var(--ermis-text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.ermis-channel-list__closed-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--ermis-color-danger);
+}
+
 .ermis-channel-list__item-badges {
   display: flex;
   align-items: center;

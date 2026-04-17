@@ -326,6 +326,8 @@ export type ChannelItemProps = {
   pendingBadgeLabel?: string;
   /** Label for the blocked channel badge indicator */
   blockedBadgeLabel?: string;
+  isClosedTopic?: boolean;
+  closedTopicIcon?: React.ReactNode;
 };
 
 export type ChannelListProps = {
@@ -364,6 +366,7 @@ export type ChannelListProps = {
   onAddTopic?: (channel: Channel) => void;
   /** Optional custom emoji picker for TopicModal */
   TopicEmojiPickerComponent?: React.ComponentType<any>;
+  closedTopicIcon?: React.ReactNode;
 };
 
 /* ----------------------------------------------------------
@@ -455,6 +458,9 @@ export type MessageListProps = {
   pendingOverlaySubtitle?: string;
   pendingAcceptLabel?: string;
   pendingRejectLabel?: string;
+  closedTopicOverlayTitle?: string;
+  closedTopicOverlaySubtitle?: string;
+  closedTopicReopenLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -482,6 +488,8 @@ export type MessageReactionsProps = {
   AvatarComponent?: React.ComponentType<AvatarProps>;
   /** Callback when clicking a reaction */
   onClickReaction?: (type: string) => void;
+  /** Whether interactions are disabled */
+  disabled?: boolean;
 };
 
 /* ----------------------------------------------------------
@@ -619,6 +627,8 @@ export type MessageInputProps = {
   sendDisabledLabel?: string;
   /** I18n Label for slow mode active */
   slowModeLabel?: (cooldown: number) => React.ReactNode;
+  /** I18n Label for closed topic */
+  closedTopicLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -910,6 +920,7 @@ export type ChannelInfoActionsProps = {
   onUnblockUser?: () => void;
   isTeamChannel?: boolean;
   isTopic?: boolean;
+  isClosedTopic?: boolean;
   isBlocked?: boolean;
   currentUserRole?: string;
   searchLabel?: string;
@@ -918,6 +929,10 @@ export type ChannelInfoActionsProps = {
   leaveLabel?: string;
   blockLabel?: string;
   unblockLabel?: string;
+  onCloseTopic?: () => void;
+  onReopenTopic?: () => void;
+  closeTopicLabel?: string;
+  reopenTopicLabel?: string;
 };
 
 export type ChannelInfoMember = {
@@ -1136,6 +1151,8 @@ export type ChannelInfoProps = {
   /** I18n labels for block/unblock actions */
   actionsBlockLabel?: string;
   actionsUnblockLabel?: string;
+  actionsCloseTopicLabel?: string;
+  actionsReopenTopicLabel?: string;
 
   /** Settings Panel Topics Labels */
   settingsWorkspaceTopicsTitle?: string;

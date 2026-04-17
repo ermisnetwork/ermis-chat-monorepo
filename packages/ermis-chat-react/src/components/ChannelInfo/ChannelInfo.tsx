@@ -92,10 +92,10 @@ DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
   onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel,
-  onBlockUser, onUnblockUser,
-  isTeamChannel, isTopic, isBlocked, currentUserRole,
+  onBlockUser, onUnblockUser, onCloseTopic, onReopenTopic,
+  isTeamChannel, isTopic, isClosedTopic, isBlocked, currentUserRole,
   searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', leaveLabel = 'Leave',
-  blockLabel = 'Block', unblockLabel = 'Unblock'
+  blockLabel = 'Block', unblockLabel = 'Unblock', closeTopicLabel = 'Close Topic', reopenTopicLabel = 'Reopen Topic'
 }) => {
   return (
     <div className="ermis-channel-info__actions">
@@ -140,6 +140,30 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
               </svg>
             </div>
             <span>{leaveLabel}</span>
+          </button>
+        )
+      )}
+      {/* Topics: Close/Reopen Topic for owner/moder */}
+      {isTopic && (currentUserRole === 'owner' || currentUserRole === 'moder') && (
+        isClosedTopic ? (
+          <button className="ermis-channel-info__action-btn" onClick={onReopenTopic}>
+            <div className="ermis-channel-info__action-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+              </svg>
+            </div>
+            <span>{reopenTopicLabel}</span>
+          </button>
+        ) : (
+          <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onCloseTopic}>
+            <div className="ermis-channel-info__action-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+            <span>{closeTopicLabel}</span>
           </button>
         )
       )}
@@ -234,6 +258,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     onUnblockUser: onUnblockUserProp,
     actionsBlockLabel,
     actionsUnblockLabel,
+    actionsCloseTopicLabel,
+    actionsReopenTopicLabel,
     // Settings panel customizations
     settingsWorkspaceTopicsTitle,
     settingsTopicsFeatureName,
@@ -249,6 +275,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
   const isTeamChannel = channel?.type === 'team';
   const isTopic = Boolean(channel?.data?.parent_cid) || channel?.type === 'topic';
+  const isClosedTopic = channel?.data?.is_closed_topic === true;
   const title = titleProp !== undefined ? titleProp : (isTopic ? 'Topic Info' : 'Channel Info');
 
   const parentCid = channel?.data?.parent_cid as string | undefined;
@@ -329,6 +356,16 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     try { await channel.unblockUser(); } catch (e) { console.error('Error unblocking user', e); }
   }, [channel, onUnblockUserProp]);
 
+  const handleCloseTopic = useCallback(async () => {
+    if (!channel || !parentChannel) return;
+    try { await parentChannel.closeTopic(channel.cid); } catch (e) { console.error('Error closing topic', e); }
+  }, [channel, parentChannel]);
+
+  const handleReopenTopic = useCallback(async () => {
+    if (!channel || !parentChannel) return;
+    try { await parentChannel.reopenTopic(channel.cid); } catch (e) { console.error('Error reopening topic', e); }
+  }, [channel, parentChannel]);
+
   const { members } = useChannelMembers(channel);
   const { channelName, channelImage, channelDescription } = useChannelProfile(channel);
 
@@ -394,8 +431,11 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
             onDeleteChannel={handleDeleteChannel}
             onBlockUser={handleBlockUser}
             onUnblockUser={handleUnblockUser}
+            onCloseTopic={handleCloseTopic}
+            onReopenTopic={handleReopenTopic}
             isTeamChannel={isTeamChannel}
             isTopic={isTopic}
+            isClosedTopic={isClosedTopic}
             isBlocked={isBlocked}
             currentUserRole={currentUserRole}
             searchLabel={actionsSearchLabel}
@@ -404,6 +444,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
             leaveLabel={actionsLeaveLabel}
             blockLabel={actionsBlockLabel}
             unblockLabel={actionsUnblockLabel}
+            closeTopicLabel={actionsCloseTopicLabel}
+            reopenTopicLabel={actionsReopenTopicLabel}
           />
 
           <TabsComponent

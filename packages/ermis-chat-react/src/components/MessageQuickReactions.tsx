@@ -14,7 +14,8 @@ const EMOJI_MAP: Record<string, string> = {
 export const MessageQuickReactions: React.FC<{
   message: FormatMessageResponse;
   isOwnMessage: boolean;
-}> = React.memo(({ message, isOwnMessage }) => {
+  disabled?: boolean;
+}> = React.memo(({ message, isOwnMessage, disabled }) => {
   const { activeChannel, client } = useChatClient();
   const currentUserId = client?.userID;
 
@@ -41,7 +42,7 @@ export const MessageQuickReactions: React.FC<{
   );
 
   return (
-    <div className={`ermis-message-quick-reactions ${isOwnMessage ? 'ermis-message-quick-reactions--own' : ''}`}>
+    <div className={`ermis-message-quick-reactions ${isOwnMessage ? 'ermis-message-quick-reactions--own' : ''} ${disabled ? 'ermis-message-quick-reactions--disabled' : ''}`}>
       {QUICK_REACTIONS.map((type) => {
         const isOwn =
           (message as any).own_reactions?.some((r: any) => r.type === type) ||

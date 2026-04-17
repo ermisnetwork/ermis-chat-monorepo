@@ -190,7 +190,7 @@
   align-items: flex-end;
   padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
   border-radius: var(--ermis-radius-lg);
-  width: 100%;
+  /* width: 100%; */
   word-break: break-word;
 }
 

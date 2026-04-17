@@ -155,9 +155,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
           />
         )}
         <div className="ermis-message-list__bubble-wrapper">
-          <div style={!canReact ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
-            <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} />
-          </div>
+          <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!canReact} />
           <MessageBubble message={message} isOwnMessage={isOwnMessage}>
             {isForwarded && (
               <span className="ermis-message-list__forwarded-indicator">{forwardedLabel}</span>
@@ -187,14 +185,13 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
 
           {/* Message Reactions */}
           {MessageReactionsComponent && (
-            <div style={!canReact ? { opacity: 0.8, pointerEvents: 'none' } : {}}>
-              <MessageReactionsComponent
-                reactionCounts={(message as any).reaction_counts}
-                ownReactions={(message as any).own_reactions}
-                latestReactions={(message as any).latest_reactions}
-                onClickReaction={handleReactionToggle}
-              />
-            </div>
+            <MessageReactionsComponent
+              reactionCounts={(message as any).reaction_counts}
+              ownReactions={(message as any).own_reactions}
+              latestReactions={(message as any).latest_reactions}
+              onClickReaction={handleReactionToggle}
+              disabled={!canReact}
+            />
           )}
         </div>
       </div>

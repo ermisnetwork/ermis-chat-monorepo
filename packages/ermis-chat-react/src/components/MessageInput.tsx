@@ -43,6 +43,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   slowModeLabel = (cooldown: number) => (
     <>Slow mode is active. You can send another message in <strong>{cooldown}s</strong>.</>
   ),
+  closedTopicLabel = 'This topic is closed.',
 }) => {
   const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -52,6 +53,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   const [hasContent, setHasContent] = useState(false);
 
   const { role, isTeamChannel, hasCapability } = useChannelCapabilities();
+  const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
 
   // Slow Mode Logic
   const [memberMessageCooldown, setMemberMessageCooldown] = useState(Number(activeChannel?.data?.member_message_cooldown) || 0);
@@ -393,6 +395,21 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
             <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
           </svg>
           <span>{blockedLabel}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Show closed topic banner instead of input
+  if (isClosedTopic) {
+    return (
+      <div className={`ermis-message-input ermis-message-input--closed${className ? ` ${className}` : ''}`}>
+        <div className="ermis-message-input__closed-banner">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span>{closedTopicLabel}</span>
         </div>
       </div>
     );

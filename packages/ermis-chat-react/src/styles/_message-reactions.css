@@ -6,6 +6,13 @@
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 2px;
+  margin-top: 2px;
+  width: 100%;
+}
+
+.ermis-message-reactions--disabled {
+  opacity: 0.8;
+  pointer-events: none;
 }
 
 .ermis-message-reactions__item {

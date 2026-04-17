@@ -112,11 +112,17 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   pendingOverlaySubtitle = 'Accept the invitation to view messages and interact',
   pendingAcceptLabel = 'Accept',
   pendingRejectLabel = 'Reject',
+  closedTopicOverlayTitle = 'This topic has been closed',
+  closedTopicOverlaySubtitle = 'You can no longer read or send messages in this topic.',
+  closedTopicReopenLabel = 'Reopen Topic',
 }) => {
   const { client, messages, readState, activeChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
+  const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
+  const parentCid = activeChannel?.data?.parent_cid as string | undefined;
+  const parentChannel = parentCid && client ? client.activeChannels[parentCid] : undefined;
 
   const { channelName, channelImage } = useChannelProfile(activeChannel);
 
@@ -124,6 +130,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const currentUserId = client.userID;
+  const currentUserRole = currentUserId ? activeChannel?.state?.members?.[currentUserId]?.channel_role : undefined;
+  const canManageTopic = currentUserRole === 'owner' || currentUserRole === 'moder';
 
   // Ref to scope DOM queries (safe for multiple instances)
   const containerRef = useRef<HTMLDivElement>(null);
@@ -403,6 +411,25 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
                 onClick={() => { activeChannel.unblockUser().catch((e: any) => console.error('Error unblocking user', e)); }}
               >
                 Unblock
+              </button>
+            )}
+          </div>
+        ) : isClosedTopic && !isPending && !isBanned && !isBlocked ? (
+          <div className="ermis-message-list__closed-overlay">
+            <div className="ermis-message-list__closed-overlay-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+            <span className="ermis-message-list__closed-overlay-title">{closedTopicOverlayTitle}</span>
+            <span className="ermis-message-list__closed-overlay-subtitle">{closedTopicOverlaySubtitle}</span>
+            {canManageTopic && activeChannel && parentChannel && (
+              <button
+                className="ermis-message-list__reopen-btn"
+                onClick={() => { parentChannel.reopenTopic(activeChannel.cid).catch((e: any) => console.error('Error reopening topic', e)); }}
+              >
+                {closedTopicReopenLabel}
               </button>
             )}
           </div>

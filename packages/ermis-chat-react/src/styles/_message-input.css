@@ -356,6 +356,30 @@
 }
 
 /* ----------------------------------------------------------
+   Closed Topic State
+   ---------------------------------------------------------- */
+.ermis-message-input--closed {
+  pointer-events: none;
+}
+
+.ermis-message-input__closed-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ermis-spacing-sm);
+  padding: var(--ermis-spacing-md) var(--ermis-spacing-lg);
+  color: var(--ermis-color-danger);
+  font-size: var(--ermis-font-size-sm);
+  font-weight: 500;
+  user-select: none;
+  opacity: 0.8;
+}
+
+.ermis-message-input__closed-banner svg {
+  flex-shrink: 0;
+}
+
+/* ----------------------------------------------------------
    Banners
    ---------------------------------------------------------- */
 .ermis-message-input__keyword-banner {

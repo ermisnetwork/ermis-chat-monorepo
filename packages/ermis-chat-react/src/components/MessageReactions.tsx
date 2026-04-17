@@ -16,6 +16,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = React.memo(({
   ownReactions,
   latestReactions,
   onClickReaction,
+  disabled,
 }) => {
   const { client } = useChatClient();
   const currentUserId = client?.userID;
@@ -23,18 +24,22 @@ export const MessageReactions: React.FC<MessageReactionsProps> = React.memo(({
   if (!reactionCounts || Object.keys(reactionCounts).length === 0) return null;
 
   return (
-    <div className="ermis-message-reactions">
+    <div className={`ermis-message-reactions${disabled ? ' ermis-message-reactions--disabled' : ''}`}>
       {Object.entries(reactionCounts).map(([type, count]) => {
         const isOwn = 
           ownReactions?.some((r) => r.type === type) ||
           latestReactions?.some((r) => r.type === type && (r.user?.id === currentUserId || (r as any).user_id === currentUserId));
         
         // Find users who reacted with this type for the tooltip
-        const userNames = latestReactions
+        const rawUserNames = latestReactions
           ?.filter((r) => r.type === type)
           .map((r: any) => r.user?.name || r.user?.id || r.user_id || 'Someone');
         
-        const tooltip = userNames && userNames.length > 0 ? userNames.join('\n') : type;
+        const userNames = Array.from(new Set(rawUserNames || []))
+          .map((n: any) => typeof n === 'string' ? n.replace(/&lrm;|\u200E/gi, '').trim() : n)
+          .filter(Boolean);
+
+        const tooltip = userNames.length > 0 ? userNames.join(', ') : type;
         const emoji = defaultReactionEmojiMap[type] || type;
 
         return (

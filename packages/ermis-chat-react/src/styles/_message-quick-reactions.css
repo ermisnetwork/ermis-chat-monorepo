@@ -37,6 +37,11 @@
   transform: translateY(0);
 }
 
+.ermis-message-list__bubble-wrapper:hover .ermis-message-quick-reactions--disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .ermis-message-quick-reactions__btn {
   display: flex;
   align-items: center;
