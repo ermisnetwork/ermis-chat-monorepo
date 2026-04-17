@@ -13,6 +13,7 @@
     "build:sdk": "yarn workspace @ermis-network/ermis-chat-sdk build",
     "build:react": "yarn workspace @ermis-network/ermis-chat-react build",
     "dev": "yarn workspace chat-demo dev",
+    "dev:next": "yarn workspace nextjs-demo dev",
     "docs": "yarn workspace apps-docs start",
     "prettier": "prettier --check '**/*.{js,ts,tsx,md,css,scss,json}' --ignore-path .prettierignore",
     "prettier-fix": "prettier --write '**/*.{js,ts,tsx,md,css,scss,json}' --ignore-path .prettierignore",
