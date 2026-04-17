@@ -6,6 +6,7 @@ import { Avatar } from '../Avatar';
 import { DefaultChannelInfoTabs } from './ChannelInfoTabs';
 import { AddMemberModal } from './AddMemberModal';
 import { EditChannelModal } from './EditChannelModal';
+import { TopicModal } from '../TopicModal';
 import { MessageSearchPanel } from './MessageSearchPanel';
 import { ChannelSettingsPanel } from './ChannelSettingsPanel';
 import type {
@@ -333,15 +334,20 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
 
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditChannelModal, setShowEditChannelModal] = useState(false);
+  const [showEditTopicModal, setShowEditTopicModal] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
   // Permission: only owner or moderator can edit channel info (banned users cannot)
-  const canEditChannel = isTeamChannel && !isBanned && (currentUserRole === 'owner' || currentUserRole === 'moder');
+  const canEditChannel = (isTeamChannel || isTopic) && !isBanned && (currentUserRole === 'owner' || currentUserRole === 'moder');
 
   const handleEditChannelClick = useCallback(() => {
-    setShowEditChannelModal(true);
-  }, []);
+    if (isTopic) {
+      setShowEditTopicModal(true);
+    } else {
+      setShowEditChannelModal(true);
+    }
+  }, [isTopic]);
 
   const handleAddMemberClick = useCallback(() => {
     if (onAddMemberClick) return onAddMemberClick();
@@ -462,6 +468,16 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 imageAccept={editChannelImageAccept}
                 maxImageSize={editChannelMaxImageSize}
                 maxImageSizeError={editChannelMaxImageSizeError}
+              />
+            );
+          })()}
+
+          {showEditTopicModal && (() => {
+            return (
+              <TopicModal
+                isOpen={true}
+                onClose={() => setShowEditTopicModal(false)}
+                topic={channel}
               />
             );
           })()}

@@ -37,6 +37,7 @@ import {
   EditMessage,
   ForwardMessage,
   CreateTopicData,
+  EditTopicData,
 } from './types';
 /**
  * Represents a Channel in the Ermis Network.
@@ -1082,7 +1083,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     });
   }
 
-  async editTopic(topicCID: string, data: any) {
+  async editTopic(topicCID: string, data: EditTopicData) {
     const response: any = await this.getClient().post(
       this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics`,
       {

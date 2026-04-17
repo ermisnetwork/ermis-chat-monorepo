@@ -362,7 +362,7 @@ export type ChannelListProps = {
   generalTopicLabel?: string;
   /** Handler when Add Topic button is clicked on a team channel */
   onAddTopic?: (channel: Channel) => void;
-  /** Optional custom emoji picker for CreateTopicModal */
+  /** Optional custom emoji picker for TopicModal */
   TopicEmojiPickerComponent?: React.ComponentType<any>;
 };
 
@@ -1290,7 +1290,7 @@ export type CreateChannelModalProps = {
   maxImageSizeError?: string;
 };
 
-export type CreateTopicModalProps = {
+export type TopicModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: (channel: Channel) => void;
@@ -1299,12 +1299,17 @@ export type CreateTopicModalProps = {
   /** Parent team channel to create topic under, will use activeChannel if not provided */
   parentChannel?: Channel;
 
+  /** If provided, operates in edit mode for this topic */
+  topic?: Channel;
+
   /** i18n labels */
   title?: string;
   nameLabel?: string;
   namePlaceholder?: string;
   emojiLabel?: string;
+  descriptionLabel?: string;
+  descriptionPlaceholder?: string;
   cancelButtonLabel?: string;
-  createButtonLabel?: string;
-  creatingButtonLabel?: string;
+  saveButtonLabel?: string;
+  savingButtonLabel?: string;
 };

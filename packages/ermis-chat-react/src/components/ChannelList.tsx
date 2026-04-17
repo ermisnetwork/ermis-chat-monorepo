@@ -11,7 +11,7 @@ import { Avatar } from './Avatar';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
 export type { ChannelListProps, ChannelItemProps } from '../types';
-import { CreateTopicModal } from './CreateTopicModal';
+import { TopicModal } from './TopicModal';
 
 /**
  * Get a human-readable preview string for the last message,
@@ -151,14 +151,14 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
           )}
         </div>
         <div className="ermis-channel-list__item-bottom-row">
-          {lastMessageUser && lastMessageText && (
+          {lastMessageText && (
             <div className="ermis-channel-list__item-last-message">
               {lastMessageUser && (
                 <span className="ermis-channel-list__item-last-message-user">
                   {lastMessageUser}:{' '}
                 </span>
               )}
-              {lastMessageText && <span>{lastMessageText}</span>}
+              <span>{lastMessageText}</span>
             </div>
           )}
 
@@ -578,7 +578,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
         })}
       </VList>
       {addingTopicForChannel && (
-        <CreateTopicModal
+        <TopicModal
           isOpen={true}
           onClose={() => setAddingTopicForChannel(null)}
           parentChannel={addingTopicForChannel}

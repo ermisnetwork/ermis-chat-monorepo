@@ -807,6 +807,37 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         }
       });
     }
+    if (event.type === 'channel.topic.updated') {
+      postListenerCallbacks.push(() => {
+        const parentCid = event.parent_cid || event.channel?.parent_cid;
+        if (parentCid && this.activeChannels[parentCid]) {
+          const parentChannel = this.activeChannels[parentCid];
+          if (parentChannel.state?.topics && event.channel) {
+            const topicIndex = parentChannel.state.topics.findIndex((t: any) => t.cid === event.cid || t.channel?.cid === event.cid);
+            if (topicIndex !== -1) {
+              const t = parentChannel.state.topics[topicIndex] as any;
+              if (t.data) {
+                t.data = { ...t.data, ...event.channel };
+              } else if (t.channel) {
+                t.channel = { ...t.channel, ...event.channel };
+              } else {
+                Object.assign(t, event.channel);
+              }
+            }
+            parentChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: parentChannel.data } as any);
+          }
+        }
+
+        if (event.cid && this.activeChannels[event.cid]) {
+          const topicChannel = this.activeChannels[event.cid];
+          if (event.channel) {
+            topicChannel.data = { ...topicChannel.data, ...event.channel };
+            topicChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: topicChannel.data } as any);
+          }
+        }
+      });
+    }
+
 
 
     if (event.type === 'connection.recovered') {

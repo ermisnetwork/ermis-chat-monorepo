@@ -94,7 +94,7 @@ export type { ReplyPreviewProps } from './types';
 export { ForwardMessageModal } from './components/ForwardMessageModal';
 export type { ForwardMessageModalProps, ForwardChannelItemProps } from './components/ForwardMessageModal';
 
-export { CreateTopicModal } from './components/CreateTopicModal';
+export { TopicModal } from './components/TopicModal';
 
 export { TypingIndicator } from './components/TypingIndicator';
 export type { TypingIndicatorProps } from './components/TypingIndicator';

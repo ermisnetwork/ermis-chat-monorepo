@@ -308,6 +308,12 @@ export type CreateTopicData = {
   [key: string]: any;
 };
 
+export type EditTopicData = {
+  name?: string;
+  image?: string;
+  description?: string;
+};
+
 export type ChannelSort = {
   field: string;
   direction: -1 | 1;
