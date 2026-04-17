@@ -121,7 +121,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
     if (isNaN(d.getTime())) return null;
     const today = new Date();
     const isToday = d.toDateString() === today.toDateString();
-    return isToday 
+    return isToday
       ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }, [lastMessageTimestamp]);
@@ -145,17 +145,22 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
         <div className="ermis-channel-list__item-top-row">
           <div className="ermis-channel-list__item-name">{name}</div>
           {timestampText && <div className="ermis-channel-list__item-timestamp">{timestampText}</div>}
+
+          {isPending && (
+            <span className="ermis-channel-list__pending-badge">{pendingBadgeLabel || 'Invited'}</span>
+          )}
         </div>
-        
         <div className="ermis-channel-list__item-bottom-row">
-          <div className="ermis-channel-list__item-last-message">
-            {lastMessageUser && lastMessageText && (
-              <span className="ermis-channel-list__item-last-message-user">
-                {lastMessageUser}:{' '}
-              </span>
-            )}
-            {lastMessageText && <span>{lastMessageText}</span>}
-          </div>
+          {lastMessageUser && lastMessageText && (
+            <div className="ermis-channel-list__item-last-message">
+              {lastMessageUser && (
+                <span className="ermis-channel-list__item-last-message-user">
+                  {lastMessageUser}:{' '}
+                </span>
+              )}
+              {lastMessageText && <span>{lastMessageText}</span>}
+            </div>
+          )}
 
           <div className="ermis-channel-list__item-badges">
             {showUnread && unreadCount > 0 && (
@@ -170,9 +175,6 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
                   <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
                 </svg>
               </span>
-            )}
-            {isPending && (
-              <span className="ermis-channel-list__pending-badge">{pendingBadgeLabel || 'Invited'}</span>
             )}
           </div>
         </div>
@@ -321,15 +323,15 @@ export const ChannelTopicGroup = React.memo(({
 
   return (
     <div className="ermis-channel-list__topic-group">
-      <div 
-        className={`ermis-channel-list__topic-header ${isExpanded ? 'ermis-channel-list__topic-header--expanded' : ''}`} 
+      <div
+        className={`ermis-channel-list__topic-header ${isExpanded ? 'ermis-channel-list__topic-header--expanded' : ''}`}
         onClick={handleToggle}
       >
         <AvatarComponent image={image} name={name} size={40} />
         <div className="ermis-channel-list__topic-header-name">{name}</div>
-        
+
         {hasTopicAddPermission && (
-          <button 
+          <button
             className="ermis-channel-list__add-topic-btn"
             onClick={(e) => {
               e.stopPropagation();
@@ -345,9 +347,9 @@ export const ChannelTopicGroup = React.memo(({
           </button>
         )}
 
-        <svg 
+        <svg
           className="ermis-channel-list__accordion-icon"
-          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
         >
           <polyline points="6 9 12 15 18 9"></polyline>
         </svg>
@@ -429,7 +431,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   const { pendingChannels, regularChannels } = useMemo<{ pendingChannels: Channel[], regularChannels: Channel[] }>(() => {
     const pending: Channel[] = [];
     const regular: Channel[] = [];
-    
+
     channels.forEach(ch => {
       const ms = ch.state?.membership as Record<string, unknown> | undefined;
       const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
@@ -475,7 +477,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       const isBannedInChannel = Boolean(ms?.banned);
       const isBlockedInChannel = channel.type === 'messaging' && Boolean(ms?.blocked);
       const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
-      
+
       if (!isBannedInChannel && !isBlockedInChannel && !isPending && (chState?.unreadCount as number) > 0) {
         channel.markRead().catch(() => { });
         // Optimistically reset unread to update UI immediately
@@ -494,8 +496,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       {/* VList requires its container to have a height to work. */}
       <VList style={{ height: '100%' }}>
         {pendingChannels.length > 0 && (
-          <div 
-            className="ermis-channel-list__accordion-header" 
+          <div
+            className="ermis-channel-list__accordion-header"
             onClick={() => setIsPendingExpanded(prev => !prev)}
           >
             <span>
@@ -503,9 +505,9 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 ? pendingInvitesLabel(pendingChannels.length)
                 : pendingInvitesLabel || `Invites (${pendingChannels.length})`}
             </span>
-            <svg 
+            <svg
               className={`ermis-channel-list__accordion-icon ${isPendingExpanded ? 'ermis-channel-list__accordion-icon--expanded' : ''}`}
-              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             >
               <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
