@@ -316,6 +316,34 @@ export type ChannelAction = {
   isDanger?: boolean;
 };
 
+export type ChannelActionLabels = {
+  pinChannel?: string;
+  unpinChannel?: string;
+  pinTopic?: string;
+  unpinTopic?: string;
+  blockUser?: string;
+  unblockUser?: string;
+  editTopic?: string;
+  closeTopic?: string;
+  reopenTopic?: string;
+  createTopic?: string;
+  deleteChannel?: string;
+  leaveChannel?: string;
+};
+
+export type ChannelActionIcons = {
+  PinIcon?: React.ReactNode;
+  UnpinIcon?: React.ReactNode;
+  BlockIcon?: React.ReactNode;
+  UnblockIcon?: React.ReactNode;
+  EditTopicIcon?: React.ReactNode;
+  CloseTopicIcon?: React.ReactNode;
+  ReopenTopicIcon?: React.ReactNode;
+  CreateTopicIcon?: React.ReactNode;
+  DeleteChannelIcon?: React.ReactNode;
+  LeaveChannelIcon?: React.ReactNode;
+};
+
 export type ChannelActionsProps = {
   channel: Channel;
   actions: ChannelAction[];
@@ -352,6 +380,10 @@ export type ChannelItemProps = {
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
   /** Array of action IDs to hide from the actions dropdown */
   hiddenActions?: string[];
+  /** Custom labels for default channel actions */
+  actionLabels?: ChannelActionLabels;
+  /** Custom icons for default channel actions */
+  actionIcons?: ChannelActionIcons;
 };
 
 export type ChannelListProps = {
@@ -400,6 +432,10 @@ export type ChannelListProps = {
   onEditTopic?: (channel: Channel) => void;
   /** Handler when Close/Reopen Topic action is triggered */
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
+  /** Custom labels for default channel actions */
+  actionLabels?: ChannelActionLabels;
+  /** Custom icons for default channel actions */
+  actionIcons?: ChannelActionIcons;
 };
 
 /* ----------------------------------------------------------

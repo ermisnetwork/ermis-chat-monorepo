@@ -115,6 +115,8 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   onEditTopic,
   onToggleCloseTopic,
   hiddenActions,
+  actionLabels,
+  actionIcons,
 }) => {
   const { client } = useChatClient();
   const currentUserId = client.userID;
@@ -135,8 +137,8 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   }, [channel]);
 
   const defaultActions = useMemo(
-    () => computeDefaultActions(channel, currentUserId, { onAddTopic, onEditTopic, onToggleCloseTopic, isBlocked }),
-    [channel, currentUserId, updateCount, onAddTopic, onEditTopic, onToggleCloseTopic, isBlocked],
+    () => computeDefaultActions(channel, currentUserId, { onAddTopic, onEditTopic, onToggleCloseTopic, isBlocked, actionLabels, actionIcons }),
+    [channel, currentUserId, updateCount, onAddTopic, onEditTopic, onToggleCloseTopic, isBlocked, actionLabels, actionIcons],
   );
 
   const filteredActions = useMemo(() => {
@@ -277,6 +279,8 @@ type ChannelRowProps = {
   onEditTopic?: (channel: Channel) => void;
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
   hiddenActions?: string[];
+  actionLabels?: import('../types').ChannelActionLabels;
+  actionIcons?: import('../types').ChannelActionIcons;
 };
 
 const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
@@ -296,6 +300,8 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   onEditTopic,
   onToggleCloseTopic,
   hiddenActions,
+  actionLabels,
+  actionIcons,
 }) => {
   // Use the new custom hook to handle all row-level realtime updates
   const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
@@ -354,6 +360,8 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       onEditTopic={onEditTopic}
       onToggleCloseTopic={onToggleCloseTopic}
       hiddenActions={hiddenActions}
+      actionLabels={actionLabels}
+      actionIcons={actionIcons}
     />
   );
 });
@@ -379,6 +387,8 @@ export const ChannelTopicGroup = React.memo(({
   onEditTopic,
   onToggleCloseTopic,
   hiddenActions,
+  actionLabels,
+  actionIcons,
 }: any) => {
   const { updateCount } = useChannelRowUpdates(channel, currentUserId);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -451,8 +461,8 @@ export const ChannelTopicGroup = React.memo(({
   }, [channel, generalTopicLabel]);
 
   const defaultActions = useMemo(
-    () => computeDefaultActions(channel, currentUserId, { onAddTopic }),
-    [channel, currentUserId, updateCount, onAddTopic],
+    () => computeDefaultActions(channel, currentUserId, { onAddTopic, actionLabels, actionIcons }),
+    [channel, currentUserId, updateCount, onAddTopic, actionLabels, actionIcons],
   );
 
   const filteredActions = useMemo(() => {
@@ -504,6 +514,8 @@ export const ChannelTopicGroup = React.memo(({
             PinnedIconComponent={PinnedIconComponent}
             ChannelActionsComponent={() => null}
             hiddenActions={hiddenActions}
+            actionLabels={actionLabels}
+            actionIcons={actionIcons}
           />
           {topics.map((topicChannel: any) => (
             <ChannelRow
@@ -523,6 +535,8 @@ export const ChannelTopicGroup = React.memo(({
               onEditTopic={onEditTopic}
               onToggleCloseTopic={onToggleCloseTopic}
               hiddenActions={hiddenActions}
+              actionLabels={actionLabels}
+              actionIcons={actionIcons}
             />
           ))}
         </div>
@@ -561,6 +575,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   onEditTopic,
   onToggleCloseTopic,
   hiddenActions,
+  actionLabels,
+  actionIcons,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -715,6 +731,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               PinnedIconComponent={PinnedIconComponent}
               ChannelActionsComponent={ChannelActionsComponent}
               hiddenActions={hiddenActions}
+              actionLabels={actionLabels}
+              actionIcons={actionIcons}
             />
           );
         })}
@@ -751,6 +769,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 onEditTopic={handleEditTopicClick}
                 onToggleCloseTopic={handleToggleCloseTopicClick}
                 hiddenActions={hiddenActions}
+                actionLabels={actionLabels}
+                actionIcons={actionIcons}
               />
             );
           }
@@ -774,6 +794,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               onEditTopic={handleEditTopicClick}
               onToggleCloseTopic={handleToggleCloseTopicClick}
               hiddenActions={hiddenActions}
+              actionLabels={actionLabels}
+              actionIcons={actionIcons}
             />
           );
         })}

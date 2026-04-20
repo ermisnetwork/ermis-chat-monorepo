@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
-import type { ChannelAction, ChannelActionsProps } from '../types';
+import type { ChannelAction, ChannelActionLabels, ChannelActionIcons, ChannelActionsProps } from '../types';
 import { Dropdown } from './Dropdown';
 
 /* ----------------------------------------------------------
@@ -31,6 +31,8 @@ export function computeDefaultActions(
     onEditTopic?: (channel: Channel) => void;
     onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
     isBlocked?: boolean;
+    actionLabels?: ChannelActionLabels;
+    actionIcons?: ChannelActionIcons;
   },
 ): ChannelAction[] {
   const actions: ChannelAction[] = [];
@@ -47,10 +49,22 @@ export function computeDefaultActions(
   const isPinned = channel.data?.is_pinned === true;
 
   // Pin / Unpin — available for all channel types
+  const actionLabels = options?.actionLabels;
+
+  const pinLabel = isPinned
+    ? (isTopic ? (actionLabels?.unpinTopic || 'Unpin topic') : (actionLabels?.unpinChannel || 'Unpin channel'))
+    : (isTopic ? (actionLabels?.pinTopic || 'Pin topic') : (actionLabels?.pinChannel || 'Pin channel'));
+
+  const actionIcons = options?.actionIcons;
+
+  const pinIcon = isPinned 
+    ? (actionIcons?.UnpinIcon || <UnpinIcon />) 
+    : (actionIcons?.PinIcon || <PinIcon />);
+
   actions.push({
     id: isPinned ? 'unpin' : 'pin',
-    label: isPinned ? (isTopic ? 'Unpin topic' : 'Unpin channel') : (isTopic ? 'Pin topic' : 'Pin channel'),
-    icon: isPinned ? <UnpinIcon /> : <PinIcon />,
+    label: pinLabel,
+    icon: pinIcon,
     onClick: async (ch) => {
       try {
         if (isPinned) {
@@ -68,8 +82,8 @@ export function computeDefaultActions(
     // Direct channel: Block / Unblock
     actions.push({
       id: isBlocked ? 'unblock' : 'block',
-      label: isBlocked ? 'Unblock user' : 'Block user',
-      icon: <BlockIcon />,
+      label: isBlocked ? (actionLabels?.unblockUser || 'Unblock user') : (actionLabels?.blockUser || 'Block user'),
+      icon: isBlocked ? (actionIcons?.UnblockIcon || <BlockIcon />) : (actionIcons?.BlockIcon || <BlockIcon />),
       isDanger: !isBlocked,
       onClick: async (ch) => {
         try {
@@ -88,8 +102,8 @@ export function computeDefaultActions(
     if (role === 'owner' || role === 'moder') {
       actions.push({
         id: 'edit_topic',
-        label: 'Edit topic',
-        icon: <EditIcon />,
+        label: actionLabels?.editTopic || 'Edit topic',
+        icon: actionIcons?.EditTopicIcon || <EditIcon />,
         onClick: (ch) => {
           options?.onEditTopic?.(ch);
         },
@@ -99,8 +113,8 @@ export function computeDefaultActions(
     if (role === 'owner' || role === 'moder') {
       actions.push({
         id: isClosed ? 'reopen' : 'close',
-        label: isClosed ? 'Reopen topic' : 'Close topic',
-        icon: isClosed ? <UnlockIcon /> : <LockIcon />,
+        label: isClosed ? (actionLabels?.reopenTopic || 'Reopen topic') : (actionLabels?.closeTopic || 'Close topic'),
+        icon: isClosed ? (actionIcons?.ReopenTopicIcon || <UnlockIcon />) : (actionIcons?.CloseTopicIcon || <LockIcon />),
         isDanger: !isClosed,
         onClick: (ch) => {
           options?.onToggleCloseTopic?.(ch, isClosed);
@@ -113,16 +127,16 @@ export function computeDefaultActions(
     if (hasTopicsEnabled && (role === 'owner' || role === 'moder') && options?.onAddTopic) {
       actions.push({
         id: 'create_topic',
-        label: 'Create topic',
-        icon: <CreateTopicIcon />,
+        label: actionLabels?.createTopic || 'Create topic',
+        icon: actionIcons?.CreateTopicIcon || <CreateTopicIcon />,
         onClick: (ch) => { options.onAddTopic!(ch); },
       });
     }
     if (role === 'owner') {
       actions.push({
         id: 'delete',
-        label: 'Delete channel',
-        icon: <TrashIcon />,
+        label: actionLabels?.deleteChannel || 'Delete channel',
+        icon: actionIcons?.DeleteChannelIcon || <TrashIcon />,
         isDanger: true,
         onClick: async (ch) => {
           try {
@@ -136,8 +150,8 @@ export function computeDefaultActions(
     if (role === 'moder' || role === 'member') {
       actions.push({
         id: 'leave',
-        label: 'Leave channel',
-        icon: <LeaveIcon />,
+        label: actionLabels?.leaveChannel || 'Leave channel',
+        icon: actionIcons?.LeaveChannelIcon || <LeaveIcon />,
         isDanger: true,
         onClick: async (ch) => {
           try {
