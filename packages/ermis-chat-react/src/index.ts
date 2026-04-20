@@ -22,6 +22,9 @@ export type { AvatarProps } from './components/Avatar';
 export { ChannelList, ChannelItem, ChannelTopicGroup } from './components/ChannelList';
 export type { ChannelListProps, ChannelItemProps } from './components/ChannelList';
 
+export { DefaultChannelActions, computeDefaultActions } from './components/ChannelActions';
+export type { ChannelAction, ChannelActionsProps } from './types';
+
 export { Channel } from './components/Channel';
 export type { ChannelProps } from './components/Channel';
 

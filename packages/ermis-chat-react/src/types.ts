@@ -308,6 +308,20 @@ export type ChannelHeaderData = {
 /* ----------------------------------------------------------
    ChannelList types
    ---------------------------------------------------------- */
+export type ChannelAction = {
+  id: string;
+  label: string;
+  icon?: React.ReactNode;
+  onClick: (channel: Channel, e: React.MouseEvent) => void;
+  isDanger?: boolean;
+};
+
+export type ChannelActionsProps = {
+  channel: Channel;
+  actions: ChannelAction[];
+  onClose: () => void;
+};
+
 export type ChannelItemProps = {
   channel: Channel;
   isActive: boolean;
@@ -328,6 +342,15 @@ export type ChannelItemProps = {
   blockedBadgeLabel?: string;
   isClosedTopic?: boolean;
   closedTopicIcon?: React.ReactNode;
+  ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
+  /** Handler when Create Topic action is triggered */
+  onAddTopic?: (channel: Channel) => void;
+  /** Handler when Edit Topic action is triggered */
+  onEditTopic?: (channel: Channel) => void;
+  /** Handler when Close/Reopen Topic action is triggered */
+  onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
+  /** Array of action IDs to hide from the actions dropdown */
+  hiddenActions?: string[];
 };
 
 export type ChannelListProps = {
@@ -337,6 +360,8 @@ export type ChannelListProps = {
   renderChannel?: (channel: Channel, isActive: boolean) => React.ReactNode;
   onChannelSelect?: (channel: Channel) => void;
   className?: string;
+  /** Array of action IDs to hide from the actions dropdown */
+  hiddenActions?: string[];
   LoadingIndicator?: React.ComponentType<{ text?: string }>;
   EmptyStateIndicator?: React.ComponentType<{ text?: string }>;
   AvatarComponent?: React.ComponentType<AvatarProps>;
@@ -367,6 +392,12 @@ export type ChannelListProps = {
   /** Optional custom emoji picker for TopicModal */
   TopicEmojiPickerComponent?: React.ComponentType<any>;
   closedTopicIcon?: React.ReactNode;
+  /** Custom component for channel actions dropdown */
+  ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
+  /** Handler when Edit Topic action is triggered */
+  onEditTopic?: (channel: Channel) => void;
+  /** Handler when Close/Reopen Topic action is triggered */
+  onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
 };
 
 /* ----------------------------------------------------------

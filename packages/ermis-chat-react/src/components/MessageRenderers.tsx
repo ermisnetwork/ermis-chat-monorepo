@@ -52,7 +52,7 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =
   }, [loaded, src]);
 
   return (
-    <div className="ermis-attachment-aspect-box" style={{ paddingBottom: '75%' }}>
+    <div className="ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3">
       {/* Blur placeholder: use thumb if available, otherwise shimmer */}
       {!loaded && (
         thumbSrc && thumbSrc !== src ? (
@@ -104,7 +104,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =
   }, [loaded, posterSrc]);
 
   return (
-    <div className="ermis-attachment-aspect-box" style={{ paddingBottom: '75%' }}>
+    <div className="ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3">
       {!loaded && (
         blurThumb && blurThumb !== posterSrc ? (
           <img
@@ -121,7 +121,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =
         <img
           ref={imgRef}
           src={posterSrc}
-          style={{ display: 'none' }}
+          className="ermis-attachment--hidden-loader"
           onLoad={() => setLoaded(true)}
           alt="poster-loader"
         />
@@ -133,7 +133,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =
         controls
         preload="metadata"
         onLoadedData={() => {
-           if (!posterSrc) setLoaded(true);
+          if (!posterSrc) setLoaded(true);
         }}
       />
     </div>
@@ -226,7 +226,7 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(({ attachmen
       rel="noopener noreferrer"
     >
       {image && (
-        <div style={{ position: 'relative', width: '100%', minHeight: '120px', backgroundColor: 'var(--ermis-bg-hover, #2a2a4a)', overflow: 'hidden' }}>
+        <div className="ermis-attachment__link-image-wrapper">
           {!loaded && <div className="ermis-attachment-shimmer" />}
           <img
             ref={imgRef}
@@ -235,7 +235,6 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(({ attachmen
             alt={title || 'preview'}
             loading="lazy"
             onLoad={() => setLoaded(true)}
-            style={{ opacity: loaded ? 1 : 0, transition: 'opacity 0.3s ease', display: 'block', width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }}
           />
         </div>
       )}
@@ -553,16 +552,15 @@ export const StickerMessage: React.FC<MessageRendererProps> = ({ message }) => {
 
   if (stickerUrl) {
     return (
-      <div style={{ position: 'relative', width: '120px', height: '120px', overflow: 'hidden' }}>
+      <div className="ermis-message-sticker-wrapper">
         {!loaded && <div className="ermis-attachment-shimmer" />}
         <img
           ref={imgRef}
-          className="ermis-message-sticker"
+          className={`ermis-message-sticker${loaded ? ' ermis-attachment--loaded' : ''}`}
           src={stickerUrl}
           alt="sticker"
           loading="lazy"
           onLoad={() => setLoaded(true)}
-          style={{ opacity: loaded ? 1 : 0, transition: 'opacity 0.3s ease', position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'contain' }}
         />
       </div>
     );

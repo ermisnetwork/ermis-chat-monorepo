@@ -323,6 +323,10 @@
   width: 350px;
 }
 
+.ermis-message-list__item-content--has-attachments .ermis-message-bubble {
+  width: 100%;
+}
+
 /* Container for messages with both text + attachments */
 .ermis-message-content--with-attachments {
   display: flex;
@@ -365,9 +369,17 @@
   height: 100%;
   max-width: none;
   max-height: 200px;
-  object-fit: cover;
   border-radius: 0;
   display: block;
+}
+
+.ermis-attachment-grid .ermis-attachment--image {
+  object-fit: cover;
+}
+
+.ermis-attachment-grid .ermis-attachment--video {
+  object-fit: contain;
+  background-color: var(--ermis-bg-hover);
 }
 
 /* Single media: larger height allowed */
@@ -390,6 +402,10 @@
   max-width: 300px;
   min-height: 120px;
   background-color: var(--ermis-bg-hover);
+}
+
+.ermis-attachment-aspect-box--4-3 {
+  padding-bottom: 75%;
 }
 
 /* Blurred thumbnail preview (shown while full image loads) */
@@ -427,14 +443,18 @@
   }
 }
 
-/* Full image — hidden until loaded, fades in over blur/shimmer */
-.ermis-attachment-aspect-box .ermis-attachment--image {
+.ermis-attachment--hidden-loader {
+  display: none;
+}
+
+/* Full media — hidden until loaded, fades in over blur/shimmer */
+.ermis-attachment-aspect-box .ermis-attachment--image,
+.ermis-attachment-aspect-box .ermis-attachment--video {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
   opacity: 0;
   transition: opacity 0.3s ease;
   z-index: 2;
@@ -444,7 +464,17 @@
   border-radius: 0;
 }
 
-.ermis-attachment-aspect-box .ermis-attachment--image.ermis-attachment--loaded {
+.ermis-attachment-aspect-box .ermis-attachment--image {
+  object-fit: cover;
+}
+
+.ermis-attachment-aspect-box .ermis-attachment--video {
+  object-fit: contain;
+  background-color: var(--ermis-bg-hover);
+}
+
+.ermis-attachment-aspect-box .ermis-attachment--image.ermis-attachment--loaded,
+.ermis-attachment-aspect-box .ermis-attachment--video.ermis-attachment--loaded {
   opacity: 1;
 }
 
@@ -467,6 +497,7 @@
   max-width: 300px;
   max-height: 200px;
   border-radius: var(--ermis-radius-md);
+  object-fit: contain;
 }
 
 .ermis-attachment--file {
@@ -557,10 +588,28 @@
   border-color: var(--ermis-accent);
 }
 
-.ermis-attachment__link-image {
+.ermis-attachment__link-image-wrapper {
+  position: relative;
   width: 100%;
-  max-height: 160px;
+  min-height: 120px;
+  background-color: var(--ermis-bg-hover);
+  overflow: hidden;
+}
+
+.ermis-attachment__link-image {
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.ermis-attachment__link-image.ermis-attachment--loaded {
+  opacity: 1;
 }
 
 .ermis-attachment__link-info {
@@ -612,9 +661,26 @@
 }
 
 /* --- Sticker message --- */
+.ermis-message-sticker-wrapper {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  overflow: hidden;
+}
+
 .ermis-message-sticker {
-  max-width: 120px;
-  max-height: 120px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.ermis-message-sticker.ermis-attachment--loaded {
+  opacity: 1;
 }
 
 /* --- Error message --- */

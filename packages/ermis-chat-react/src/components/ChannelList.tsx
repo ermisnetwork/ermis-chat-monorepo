@@ -11,7 +11,12 @@ import { Avatar } from './Avatar';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
 export type { ChannelListProps, ChannelItemProps } from '../types';
+import type { ChannelActionsProps } from '../types';
 import { TopicModal } from './TopicModal';
+import { DefaultChannelActions, computeDefaultActions } from './ChannelActions';
+
+export { DefaultChannelActions } from './ChannelActions';
+export type { ChannelAction, ChannelActionsProps } from '../types';
 
 /**
  * Get a human-readable preview string for the last message,
@@ -104,14 +109,33 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   blockedBadgeLabel,
   isClosedTopic,
   closedTopicIcon,
+  ChannelActionsComponent,
+  onAddTopic,
+  onEditTopic,
+  onToggleCloseTopic,
+  hiddenActions,
 }) => {
+  const { client } = useChatClient();
+  const currentUserId = client.userID;
+
   // Subscribe to channel.updated so that when name/image/description change,
   // we re-render from within (bypasses React.memo which only blocks parent-driven re-renders)
-  const [, forceUpdate] = useState(0);
+  const [updateCount, forceUpdate] = useState(0);
   useEffect(() => {
     const sub = channel.on('channel.updated', () => forceUpdate((c) => c + 1));
     return () => sub.unsubscribe();
   }, [channel]);
+
+  const defaultActions = useMemo(
+    () => computeDefaultActions(channel, currentUserId, { onAddTopic, onEditTopic, onToggleCloseTopic, isBlocked }),
+    [channel, currentUserId, updateCount, onAddTopic, onEditTopic, onToggleCloseTopic, isBlocked],
+  );
+
+  const filteredActions = useMemo(() => {
+    if (!hiddenActions || hiddenActions.length === 0) return defaultActions;
+    return defaultActions.filter(a => !hiddenActions.includes(a.id));
+  }, [defaultActions, hiddenActions]);
+  const ActionsComponent = ChannelActionsComponent || DefaultChannelActions;
 
   const name = channel.data?.name || channel.cid;
   const image = channel.data?.image as string | undefined;
@@ -193,6 +217,11 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
           )}
         </div>
       </div>
+      {!isPending && (
+        <div className="ermis-channel-list__item-actions-wrapper">
+          <ActionsComponent channel={channel} actions={filteredActions} onClose={() => { }} />
+        </div>
+      )}
     </div>
   );
 });
@@ -222,6 +251,11 @@ type ChannelRowProps = {
   pendingBadgeLabel?: string;
   blockedBadgeLabel?: string;
   closedTopicIcon?: React.ReactNode;
+  ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
+  onAddTopic?: (channel: Channel) => void;
+  onEditTopic?: (channel: Channel) => void;
+  onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
+  hiddenActions?: string[];
 };
 
 const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
@@ -235,6 +269,11 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   pendingBadgeLabel,
   blockedBadgeLabel,
   closedTopicIcon,
+  ChannelActionsComponent,
+  onAddTopic,
+  onEditTopic,
+  onToggleCloseTopic,
+  hiddenActions,
 }) => {
   // Use the new custom hook to handle all row-level realtime updates
   const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
@@ -287,6 +326,11 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       blockedBadgeLabel={blockedBadgeLabel}
       isClosedTopic={isClosedTopic}
       closedTopicIcon={closedTopicIcon}
+      ChannelActionsComponent={ChannelActionsComponent}
+      onAddTopic={onAddTopic}
+      onEditTopic={onEditTopic}
+      onToggleCloseTopic={onToggleCloseTopic}
+      hiddenActions={hiddenActions}
     />
   );
 });
@@ -305,8 +349,12 @@ export const ChannelTopicGroup = React.memo(({
   pendingBadgeLabel,
   blockedBadgeLabel,
   generalTopicLabel,
-  onAddTopic,
   closedTopicIcon,
+  ChannelActionsComponent,
+  onAddTopic,
+  onEditTopic,
+  onToggleCloseTopic,
+  hiddenActions,
 }: any) => {
   const { updateCount } = useChannelRowUpdates(channel, currentUserId);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -344,6 +392,17 @@ export const ChannelTopicGroup = React.memo(({
     });
   }, [channel, generalTopicLabel]);
 
+  const defaultActions = useMemo(
+    () => computeDefaultActions(channel, currentUserId, { onAddTopic }),
+    [channel, currentUserId, updateCount, onAddTopic],
+  );
+
+  const filteredActions = useMemo(() => {
+    if (!hiddenActions || hiddenActions.length === 0) return defaultActions;
+    return defaultActions.filter((a: any) => !hiddenActions.includes(a.id));
+  }, [defaultActions, hiddenActions]);
+  const ActionsComponent = ChannelActionsComponent || DefaultChannelActions;
+
   return (
     <div className="ermis-channel-list__topic-group">
       <div
@@ -353,22 +412,9 @@ export const ChannelTopicGroup = React.memo(({
         <AvatarComponent image={image} name={name} size={40} />
         <div className="ermis-channel-list__topic-header-name">{name}</div>
 
-        {hasTopicAddPermission && (
-          <button
-            className="ermis-channel-list__add-topic-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              onAddTopic?.(channel);
-            }}
-            title="Create topic"
-            type="button"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-          </button>
-        )}
+        <div className="ermis-channel-list__topic-actions-wrapper">
+          <ActionsComponent channel={channel} actions={filteredActions} onClose={() => { }} />
+        </div>
 
         <svg
           className="ermis-channel-list__accordion-icon"
@@ -391,6 +437,8 @@ export const ChannelTopicGroup = React.memo(({
             pendingBadgeLabel={pendingBadgeLabel}
             blockedBadgeLabel={blockedBadgeLabel}
             closedTopicIcon={closedTopicIcon}
+            ChannelActionsComponent={() => null}
+            hiddenActions={hiddenActions}
           />
           {topics.map((topicChannel: any) => (
             <ChannelRow
@@ -405,6 +453,10 @@ export const ChannelTopicGroup = React.memo(({
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
               closedTopicIcon={closedTopicIcon}
+              ChannelActionsComponent={ChannelActionsComponent}
+              onEditTopic={onEditTopic}
+              onToggleCloseTopic={onToggleCloseTopic}
+              hiddenActions={hiddenActions}
             />
           ))}
         </div>
@@ -438,12 +490,17 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   onAddTopic,
   TopicEmojiPickerComponent,
   closedTopicIcon,
+  ChannelActionsComponent,
+  onEditTopic,
+  onToggleCloseTopic,
+  hiddenActions,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPendingExpanded, setIsPendingExpanded] = useState(true);
   const [addingTopicForChannel, setAddingTopicForChannel] = useState<Channel | null>(null);
+  const [editingTopicForChannel, setEditingTopicForChannel] = useState<Channel | null>(null);
 
   const handleAddTopicClick = useCallback((channel: Channel) => {
     if (onAddTopic) {
@@ -452,6 +509,37 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       setAddingTopicForChannel(channel);
     }
   }, [onAddTopic]);
+
+  const handleEditTopicClick = useCallback((channel: Channel) => {
+    if (onEditTopic) {
+      onEditTopic(channel);
+    } else {
+      setEditingTopicForChannel(channel);
+    }
+  }, [onEditTopic]);
+
+  const handleToggleCloseTopicClick = useCallback(async (channel: Channel, isClosed: boolean) => {
+    if (onToggleCloseTopic) {
+      onToggleCloseTopic(channel, isClosed);
+      return;
+    }
+
+    const parentCid = channel.data?.parent_cid as string | undefined;
+    if (!parentCid) return;
+
+    const parentChannel = client.activeChannels[parentCid];
+    if (!parentChannel) return;
+
+    try {
+      if (isClosed) {
+        await parentChannel.reopenTopic(channel.cid);
+      } else {
+        await parentChannel.closeTopic(channel.cid);
+      }
+    } catch (err) {
+      console.error('Failed to toggle topic close state', err);
+    }
+  }, [client.activeChannels, onToggleCloseTopic]);
 
   // Group channels into pending and regular
   const { pendingChannels, regularChannels } = useMemo<{ pendingChannels: Channel[], regularChannels: Channel[] }>(() => {
@@ -554,6 +642,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
               closedTopicIcon={closedTopicIcon}
+              ChannelActionsComponent={ChannelActionsComponent}
+              hiddenActions={hiddenActions}
             />
           );
         })}
@@ -585,6 +675,10 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 generalTopicLabel={generalTopicLabel}
                 onAddTopic={handleAddTopicClick}
                 closedTopicIcon={closedTopicIcon}
+                ChannelActionsComponent={ChannelActionsComponent}
+                onEditTopic={handleEditTopicClick}
+                onToggleCloseTopic={handleToggleCloseTopicClick}
+                hiddenActions={hiddenActions}
               />
             );
           }
@@ -602,6 +696,11 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
               closedTopicIcon={closedTopicIcon}
+              ChannelActionsComponent={ChannelActionsComponent}
+              onAddTopic={handleAddTopicClick}
+              onEditTopic={handleEditTopicClick}
+              onToggleCloseTopic={handleToggleCloseTopicClick}
+              hiddenActions={hiddenActions}
             />
           );
         })}
@@ -611,6 +710,14 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
           isOpen={true}
           onClose={() => setAddingTopicForChannel(null)}
           parentChannel={addingTopicForChannel}
+          EmojiPickerComponent={TopicEmojiPickerComponent}
+        />
+      )}
+      {editingTopicForChannel && (
+        <TopicModal
+          isOpen={true}
+          onClose={() => setEditingTopicForChannel(null)}
+          topic={editingTopicForChannel}
           EmojiPickerComponent={TopicEmojiPickerComponent}
         />
       )}
