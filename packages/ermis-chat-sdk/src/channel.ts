@@ -132,13 +132,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     // 3. Call API — don't update status on success (WS message.new will handle it)
     try {
-      return await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(
-        this._channelURL() + '/message',
-        { message: { ...message } },
-      );
+      return await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(this._channelURL() + '/message', {
+        message: { ...message },
+      });
     } catch (error: any) {
       // 4. On error: check if it's an offline/network error
-      const isOfflineError = !error.response || error.code === 'ERR_NETWORK' || error.isWSFailure || !this.getClient().wsConnection?.isHealthy;
+      const isOfflineError =
+        !error.response ||
+        error.code === 'ERR_NETWORK' ||
+        error.isWSFailure ||
+        !this.getClient().wsConnection?.isHealthy;
       const statusToSet = isOfflineError ? 'failed_offline' : 'error';
       this.state.updateMessageStatus(messageId, statusToSet);
       throw error;
@@ -166,12 +169,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
 
     try {
-      return await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(
-        this._channelURL() + '/message',
-        { message: messagePayload },
-      );
+      return await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(this._channelURL() + '/message', {
+        message: messagePayload,
+      });
     } catch (error: any) {
-      const isOfflineError = !error.response || error.code === 'ERR_NETWORK' || error.isWSFailure || !this.getClient().wsConnection?.isHealthy;
+      const isOfflineError =
+        !error.response ||
+        error.code === 'ERR_NETWORK' ||
+        error.isWSFailure ||
+        !this.getClient().wsConnection?.isHealthy;
       this.state.updateMessageStatus(messageId, isOfflineError ? 'failed_offline' : 'error');
       throw error;
     }
@@ -263,9 +269,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     // 2. Upload all files in parallel
     const uploadResults = await Promise.allSettled(
-      processedFiles.map((file) =>
-        this.sendFile(file, file.name, file.type),
-      ),
+      processedFiles.map((file) => this.sendFile(file, file.name, file.type)),
     );
 
     // 3. For successful video uploads, generate and upload thumbnails
@@ -280,11 +284,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             try {
               const thumbBlob = await this.getThumbBlobVideo(files[i]);
               if (thumbBlob) {
-                const thumbFile = new File(
-                  [thumbBlob],
-                  `thumb_${processedFiles[i].name}.jpg`,
-                  { type: 'image/jpeg' },
-                );
+                const thumbFile = new File([thumbBlob], `thumb_${processedFiles[i].name}.jpg`, { type: 'image/jpeg' });
                 const thumbResp = await this.sendFile(thumbFile, thumbFile.name, 'image/jpeg');
                 thumbUrls.set(i, thumbResp.file);
               }
@@ -306,9 +306,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         const uploadedUrl = result.value.file;
         const thumbUrl = thumbUrls.get(i);
         const voiceMeta = options?.voiceMetadata?.get(i);
-        attachments.push(
-          buildAttachmentPayload(processedFiles[i], uploadedUrl, thumbUrl, voiceMeta),
-        );
+        attachments.push(buildAttachmentPayload(processedFiles[i], uploadedUrl, thumbUrl, voiceMeta));
       } else {
         failedFiles.push({
           file: files[i],
@@ -756,7 +754,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (this.id) {
       queryURL += `/${this.id}`;
     } else {
-      if (this.type === 'team') {
+      if (this.type === 'team' || this.type === 'meeting') {
         const uuid = randomId();
         this.id = `${project_id}:${uuid}`;
         queryURL += `/${this.id}`;

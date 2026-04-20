@@ -245,7 +245,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
 ChannelRow.displayName = 'ChannelRow';
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
-  filters = { type: ['messaging', 'team'], include_pinned_messages: true } as unknown as ChannelFilters,
+  filters = { type: ['messaging', 'team', 'meeting'], include_pinned_messages: true } as unknown as ChannelFilters,
   sort = [],
   options = { message_limit: 25 } as unknown as ChannelListProps['options'],
   renderChannel,
@@ -271,7 +271,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   const { pendingChannels, regularChannels } = useMemo<{ pendingChannels: Channel[], regularChannels: Channel[] }>(() => {
     const pending: Channel[] = [];
     const regular: Channel[] = [];
-    
+
     channels.forEach(ch => {
       const ms = ch.state?.membership as Record<string, unknown> | undefined;
       const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
@@ -317,7 +317,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       const isBannedInChannel = Boolean(ms?.banned);
       const isBlockedInChannel = channel.type === 'messaging' && Boolean(ms?.blocked);
       const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
-      
+
       if (!isBannedInChannel && !isBlockedInChannel && !isPending && (chState?.unreadCount as number) > 0) {
         channel.markRead().catch(() => { });
         // Optimistically reset unread to update UI immediately
@@ -336,8 +336,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       {/* VList requires its container to have a height to work. */}
       <VList style={{ height: '100%' }}>
         {pendingChannels.length > 0 && (
-          <div 
-            className="ermis-channel-list__accordion-header" 
+          <div
+            className="ermis-channel-list__accordion-header"
             onClick={() => setIsPendingExpanded(prev => !prev)}
           >
             <span>
@@ -345,9 +345,9 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 ? pendingInvitesLabel(pendingChannels.length)
                 : pendingInvitesLabel || `Invites (${pendingChannels.length})`}
             </span>
-            <svg 
+            <svg
               className={`ermis-channel-list__accordion-icon ${isPendingExpanded ? 'ermis-channel-list__accordion-icon--expanded' : ''}`}
-              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             >
               <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
