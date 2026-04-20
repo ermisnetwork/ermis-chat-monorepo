@@ -1437,6 +1437,56 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return channel;
   };
 
+  /**
+   * Creates an interactive `meeting` Channel locally, and immediately creates it on the server.
+   * Consumers can customize the `name` field. `members` and `public` fields are constrained.
+   *
+   * @param name - The custom name for the meeting channel.
+   * @returns A promise that resolves to the created `Channel` object.
+   */
+  async createMeetingChannel(name?: string): Promise<Channel<ErmisChatGenerics>> {
+    if (!this.userID) {
+      throw Error('Call connectUser before creating a channel');
+    }
+
+    const payload = {
+      name: name || `Meeting Public - ${new Date().toISOString()}`,
+      members: [this.userID],
+      public: true,
+    } as unknown as ChannelData<ErmisChatGenerics>;
+
+    const meetingChannel = this.channel('meeting', payload);
+    await meetingChannel.create();
+    
+    return meetingChannel;
+  }
+
+  /**
+   * Joins a `meeting` channel.
+   * It queries/watches the channel to see if caller is already a member.
+   * If not, it accepts the invite to join the channel, then watches it again to reflect changes.
+   *
+   * @param channelId - The ID of the meeting channel to join.
+   * @returns A promise that resolves to the joined `Channel` object.
+   */
+  async joinMeetingChannel(channelId: string): Promise<Channel<ErmisChatGenerics>> {
+    if (!this.userID) {
+      throw Error('Call connectUser before joining a channel');
+    }
+
+    const meetingChannel = this.channel('meeting', channelId);
+    await meetingChannel.watch();
+
+    const isMember = meetingChannel.state.members && meetingChannel.state.members[this.userID];
+
+    if (!isMember) {
+      await meetingChannel.acceptInvite('join');
+      await meetingChannel.watch();
+    }
+
+    return meetingChannel;
+  }
+
   _normalizeExpiration(timeoutOrExpirationDate?: null | number | string | Date) {
     let pinExpires: null | string = null;
     if (typeof timeoutOrExpirationDate === 'number') {

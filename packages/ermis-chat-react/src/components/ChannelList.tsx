@@ -485,7 +485,7 @@ export const ChannelTopicGroup = React.memo(({
 ChannelTopicGroup.displayName = 'ChannelTopicGroup';
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
-  filters = { type: ['messaging', 'team'], include_pinned_messages: true } as unknown as ChannelFilters,
+  filters = { type: ['messaging', 'team', 'meeting'], include_pinned_messages: true } as unknown as ChannelFilters,
   sort = [],
   options = { message_limit: 25 } as unknown as ChannelListProps['options'],
   renderChannel,
