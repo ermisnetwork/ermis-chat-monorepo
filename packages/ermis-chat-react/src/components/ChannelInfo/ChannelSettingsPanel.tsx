@@ -444,7 +444,7 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
         </section>
 
         {/* Section 3: Features */}
-        {channel?.type === 'team' && (
+        {(channel?.type === 'team' || channel?.type === 'meeting') && (
           <section
             className="ermis-settings-panel__section"
             style={{

@@ -273,7 +273,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
 
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
-  const isTeamChannel = channel?.type === 'team';
+  const isTeamChannel = channel?.type === 'team' || channel?.type === 'meeting';
   const isTopic = Boolean(channel?.data?.parent_cid) || channel?.type === 'topic';
   const isClosedTopic = channel?.data?.is_closed_topic === true;
   const title = titleProp !== undefined ? titleProp : (isTopic ? 'Topic Info' : 'Channel Info');
@@ -283,7 +283,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   let parentChannelName = parentChannel?.data?.name || (parentCid ? 'Unknown' : undefined);
 
   // If this is the proxy 'general' channel, its real name is the parent team name
-  if (channel?.type === 'team' && channel?.data?.name === 'general' && channel.cid) {
+  if ((channel?.type === 'team' || channel?.type === 'meeting') && channel?.data?.name === 'general' && channel.cid) {
     const realChannelName = client?.activeChannels[channel.cid]?.data?.name;
     if (realChannelName && realChannelName !== 'general') {
       parentChannelName = realChannelName;

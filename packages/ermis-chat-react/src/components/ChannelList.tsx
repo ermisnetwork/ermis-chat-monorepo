@@ -725,7 +725,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
         )}
         {regularChannels.map((channel: Channel) => {
           const isActive = activeChannel?.cid === channel.cid;
-          const isTeamWithTopics = channel.type === 'team' && channel.data?.topics_enabled;
+          const isTeamWithTopics = (channel.type === 'team' || channel.type === 'meeting') && channel.data?.topics_enabled;
 
           if (isTeamWithTopics) {
             const GroupComponent = ChannelTopicGroupComponent || ChannelTopicGroup;

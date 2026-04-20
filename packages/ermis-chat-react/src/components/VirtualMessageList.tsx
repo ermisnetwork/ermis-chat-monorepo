@@ -145,8 +145,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   const handleAcceptInvite = useCallback(async () => {
     if (!activeChannel) return;
     try {
-      const isPublicTeam = activeChannel.type === 'team' && Boolean(activeChannel.data?.public);
-      const action = isPublicTeam ? 'join' : 'accept';
+      const isPublicTeamOrMeeting = (activeChannel.type === 'team' || activeChannel.type === 'meeting') && Boolean(activeChannel.data?.public);
+      const action = isPublicTeamOrMeeting ? 'join' : 'accept';
       await activeChannel.acceptInvite(action);
     } catch (e: any) {
       console.error('Error accepting invite', e);

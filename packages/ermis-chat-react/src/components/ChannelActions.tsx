@@ -37,7 +37,7 @@ export function computeDefaultActions(
   if (!currentUserId) return actions;
 
   const isDirect = channel.type === 'messaging';
-  const isTeam = channel.type === 'team';
+  const isTeamOrMeeting = channel.type === 'team' || channel.type === 'meeting';
   const isTopic = channel.type === 'topic' || Boolean(channel.data?.parent_cid);
   const isClosed = channel.data?.is_closed_topic === true;
 
@@ -107,7 +107,7 @@ export function computeDefaultActions(
         },
       });
     }
-  } else if (isTeam) {
+  } else if (isTeamOrMeeting) {
     // Team channel: Create Topic (owner & moder, only if topics enabled)
     const hasTopicsEnabled = Boolean(channel.data?.topics_enabled);
     if (hasTopicsEnabled && (role === 'owner' || role === 'moder') && options?.onAddTopic) {

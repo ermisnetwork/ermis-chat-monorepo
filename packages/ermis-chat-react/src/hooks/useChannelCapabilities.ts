@@ -18,20 +18,24 @@ export const useChannelCapabilities = () => {
 
   const currentUserId = client?.userID || '';
   const isTeamChannel = activeChannel?.type === 'team';
+  const isMeetingChannel = activeChannel?.type === 'meeting';
+  const isTeamOrMeetingChannel = isTeamChannel || isMeetingChannel;
   const role = (activeChannel?.state as any)?.members?.[currentUserId]?.channel_role;
   
   const isOwner = role === 'owner' || activeChannel?.data?.created_by_id === currentUserId;
   const isModerator = role === 'moder';
   const isOwnerOrModerator = isOwner || isModerator;
 
-  const capabilities: string[] = isTeamChannel ? (activeChannel?.data as any)?.member_capabilities || [] : [];
+  const capabilities: string[] = isTeamOrMeetingChannel ? (activeChannel?.data as any)?.member_capabilities || [] : [];
 
   const hasCapability = useCallback((cap: string) => {
-    return !isTeamChannel || isOwnerOrModerator || capabilities.includes(cap);
-  }, [isTeamChannel, isOwnerOrModerator, capabilities, updateTick]); // React to updateTick correctly
+    return !isTeamOrMeetingChannel || isOwnerOrModerator || capabilities.includes(cap);
+  }, [isTeamOrMeetingChannel, isOwnerOrModerator, capabilities, updateTick]); // React to updateTick correctly
 
   return {
     isTeamChannel,
+    isMeetingChannel,
+    isTeamOrMeetingChannel,
     isOwner,
     isModerator,
     isOwnerOrModerator,

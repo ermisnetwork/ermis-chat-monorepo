@@ -71,7 +71,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
 
     // If it's a topics-enabled team channel (the general proxy), the proxy overrides data.name.
     // We can pull the original name from the SDK cache.
-    if (activeChannel.type === 'team' && activeChannel.data?.topics_enabled) {
+    if ((activeChannel.type === 'team' || activeChannel.type === 'meeting') && activeChannel.data?.topics_enabled) {
       const rawChannel = client.activeChannels[activeChannel.cid];
       if (rawChannel && rawChannel.data?.name && rawChannel.data.name !== activeChannel.data?.name) {
         return rawChannel.data.name;

@@ -23,7 +23,7 @@ export type MessageActionList = {
 
 export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: boolean): MessageActionList => {
   const { activeChannel, client } = useChatClient();
-  const { isTeamChannel: isTeam, isOwner, hasCapability } = useChannelCapabilities();
+  const { isTeamOrMeetingChannel: isTeam, isOwner, hasCapability } = useChannelCapabilities();
 
   // Only depend on the specific message fields we actually read
   const messageType = message.type;

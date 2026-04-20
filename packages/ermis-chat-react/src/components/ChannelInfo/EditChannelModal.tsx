@@ -28,7 +28,7 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
   const originalImage = (channel.data?.image as string) || '';
   const originalDescription = (channel.data?.description as string) || '';
   const originalPublic = Boolean(channel.data?.public);
-  const isTeamChannel = channel.type === 'team';
+  const isTeamOrMeetingChannel = channel.type === 'team' || channel.type === 'meeting';
 
   // Form state
   const [name, setName] = useState(originalName);
@@ -92,7 +92,7 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
       payload.description = description.trim();
       hasChanges = true;
     }
-    if (isTeamChannel && isPublic !== originalPublic) {
+    if (isTeamOrMeetingChannel && isPublic !== originalPublic) {
       payload.public = isPublic;
       hasChanges = true;
     }
@@ -102,7 +102,7 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
     }
 
     return hasChanges ? payload : null;
-  }, [name, description, isPublic, selectedFile, originalName, originalDescription, originalPublic, isTeamChannel]);
+  }, [name, description, isPublic, selectedFile, originalName, originalDescription, originalPublic, isTeamOrMeetingChannel]);
 
   const handleSave = useCallback(async () => {
     const payload = buildPayload();
@@ -237,7 +237,7 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
         </div>
 
         {/* Public toggle — only for team channels */}
-        {isTeamChannel && (
+        {isTeamOrMeetingChannel && (
           <div className="ermis-channel-info__edit-field ermis-channel-info__edit-field--toggle">
             <label className="ermis-channel-info__edit-label">{publicLabel}</label>
             <button
