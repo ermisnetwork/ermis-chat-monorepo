@@ -109,6 +109,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   blockedBadgeLabel,
   isClosedTopic,
   closedTopicIcon,
+  PinnedIconComponent,
   ChannelActionsComponent,
   onAddTopic,
   onEditTopic,
@@ -176,9 +177,9 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-top-row">
           <div className="ermis-channel-list__item-name">{name}</div>
-          {channel.data?.is_pinned === true && !isClosedTopic && (
+          {channel.data?.is_pinned === true && !isClosedTopic && PinnedIconComponent && (
             <span className="ermis-channel-list__pinned-icon" title="Pinned">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 11.24V6a3 3 0 0 0-6 0v5.24a2 2 0 0 1-1.11 1.31l-1.78.9A2 2 0 0 0 5 15.24Z" /></svg>
+              <PinnedIconComponent />
             </span>
           )}
           {isClosedTopic && (
@@ -239,6 +240,13 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
 });
 ChannelItem.displayName = 'ChannelItem';
 
+export const DefaultPinnedIcon = React.memo(() => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+  </svg>
+));
+DefaultPinnedIcon.displayName = 'DefaultPinnedIcon';
+
 const DefaultLoading = React.memo(({ text }: { text?: string }) => (
   <div className="ermis-channel-list__loading">{text || 'Loading channels...'}</div>
 ));
@@ -263,6 +271,7 @@ type ChannelRowProps = {
   pendingBadgeLabel?: string;
   blockedBadgeLabel?: string;
   closedTopicIcon?: React.ReactNode;
+  PinnedIconComponent?: React.ComponentType;
   ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
   onAddTopic?: (channel: Channel) => void;
   onEditTopic?: (channel: Channel) => void;
@@ -281,6 +290,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   pendingBadgeLabel,
   blockedBadgeLabel,
   closedTopicIcon,
+  PinnedIconComponent,
   ChannelActionsComponent,
   onAddTopic,
   onEditTopic,
@@ -338,6 +348,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       blockedBadgeLabel={blockedBadgeLabel}
       isClosedTopic={isClosedTopic}
       closedTopicIcon={closedTopicIcon}
+      PinnedIconComponent={PinnedIconComponent}
       ChannelActionsComponent={ChannelActionsComponent}
       onAddTopic={onAddTopic}
       onEditTopic={onEditTopic}
@@ -362,6 +373,7 @@ export const ChannelTopicGroup = React.memo(({
   blockedBadgeLabel,
   generalTopicLabel,
   closedTopicIcon,
+  PinnedIconComponent,
   ChannelActionsComponent,
   onAddTopic,
   onEditTopic,
@@ -370,13 +382,47 @@ export const ChannelTopicGroup = React.memo(({
 }: any) => {
   const { updateCount } = useChannelRowUpdates(channel, currentUserId);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [topicUpdateCount, setTopicUpdateCount] = useState(0);
+
+  useEffect(() => {
+    const subs: { unsubscribe: () => void }[] = [];
+    const handleUpdate = () => setTopicUpdateCount((c) => c + 1);
+    const currentTopics = channel.state?.topics || [];
+    currentTopics.forEach((t: Channel) => {
+      subs.push(t.on('channel.pinned', handleUpdate));
+      subs.push(t.on('channel.unpinned', handleUpdate));
+      subs.push(t.on('message.new', handleUpdate));
+      subs.push(t.on('message.deleted', handleUpdate));
+    });
+    return () => {
+      subs.forEach((s) => s.unsubscribe());
+    };
+  }, [channel.state?.topics]);
 
   const handleToggle = useCallback(() => setIsExpanded((prev) => !prev), []);
 
   const userRole = channel.state?.members?.[currentUserId]?.channel_role;
   const hasTopicAddPermission = Boolean(userRole === 'owner' || userRole === 'moder');
 
-  const topics = channel.state?.topics || [];
+  const getTopicTime = (t: Channel) => {
+    const lastMsg = t.state?.latestMessages?.slice(-1)[0];
+    if (lastMsg?.created_at) return new Date(lastMsg.created_at).getTime();
+    if (t.data?.last_message_at) return new Date(t.data.last_message_at as string | Date).getTime();
+    if (t.data?.created_at) return new Date(t.data.created_at as string | Date).getTime();
+    return 0;
+  };
+
+  const topics = useMemo(() => {
+    const allTopics = channel.state?.topics || [];
+    return [...allTopics].sort((a: any, b: any) => {
+      const aPinned = a.data?.is_pinned === true;
+      const bPinned = b.data?.is_pinned === true;
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      
+      return getTopicTime(b) - getTopicTime(a);
+    });
+  }, [channel.state?.topics, topicUpdateCount]);
   const name = channel.data?.name || channel.cid;
   const image = channel.data?.image as string | undefined;
 
@@ -424,9 +470,9 @@ export const ChannelTopicGroup = React.memo(({
         <AvatarComponent image={image} name={name} size={40} />
         <div className="ermis-channel-list__topic-header-name">{name}</div>
 
-        {channel.data?.is_pinned === true && (
+        {channel.data?.is_pinned === true && PinnedIconComponent && (
           <span className="ermis-channel-list__pinned-icon" title="Pinned">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 11.24V6a3 3 0 0 0-6 0v5.24a2 2 0 0 1-1.11 1.31l-1.78.9A2 2 0 0 0 5 15.24Z" /></svg>
+            <PinnedIconComponent />
           </span>
         )}
 
@@ -455,6 +501,7 @@ export const ChannelTopicGroup = React.memo(({
             pendingBadgeLabel={pendingBadgeLabel}
             blockedBadgeLabel={blockedBadgeLabel}
             closedTopicIcon={closedTopicIcon}
+            PinnedIconComponent={PinnedIconComponent}
             ChannelActionsComponent={() => null}
             hiddenActions={hiddenActions}
           />
@@ -471,6 +518,7 @@ export const ChannelTopicGroup = React.memo(({
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
               closedTopicIcon={closedTopicIcon}
+              PinnedIconComponent={PinnedIconComponent}
               ChannelActionsComponent={ChannelActionsComponent}
               onEditTopic={onEditTopic}
               onToggleCloseTopic={onToggleCloseTopic}
@@ -508,6 +556,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   onAddTopic,
   TopicEmojiPickerComponent,
   closedTopicIcon,
+  PinnedIconComponent = DefaultPinnedIcon,
   ChannelActionsComponent,
   onEditTopic,
   onToggleCloseTopic,
@@ -663,6 +712,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
               closedTopicIcon={closedTopicIcon}
+              PinnedIconComponent={PinnedIconComponent}
               ChannelActionsComponent={ChannelActionsComponent}
               hiddenActions={hiddenActions}
             />
@@ -696,6 +746,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 generalTopicLabel={generalTopicLabel}
                 onAddTopic={handleAddTopicClick}
                 closedTopicIcon={closedTopicIcon}
+                PinnedIconComponent={PinnedIconComponent}
                 ChannelActionsComponent={ChannelActionsComponent}
                 onEditTopic={handleEditTopicClick}
                 onToggleCloseTopic={handleToggleCloseTopicClick}
@@ -717,6 +768,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
               closedTopicIcon={closedTopicIcon}
+              PinnedIconComponent={PinnedIconComponent}
               ChannelActionsComponent={ChannelActionsComponent}
               onAddTopic={handleAddTopicClick}
               onEditTopic={handleEditTopicClick}

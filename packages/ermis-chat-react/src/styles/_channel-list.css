@@ -184,6 +184,17 @@
   color: var(--ermis-color-danger);
 }
 
+.ermis-channel-list__pinned-icon {
+  position: absolute;
+  top: -5px;
+  right: 0px;
+  color: var(--ermis-color-danger, #ef4444);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(45deg);
+}
+
 .ermis-channel-list__item-badges {
   display: flex;
   align-items: center;

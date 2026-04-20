@@ -342,6 +342,7 @@ export type ChannelItemProps = {
   blockedBadgeLabel?: string;
   isClosedTopic?: boolean;
   closedTopicIcon?: React.ReactNode;
+  PinnedIconComponent?: React.ComponentType;
   ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
   /** Handler when Create Topic action is triggered */
   onAddTopic?: (channel: Channel) => void;
@@ -392,6 +393,7 @@ export type ChannelListProps = {
   /** Optional custom emoji picker for TopicModal */
   TopicEmojiPickerComponent?: React.ComponentType<any>;
   closedTopicIcon?: React.ReactNode;
+  PinnedIconComponent?: React.ComponentType;
   /** Custom component for channel actions dropdown */
   ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
   /** Handler when Edit Topic action is triggered */
