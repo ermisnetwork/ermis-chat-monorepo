@@ -1343,7 +1343,7 @@ export type TopicModalProps = {
   onClose: () => void;
   onSuccess?: (channel: Channel) => void;
   /** Inject external emoji picker component */
-  EmojiPickerComponent?: React.ComponentType<{ onSelect: (emoji: any) => void;[key: string]: any }>;
+  EmojiPickerComponent?: React.ComponentType<{ onSelect: (emoji: any) => void; [key: string]: any }>;
   /** Parent team channel to create topic under, will use activeChannel if not provided */
   parentChannel?: Channel;
 

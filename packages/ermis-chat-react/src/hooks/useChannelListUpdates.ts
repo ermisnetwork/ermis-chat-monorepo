@@ -207,8 +207,8 @@ export function useChannelListUpdates(
       }
     };
 
-    // --- channel.topic.enabled / disabled / created: force re-render so ChannelList toggles Accordion UI or inserts new topic ---
-    const handleTopicUpdate = (event: Event) => {
+    // --- channel.topic.enabled / disabled / created / channel.pinned / channel.unpinned: force re-render so ChannelList toggles Accordion UI, inserts new topic, or updates pinned channels ---
+    const handleGenericUpdate = (event: Event) => {
       setChannels((prev) => [...prev]);
     };
 
@@ -220,9 +220,11 @@ export function useChannelListUpdates(
     const sub6 = client.on('notification.added_to_channel', handleMemberAdded);
     const sub7 = client.on('notification.invite_rejected', handleMemberRemoved);
     const sub8 = client.on('notification.invite_accepted', handleMemberUpdated);
-    const sub9 = client.on('channel.topic.enabled', handleTopicUpdate);
-    const sub10 = client.on('channel.topic.disabled', handleTopicUpdate);
-    const sub11 = client.on('channel.topic.created', handleTopicUpdate);
+    const sub9 = client.on('channel.topic.enabled', handleGenericUpdate);
+    const sub10 = client.on('channel.topic.disabled', handleGenericUpdate);
+    const sub11 = client.on('channel.topic.created', handleGenericUpdate);
+    const sub12 = client.on('channel.pinned', handleGenericUpdate);
+    const sub13 = client.on('channel.unpinned', handleGenericUpdate);
 
     return () => {
       sub1.unsubscribe();
@@ -236,6 +238,8 @@ export function useChannelListUpdates(
       sub9.unsubscribe();
       sub10.unsubscribe();
       sub11.unsubscribe();
+      sub12.unsubscribe();
+      sub13.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }

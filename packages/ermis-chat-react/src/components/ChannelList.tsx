@@ -122,8 +122,15 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   // we re-render from within (bypasses React.memo which only blocks parent-driven re-renders)
   const [updateCount, forceUpdate] = useState(0);
   useEffect(() => {
-    const sub = channel.on('channel.updated', () => forceUpdate((c) => c + 1));
-    return () => sub.unsubscribe();
+    const handleUpdate = () => forceUpdate((c) => c + 1);
+    const sub1 = channel.on('channel.updated', handleUpdate);
+    const sub2 = channel.on('channel.pinned', handleUpdate);
+    const sub3 = channel.on('channel.unpinned', handleUpdate);
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+      sub3.unsubscribe();
+    };
   }, [channel]);
 
   const defaultActions = useMemo(
@@ -169,6 +176,11 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-top-row">
           <div className="ermis-channel-list__item-name">{name}</div>
+          {channel.data?.is_pinned === true && !isClosedTopic && (
+            <span className="ermis-channel-list__pinned-icon" title="Pinned">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 11.24V6a3 3 0 0 0-6 0v5.24a2 2 0 0 1-1.11 1.31l-1.78.9A2 2 0 0 0 5 15.24Z" /></svg>
+            </span>
+          )}
           {isClosedTopic && (
             <span className="ermis-channel-list__closed-icon">
               {closedTopicIcon || (
@@ -384,7 +396,7 @@ export const ChannelTopicGroup = React.memo(({
     return new Proxy(channel, {
       get(target, prop, receiver) {
         if (prop === 'data') {
-          return { ...target.data, name: generalTopicLabel || 'general' };
+          return { ...target.data, name: generalTopicLabel || 'general', is_pinned: false };
         }
         const value = Reflect.get(target, prop, receiver);
         return typeof value === 'function' ? value.bind(target) : value;
@@ -411,6 +423,12 @@ export const ChannelTopicGroup = React.memo(({
       >
         <AvatarComponent image={image} name={name} size={40} />
         <div className="ermis-channel-list__topic-header-name">{name}</div>
+
+        {channel.data?.is_pinned === true && (
+          <span className="ermis-channel-list__pinned-icon" title="Pinned">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 11.24V6a3 3 0 0 0-6 0v5.24a2 2 0 0 1-1.11 1.31l-1.78.9A2 2 0 0 0 5 15.24Z" /></svg>
+          </span>
+        )}
 
         <div className="ermis-channel-list__topic-actions-wrapper">
           <ActionsComponent channel={channel} actions={filteredActions} onClose={() => { }} />
@@ -544,6 +562,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   // Group channels into pending and regular
   const { pendingChannels, regularChannels } = useMemo<{ pendingChannels: Channel[], regularChannels: Channel[] }>(() => {
     const pending: Channel[] = [];
+    const pinned: Channel[] = [];
     const regular: Channel[] = [];
 
     channels.forEach(ch => {
@@ -551,12 +570,14 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
       if (isPending) {
         pending.push(ch);
+      } else if (ch.data?.is_pinned) {
+        pinned.push(ch);
       } else {
         regular.push(ch);
       }
     });
 
-    return { pendingChannels: pending, regularChannels: regular };
+    return { pendingChannels: pending, regularChannels: [...pinned, ...regular] };
   }, [channels]);
 
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);

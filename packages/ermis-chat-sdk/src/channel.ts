@@ -220,6 +220,48 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     );
   }
 
+  async pin() {
+    if (this.data) this.data.is_pinned = true;
+    this.getClient().dispatchEvent({
+      type: 'channel.pinned',
+      cid: this.cid,
+      channel: this.data,
+    } as Event<ErmisChatGenerics>);
+
+    try {
+      return await this.getClient().pinChannel(this.type, this.id as string);
+    } catch (e) {
+      if (this.data) this.data.is_pinned = false;
+      this.getClient().dispatchEvent({
+        type: 'channel.unpinned',
+        cid: this.cid,
+        channel: this.data,
+      } as Event<ErmisChatGenerics>);
+      throw e;
+    }
+  }
+
+  async unpin() {
+    if (this.data) this.data.is_pinned = false;
+    this.getClient().dispatchEvent({
+      type: 'channel.unpinned',
+      cid: this.cid,
+      channel: this.data,
+    } as Event<ErmisChatGenerics>);
+
+    try {
+      return await this.getClient().unpinChannel(this.type, this.id as string);
+    } catch (e) {
+      if (this.data) this.data.is_pinned = true;
+      this.getClient().dispatchEvent({
+        type: 'channel.pinned',
+        cid: this.cid,
+        channel: this.data,
+      } as Event<ErmisChatGenerics>);
+      throw e;
+    }
+  }
+
   async editMessage(oldMessageID: string, message: EditMessage) {
     return await this.getClient().post(this.getClient().baseURL + `/messages/${this.type}/${this.id}/${oldMessageID}`, {
       message,

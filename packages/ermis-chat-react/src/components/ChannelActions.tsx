@@ -43,7 +43,7 @@ export function computeDefaultActions(
   const ms = channel.state?.members?.[currentUserId] || channel.state?.membership;
   const role = ms?.channel_role || (ms as any)?.role;
   const isBlocked = options?.isBlocked !== undefined ? options.isBlocked : (ms as any)?.blocked;
-  const isPinned = false;
+  const isPinned = channel.data?.is_pinned === true;
 
   // Pin / Unpin — available for all channel types
   actions.push({
@@ -51,7 +51,15 @@ export function computeDefaultActions(
     label: isPinned ? (isTopic ? 'Unpin topic' : 'Unpin channel') : (isTopic ? 'Pin topic' : 'Pin channel'),
     icon: <PinIcon />,
     onClick: async (ch) => {
-      // TODO: Implement pin/unpin logic
+      try {
+        if (isPinned) {
+          await ch.unpin();
+        } else {
+          await ch.pin();
+        }
+      } catch (e) {
+        console.error('Error toggling pin state', e);
+      }
     },
   });
 
