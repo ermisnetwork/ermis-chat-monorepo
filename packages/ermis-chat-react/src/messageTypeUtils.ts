@@ -1,10 +1,8 @@
 export const MESSAGE_TYPES = {
   REGULAR: 'regular',
   SYSTEM: 'system',
-  EPHEMERAL: 'ephemeral',
   STICKER: 'sticker',
-  REPLY: 'reply',
-  SIGNAL: 'signal', // typing / active / status events
+  SIGNAL: 'signal',
   ERROR: 'error',
 } as const;
 
@@ -31,6 +29,10 @@ export function isStickerMessage(message: any): boolean {
 
 export function isRegularMessage(message: any): boolean {
   return !message?.type || message?.type === MESSAGE_TYPES.REGULAR;
+}
+
+export function isSignalMessage(message: any): boolean {
+  return message?.type === MESSAGE_TYPES.SIGNAL;
 }
 
 // Helpers cho attachment

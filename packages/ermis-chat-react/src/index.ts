@@ -87,6 +87,7 @@ export {
   isSystemMessage,
   isStickerMessage,
   isRegularMessage,
+  isSignalMessage,
   isImageAttachment,
   isVideoAttachment,
   isVoiceRecordingAttachment,

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useChatClient } from './useChatClient';
 import { useChannelCapabilities } from './useChannelCapabilities';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
+import { isSignalMessage, isSystemMessage } from '../messageTypeUtils';
 
 export type MessageActionList = {
   canEdit: boolean;
@@ -50,18 +51,18 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
       };
     }
 
-    const isSystem = messageType === 'system';
-    const isSignal = messageType === 'signal';
+    const isSystem = isSystemMessage(message);
+    const isSignal = isSignalMessage(message);
     const isPinned = isPinnedFlag;
 
     const canEdit = !isSystem && !isSignal && isOwnMessage;
-    
+
     // Delete for everyone:
     // + Team channel: only the owner can perform this action natively.
     // + Messaging channel: only own messages can be deleted
     const canDeleteForEveryoneTeam = isTeam && isOwner;
     const canDeleteForEveryoneMessaging = !isTeam && isOwnMessage;
-    
+
     const canDelete = !isSystem && (canDeleteForEveryoneTeam || canDeleteForEveryoneMessaging);
     const canDeleteForMe = !isSystem;
     const canReply = !isSystem && !isSignal;
@@ -74,14 +75,27 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const hasCapDelete = !isTeam || isOwner || (isOwnMessage && hasCapability('delete-own-message'));
     // Apply the delete-own-message capability to the "delete for me" action for own messages
     const hasCapDeleteForMe = !isTeam || isOwner || !isOwnMessage || hasCapability('delete-own-message');
-    
+
     const hasCapReply = hasCapability('send-reply');
     const hasCapQuote = hasCapability('quote-message');
     const hasCapPin = hasCapability('pin-message');
 
-    return { 
-      canEdit, canDelete, canDeleteForMe, canReply, canQuote, canForward, canPin, canCopy, isPinned,
-      hasCapEdit, hasCapDelete, hasCapDeleteForMe, hasCapPin, hasCapReply, hasCapQuote 
+    return {
+      canEdit,
+      canDelete,
+      canDeleteForMe,
+      canReply,
+      canQuote,
+      canForward,
+      canPin,
+      canCopy,
+      isPinned,
+      hasCapEdit,
+      hasCapDelete,
+      hasCapDeleteForMe,
+      hasCapPin,
+      hasCapReply,
+      hasCapQuote,
     };
   }, [activeChannel, isTeam, isOwner, hasCapability, messageType, message.text, isPinnedFlag, isOwnMessage]); // Use capabilities from hook
 };
