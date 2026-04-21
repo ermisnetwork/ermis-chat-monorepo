@@ -7,6 +7,7 @@ import { MessageQuickReactions } from './MessageQuickReactions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { useChatClient } from '../hooks/useChatClient';
 import { formatTime } from '../utils';
+import { isSystemMessage } from '../messageTypeUtils';
 
 export type { MessageItemProps, SystemMessageItemProps } from '../types';
 
@@ -176,7 +177,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
           </MessageBubble>
 
           {/* Actions: hover buttons + dropdown menu */}
-          {message.type !== 'system' && (
+          {!isSystemMessage(message) && (
             <MessageActionsBoxComponent
               message={message}
               isOwnMessage={isOwnMessage}

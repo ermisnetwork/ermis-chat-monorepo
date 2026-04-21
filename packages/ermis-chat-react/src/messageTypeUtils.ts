@@ -1,0 +1,62 @@
+export const MESSAGE_TYPES = {
+  REGULAR: 'regular',
+  SYSTEM: 'system',
+  EPHEMERAL: 'ephemeral',
+  STICKER: 'sticker',
+  REPLY: 'reply',
+  SIGNAL: 'signal', // typing / active / status events
+  ERROR: 'error',
+} as const;
+
+export const ATTACHMENT_TYPES = {
+  IMAGE: 'image',
+  VIDEO: 'video',
+  VOICE_RECORDING: 'voiceRecording',
+  LINK_PREVIEW: 'linkPreview',
+  FILE: 'file',
+  AUDIO: 'audio',
+} as const;
+
+export type MessageType = (typeof MESSAGE_TYPES)[keyof typeof MESSAGE_TYPES] | string;
+export type AttachmentType = (typeof ATTACHMENT_TYPES)[keyof typeof ATTACHMENT_TYPES] | string;
+
+// Helpers cho message
+export function isSystemMessage(message: any): boolean {
+  return message?.type === MESSAGE_TYPES.SYSTEM;
+}
+
+export function isStickerMessage(message: any): boolean {
+  return message?.type === MESSAGE_TYPES.STICKER;
+}
+
+export function isRegularMessage(message: any): boolean {
+  return !message?.type || message?.type === MESSAGE_TYPES.REGULAR;
+}
+
+// Helpers cho attachment
+export function isImageAttachment(attachment: any): boolean {
+  return attachment?.type === ATTACHMENT_TYPES.IMAGE;
+}
+
+export function isVideoAttachment(attachment: any): boolean {
+  return attachment?.type === ATTACHMENT_TYPES.VIDEO;
+}
+
+export function isVoiceRecordingAttachment(attachment: any): boolean {
+  return attachment?.type === ATTACHMENT_TYPES.VOICE_RECORDING;
+}
+
+export function isLinkPreviewAttachment(attachment: any): boolean {
+  return attachment?.type === ATTACHMENT_TYPES.LINK_PREVIEW;
+}
+
+export function isImage(attachment: any): boolean {
+  return Boolean(
+    isImageAttachment(attachment) ||
+      (!attachment?.type && (attachment?.mime_type?.startsWith('image/') || attachment?.image_url)),
+  );
+}
+
+export function isVideo(attachment: any): boolean {
+  return !!(isVideoAttachment(attachment) || (!attachment.type && attachment.mime_type?.startsWith('video/')));
+}

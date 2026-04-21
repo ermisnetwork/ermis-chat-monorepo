@@ -32,7 +32,14 @@ export { ChannelHeader } from './components/ChannelHeader';
 export type { ChannelHeaderProps } from './components/ChannelHeader';
 export type { ChannelHeaderData } from './types';
 
-export type { MessageListProps, MessageBubbleProps, MessageItemProps, SystemMessageItemProps, DateSeparatorProps, JumpToLatestProps } from './types';
+export type {
+  MessageListProps,
+  MessageBubbleProps,
+  MessageItemProps,
+  SystemMessageItemProps,
+  DateSeparatorProps,
+  JumpToLatestProps,
+} from './types';
 
 export { VirtualMessageList } from './components/VirtualMessageList';
 
@@ -54,9 +61,40 @@ export { MessageQuickReactions } from './components/MessageQuickReactions';
 export { useMessageActions } from './hooks/useMessageActions';
 
 export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview } from './utils';
-export { isGroupChannel, isDirectChannel, isTopicChannel, isPublicGroupChannel, isGeneralProxy, hasTopicsEnabled, supportsBlocking } from './channelTypeUtils';
-export { CHANNEL_ROLES, isPendingMember, canManageChannel, canRemoveTargetMember, canBanTargetMember, canPromoteTargetMember, canDemoteTargetMember } from './channelRoleUtils';
+export {
+  isGroupChannel,
+  isDirectChannel,
+  isTopicChannel,
+  isPublicGroupChannel,
+  isGeneralProxy,
+  hasTopicsEnabled,
+  supportsBlocking,
+} from './channelTypeUtils';
+export {
+  CHANNEL_ROLES,
+  isPendingMember,
+  canManageChannel,
+  canRemoveTargetMember,
+  canBanTargetMember,
+  canPromoteTargetMember,
+  canDemoteTargetMember,
+} from './channelRoleUtils';
 export type { ChannelRole } from './channelRoleUtils';
+
+export {
+  MESSAGE_TYPES,
+  ATTACHMENT_TYPES,
+  isSystemMessage,
+  isStickerMessage,
+  isRegularMessage,
+  isImageAttachment,
+  isVideoAttachment,
+  isVoiceRecordingAttachment,
+  isLinkPreviewAttachment,
+  isImage,
+  isVideo,
+} from './messageTypeUtils';
+export type { MessageType, AttachmentType } from './messageTypeUtils';
 
 export {
   defaultMessageRenderers,
@@ -72,7 +110,13 @@ export {
 export type { MessageRendererProps, AttachmentProps } from './components/MessageRenderers';
 
 export { MessageInput } from './components/MessageInput';
-export type { MessageInputProps, SendButtonProps, AttachButtonProps, EmojiPickerProps, EmojiButtonProps } from './components/MessageInput';
+export type {
+  MessageInputProps,
+  SendButtonProps,
+  AttachButtonProps,
+  EmojiPickerProps,
+  EmojiButtonProps,
+} from './components/MessageInput';
 
 export { FilesPreview } from './components/FilesPreview';
 export type { FilePreviewItem, FilesPreviewProps } from './components/FilesPreview';
@@ -112,7 +156,7 @@ export {
   DefaultChannelInfoHeader,
   DefaultChannelInfoCover,
   DefaultChannelInfoActions,
-  DefaultChannelInfoTabs
+  DefaultChannelInfoTabs,
 } from './components/ChannelInfo';
 
 export { Modal } from './components/Modal';
@@ -137,12 +181,7 @@ export type {
 } from './types';
 
 export { UserPicker } from './components/UserPicker';
-export type {
-  UserPickerProps,
-  UserPickerUser,
-  UserPickerItemProps,
-  UserPickerSelectedBoxProps,
-} from './types';
+export type { UserPickerProps, UserPickerUser, UserPickerItemProps, UserPickerSelectedBoxProps } from './types';
 
 export { CreateChannelModal } from './components/CreateChannelModal';
 export type { CreateChannelModalProps } from './types';

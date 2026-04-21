@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
+import { isStickerMessage } from '../messageTypeUtils';
 import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import type { PinnedMessageItemProps, PinnedMessagesProps } from '../types';
@@ -25,7 +26,7 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   }, [activeChannel?.state]);
 
   let previewText = message.text || '';
-  const isSticker = message.type === 'sticker';
+  const isSticker = isStickerMessage(message);
 
   if (!previewText && hasAttachments) {
     const firstAttach = message.attachments![0];

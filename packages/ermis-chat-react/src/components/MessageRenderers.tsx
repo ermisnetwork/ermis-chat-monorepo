@@ -7,28 +7,12 @@ import { buildUserMap } from '../utils';
 import type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
 
 export type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
-
-/* ----------------------------------------------------------
-   Attachment type helpers
-   ---------------------------------------------------------- */
-function isImage(attachment: Attachment): boolean {
-  return !!(
-    attachment.type === 'image' ||
-    (!attachment.type && (attachment.mime_type?.startsWith('image/') || attachment.image_url))
-  );
-}
-
-function isVideo(attachment: Attachment): boolean {
-  return !!(attachment.type === 'video' || (!attachment.type && attachment.mime_type?.startsWith('video/')));
-}
-
-function isVoiceRecording(attachment: Attachment): boolean {
-  return attachment.type === 'voiceRecording';
-}
-
-function isLinkPreview(attachment: Attachment): boolean {
-  return attachment.type === 'linkPreview';
-}
+import {
+  isVoiceRecordingAttachment,
+  isLinkPreviewAttachment,
+  isImage,
+  isVideo
+} from '../messageTypeUtils';
 
 /* ----------------------------------------------------------
    Attachment renderers
@@ -258,8 +242,8 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(({ attachmen
 export const MessageAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
   if (isImage(attachment)) return <ImageAttachment attachment={attachment} />;
   if (isVideo(attachment)) return <VideoAttachment attachment={attachment} />;
-  if (isVoiceRecording(attachment)) return <VoiceRecordingAttachment attachment={attachment} />;
-  if (isLinkPreview(attachment)) return <LinkPreviewAttachment attachment={attachment} />;
+  if (isVoiceRecordingAttachment(attachment)) return <VoiceRecordingAttachment attachment={attachment} />;
+  if (isLinkPreviewAttachment(attachment)) return <LinkPreviewAttachment attachment={attachment} />;
   return <FileAttachment attachment={attachment} />;
 };
 
@@ -268,9 +252,9 @@ export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = React.me
 
   // Group by type
   const media = attachments.filter((a) => isImage(a) || isVideo(a));
-  const files = attachments.filter((a) => !isImage(a) && !isVideo(a) && !isVoiceRecording(a) && !isLinkPreview(a));
-  const voices = attachments.filter(isVoiceRecording);
-  const links = attachments.filter(isLinkPreview);
+  const files = attachments.filter((a) => !isImage(a) && !isVideo(a) && !isVoiceRecordingAttachment(a) && !isLinkPreviewAttachment(a));
+  const voices = attachments.filter(isVoiceRecordingAttachment);
+  const links = attachments.filter(isLinkPreviewAttachment);
 
   const mediaGridClass = media.length === 1
     ? 'ermis-attachment-grid ermis-attachment-grid--single'
@@ -426,7 +410,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
     const isOnlyUrl = URL_REGEX_STRICT.test(text);
 
     return message.attachments.filter(att => {
-      if (isLinkPreview(att)) return isOnlyUrl;
+      if (isLinkPreviewAttachment(att)) return isOnlyUrl;
       return true;
     });
   }, [message.attachments, message.text]);

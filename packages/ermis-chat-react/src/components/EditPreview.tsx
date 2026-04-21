@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { replaceMentionsForPreview, buildUserMap } from '../utils';
+import { isStickerMessage } from '../messageTypeUtils';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 
 const MAX_PREVIEW_LENGTH = 120;
@@ -57,7 +58,7 @@ export const EditPreview: React.FC<{
   const formattedText = useMemo(() => replaceMentionsForPreview(rawText, message, userMap), [rawText, message, userMap]);
   const hasText = !!formattedText.trim();
   const hasAttachments = message.attachments && message.attachments.length > 0;
-  const isSticker = message.type === 'sticker';
+  const isSticker = isStickerMessage(message);
   const attachmentSummary = hasAttachments ? getAttachmentSummary(message.attachments!) : '';
 
   // Build preview content
