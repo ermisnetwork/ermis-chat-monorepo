@@ -1,6 +1,6 @@
 {
   "name": "@ermis-network/ermis-chat-react",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "React UI components for Ermis Chat",
   "author": "Ermis",
   "homepage": "https://ermis.network/",
@@ -20,7 +20,7 @@
     "/src"
   ],
   "dependencies": {
-    "@ermis-network/ermis-chat-sdk": "1.0.6",
+    "@ermis-network/ermis-chat-sdk": "1.0.7",
     "virtua": "^0.48.8"
   },
   "peerDependencies": {
