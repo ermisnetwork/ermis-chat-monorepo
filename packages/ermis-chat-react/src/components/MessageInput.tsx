@@ -52,7 +52,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   const editableRef = React.useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
 
-  const { role, isTeamOrMeetingChannel: isTeamChannel, hasCapability } = useChannelCapabilities();
+  const { role, isGroupChannel: isTeamChannel, hasCapability } = useChannelCapabilities();
   const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
 
   // Slow Mode Logic

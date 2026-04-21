@@ -14,6 +14,7 @@ export type { ChannelListProps, ChannelItemProps } from '../types';
 import type { ChannelActionsProps } from '../types';
 import { TopicModal } from './TopicModal';
 import { DefaultChannelActions, computeDefaultActions } from './ChannelActions';
+import { isDirectChannel, hasTopicsEnabled } from '../channelTypeUtils';
 
 export { DefaultChannelActions } from './ChannelActions';
 export type { ChannelAction, ChannelActionsProps } from '../types';
@@ -675,7 +676,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       const ms = channel.state?.membership as Record<string, unknown> | undefined;
       const chState = channel.state as unknown as Record<string, unknown> | undefined;
       const isBannedInChannel = Boolean(ms?.banned);
-      const isBlockedInChannel = channel.type === 'messaging' && Boolean(ms?.blocked);
+      const isBlockedInChannel = isDirectChannel(channel) && Boolean(ms?.blocked);
       const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
 
       if (!isBannedInChannel && !isBlockedInChannel && !isPending && (chState?.unreadCount as number) > 0) {
@@ -743,7 +744,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
         )}
         {regularChannels.map((channel: Channel) => {
           const isActive = activeChannel?.cid === channel.cid;
-          const isTeamWithTopics = (channel.type === 'team' || channel.type === 'meeting') && channel.data?.topics_enabled;
+          const isTeamWithTopics = hasTopicsEnabled(channel);
 
           if (isTeamWithTopics) {
             const GroupComponent = ChannelTopicGroupComponent || ChannelTopicGroup;

@@ -34,3 +34,10 @@ When modifying, maintaining, or adding features to the Ermis Chat React SDK UI K
 - **Optimistic UI:** Actions like typing a message, clicking "reaction", or hitting delete must immediately reflect in UI state BEFORE the server responds, ensuring instantaneous fluidity. In case of API failure, roll back with explicit UI error states.
 - **Composability / Escape Hatches:** The SDK must empower customization. Core containers (like `ChannelInfo` or `MessageList`) must expose numerous internal `Component` overridable hooks (e.g., `AvatarComponent`, `MessageBubbleComponent`). Provide at least 5-10 structural entry points per view.
 - **No Hardcoded Language:** Never hardcode English or Vietnamese strings down into JSX textual nodes (`<span>Send message</span>`). Expose these using Customizable Labels inside Interfaces (e.g., `saveLabel`, `titlePlaceholder`) allowing downstream software to adapt natively for multi-language (i18n) integrations.
+- **No Hardcoded Channel Types (CRITICAL):** Never compare `channel.type` directly against raw strings like `'team'`, `'meeting'`, `'messaging'`, or `'topic'` inside components or hooks. All channel type classification **MUST** use the semantic helper functions from `src/channelTypeUtils.ts`:
+  - `isGroupChannel(channel)` — replaces `channel.type === 'team' || channel.type === 'meeting'`
+  - `isDirectChannel(channel)` — replaces `channel.type === 'messaging'`
+  - `isTopicChannel(channel)` — replaces `channel.type === 'topic' || Boolean(channel.data?.parent_cid)`
+  - `isPublicGroupChannel(channel)`, `hasTopicsEnabled(channel)`, `isGeneralProxy(channel)`, `supportsBlocking(channel)`
+  - When adding a **new channel type**, add it to the appropriate `Set` in `channelTypeUtils.ts` (`GROUP_CHANNEL_TYPES` or `DIRECT_CHANNEL_TYPES`) — zero changes needed in any component or hook.
+  - **Exception:** Raw type strings are permitted only when passing values to SDK API methods (e.g., `client.channel('team', payload)` for channel creation, or `filters = { type: ['messaging', 'team'] }` for queries).

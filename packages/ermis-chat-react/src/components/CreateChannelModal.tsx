@@ -4,6 +4,7 @@ import { UserPicker } from './UserPicker';
 import { Avatar } from './Avatar';
 import { useChatClient } from '../hooks/useChatClient';
 import type { CreateChannelModalProps, UserPickerUser } from '../types';
+import { isDirectChannel } from '../channelTypeUtils';
 
 
 export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
@@ -50,7 +51,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
 
     const ids = new Set<string>();
     Object.values(client.activeChannels).forEach((channel: any) => {
-      if (channel.type === 'messaging' && channel.state?.members) {
+      if (isDirectChannel(channel) && channel.state?.members) {
         Object.keys(channel.state.members).forEach(uid => {
           if (uid !== currentUserId) ids.add(uid);
         });

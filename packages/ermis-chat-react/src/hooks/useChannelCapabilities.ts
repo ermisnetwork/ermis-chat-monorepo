@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useChatClient } from './useChatClient';
+import { isGroupChannel } from '../channelTypeUtils';
 
 export const useChannelCapabilities = () => {
   const { activeChannel, client } = useChatClient();
@@ -17,25 +18,21 @@ export const useChannelCapabilities = () => {
   }, [activeChannel]);
 
   const currentUserId = client?.userID || '';
-  const isTeamChannel = activeChannel?.type === 'team';
-  const isMeetingChannel = activeChannel?.type === 'meeting';
-  const isTeamOrMeetingChannel = isTeamChannel || isMeetingChannel;
+  const isGroupCh = isGroupChannel(activeChannel);
   const role = (activeChannel?.state as any)?.members?.[currentUserId]?.channel_role;
   
   const isOwner = role === 'owner' || activeChannel?.data?.created_by_id === currentUserId;
   const isModerator = role === 'moder';
   const isOwnerOrModerator = isOwner || isModerator;
 
-  const capabilities: string[] = isTeamOrMeetingChannel ? (activeChannel?.data as any)?.member_capabilities || [] : [];
+  const capabilities: string[] = isGroupCh ? (activeChannel?.data as any)?.member_capabilities || [] : [];
 
   const hasCapability = useCallback((cap: string) => {
-    return !isTeamOrMeetingChannel || isOwnerOrModerator || capabilities.includes(cap);
-  }, [isTeamOrMeetingChannel, isOwnerOrModerator, capabilities, updateTick]); // React to updateTick correctly
+    return !isGroupCh || isOwnerOrModerator || capabilities.includes(cap);
+  }, [isGroupCh, isOwnerOrModerator, capabilities, updateTick]); // React to updateTick correctly
 
   return {
-    isTeamChannel,
-    isMeetingChannel,
-    isTeamOrMeetingChannel,
+    isGroupChannel: isGroupCh,
     isOwner,
     isModerator,
     isOwnerOrModerator,

@@ -4,6 +4,7 @@ import { usePendingState } from '../hooks/usePendingState';
 import { Avatar } from './Avatar';
 import type { ChannelHeaderProps } from '../types';
 import { ErmisCallContext } from '../context/ErmisCallContext';
+import { hasTopicsEnabled, isDirectChannel } from '../channelTypeUtils';
 
 export type { ChannelHeaderProps } from '../types';
 
@@ -71,7 +72,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
 
     // If it's a topics-enabled team channel (the general proxy), the proxy overrides data.name.
     // We can pull the original name from the SDK cache.
-    if ((activeChannel.type === 'team' || activeChannel.type === 'meeting') && activeChannel.data?.topics_enabled) {
+    if (hasTopicsEnabled(activeChannel)) {
       const rawChannel = client.activeChannels[activeChannel.cid];
       if (rawChannel && rawChannel.data?.name && rawChannel.data.name !== activeChannel.data?.name) {
         return rawChannel.data.name;
@@ -115,7 +116,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
 
       {/* renderRight exposes actionDisabled for consumers to disable UI features natively */}
       <div className="ermis-channel-header__actions">
-        {enableCall && callContext && activeChannel?.type === 'messaging' && !isPending && (
+        {enableCall && callContext && isDirectChannel(activeChannel) && !isPending && (
           <>
             {renderAudioCallButton ? (
               renderAudioCallButton(() => callContext.createCall('audio', activeChannel.cid || ''), actionDisabled)

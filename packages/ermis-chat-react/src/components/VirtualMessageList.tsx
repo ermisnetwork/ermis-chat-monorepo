@@ -12,6 +12,7 @@ import { useChannelProfile } from '../hooks/useChannelData';
 import { Avatar } from './Avatar';
 import { MessageItem } from './MessageItem';
 import { SystemMessageItem } from './MessageItem';
+import { isPublicGroupChannel } from '../channelTypeUtils';
 import {
   defaultMessageRenderers,
   type MessageBubbleProps,
@@ -145,7 +146,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   const handleAcceptInvite = useCallback(async () => {
     if (!activeChannel) return;
     try {
-      const isPublicTeamOrMeeting = (activeChannel.type === 'team' || activeChannel.type === 'meeting') && Boolean(activeChannel.data?.public);
+      const isPublicTeamOrMeeting = isPublicGroupChannel(activeChannel);
       const action = isPublicTeamOrMeeting ? 'join' : 'accept';
       await activeChannel.acceptInvite(action);
     } catch (e: any) {

@@ -5,6 +5,7 @@ import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
 import { Modal } from './Modal';
 import type { ForwardMessageModalProps, ForwardChannelItemProps, AvatarProps } from '../types';
+import { isTopicChannel } from '../channelTypeUtils';
 
 export type { ForwardMessageModalProps, ForwardChannelItemProps } from '../types';
 
@@ -66,7 +67,7 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   /* ---------- Get channels from client state (exclude topics) ---------- */
   const channels = useMemo(() => {
     return (Object.values(client.activeChannels) as Channel[]).filter(
-      (ch) => ch.type !== 'topic',
+      (ch) => !isTopicChannel(ch),
     );
   }, [client.activeChannels]);
 

@@ -54,6 +54,7 @@ export { MessageQuickReactions } from './components/MessageQuickReactions';
 export { useMessageActions } from './hooks/useMessageActions';
 
 export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview } from './utils';
+export { isGroupChannel, isDirectChannel, isTopicChannel, isPublicGroupChannel, isGeneralProxy, hasTopicsEnabled, supportsBlocking } from './channelTypeUtils';
 
 export {
   defaultMessageRenderers,

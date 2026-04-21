@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
+import { isDirectChannel } from '../channelTypeUtils';
 
 /**
  * Hook that tracks whether the current user has blocked the other party
@@ -17,12 +18,12 @@ import type { Channel } from '@ermis-network/ermis-chat-sdk';
  */
 export function useBlockedState(channel: Channel | null | undefined, currentUserId?: string) {
   const [isBlocked, setIsBlocked] = useState<boolean>(() => {
-    if (channel?.type !== 'messaging') return false;
+    if (!isDirectChannel(channel)) return false;
     return Boolean(channel?.state?.membership?.blocked);
   });
 
   useEffect(() => {
-    if (!channel || channel.type !== 'messaging') {
+    if (!channel || !isDirectChannel(channel)) {
       setIsBlocked(false);
       return;
     }

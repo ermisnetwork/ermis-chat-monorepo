@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import type { ChannelAction, ChannelActionLabels, ChannelActionIcons, ChannelActionsProps } from '../types';
 import { Dropdown } from './Dropdown';
+import { isDirectChannel, isGroupChannel, isTopicChannel } from '../channelTypeUtils';
 
 /* ----------------------------------------------------------
    SVG Icons for default actions
@@ -38,9 +39,9 @@ export function computeDefaultActions(
   const actions: ChannelAction[] = [];
   if (!currentUserId) return actions;
 
-  const isDirect = channel.type === 'messaging';
-  const isTeamOrMeeting = channel.type === 'team' || channel.type === 'meeting';
-  const isTopic = channel.type === 'topic' || Boolean(channel.data?.parent_cid);
+  const isDirect = isDirectChannel(channel);
+  const isTeamOrMeeting = isGroupChannel(channel);
+  const isTopic = isTopicChannel(channel);
   const isClosed = channel.data?.is_closed_topic === true;
 
   const ms = channel.state?.members?.[currentUserId] || channel.state?.membership;

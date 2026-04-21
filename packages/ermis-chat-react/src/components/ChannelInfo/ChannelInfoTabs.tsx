@@ -9,6 +9,7 @@ import { FileListItem } from './FileListItem';
 import { MemberListItem } from './MemberListItem';
 import { TabEmptyState, TabLoadingState } from './States';
 import type { ChannelInfoTabsProps, MediaTab, AttachmentItem } from '../../types';
+import { isDirectChannel } from '../../channelTypeUtils';
 
 export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
   channel,
@@ -31,7 +32,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
   EmptyStateComponent,
   LoadingComponent,
 }) => {
-  const isMessaging = channel?.type === 'messaging';
+  const isMessaging = isDirectChannel(channel);
   const isTopic = Boolean(channel?.data?.parent_cid);
   
   const { isBanned } = useBannedState(channel, currentUserId);

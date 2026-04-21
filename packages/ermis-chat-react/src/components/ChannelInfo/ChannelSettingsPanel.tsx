@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Panel } from '../Panel';
 import { useChatClient } from '../../hooks/useChatClient';
 import type { ChannelSettingsPanelProps } from '../../types';
+import { isGroupChannel } from '../../channelTypeUtils';
 
 export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.memo(({
   isOpen,
@@ -444,7 +445,7 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
         </section>
 
         {/* Section 3: Features */}
-        {(channel?.type === 'team' || channel?.type === 'meeting') && (
+        {isGroupChannel(channel) && (
           <section
             className="ermis-settings-panel__section"
             style={{

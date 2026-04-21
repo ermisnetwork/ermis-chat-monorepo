@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
+import { isDirectChannel } from '../channelTypeUtils';
 
 /**
  * Custom hook to abstract real-time row-level updates for a single channel.
@@ -9,7 +10,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
   // Track banned state for the current user in this channel
   const [isBannedInChannel, setIsBannedInChannel] = useState(() => Boolean(channel.state?.membership?.banned));
   const [isBlockedInChannel, setIsBlockedInChannel] = useState(() => {
-    if (channel.type !== 'messaging') return false;
+    if (!isDirectChannel(channel)) return false;
     return Boolean(channel.state?.membership?.blocked);
   });
 
@@ -19,7 +20,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
   useEffect(() => {
     setIsBannedInChannel(Boolean(channel.state?.membership?.banned));
     setIsBlockedInChannel(
-      channel.type === 'messaging' ? Boolean(channel.state?.membership?.blocked) : false
+      isDirectChannel(channel) ? Boolean(channel.state?.membership?.blocked) : false
     );
 
     const handleBanned = (event: any) => {

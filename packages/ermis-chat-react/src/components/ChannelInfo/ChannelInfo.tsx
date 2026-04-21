@@ -16,6 +16,7 @@ import type {
   ChannelInfoActionsProps,
 } from '../../types';
 import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData';
+import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
 
 export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.memo(({ title, onClose }) => {
   return (
@@ -273,22 +274,14 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
 
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
-  const isTeamChannel = channel?.type === 'team' || channel?.type === 'meeting';
-  const isTopic = Boolean(channel?.data?.parent_cid) || channel?.type === 'topic';
+  const isTeamChannel = isGroupChannel(channel);
+  const isTopic = isTopicChannel(channel);
   const isClosedTopic = channel?.data?.is_closed_topic === true;
   const title = titleProp !== undefined ? titleProp : (isTopic ? 'Topic Info' : 'Channel Info');
 
   const parentCid = channel?.data?.parent_cid as string | undefined;
   const parentChannel = parentCid && client ? client.activeChannels[parentCid] : undefined;
   let parentChannelName = parentChannel?.data?.name || (parentCid ? 'Unknown' : undefined);
-
-  // If this is the proxy 'general' channel, its real name is the parent team name
-  if ((channel?.type === 'team' || channel?.type === 'meeting') && channel?.data?.name === 'general' && channel.cid) {
-    const realChannelName = client?.activeChannels[channel.cid]?.data?.name;
-    if (realChannelName && realChannelName !== 'general') {
-      parentChannelName = realChannelName;
-    }
-  }
 
   const handleDeleteChannel = useCallback(async () => {
     if (onDeleteChannelProp) return onDeleteChannelProp();
@@ -367,7 +360,19 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   }, [channel, parentChannel]);
 
   const { members } = useChannelMembers(channel);
-  const { channelName, channelImage, channelDescription } = useChannelProfile(channel);
+  const { channelName: profileChannelName, channelImage, channelDescription } = useChannelProfile(channel);
+
+  let finalChannelName = profileChannelName;
+  let finalParentChannelName = parentChannelName;
+
+  // If this is the proxy 'general' channel, show the team name as the main name and hide the parent name.
+  if (isGroupChannel(channel) && channel?.data?.name === 'general' && channel.cid) {
+    const realChannelName = client?.activeChannels[channel.cid]?.data?.name;
+    if (realChannelName && realChannelName !== 'general') {
+      finalChannelName = realChannelName;
+      finalParentChannelName = undefined;
+    }
+  }
 
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditChannelModal, setShowEditChannelModal] = useState(false);
@@ -400,7 +405,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
       <HeaderComponent title={title} onClose={onClose} />
 
       <CoverComponent
-        channelName={channelName}
+        channelName={finalChannelName}
         channelImage={channelImage}
         channelDescription={channelDescription}
         AvatarComponent={AvatarComponent}
@@ -408,7 +413,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
         onEditClick={handleEditChannelClick}
         isPublic={Boolean(channel?.data?.public)}
         isTeamChannel={isTeamChannel}
-        parentChannelName={parentChannelName}
+        parentChannelName={finalParentChannelName}
         isTopic={isTopic}
       />
 

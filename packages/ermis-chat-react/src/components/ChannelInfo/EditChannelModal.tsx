@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Modal } from '../Modal';
 import type { EditChannelModalProps, EditChannelData } from '../../types';
+import { isGroupChannel } from '../../channelTypeUtils';
 
 const DEFAULT_MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -28,7 +29,7 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
   const originalImage = (channel.data?.image as string) || '';
   const originalDescription = (channel.data?.description as string) || '';
   const originalPublic = Boolean(channel.data?.public);
-  const isTeamOrMeetingChannel = channel.type === 'team' || channel.type === 'meeting';
+  const isTeamOrMeetingChannel = isGroupChannel(channel);
 
   // Form state
   const [name, setName] = useState(originalName);
