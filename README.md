@@ -470,7 +470,7 @@ await chatClient.queryUser(user_id);
 ```javascript
 const name = 'Tony';
 const about_me = 'My name is Tony';
-await chatClient.updateProfile(name, about_me);
+await chatClient.updateProfile({ name, about_me });
 ```
 
 | Name     | Type   | Required | Description      |

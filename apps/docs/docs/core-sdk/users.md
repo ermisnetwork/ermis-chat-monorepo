@@ -41,21 +41,59 @@ console.log("Blocked Users", block_users);
 
 ## Updating Profiles
 
-The client exposes shortcuts to mutate the authenticated user's profile metadata and avatar image.
+The client exposes two distinct methods to update the authenticated user's profile, separating media uploads from lightweight text changes to maximize UI responsiveness.
 
-### Metadata
+### 1. Updating Metadata (Text Only)
+Use `updateProfile` for near-instant updates to the user's name or bio. This method does not support uploading image files.
+
 ```typescript
-await chatClient.updateProfile('New User Name', 'My updated about me...');
+// Updates text fields asynchronously and hydrates the local user state
+await chatClient.updateProfile({ 
+  name: 'New User Name', 
+  about_me: 'My updated about me...' 
+});
 ```
 
-### Avatar
+### 2. Updating the Avatar (Image Upload)
+Use `uploadFile` to send a media file to the server. The backend processes the file, updates the user's avatar URL in the database, and the SDK automatically syncs this new avatar URL down to the client state.
+
 ```typescript
-// Construct a browser File Blob or Node.JS File Stream representing the new image
+// Usually derived from an <input type="file" /> in the browser
 const newAvatarFile = new File([...], 'avatar.png');
 
-const response = await chatClient.uploadFile(newAvatarFile);
+// Uploads the file and updates the profile avatar automatically
+const response = await chatClient.uploadAvatar(newAvatarFile);
 
-console.log('New Avatar URL uploaded:', response.avatar);
+console.log('Successfully uploaded and updated Avatar URL to:', response.avatar);
+```
+
+### 🎯 Orchestrating a Complete Profile Form
+When building a 'Settings' form that updates both the Avatar and text metadata simultaneously, it's a best practice to orchestrate these two methods sequentially. This prevents UI blocking from heavy image uploads while keeping text changes fast.
+
+> **Why not merge them?** 
+> Keeping them separate ensures you can provide distinct loading states for image uploads vs text saves, and elegantly handle cases where an image upload fails but text properties are successfully persisted.
+
+```javascript
+const saveProfileChanges = async (newName, newAboutMe, newAvatarFile) => {
+  setIsSaving(true);
+  
+  try {
+    // Stage 1: Upload the avatar if the user selected a new image
+    if (newAvatarFile) {
+      // You can show a specific progress indicator here
+      await chatClient.uploadAvatar(newAvatarFile); 
+    }
+
+    // Stage 2: Always update the text metadata
+    await chatClient.updateProfile({ name: newName, about_me: newAboutMe });
+    
+    alert('Profile updated successfully!');
+  } catch (error) {
+    console.error('Failed to update profile:', error);
+  } finally {
+    setIsSaving(false);
+  }
+};
 ```
 
 ## Real-time Profile Sync (SSE)

@@ -45,10 +45,19 @@ const user = {
 
 // Standard JWT connection
 await chatClient.connectUser(user, 'USER_JWT_TOKEN');
+```
 
-// Connect with external authentication (fetches token from the `userBaseURL`)
+#### External Authentication
+
+If your application relies on an external authentication system, you can set the `external_auth` flag to `true`. This instructs the SDK to exchange your external token for an Ermis Network token by calling the `{userBaseURL}/get_token/external_auth` endpoint behind the scenes.
+
+```typescript
+// Connect with external authentication
+// The SDK fetches an internal token from `userBaseURL` utilizing the external token as a Bearer authorization header.
 await chatClient.connectUser(user, 'EXTERNAL_OAUTH_TOKEN', true);
 ```
+
+> **Note**: When using `external_auth`, the `id` you provide in the `user` object acts as an initial reference but will be overwritten globally by the `user_id` returned from the external authentication server response.
 
 > **Note**: Avoid calling `connectUser` multiple times without disconnecting first.
 

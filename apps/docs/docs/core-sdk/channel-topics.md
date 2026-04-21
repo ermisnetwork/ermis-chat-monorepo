@@ -103,7 +103,7 @@ topics.forEach((topic) => {
 Under the hood, a topic functions exactly like a channel. This means you can initialize and interact with it using `client.channel('topic', topicId)` and listen to its events exactly as you would with a `team` channel.
 :::
 
-## Lắng nghe Sự kiện Topic (Topic Events)
+## Listening to Topic Events
 
 The SDK fires specific events on the parent channel when topic settings or lifecycle changes occur. You can listen to these to perform optimistic UI updates.
 

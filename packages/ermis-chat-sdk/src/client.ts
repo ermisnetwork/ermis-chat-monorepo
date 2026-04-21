@@ -205,7 +205,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       params.avatar = user.avatar;
     }
     const url = this.userBaseURL + '/get_token/external_auth';
-    const query = new URLSearchParams(params).toString();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -213,21 +212,21 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       const tokenStr = typeof token === 'string' && token.startsWith('Bearer ') ? token : `Bearer ${token}`;
       headers['Authorization'] = tokenStr;
     }
-    const response = await fetch(`${url}?${query}`, {
-      method: 'GET',
-      headers,
-    });
-    if (!response.ok) {
-      let errorMsg = '';
-      try {
-        const errorData = await response.json();
-        errorMsg = errorData.message || JSON.stringify(errorData);
-      } catch {
-        errorMsg = await response.text();
+    try {
+      const response = await this.axiosInstance.get(url, {
+        params,
+        headers,
+      });
+      return response.data;
+    } catch (error: any) {
+      let errorMsg = 'Failed to fetch external auth token';
+      if (error.response && error.response.data) {
+        errorMsg = error.response.data.message || JSON.stringify(error.response.data);
+      } else if (error.message) {
+        errorMsg = error.message;
       }
       throw new Error(errorMsg);
     }
-    return await response.json();
   }
 
   /**
@@ -242,7 +241,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   connectUser = async (
     user: UserResponse<ErmisChatGenerics>,
     userTokenOrProvider: string | null,
-    extenal_auth?: boolean, // pass true if you are using external auth
+    external_auth?: boolean, // pass true if you are using external auth
   ) => {
     this.logger('info', 'client:connectUser() - started', {
       tags: ['connection', 'client'],
@@ -251,19 +250,25 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       throw new Error('The "id" field on the user is missing');
     }
 
+    let connectionUser = user;
+    let connectionToken = userTokenOrProvider;
+
     // If external auth is enabled, get the token from the server
-    if (extenal_auth) {
+    if (external_auth) {
       const external_auth_token = await this.getExternalAuthToken(user, userTokenOrProvider);
 
-      userTokenOrProvider = external_auth_token.token;
-      user.id = external_auth_token.user_id;
+      connectionToken = external_auth_token.token;
+      connectionUser = {
+        ...user,
+        id: external_auth_token.user_id,
+      };
     }
 
     /**
      * Calling connectUser multiple times is potentially the result of a  bad integration, however,
      * If the user id remains the same we don't throw error
      */
-    if (this.userID === user.id && this.setUserPromise) {
+    if (this.userID === connectionUser.id && this.setUserPromise) {
       console.warn(
         'Consecutive calls to connectUser is detected, ideally you should only call this function once in your app.',
       );
@@ -283,11 +288,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
 
     // we generate the client id client side
-    this.userID = user.id;
+    this.userID = connectionUser.id;
 
-    const setTokenPromise = this._setToken(user, userTokenOrProvider);
-    this._setUser(user);
-    this.state.updateUser({ id: user.id, name: user?.name || user.id, avatar: user?.avatar || '' });
+    const setTokenPromise = this._setToken(connectionUser, connectionToken);
+    this._setUser(connectionUser);
+    this.state.updateUser({ id: connectionUser.id, name: connectionUser?.name || connectionUser.id, avatar: connectionUser?.avatar || '' });
 
     const wsPromise = this.openConnection();
 
@@ -1165,7 +1170,14 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.projectId = project_id;
   }
 
-  async uploadFile(file: File) {
+  /**
+   * Uploads a new avatar image for the current user.
+   * The user's avatar URL is automatically updated in both the client and the local state.
+   *
+   * @param file - The image file to upload.
+   * @returns The response containing the new avatar URL.
+   */
+  async uploadAvatar(file: File) {
     const formData = new FormData();
     formData.append('avatar', file);
     let response = await this.post<{ avatar: string }>(this.userBaseURL + '/users/upload', formData, {
@@ -1181,12 +1193,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     return response;
   }
-  async updateProfile(name: string, about_me: string) {
-    let body = {
-      name,
-      about_me,
-    };
-    let response = await this.patch<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/update', body);
+  async updateProfile(updates: Partial<UserResponse<ErmisChatGenerics>>) {
+    let response = await this.patch<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/update', updates);
     this.user = response;
     this.state.updateUser(response);
     return response;
@@ -1438,53 +1446,60 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   };
 
   /**
-   * Creates an interactive `meeting` Channel locally, and immediately creates it on the server.
-   * Consumers can customize the `name` field. `members` and `public` fields are constrained.
+   * Creates a quick channel and immediately registers it on the server.
+   * Quick channels are public group channels that anyone can join without an invitation.
+   * The creator is added as the first member automatically.
    *
-   * @param name - The custom name for the meeting channel.
+   * @param name - An optional display name for the channel.
    * @returns A promise that resolves to the created `Channel` object.
    */
-  async createMeetingChannel(name?: string): Promise<Channel<ErmisChatGenerics>> {
+  async createQuickChannel(name?: string): Promise<Channel<ErmisChatGenerics>> {
     if (!this.userID) {
       throw Error('Call connectUser before creating a channel');
     }
 
+    const now = new Date();
+    const formattedDate = new Intl.DateTimeFormat('en-US', {
+      month: 'short', day: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(now);
+
     const payload = {
-      name: name || `Meeting Public - ${new Date().toISOString()}`,
+      name: name || `Quick Channel - ${formattedDate}`,
       members: [this.userID],
       public: true,
     } as unknown as ChannelData<ErmisChatGenerics>;
 
-    const meetingChannel = this.channel('meeting', payload);
-    await meetingChannel.create();
+    const quickChannel = this.channel('meeting', payload);
+    await quickChannel.create();
     
-    return meetingChannel;
+    return quickChannel;
   }
 
   /**
-   * Joins a `meeting` channel.
-   * It queries/watches the channel to see if caller is already a member.
-   * If not, it accepts the invite to join the channel, then watches it again to reflect changes.
+   * Joins a quick channel by its ID.
+   * Automatically checks whether the caller is already a member.
+   * If not, it joins the channel and synchronizes state.
    *
-   * @param channelId - The ID of the meeting channel to join.
+   * @param channelId - The ID of the quick channel to join.
    * @returns A promise that resolves to the joined `Channel` object.
    */
-  async joinMeetingChannel(channelId: string): Promise<Channel<ErmisChatGenerics>> {
+  async joinQuickChannel(channelId: string): Promise<Channel<ErmisChatGenerics>> {
     if (!this.userID) {
       throw Error('Call connectUser before joining a channel');
     }
 
-    const meetingChannel = this.channel('meeting', channelId);
-    await meetingChannel.watch();
+    const quickChannel = this.channel('meeting', channelId);
+    await quickChannel.watch();
 
-    const isMember = meetingChannel.state.members && meetingChannel.state.members[this.userID];
+    const isMember = quickChannel.state.members && quickChannel.state.members[this.userID];
 
     if (!isMember) {
-      await meetingChannel.acceptInvite('join');
-      await meetingChannel.watch();
+      await quickChannel.acceptInvite('join');
+      await quickChannel.watch();
     }
 
-    return meetingChannel;
+    return quickChannel;
   }
 
   _normalizeExpiration(timeoutOrExpirationDate?: null | number | string | Date) {
