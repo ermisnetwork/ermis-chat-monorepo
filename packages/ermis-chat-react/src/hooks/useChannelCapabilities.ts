@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useChatClient } from './useChatClient';
 import { isGroupChannel } from '../channelTypeUtils';
+import { canManageChannel, CHANNEL_ROLES } from '../channelRoleUtils';
 
 export const useChannelCapabilities = () => {
   const { activeChannel, client } = useChatClient();
@@ -21,9 +22,9 @@ export const useChannelCapabilities = () => {
   const isGroupCh = isGroupChannel(activeChannel);
   const role = (activeChannel?.state as any)?.members?.[currentUserId]?.channel_role;
   
-  const isOwner = role === 'owner' || activeChannel?.data?.created_by_id === currentUserId;
-  const isModerator = role === 'moder';
-  const isOwnerOrModerator = isOwner || isModerator;
+  const isOwner = role === CHANNEL_ROLES.OWNER || activeChannel?.data?.created_by_id === currentUserId;
+  const isModerator = role === CHANNEL_ROLES.MODERATOR;
+  const isOwnerOrModerator = isOwner || isModerator || canManageChannel(role);
 
   const capabilities: string[] = isGroupCh ? (activeChannel?.data as any)?.member_capabilities || [] : [];
 

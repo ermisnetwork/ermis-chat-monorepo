@@ -3,6 +3,7 @@ import { Panel } from '../Panel';
 import { useChatClient } from '../../hooks/useChatClient';
 import type { ChannelSettingsPanelProps } from '../../types';
 import { isGroupChannel } from '../../channelTypeUtils';
+import { CHANNEL_ROLES } from '../../channelRoleUtils';
 
 export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.memo(({
   isOpen,
@@ -26,7 +27,7 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
   const { client } = useChatClient();
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
-  const isOwner = currentUserRole === 'owner';
+  const isOwner = currentUserRole === CHANNEL_ROLES.OWNER;
 
   const [slowMode, setSlowMode] = useState<number>(0);
   const [topicsEnabled, setTopicsEnabled] = useState<boolean>(false);

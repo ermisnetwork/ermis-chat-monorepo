@@ -10,6 +10,13 @@ import { MemberListItem } from './MemberListItem';
 import { TabEmptyState, TabLoadingState } from './States';
 import type { ChannelInfoTabsProps, MediaTab, AttachmentItem } from '../../types';
 import { isDirectChannel } from '../../channelTypeUtils';
+import {
+  CHANNEL_ROLES,
+  canRemoveTargetMember,
+  canBanTargetMember,
+  canPromoteTargetMember,
+  canDemoteTargetMember
+} from '../../channelRoleUtils';
 
 export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
   channel,
@@ -69,8 +76,8 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
 
   const sortedMembers = useMemo(() => {
     return [...members].sort((a, b) => {
-      const aWeight = ROLE_WEIGHTS[a.channel_role || 'member'] || 0;
-      const bWeight = ROLE_WEIGHTS[b.channel_role || 'member'] || 0;
+      const aWeight = ROLE_WEIGHTS[a.channel_role || CHANNEL_ROLES.MEMBER] || 0;
+      const bWeight = ROLE_WEIGHTS[b.channel_role || CHANNEL_ROLES.MEMBER] || 0;
       return bWeight - aWeight;
     });
   }, [members]);
@@ -172,42 +179,29 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
           }
         }
         sortedMembers.forEach(member => {
-          const role = member.channel_role || 'member';
-          const isTargetRemovable = role === 'member' || role === 'pending' || (currentUserRole === 'owner' && role === 'moder');
+          const role = member.channel_role || CHANNEL_ROLES.MEMBER;
+          const isTargetRemovable = canRemoveTargetMember(currentUserRole, role);
 
           const canRemove = Boolean(
-            (currentUserRole === 'owner' || currentUserRole === 'moder') &&
             isTargetRemovable &&
             member.user_id !== currentUserId
           );
 
           const canBan = Boolean(
-            (currentUserRole === 'owner' || currentUserRole === 'moder') &&
-            isTargetRemovable &&
-            role !== 'pending' &&
+            canBanTargetMember(currentUserRole, role) &&
             member.user_id !== currentUserId &&
             !member.banned
           );
 
           const canUnban = Boolean(
-            (currentUserRole === 'owner' || currentUserRole === 'moder') &&
-            isTargetRemovable &&
-            role !== 'pending' &&
+            canBanTargetMember(currentUserRole, role) &&
             member.user_id !== currentUserId &&
             member.banned
           );
 
-          const canPromote = Boolean(
-            currentUserRole === 'owner' &&
-            role === 'member' &&
-            member.user_id !== currentUserId
-          );
+          const canPromote = canPromoteTargetMember(currentUserRole, role) && member.user_id !== currentUserId;
 
-          const canDemote = Boolean(
-            currentUserRole === 'owner' &&
-            role === 'moder' &&
-            member.user_id !== currentUserId
-          );
+          const canDemote = canDemoteTargetMember(currentUserRole, role) && member.user_id !== currentUserId;
 
           items.push(
             <MemberItem

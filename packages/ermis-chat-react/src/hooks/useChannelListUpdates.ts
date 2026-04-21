@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
 import { isDirectChannel } from '../channelTypeUtils';
+import { isPendingMember } from '../channelRoleUtils';
 
 /**
  * Subscribes to real-time events and keeps the channel list in sync:
@@ -37,9 +38,7 @@ export function useChannelListUpdates(
       if (active?.cid === eventCid && event.user?.id !== client.userID) {
         const isBannedInActive = Boolean(active.state?.membership?.banned);
         const isBlockedInActive = isDirectChannel(active) && Boolean(active.state?.membership?.blocked);
-        const isPendingActive =
-          active.state?.membership?.channel_role === 'pending' ||
-          (active.state?.membership as Record<string, unknown>)?.role === 'pending';
+        const isPendingActive = isPendingMember(active.state?.membership?.channel_role as string);
 
         if (!isBannedInActive && !isBlockedInActive && !isPendingActive) {
           active.markRead().catch(() => {

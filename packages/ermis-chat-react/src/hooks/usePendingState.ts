@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
+import { isPendingMember } from '../channelRoleUtils';
 
 /**
  * Hook that tracks whether the current user is in a 'pending' state for the given channel.
@@ -7,7 +8,7 @@ import type { Channel } from '@ermis-network/ermis-chat-sdk';
 export function usePendingState(channel: Channel | null | undefined, currentUserId?: string) {
   const [isPending, setIsPending] = useState<boolean>(() => {
     const membership = channel?.state?.membership || channel?.state?.members?.[currentUserId || ''];
-    return membership?.channel_role === 'pending' || (membership as Record<string, unknown>)?.role === 'pending';
+    return isPendingMember(membership?.channel_role as string);
   });
 
   useEffect(() => {
@@ -18,7 +19,7 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
 
     const checkPending = () => {
       const membership = channel.state?.membership || channel.state?.members?.[currentUserId];
-      return membership?.channel_role === 'pending' || (membership as Record<string, unknown>)?.role === 'pending';
+      return isPendingMember(membership?.channel_role as string);
     };
 
     // Sync initial state
@@ -42,7 +43,9 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
       if (eventUserId !== currentUserId) return; // Only react to own invite events
 
       const eventCid =
-        event.cid || (event.channel as Record<string, unknown>)?.cid || (event.channel_id ? `${event.channel_type}:${event.channel_id}` : undefined);
+        event.cid ||
+        (event.channel as Record<string, unknown>)?.cid ||
+        (event.channel_id ? `${event.channel_type}:${event.channel_id}` : undefined);
       if (eventCid === channel.cid) {
         defensiveUpdateState(event);
         setIsPending(checkPending());

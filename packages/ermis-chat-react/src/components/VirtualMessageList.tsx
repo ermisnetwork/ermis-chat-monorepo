@@ -13,6 +13,7 @@ import { Avatar } from './Avatar';
 import { MessageItem } from './MessageItem';
 import { SystemMessageItem } from './MessageItem';
 import { isPublicGroupChannel } from '../channelTypeUtils';
+import { canManageChannel } from '../channelRoleUtils';
 import {
   defaultMessageRenderers,
   type MessageBubbleProps,
@@ -135,7 +136,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   messagesRef.current = messages;
   const currentUserId = client.userID;
   const currentUserRole = currentUserId ? activeChannel?.state?.members?.[currentUserId]?.channel_role : undefined;
-  const canManageTopic = currentUserRole === 'owner' || currentUserRole === 'moder';
+  const canManageTopic = canManageChannel(currentUserRole);
 
   // Ref to scope DOM queries (safe for multiple instances)
   const containerRef = useRef<HTMLDivElement>(null);

@@ -55,6 +55,8 @@ export { useMessageActions } from './hooks/useMessageActions';
 
 export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview } from './utils';
 export { isGroupChannel, isDirectChannel, isTopicChannel, isPublicGroupChannel, isGeneralProxy, hasTopicsEnabled, supportsBlocking } from './channelTypeUtils';
+export { CHANNEL_ROLES, isPendingMember, canManageChannel, canRemoveTargetMember, canBanTargetMember, canPromoteTargetMember, canDemoteTargetMember } from './channelRoleUtils';
+export type { ChannelRole } from './channelRoleUtils';
 
 export {
   defaultMessageRenderers,

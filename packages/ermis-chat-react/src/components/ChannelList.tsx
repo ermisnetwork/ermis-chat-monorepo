@@ -15,6 +15,7 @@ import type { ChannelActionsProps } from '../types';
 import { TopicModal } from './TopicModal';
 import { DefaultChannelActions, computeDefaultActions } from './ChannelActions';
 import { isDirectChannel, hasTopicsEnabled } from '../channelTypeUtils';
+import { canManageChannel, isPendingMember } from '../channelRoleUtils';
 
 export { DefaultChannelActions } from './ChannelActions';
 export type { ChannelAction, ChannelActionsProps } from '../types';
@@ -413,7 +414,7 @@ export const ChannelTopicGroup = React.memo(({
   const handleToggle = useCallback(() => setIsExpanded((prev) => !prev), []);
 
   const userRole = channel.state?.members?.[currentUserId]?.channel_role;
-  const hasTopicAddPermission = Boolean(userRole === 'owner' || userRole === 'moder');
+  const hasTopicAddPermission = canManageChannel(userRole);
 
   const getTopicTime = (t: Channel) => {
     const lastMsg = t.state?.latestMessages?.slice(-1)[0];
@@ -430,7 +431,7 @@ export const ChannelTopicGroup = React.memo(({
       const bPinned = b.data?.is_pinned === true;
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
-      
+
       return getTopicTime(b) - getTopicTime(a);
     });
   }, [channel.state?.topics, topicUpdateCount]);
@@ -633,7 +634,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
 
     channels.forEach(ch => {
       const ms = ch.state?.membership as Record<string, unknown> | undefined;
-      const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
+      const isPending = isPendingMember(ms?.channel_role as string);
       if (isPending) {
         pending.push(ch);
       } else if (ch.data?.is_pinned) {
@@ -677,7 +678,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       const chState = channel.state as unknown as Record<string, unknown> | undefined;
       const isBannedInChannel = Boolean(ms?.banned);
       const isBlockedInChannel = isDirectChannel(channel) && Boolean(ms?.blocked);
-      const isPending = ms?.channel_role === 'pending' || ms?.role === 'pending';
+      const isPending = isPendingMember(ms?.channel_role as string);
 
       if (!isBannedInChannel && !isBlockedInChannel && !isPending && (chState?.unreadCount as number) > 0) {
         channel.markRead().catch(() => { });

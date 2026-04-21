@@ -17,6 +17,7 @@ import type {
 } from '../../types';
 import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData';
 import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
+import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
 
 export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.memo(({ title, onClose }) => {
   return (
@@ -109,7 +110,7 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         </div>
         <span>{searchLabel}</span>
       </button>
-      {isTeamChannel && (currentUserRole === 'owner' || currentUserRole === 'moder') && (
+      {isTeamChannel && canManageChannel(currentUserRole) && (
         <button className="ermis-channel-info__action-btn" onClick={onSettingsClick}>
           <div className="ermis-channel-info__action-icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -121,7 +122,7 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         </button>
       )}
       {isTeamChannel && (
-        currentUserRole === 'owner' ? (
+        currentUserRole === CHANNEL_ROLES.OWNER ? (
           <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onDeleteChannel}>
             <div className="ermis-channel-info__action-icon">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -145,7 +146,7 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         )
       )}
       {/* Topics: Close/Reopen Topic for owner/moder */}
-      {isTopic && (currentUserRole === 'owner' || currentUserRole === 'moder') && (
+      {isTopic && canManageChannel(currentUserRole) && (
         isClosedTopic ? (
           <button className="ermis-channel-info__action-btn" onClick={onReopenTopic}>
             <div className="ermis-channel-info__action-icon">
@@ -381,7 +382,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
   // Permission: only owner or moderator can edit channel info (banned users cannot)
-  const canEditChannel = (isTeamChannel || isTopic) && !isBanned && (currentUserRole === 'owner' || currentUserRole === 'moder');
+  const canEditChannel = (isTeamChannel || isTopic) && !isBanned && canManageChannel(currentUserRole);
 
   const handleEditChannelClick = useCallback(() => {
     if (isTopic) {

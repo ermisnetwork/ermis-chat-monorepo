@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
+import { isPendingMember } from '../channelRoleUtils';
 
 export type UseChannelMessagesOptions = {
   scrollToBottom: (smooth: boolean) => void;
@@ -100,9 +101,7 @@ export function useChannelMessages({
           .then(() => {
             syncMessages();
             scheduleScrollToBottom(false);
-            const isPending =
-              activeChannel.state?.membership?.channel_role === 'pending' ||
-              (activeChannel.state?.membership as any)?.role === 'pending';
+            const isPending = isPendingMember(activeChannel.state?.membership?.channel_role as string);
             if (!isPending) {
               activeChannel.markRead().catch(() => {});
             }

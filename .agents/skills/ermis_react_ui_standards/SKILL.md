@@ -41,3 +41,4 @@ When modifying, maintaining, or adding features to the Ermis Chat React SDK UI K
   - `isPublicGroupChannel(channel)`, `hasTopicsEnabled(channel)`, `isGeneralProxy(channel)`, `supportsBlocking(channel)`
   - When adding a **new channel type**, add it to the appropriate `Set` in `channelTypeUtils.ts` (`GROUP_CHANNEL_TYPES` or `DIRECT_CHANNEL_TYPES`) — zero changes needed in any component or hook.
   - **Exception:** Raw type strings are permitted only when passing values to SDK API methods (e.g., `client.channel('team', payload)` for channel creation, or `filters = { type: ['messaging', 'team'] }` for queries).
+- **No Hardcoded System Roles:** Never compare string values like `'owner'`, `'moder'`, `'member'`, `'pending'`, or `'skipped'` directly. Use exported `CHANNEL_ROLES` and utility logic from `channelRoleUtils.ts` (e.g. `canManageChannel(role)`, `isPendingMember(role)`).

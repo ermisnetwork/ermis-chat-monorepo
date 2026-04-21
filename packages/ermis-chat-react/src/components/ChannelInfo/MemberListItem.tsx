@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Dropdown } from '../Dropdown';
 import type { ChannelInfoMemberItemProps } from '../../types';
+import { CHANNEL_ROLES } from '../../channelRoleUtils';
 
 export const MemberListItem = React.memo(({
   member, AvatarComponent, 
@@ -14,7 +15,7 @@ export const MemberListItem = React.memo(({
   const isOpen = anchorRect !== null;
 
   if (!member) return null;
-  const role = member.channel_role || 'member';
+  const role = member.channel_role || CHANNEL_ROLES.MEMBER;
   const hasActions = canRemove || canBan || canUnban || canPromote || canDemote;
 
   return (

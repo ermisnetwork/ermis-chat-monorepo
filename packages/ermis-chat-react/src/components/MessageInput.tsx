@@ -15,6 +15,7 @@ import { EditPreview } from './EditPreview';
 import { buildUserMap, replaceMentionsForPreview, moveCaretToEnd } from '../utils';
 import { getMentionHtml } from '../hooks/useMentions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
+import { CHANNEL_ROLES } from '../channelRoleUtils';
 import type { MentionMember, MessageInputProps, FilePreviewItem } from '../types';
 
 export type { MessageInputProps, SendButtonProps, AttachButtonProps, EmojiPickerProps, EmojiButtonProps } from '../types';
@@ -71,7 +72,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     };
   }, [activeChannel]);
 
-  const isSlowModeApplied = isTeamChannel && role === 'member' && memberMessageCooldown > 0;
+  const isSlowModeApplied = isTeamChannel && role === CHANNEL_ROLES.MEMBER && memberMessageCooldown > 0;
 
   const [cooldownEnd, setCooldownEnd] = useState<number | null>(null);
   const [cooldown, setCooldown] = useState(0);

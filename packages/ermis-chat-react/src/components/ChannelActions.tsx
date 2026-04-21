@@ -3,6 +3,7 @@ import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import type { ChannelAction, ChannelActionLabels, ChannelActionIcons, ChannelActionsProps } from '../types';
 import { Dropdown } from './Dropdown';
 import { isDirectChannel, isGroupChannel, isTopicChannel } from '../channelTypeUtils';
+import { canManageChannel, CHANNEL_ROLES } from '../channelRoleUtils';
 
 /* ----------------------------------------------------------
    SVG Icons for default actions
@@ -45,7 +46,7 @@ export function computeDefaultActions(
   const isClosed = channel.data?.is_closed_topic === true;
 
   const ms = channel.state?.members?.[currentUserId] || channel.state?.membership;
-  const role = ms?.channel_role || (ms as any)?.role;
+  const role = ms?.channel_role;
   const isBlocked = options?.isBlocked !== undefined ? options.isBlocked : (ms as any)?.blocked;
   const isPinned = channel.data?.is_pinned === true;
 
@@ -58,8 +59,8 @@ export function computeDefaultActions(
 
   const actionIcons = options?.actionIcons;
 
-  const pinIcon = isPinned 
-    ? (actionIcons?.UnpinIcon || <UnpinIcon />) 
+  const pinIcon = isPinned
+    ? (actionIcons?.UnpinIcon || <UnpinIcon />)
     : (actionIcons?.PinIcon || <PinIcon />);
 
   actions.push({
@@ -100,7 +101,7 @@ export function computeDefaultActions(
     });
   } else if (isTopic) {
     // Topic: Edit topic (owner & moder only)
-    if (role === 'owner' || role === 'moder') {
+    if (canManageChannel(role)) {
       actions.push({
         id: 'edit_topic',
         label: actionLabels?.editTopic || 'Edit topic',
@@ -111,7 +112,7 @@ export function computeDefaultActions(
       });
     }
     // Topic: Close / Reopen (owner & moder only)
-    if (role === 'owner' || role === 'moder') {
+    if (canManageChannel(role)) {
       actions.push({
         id: isClosed ? 'reopen' : 'close',
         label: isClosed ? (actionLabels?.reopenTopic || 'Reopen topic') : (actionLabels?.closeTopic || 'Close topic'),
@@ -125,7 +126,7 @@ export function computeDefaultActions(
   } else if (isTeamOrMeeting) {
     // Team channel: Create Topic (owner & moder, only if topics enabled)
     const hasTopicsEnabled = Boolean(channel.data?.topics_enabled);
-    if (hasTopicsEnabled && (role === 'owner' || role === 'moder') && options?.onAddTopic) {
+    if (hasTopicsEnabled && canManageChannel(role) && options?.onAddTopic) {
       actions.push({
         id: 'create_topic',
         label: actionLabels?.createTopic || 'Create topic',
@@ -133,7 +134,7 @@ export function computeDefaultActions(
         onClick: (ch) => { options.onAddTopic!(ch); },
       });
     }
-    if (role === 'owner') {
+    if (role === CHANNEL_ROLES.OWNER) {
       actions.push({
         id: 'delete',
         label: actionLabels?.deleteChannel || 'Delete channel',
@@ -148,7 +149,7 @@ export function computeDefaultActions(
         },
       });
     }
-    if (role === 'moder' || role === 'member') {
+    if (role === CHANNEL_ROLES.MODERATOR || role === CHANNEL_ROLES.MEMBER) {
       actions.push({
         id: 'leave',
         label: actionLabels?.leaveChannel || 'Leave channel',
