@@ -254,6 +254,8 @@ export type AvatarProps = {
   size?: number;
   /** Additional CSS class name */
   className?: string;
+  /** Disable opening the lightbox on click */
+  disableLightbox?: boolean;
 };
 
 /* ----------------------------------------------------------

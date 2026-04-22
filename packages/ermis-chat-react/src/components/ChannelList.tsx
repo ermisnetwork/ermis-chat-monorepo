@@ -177,7 +177,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
 
   return (
     <div className={itemClass} onClick={handleClick}>
-      <AvatarComponent image={image} name={name} size={40} />
+      <AvatarComponent image={image} name={name} size={40} disableLightbox />
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-top-row">
           <div className="ermis-channel-list__item-name">{name}</div>
@@ -480,7 +480,7 @@ export const ChannelTopicGroup = React.memo(({
         className={`ermis-channel-list__topic-header ${isExpanded ? 'ermis-channel-list__topic-header--expanded' : ''}`}
         onClick={handleToggle}
       >
-        <AvatarComponent image={image} name={name} size={40} />
+        <AvatarComponent image={image} name={name} size={40} disableLightbox />
         <div className="ermis-channel-list__topic-header-name">{name}</div>
 
         {channel.data?.is_pinned === true && PinnedIconComponent && (
