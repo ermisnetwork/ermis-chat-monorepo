@@ -12,7 +12,7 @@ import { useChannelProfile } from '../hooks/useChannelData';
 import { Avatar } from './Avatar';
 import { MessageItem } from './MessageItem';
 import { SystemMessageItem } from './MessageItem';
-import { isPublicGroupChannel } from '../channelTypeUtils';
+import { isPublicGroupChannel, isDirectChannel } from '../channelTypeUtils';
 import { canManageChannel } from '../channelRoleUtils';
 import {
   defaultMessageRenderers,
@@ -117,6 +117,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   pendingOverlaySubtitle = 'Accept the invitation to view messages and interact',
   pendingAcceptLabel = 'Accept',
   pendingRejectLabel = 'Reject',
+  pendingSkipLabel = 'Skip',
   closedTopicOverlayTitle = 'This topic has been closed',
   closedTopicOverlaySubtitle = 'You can no longer read or send messages in this topic.',
   closedTopicReopenLabel = 'Reopen Topic',
@@ -158,6 +159,11 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   const handleRejectInvite = useCallback(() => {
     if (!activeChannel) return;
     activeChannel.rejectInvite().catch((e: any) => console.error('Error rejecting invite', e));
+  }, [activeChannel]);
+
+  const handleSkipInvite = useCallback(() => {
+    if (!activeChannel) return;
+    activeChannel.skipInvite().catch((e: any) => console.error('Error skipping invite', e));
   }, [activeChannel]);
 
   const scrollToBottom = useCallback((smooth = false, attempts = 0) => {
@@ -395,6 +401,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   }
 
   if (isPending) {
+    const isDirect = activeChannel ? isDirectChannel(activeChannel) : false;
     return (
       <PendingOverlay
         channelImage={channelImage}
@@ -405,6 +412,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         acceptLabel={pendingAcceptLabel}
         onReject={handleRejectInvite}
         onAccept={handleAcceptInvite}
+        skipLabel={isDirect ? pendingSkipLabel : undefined}
+        onSkip={isDirect ? handleSkipInvite : undefined}
         AvatarComponent={AvatarComponent}
       />
     );

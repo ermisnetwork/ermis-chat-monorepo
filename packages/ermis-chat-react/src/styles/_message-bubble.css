@@ -182,6 +182,10 @@
   color: rgba(255, 255, 255, 0.9);
 }
 
+.ermis-message-bubble--own .ermis-attachment__link-title {
+  color: rgba(255, 255, 255, 0.9);
+}
+
 /* --- Message Bubble --- */
 .ermis-message-bubble {
   position: relative;
@@ -198,6 +202,24 @@
   background-color: var(--ermis-bubble-own-bg);
   color: var(--ermis-bubble-own-text);
   border-bottom-right-radius: var(--ermis-radius-sm);
+}
+
+/* --- Override muted text inside own bubble (unreadable on accent bg in dark mode) --- */
+.ermis-message-bubble--own .ermis-attachment__file-size,
+.ermis-message-bubble--own .ermis-attachment__link-url,
+.ermis-message-bubble--own .ermis-attachment__link-description,
+.ermis-message-bubble--own .ermis-attachment__voice-duration,
+.ermis-message-bubble--own .ermis-message-list__forwarded-indicator,
+.ermis-message-bubble--own .ermis-attachment--file {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.ermis-message-bubble--own .ermis-attachment--link-preview {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.ermis-message-bubble--own .ermis-attachment--file {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .ermis-message-bubble--other {
@@ -364,7 +386,8 @@
 }
 
 .ermis-attachment-grid .ermis-attachment--image,
-.ermis-attachment-grid .ermis-attachment--video {
+.ermis-attachment-grid .ermis-attachment--video,
+.ermis-attachment-grid .ermis-attachment--video-poster {
   width: 100%;
   height: 100%;
   max-width: none;
@@ -373,7 +396,8 @@
   display: block;
 }
 
-.ermis-attachment-grid .ermis-attachment--image {
+.ermis-attachment-grid .ermis-attachment--image,
+.ermis-attachment-grid .ermis-attachment--video-poster {
   object-fit: cover;
 }
 
@@ -384,7 +408,8 @@
 
 /* Single media: larger height allowed */
 .ermis-attachment-grid--single .ermis-attachment--image,
-.ermis-attachment-grid--single .ermis-attachment--video {
+.ermis-attachment-grid--single .ermis-attachment--video,
+.ermis-attachment-grid--single .ermis-attachment--video-poster {
   max-height: 300px;
 }
 
@@ -449,7 +474,8 @@
 
 /* Full media — hidden until loaded, fades in over blur/shimmer */
 .ermis-attachment-aspect-box .ermis-attachment--image,
-.ermis-attachment-aspect-box .ermis-attachment--video {
+.ermis-attachment-aspect-box .ermis-attachment--video,
+.ermis-attachment-aspect-box .ermis-attachment--video-poster {
   position: absolute;
   top: 0;
   left: 0;
@@ -464,7 +490,8 @@
   border-radius: 0;
 }
 
-.ermis-attachment-aspect-box .ermis-attachment--image {
+.ermis-attachment-aspect-box .ermis-attachment--image,
+.ermis-attachment-aspect-box .ermis-attachment--video-poster {
   object-fit: cover;
 }
 
@@ -474,7 +501,8 @@
 }
 
 .ermis-attachment-aspect-box .ermis-attachment--image.ermis-attachment--loaded,
-.ermis-attachment-aspect-box .ermis-attachment--video.ermis-attachment--loaded {
+.ermis-attachment-aspect-box .ermis-attachment--video.ermis-attachment--loaded,
+.ermis-attachment-aspect-box .ermis-attachment--video-poster.ermis-attachment--loaded {
   opacity: 1;
 }
 
@@ -485,7 +513,8 @@
   min-height: 100px;
 }
 
-.ermis-attachment--image {
+.ermis-attachment--image,
+.ermis-attachment--video-poster {
   max-width: 300px;
   max-height: 200px;
   border-radius: var(--ermis-radius-md);
@@ -517,14 +546,34 @@
 }
 
 .ermis-attachment__file-icon {
-  font-size: 1.25rem;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: var(--ermis-radius-md);
+  background: var(--ermis-bg-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--ermis-text-muted);
+  gap: 1px;
   flex-shrink: 0;
+}
+
+.ermis-attachment__file-ext {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--ermis-text-muted);
+  line-height: 1;
 }
 
 .ermis-attachment__file-info {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
 }
 
 .ermis-attachment__file-name {
@@ -538,6 +587,48 @@
 .ermis-attachment__file-size {
   font-size: var(--ermis-font-size-xs);
   color: var(--ermis-text-muted);
+}
+
+.ermis-attachment__file-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--ermis-radius-full);
+  background: transparent;
+  color: var(--ermis-text-muted);
+  cursor: pointer;
+  transition: background-color var(--ermis-transition), color var(--ermis-transition);
+}
+
+.ermis-attachment__file-download:hover {
+  background-color: var(--ermis-bg-active);
+  color: var(--ermis-accent);
+}
+
+.ermis-message-bubble--own .ermis-attachment__file-name {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.ermis-message-bubble--own .ermis-attachment__file-icon {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.ermis-message-bubble--own .ermis-attachment__file-ext {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.ermis-message-bubble--own .ermis-attachment__file-download {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ermis-message-bubble--own .ermis-attachment__file-download:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
 }
 
 /* --- Voice recording --- */

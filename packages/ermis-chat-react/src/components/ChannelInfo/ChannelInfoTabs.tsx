@@ -8,7 +8,8 @@ import { LinkListItem } from './LinkListItem';
 import { FileListItem } from './FileListItem';
 import { MemberListItem } from './MemberListItem';
 import { TabEmptyState, TabLoadingState } from './States';
-import type { ChannelInfoTabsProps, MediaTab, AttachmentItem } from '../../types';
+import { MediaLightbox } from '../MediaLightbox';
+import type { ChannelInfoTabsProps, MediaTab, AttachmentItem, MediaLightboxItem } from '../../types';
 import { isDirectChannel } from '../../channelTypeUtils';
 import {
   CHANNEL_ROLES,
@@ -141,6 +142,31 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
     window.open(url, '_blank', 'noopener,noreferrer');
   }, []);
 
+  // Lightbox state for media tab
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  const lightboxItems = useMemo<MediaLightboxItem[]>(() => {
+    return mediaItems.map(item => ({
+      type: (item.attachment_type === 'video' ? 'video' : 'image') as 'image' | 'video',
+      src: item.url,
+      alt: item.file_name,
+      posterSrc: item.thumb_url || undefined,
+    }));
+  }, [mediaItems]);
+
+  const handleMediaClick = useCallback((url: string) => {
+    const idx = mediaItems.findIndex(item => item.url === url);
+    if (idx >= 0) {
+      setLightboxIndex(idx);
+      setLightboxOpen(true);
+    }
+  }, [mediaItems]);
+
+  const closeLightbox = useCallback(() => {
+    setLightboxOpen(false);
+  }, []);
+
   // Group media into rows of 3 for grid layout inside VList
   const mediaRows = useMemo(() => {
     const rows: AttachmentItem[][] = [];
@@ -227,12 +253,12 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
         if (MediaItem === MediaGridItem) {
           // Default: use grid rows
           return mediaRows.map((row, rowIdx) => (
-            <MediaRow key={row[0]?.id || rowIdx} row={row} onClick={handleOpenUrl} />
+            <MediaRow key={row[0]?.id || rowIdx} row={row} onClick={handleMediaClick} />
           ));
         }
         // Custom: render each item individually
         return mediaItems.map((item, idx) => (
-          <MediaItem key={item.id || idx} item={item} onClick={handleOpenUrl} />
+          <MediaItem key={item.id || idx} item={item} onClick={handleMediaClick} />
         ));
       case 'links':
         return linkItems.map((item, idx) => (
@@ -245,7 +271,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
       default:
         return [];
     }
-  }, [contentTab, sortedMembers, mediaRows, mediaItems, linkItems, fileItems, onAddMemberClick, AvatarComponent, handleOpenUrl, MemberItem, MediaItem, LinkItem, FileItem]);
+  }, [contentTab, sortedMembers, mediaRows, mediaItems, linkItems, fileItems, onAddMemberClick, AvatarComponent, handleMediaClick, handleOpenUrl, MemberItem, MediaItem, LinkItem, FileItem]);
 
   // Check if content is empty for the content tab (deferred)
   const isTabEmpty = vlistChildren.length === 0 && !(loading && contentTab !== 'members');
@@ -280,6 +306,16 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
           </VList>
         )}
       </div>
+
+      {/* Media Lightbox */}
+      {lightboxItems.length > 0 && (
+        <MediaLightbox
+          items={lightboxItems}
+          initialIndex={lightboxIndex}
+          isOpen={lightboxOpen}
+          onClose={closeLightbox}
+        />
+      )}
     </div>
   );
 });

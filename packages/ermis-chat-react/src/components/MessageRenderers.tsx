@@ -1,10 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { preloadImage, isImagePreloaded } from '../utils';
 import type { FormatMessageResponse, Attachment, MessageLabel } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage, CallType } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { buildUserMap } from '../utils';
-import type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
+import { MediaLightbox } from './MediaLightbox';
+import { getFileIcon } from './ChannelInfo/utils';
+import type { AttachmentProps, MessageRendererProps, MessageBubbleProps, MediaLightboxItem } from '../types';
 
 export type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
 import {
@@ -17,7 +19,7 @@ import {
 /* ----------------------------------------------------------
    Attachment renderers
    ---------------------------------------------------------- */
-const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) => {
+const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment, onClick }) => {
   const src = attachment.image_url || attachment.thumb_url || attachment.url;
   const thumbSrc = attachment.thumb_url;
   if (!src) return null;
@@ -35,8 +37,15 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =
     }
   }, [loaded, src]);
 
+  const clickable = Boolean(onClick);
+
   return (
-    <div className="ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3">
+    <div
+      className={`ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3${clickable ? ' ermis-attachment--clickable' : ''}`}
+      onClick={onClick}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+    >
       {/* Blur placeholder: use thumb if available, otherwise shimmer */}
       {!loaded && (
         thumbSrc && thumbSrc !== src ? (
@@ -58,16 +67,26 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =
         loading="lazy"
         onLoad={() => setLoaded(true)}
       />
+      {clickable && (
+        <div className="ermis-attachment__overlay">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <line x1="11" y1="8" x2="11" y2="14" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+          </svg>
+        </div>
+      )}
     </div>
   );
 }, (prev, next) => {
   const prevSrc = prev.attachment.image_url || prev.attachment.thumb_url || prev.attachment.url;
   const nextSrc = next.attachment.image_url || next.attachment.thumb_url || next.attachment.url;
-  return prevSrc === nextSrc;
+  return prevSrc === nextSrc && prev.onClick === next.onClick;
 });
 (ImageAttachment as any).displayName = 'ImageAttachment';
 
-const VideoAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) => {
+const VideoAttachment: React.FC<AttachmentProps> = React.memo(({ attachment, onClick }) => {
   const src = attachment.asset_url || attachment.url;
   const posterSrc = attachment.image_url || attachment.thumb_url;
   const blurThumb = attachment.thumb_url;
@@ -87,6 +106,51 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =
     }
   }, [loaded, posterSrc]);
 
+  const clickable = Boolean(onClick);
+
+  // When clickable (lightbox mode): show poster thumbnail + play icon overlay
+  if (clickable) {
+    return (
+      <div
+        className="ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3 ermis-attachment--clickable"
+        onClick={onClick}
+        role="button"
+        tabIndex={0}
+      >
+        {!loaded && (
+          blurThumb && blurThumb !== posterSrc ? (
+            <img className="ermis-attachment-blur-preview" src={blurThumb} alt="" aria-hidden />
+          ) : (
+            <div className="ermis-attachment-shimmer" />
+          )
+        )}
+        {posterSrc ? (
+          <img
+            ref={imgRef}
+            className={`ermis-attachment ermis-attachment--video-poster${loaded ? ' ermis-attachment--loaded' : ''}`}
+            src={posterSrc}
+            alt={attachment.file_name || 'video'}
+            loading="lazy"
+            onLoad={() => setLoaded(true)}
+          />
+        ) : (
+          <video
+            className={`ermis-attachment ermis-attachment--video${loaded ? ' ermis-attachment--loaded' : ''}`}
+            src={src}
+            preload="metadata"
+            onLoadedData={() => setLoaded(true)}
+          />
+        )}
+        <div className="ermis-attachment__overlay">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+        </div>
+      </div>
+    );
+  }
+
+  // Default inline video player (no lightbox)
   return (
     <div className="ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3">
       {!loaded && (
@@ -124,7 +188,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =
   );
 }, (prev, next) => {
   return (prev.attachment.asset_url || prev.attachment.url) ===
-    (next.attachment.asset_url || next.attachment.url);
+    (next.attachment.asset_url || next.attachment.url) && prev.onClick === next.onClick;
 });
 (VideoAttachment as any).displayName = 'VideoAttachment';
 
@@ -132,16 +196,36 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =>
   const url = attachment.url || attachment.asset_url;
   const name = attachment.file_name || attachment.title || 'File';
   const size = attachment.file_size;
+  const mimeType = attachment.mime_type || attachment.type || '';
+  const ext = name.split('.').pop()?.toUpperCase() || 'FILE';
+  const { client } = useChatClient();
+
+  const handleDownload = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!url) return;
+
+    try {
+      const blob = await client.downloadMedia(url);
+      const urlBlob = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = urlBlob;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(urlBlob);
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  }, [client, url, name]);
 
   return (
-    <a
-      className="ermis-attachment ermis-attachment--file"
-      href={url}
-      download={name}
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      <span className="ermis-attachment__file-icon">⬇️</span>
+    <div className="ermis-attachment ermis-attachment--file">
+      <span className="ermis-attachment__file-icon">
+        {getFileIcon(mimeType, name)}
+        <span className="ermis-attachment__file-ext">{ext}</span>
+      </span>
       <span className="ermis-attachment__file-info">
         <span className="ermis-attachment__file-name">{name}</span>
         {size && (
@@ -150,7 +234,19 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =>
           </span>
         )}
       </span>
-    </a>
+      <button
+        className="ermis-attachment__file-download"
+        onClick={handleDownload}
+        title="Download"
+        type="button"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+      </button>
+    </div>
   );
 }, (prev, next) => {
   return (prev.attachment.url || prev.attachment.asset_url) ===
@@ -256,6 +352,38 @@ export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = React.me
   const voices = attachments.filter(isVoiceRecordingAttachment);
   const links = attachments.filter(isLinkPreviewAttachment);
 
+  // Lightbox state
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Build lightbox items from media attachments
+  const lightboxItems = useMemo<MediaLightboxItem[]>(() => {
+    return media.map(att => {
+      if (isImage(att)) {
+        return {
+          type: 'image' as const,
+          src: att.image_url || att.thumb_url || att.url || '',
+          alt: att.file_name || att.title,
+        };
+      }
+      return {
+        type: 'video' as const,
+        src: att.asset_url || att.url || '',
+        alt: att.file_name || att.title,
+        posterSrc: att.image_url || att.thumb_url,
+      };
+    });
+  }, [media]);
+
+  const openLightbox = useCallback((index: number) => {
+    setLightboxIndex(index);
+    setLightboxOpen(true);
+  }, []);
+
+  const closeLightbox = useCallback(() => {
+    setLightboxOpen(false);
+  }, []);
+
   const mediaGridClass = media.length === 1
     ? 'ermis-attachment-grid ermis-attachment-grid--single'
     : 'ermis-attachment-grid ermis-attachment-grid--multi';
@@ -267,8 +395,8 @@ export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = React.me
         <div className={mediaGridClass}>
           {media.map((att, i) => (
             isImage(att)
-              ? <ImageAttachment key={att.id || `img-${i}`} attachment={att} />
-              : <VideoAttachment key={att.id || `vid-${i}`} attachment={att} />
+              ? <ImageAttachment key={att.id || `img-${i}`} attachment={att} onClick={() => openLightbox(i)} />
+              : <VideoAttachment key={att.id || `vid-${i}`} attachment={att} onClick={() => openLightbox(i)} />
           ))}
         </div>
       )}
@@ -284,6 +412,16 @@ export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = React.me
       {links.map((att, i) => (
         <LinkPreviewAttachment key={att.id || `link-${i}`} attachment={att} />
       ))}
+
+      {/* Media Lightbox */}
+      {lightboxItems.length > 0 && (
+        <MediaLightbox
+          items={lightboxItems}
+          initialIndex={lightboxIndex}
+          isOpen={lightboxOpen}
+          onClose={closeLightbox}
+        />
+      )}
     </div>
   );
 }, (prev, next) => {

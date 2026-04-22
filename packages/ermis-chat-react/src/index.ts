@@ -110,6 +110,9 @@ export {
 } from './components/MessageRenderers';
 export type { MessageRendererProps, AttachmentProps } from './components/MessageRenderers';
 
+export { MediaLightbox } from './components/MediaLightbox';
+export type { MediaLightboxProps, MediaLightboxItem } from './types';
+
 export { MessageInput } from './components/MessageInput';
 export type {
   MessageInputProps,

@@ -10,6 +10,10 @@ export type PendingOverlayProps = {
   rejectLabel: string;
   onAccept: () => void;
   onReject: () => void;
+  /** Label for the skip button (direct messaging channels) */
+  skipLabel?: string;
+  /** Handler for the skip action (direct messaging channels) */
+  onSkip?: () => void;
   AvatarComponent: React.ComponentType<AvatarProps>;
 };
 
@@ -22,6 +26,8 @@ export const PendingOverlay: React.FC<PendingOverlayProps> = React.memo(({
   rejectLabel,
   onAccept,
   onReject,
+  skipLabel,
+  onSkip,
   AvatarComponent,
 }) => (
   <div className="ermis-message-list__pending-overlay">
@@ -31,7 +37,11 @@ export const PendingOverlay: React.FC<PendingOverlayProps> = React.memo(({
       <div className="ermis-message-list__pending-channel-name">{channelName}</div>
       <span className="ermis-message-list__pending-overlay-subtitle">{subtitle}</span>
       <div className="ermis-message-list__pending-actions">
-        <button className="ermis-message-list__reject-btn" onClick={onReject}>{rejectLabel}</button>
+        {onSkip ? (
+          <button className="ermis-message-list__reject-btn" onClick={onSkip}>{skipLabel || 'Skip'}</button>
+        ) : (
+          <button className="ermis-message-list__reject-btn" onClick={onReject}>{rejectLabel}</button>
+        )}
         <button className="ermis-message-list__accept-btn" onClick={onAccept}>{acceptLabel}</button>
       </div>
     </div>

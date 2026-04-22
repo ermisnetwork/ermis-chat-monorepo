@@ -591,6 +591,21 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     });
   }
 
+  /**
+   * Downloads a media file as a Blob via the SDK's configured axiosInstance.
+   * This avoids CORS issues that arise when using `fetch()` directly from the browser,
+   * because axios is routed through the SDK's authenticated transport layer.
+   *
+   * @param url - The full URL of the media file to download.
+   * @returns A Blob of the file content.
+   */
+  async downloadMedia(url: string): Promise<Blob> {
+    const response = await this.axiosInstance.get(url, {
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  }
+
   errorFromResponse(response: AxiosResponse<APIErrorResponse>): ErrorFromResponse<APIErrorResponse> {
     let err: ErrorFromResponse<APIErrorResponse>;
     err = new ErrorFromResponse(`ErmisChat error HTTP code: ${response.status}`);

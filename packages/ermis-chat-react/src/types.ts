@@ -443,6 +443,8 @@ export type ChannelListProps = {
    ---------------------------------------------------------- */
 export type AttachmentProps = {
   attachment: Attachment;
+  /** Click handler — when provided, attachment becomes clickable (opens lightbox) */
+  onClick?: () => void;
 };
 
 export type MessageRendererProps = {
@@ -462,6 +464,23 @@ export type DateSeparatorProps = {
 
 export type JumpToLatestProps = {
   onClick: () => void;
+};
+
+/* ----------------------------------------------------------
+   MediaLightbox types
+   ---------------------------------------------------------- */
+export type MediaLightboxItem = {
+  type: 'image' | 'video';
+  src: string;
+  alt?: string;
+  posterSrc?: string;
+};
+
+export type MediaLightboxProps = {
+  items: MediaLightboxItem[];
+  initialIndex?: number;
+  isOpen: boolean;
+  onClose: () => void;
 };
 
 /* ----------------------------------------------------------
@@ -514,6 +533,8 @@ export type MessageListProps = {
   TypingIndicatorComponent?: React.ComponentType;
   /** Custom component for message reactions */
   MessageReactionsComponent?: React.ComponentType<MessageReactionsProps>;
+  /** Custom media lightbox component (replaces the default lightbox entirely) */
+  MediaLightboxComponent?: React.ComponentType<MediaLightboxProps>;
 
   /** I18n Labels */
   emptyTitle?: string;
@@ -527,6 +548,8 @@ export type MessageListProps = {
   pendingOverlaySubtitle?: string;
   pendingAcceptLabel?: string;
   pendingRejectLabel?: string;
+  /** I18n Label for skip button on direct messaging channels (default: "Skip") */
+  pendingSkipLabel?: string;
   closedTopicOverlayTitle?: string;
   closedTopicOverlaySubtitle?: string;
   closedTopicReopenLabel?: string;
