@@ -5,6 +5,7 @@ import { Avatar } from './Avatar';
 import type { ChannelHeaderProps } from '../types';
 import { ErmisCallContext } from '../context/ErmisCallContext';
 import { hasTopicsEnabled, isDirectChannel } from '../channelTypeUtils';
+import { isSkippedMember } from '../channelRoleUtils';
 
 export type { ChannelHeaderProps } from '../types';
 
@@ -38,7 +39,12 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   const { isPending } = usePendingState(activeChannel, client.userID);
   const callContext = useContext(ErmisCallContext);
 
-  const actionDisabled = isPending;
+  const isSkipped = client.userID 
+    ? isSkippedMember(activeChannel?.state?.members?.[client.userID]?.channel_role as string) || 
+      isSkippedMember(activeChannel?.state?.membership?.channel_role as string)
+    : false;
+
+  const actionDisabled = isPending || isSkipped;
 
   // Force re-render when channel.updated WS event fires
   const [channelUpdateCount, setChannelUpdateCount] = useState(0);
@@ -116,7 +122,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
 
       {/* renderRight exposes actionDisabled for consumers to disable UI features natively */}
       <div className="ermis-channel-header__actions">
-        {enableCall && callContext && isDirectChannel(activeChannel) && !isPending && (
+        {enableCall && callContext && isDirectChannel(activeChannel) && !isPending && !isSkipped && (
           <>
             {renderAudioCallButton ? (
               renderAudioCallButton(() => callContext.createCall('audio', activeChannel.cid || ''), actionDisabled)

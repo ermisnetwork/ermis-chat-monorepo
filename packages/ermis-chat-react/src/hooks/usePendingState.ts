@@ -55,10 +55,12 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
     const client = channel.getClient();
     const sub1 = client.on('notification.invite_accepted', handleInviteAction);
     const sub2 = client.on('notification.invite_rejected', handleInviteAction);
+    const sub3 = client.on('notification.invite_messaging_skipped', handleInviteAction);
 
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
+      sub3.unsubscribe();
     };
   }, [channel, currentUserId]);
 

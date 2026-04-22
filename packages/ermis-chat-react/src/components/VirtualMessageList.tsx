@@ -13,7 +13,7 @@ import { Avatar } from './Avatar';
 import { MessageItem } from './MessageItem';
 import { SystemMessageItem } from './MessageItem';
 import { isPublicGroupChannel, isDirectChannel } from '../channelTypeUtils';
-import { canManageChannel } from '../channelRoleUtils';
+import { canManageChannel, isSkippedMember, isPendingMember } from '../channelRoleUtils';
 import {
   defaultMessageRenderers,
   type MessageBubbleProps,
@@ -24,6 +24,7 @@ import { PinnedMessages } from './PinnedMessages';
 import { ReadReceipts } from './ReadReceipts';
 import { TypingIndicator } from './TypingIndicator';
 import { PendingOverlay } from './PendingOverlay';
+import { SkippedOverlay } from './SkippedOverlay';
 import { BannedOverlay } from './BannedOverlay';
 import { ClosedTopicOverlay } from './ClosedTopicOverlay';
 import type { MessageListProps } from '../types';
@@ -80,6 +81,23 @@ const DefaultBubble: React.FC<MessageBubbleProps> = React.memo(({
 ));
 (DefaultBubble as any).displayName = 'DefaultBubble';
 
+const DefaultPendingInviteeNotification = React.memo(({ inviteeName, label }: { inviteeName?: string, label?: string }) => {
+  const defaultLabel = inviteeName ? `${inviteeName} needs to accept your invitation to see the messages you've sent` : 'The invited user needs to accept your invitation to see the messages you\'ve sent';
+  return (
+    <div className="ermis-message-list__pending-invitee">
+      <div className="ermis-message-list__pending-invitee-content">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <span>{label || defaultLabel}</span>
+      </div>
+    </div>
+  );
+});
+DefaultPendingInviteeNotification.displayName = 'DefaultPendingInviteeNotification';
+
 /* ----------------------------------------------------------
    VirtualMessageList
    ---------------------------------------------------------- */
@@ -118,14 +136,25 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   pendingAcceptLabel = 'Accept',
   pendingRejectLabel = 'Reject',
   pendingSkipLabel = 'Skip',
+  skippedOverlayTitle = 'You skipped this conversation',
+  skippedOverlaySubtitle = 'Accept the invitation to start chatting',
+  skippedAcceptLabel = 'Accept',
   closedTopicOverlayTitle = 'This topic has been closed',
   closedTopicOverlaySubtitle = 'You can no longer read or send messages in this topic.',
   closedTopicReopenLabel = 'Reopen Topic',
+  PendingInviteeNotificationComponent = DefaultPendingInviteeNotification,
+  pendingInviteeLabel,
 }) => {
-  const { client, messages, readState, activeChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
+  const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
+  
+  const isSkipped = client.userID 
+    ? isSkippedMember(activeChannel?.state?.members?.[client.userID]?.channel_role as string) || 
+      isSkippedMember(activeChannel?.state?.membership?.channel_role as string)
+    : false;
+
   const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
   const parentCid = activeChannel?.data?.parent_cid as string | undefined;
   const parentChannel = parentCid && client ? client.activeChannels[parentCid] : undefined;
@@ -138,6 +167,19 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   const currentUserId = client.userID;
   const currentUserRole = currentUserId ? activeChannel?.state?.members?.[currentUserId]?.channel_role : undefined;
   const canManageTopic = canManageChannel(currentUserRole);
+
+  const pendingInviteeName = useMemo(() => {
+    if (!activeChannel || !currentUserId) return null;
+    if (!isDirectChannel(activeChannel)) return null;
+    const membersList = Object.values(activeChannel.state?.members || {});
+    if (membersList.length === 2 && !isPending) {
+      const otherUser = membersList.find(m => m.user_id !== currentUserId);
+      if (otherUser && isPendingMember(otherUser.channel_role)) {
+        return otherUser.user?.name || otherUser.user?.id || 'User';
+      }
+    }
+    return null;
+  }, [activeChannel, currentUserId, isPending]);
 
   // Ref to scope DOM queries (safe for multiple instances)
   const containerRef = useRef<HTMLDivElement>(null);
@@ -156,15 +198,25 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     }
   }, [activeChannel]);
 
-  const handleRejectInvite = useCallback(() => {
+  const handleRejectInvite = useCallback(async () => {
     if (!activeChannel) return;
-    activeChannel.rejectInvite().catch((e: any) => console.error('Error rejecting invite', e));
-  }, [activeChannel]);
+    try {
+      await activeChannel.rejectInvite();
+      if (setActiveChannel) setActiveChannel(null);
+    } catch (e: any) {
+      console.error('Error rejecting invite', e);
+    }
+  }, [activeChannel, setActiveChannel]);
 
-  const handleSkipInvite = useCallback(() => {
+  const handleSkipInvite = useCallback(async () => {
     if (!activeChannel) return;
-    activeChannel.skipInvite().catch((e: any) => console.error('Error skipping invite', e));
-  }, [activeChannel]);
+    try {
+      await activeChannel.skipInvite();
+      if (setActiveChannel) setActiveChannel(null);
+    } catch (e: any) {
+      console.error('Error skipping invite', e);
+    }
+  }, [activeChannel, setActiveChannel]);
 
   const scrollToBottom = useCallback((smooth = false, attempts = 0) => {
     const handle = vlistRef.current;
@@ -231,7 +283,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     }, [setHasMore, setHasNewer]),
   });
 
-  const hasOverlay = Boolean(isClosedTopic || isPending || isBanned || isBlocked);
+  const hasOverlay = Boolean(isClosedTopic || isPending || isBanned || isBlocked || isSkipped);
   const prevOverlayRef = useRef(hasOverlay);
 
   useEffect(() => {
@@ -419,6 +471,20 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     );
   }
 
+  if (isSkipped) {
+    return (
+      <SkippedOverlay
+        channelImage={channelImage}
+        channelName={channelName}
+        title={skippedOverlayTitle}
+        subtitle={skippedOverlaySubtitle}
+        acceptLabel={skippedAcceptLabel}
+        onAccept={handleAcceptInvite}
+        AvatarComponent={AvatarComponent}
+      />
+    );
+  }
+
   if (isClosedTopic) {
     return (
       <ClosedTopicOverlay
@@ -439,6 +505,13 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         EmptyStateIndicator === DefaultEmpty
           ? <DefaultEmpty title={emptyTitle} subtitle={emptySubtitle} />
           : <EmptyStateIndicator />
+      )}
+
+      {pendingInviteeName && (
+        <PendingInviteeNotificationComponent 
+          inviteeName={pendingInviteeName} 
+          label={typeof pendingInviteeLabel === 'function' ? pendingInviteeLabel(pendingInviteeName) : pendingInviteeLabel} 
+        />
       )}
 
       <VList

@@ -256,7 +256,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [search, localFilteredUsers.length, client, excludeSet]);
+  }, [search, localFilteredUsers.length, client]);
 
   /* ---------- 5. Derived display list ---------- */
   const usersToDisplay = (search.trim() && localFilteredUsers.length === 0)

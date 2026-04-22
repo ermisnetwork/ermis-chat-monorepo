@@ -25,8 +25,9 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   cancelButtonLabel = 'Cancel',
   createButtonLabel = 'Create',
   creatingButtonLabel = 'Creating...',
+  messageButtonLabel = 'Message',
 }) => {
-  const { client } = useChatClient();
+  const { client, setActiveChannel } = useChatClient();
   const currentUserId = client?.userID;
 
   /* ---------- State ---------- */
@@ -46,19 +47,20 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   /* ---------- Exclude IDs for Direct ---------- */
-  const existingDirectUserIds = useMemo(() => {
-    if (!client || !currentUserId || tab !== 'messaging') return [];
+  const hasExistingDirectChannel = useMemo(() => {
+    if (!client || !currentUserId || tab !== 'messaging' || selectedUsers.length === 0) return false;
+    const targetUserId = selectedUsers[0].id;
 
-    const ids = new Set<string>();
-    Object.values(client.activeChannels).forEach((channel: any) => {
-      if (isDirectChannel(channel) && channel.state?.members) {
-        Object.keys(channel.state.members).forEach(uid => {
-          if (uid !== currentUserId) ids.add(uid);
-        });
+    return Object.values(client.activeChannels).some((ch: any) => {
+      if (isDirectChannel(ch) && ch.state?.members) {
+        const membersList = Object.keys(ch.state.members);
+        return membersList.length === 2 && 
+               membersList.includes(currentUserId) && 
+               membersList.includes(targetUserId);
       }
+      return false;
     });
-    return Array.from(ids);
-  }, [client, currentUserId, tab]);
+  }, [client, currentUserId, tab, selectedUsers]);
 
   /* ---------- Handlers ---------- */
   const handleCreate = useCallback(async () => {
@@ -83,10 +85,37 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
 
       if (tab === 'messaging') {
         const targetUserId = selectedUsers[0].id;
+
+        // Try to find an existing direct channel locally
+        const existingChannel = Object.values(client.activeChannels).find((ch: any) => {
+          if (isDirectChannel(ch) && ch.state?.members) {
+            const membersList = Object.keys(ch.state.members);
+            return membersList.length === 2 && 
+                   membersList.includes(currentUserId) && 
+                   membersList.includes(targetUserId);
+          }
+          return false;
+        });
+
+        if (existingChannel) {
+          if (setActiveChannel) setActiveChannel(existingChannel as any);
+          if (onSuccess) {
+            onSuccess(existingChannel as any);
+          } else {
+            onClose();
+          }
+          setIsCreating(false);
+          return;
+        }
+
         createdChannel = client.channel('messaging', {
           members: [currentUserId, targetUserId],
         } as any);
-        await createdChannel.create();
+        const response = (await createdChannel.create()) as any;
+        if (response?.channel?.id) {
+          createdChannel = client.channel('messaging', response.channel.id);
+          await createdChannel.watch();
+        }
       } else {
         // Group Channel
         const memberIds = selectedUsers.map(member => member.id);
@@ -106,7 +135,15 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         }
 
         createdChannel = client.channel('team', payload);
-        await createdChannel.create();
+        const response = (await createdChannel.create()) as any;
+        if (response?.channel?.id) {
+          createdChannel = client.channel('team', response.channel.id);
+          await createdChannel.watch();
+        }
+      }
+
+      if (setActiveChannel) {
+        setActiveChannel(createdChannel);
       }
 
       // Cleanup and execute callback
@@ -137,7 +174,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
       <div className="ermis-create-channel__footer">
         <button className="ermis-create-channel__btn ermis-create-channel__btn--cancel" onClick={onClose} disabled={isCreating}>{cancelButtonLabel}</button>
         <button className="ermis-create-channel__btn ermis-create-channel__btn--create" onClick={handleCreate} disabled={isCreating || !isValid}>
-          {isCreating ? creatingButtonLabel : createButtonLabel}
+          {isCreating ? creatingButtonLabel : (hasExistingDirectChannel ? messageButtonLabel : createButtonLabel)}
         </button>
       </div>
     );
@@ -248,7 +285,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
               <UserPicker
                 mode={tab === 'messaging' ? 'radio' : 'checkbox'}
                 onSelectionChange={setSelectedUsers}
-                excludeUserIds={tab === 'messaging' ? existingDirectUserIds : []}
                 initialSelectedUsers={selectedUsers}
                 AvatarComponent={AvatarComponent}
                 UserItemComponent={UserItemComponent as any}

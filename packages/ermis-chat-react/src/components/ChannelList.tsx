@@ -15,7 +15,7 @@ import type { ChannelActionsProps } from '../types';
 import { TopicModal } from './TopicModal';
 import { DefaultChannelActions, computeDefaultActions } from './ChannelActions';
 import { isDirectChannel, hasTopicsEnabled } from '../channelTypeUtils';
-import { canManageChannel, isPendingMember } from '../channelRoleUtils';
+import { canManageChannel, isPendingMember, isSkippedMember } from '../channelRoleUtils';
 
 export { DefaultChannelActions } from './ChannelActions';
 export type { ChannelAction, ChannelActionsProps } from '../types';
@@ -308,6 +308,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   // Use the new custom hook to handle all row-level realtime updates
   const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
   const { isPending } = usePendingState(channel, currentUserId);
+  const isSkipped = isSkippedMember(channel.state?.membership?.channel_role as string);
 
   const channelState = channel.state as unknown as Record<string, unknown> | undefined;
   const rawUnreadCount = (channelState?.unreadCount as number) ?? 0;
@@ -315,7 +316,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   const isClosedTopic = channel.data?.is_closed_topic === true;
 
   // Render logic continues...
-  const unreadCount = (isBannedInChannel || isBlockedInChannel || isPending) ? 0 : rawUnreadCount;
+  const unreadCount = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped) ? 0 : rawUnreadCount;
   const hasUnread = unreadCount > 0;
 
   // Derive last message preview computation
@@ -326,10 +327,10 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
     [channel, channel.state?.latestMessages, updateCount]
   );
 
-  // Hide last message preview when banned, blocked, or pending
-  const lastMessageText = (isBannedInChannel || isBlockedInChannel || isPending) ? '' : rawLastMessageText;
-  const lastMessageUser = (isBannedInChannel || isBlockedInChannel || isPending) ? '' : rawLastMessageUser;
-  const lastMessageTimestamp = (isBannedInChannel || isBlockedInChannel || isPending) ? null : rawLastMessageTimestamp;
+  // Hide last message preview when banned, blocked, pending or skipped
+  const lastMessageText = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped) ? '' : rawLastMessageText;
+  const lastMessageUser = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped) ? '' : rawLastMessageUser;
+  const lastMessageTimestamp = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped) ? null : rawLastMessageTimestamp;
 
   if (renderChannel) {
     return (
@@ -635,6 +636,12 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
     channels.forEach(ch => {
       const ms = ch.state?.membership as Record<string, unknown> | undefined;
       const isPending = isPendingMember(ms?.channel_role as string);
+      const isSkipped = isSkippedMember(ms?.channel_role as string);
+      
+      if (isSkipped) {
+        return; // Filter out completely
+      }
+
       if (isPending) {
         pending.push(ch);
       } else if (ch.data?.is_pinned) {
@@ -679,8 +686,9 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       const isBannedInChannel = Boolean(ms?.banned);
       const isBlockedInChannel = isDirectChannel(channel) && Boolean(ms?.blocked);
       const isPending = isPendingMember(ms?.channel_role as string);
+      const isSkipped = isSkippedMember(ms?.channel_role as string);
 
-      if (!isBannedInChannel && !isBlockedInChannel && !isPending && (chState?.unreadCount as number) > 0) {
+      if (!isBannedInChannel && !isBlockedInChannel && !isPending && !isSkipped && (chState?.unreadCount as number) > 0) {
         channel.markRead().catch(() => { });
         // Optimistically reset unread to update UI immediately
         if (chState) chState.unreadCount = 0;

@@ -13,6 +13,11 @@ export function isPendingMember(role?: string): boolean {
   return role === CHANNEL_ROLES.PENDING;
 }
 
+/** Checks if the user is in a skipped state (skipped a direct message invite) */
+export function isSkippedMember(role?: string): boolean {
+  return role === CHANNEL_ROLES.SKIPPED;
+}
+
 /** Checks if the user has management permissions (owner or moderator) */
 export function canManageChannel(role?: string): boolean {
   return role === CHANNEL_ROLES.OWNER || role === CHANNEL_ROLES.MODERATOR;

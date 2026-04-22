@@ -459,3 +459,28 @@
 .ermis-message-list__reject-btn:active {
   transform: translateY(0);
 }
+
+/* Pending Invitee Notification */
+.ermis-message-list__pending-invitee {
+  background-color: var(--ermis-bg-secondary);
+  border: 1px solid var(--ermis-border);
+  border-radius: var(--ermis-radius-md, 8px);
+  padding: var(--ermis-spacing-sm, 12px) var(--ermis-spacing-md, 16px);
+  margin: var(--ermis-spacing-sm) var(--ermis-spacing-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ermis-message-list__pending-invitee-content {
+  display: flex;
+  align-items: center;
+  gap: var(--ermis-spacing-md, 12px);
+  color: var(--ermis-text-secondary);
+  font-size: var(--ermis-font-size-sm, 14px);
+  font-family: var(--ermis-font-family, sans-serif);
+}
+
+.ermis-message-list__pending-invitee-content svg {
+  color: var(--ermis-accent);
+}

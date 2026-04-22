@@ -550,9 +550,17 @@ export type MessageListProps = {
   pendingRejectLabel?: string;
   /** I18n Label for skip button on direct messaging channels (default: "Skip") */
   pendingSkipLabel?: string;
+  skippedOverlayTitle?: string;
+  skippedOverlaySubtitle?: string;
+  skippedAcceptLabel?: string;
   closedTopicOverlayTitle?: string;
   closedTopicOverlaySubtitle?: string;
   closedTopicReopenLabel?: string;
+
+  /** Custom component for pending invitee notification in direct channels */
+  PendingInviteeNotificationComponent?: React.ComponentType<{ inviteeName?: string, label?: string }>;
+  /** I18n Label for pending invitee notification */
+  pendingInviteeLabel?: string | ((inviteeName?: string) => string);
 };
 
 /* ----------------------------------------------------------
@@ -1392,6 +1400,7 @@ export type CreateChannelModalProps = {
   cancelButtonLabel?: string;
   createButtonLabel?: string;
   creatingButtonLabel?: string;
+  messageButtonLabel?: string;
 
   /** File upload configuration for group channel images */
   imageAccept?: string;

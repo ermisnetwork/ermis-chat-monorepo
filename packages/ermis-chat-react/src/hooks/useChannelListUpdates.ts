@@ -225,6 +225,7 @@ export function useChannelListUpdates(
     const sub11 = client.on('channel.topic.created', handleGenericUpdate);
     const sub12 = client.on('channel.pinned', handleGenericUpdate);
     const sub13 = client.on('channel.unpinned', handleGenericUpdate);
+    const sub14 = client.on('notification.invite_messaging_skipped', handleMemberUpdated);
 
     return () => {
       sub1.unsubscribe();
@@ -240,6 +241,7 @@ export function useChannelListUpdates(
       sub11.unsubscribe();
       sub12.unsubscribe();
       sub13.unsubscribe();
+      sub14.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }
