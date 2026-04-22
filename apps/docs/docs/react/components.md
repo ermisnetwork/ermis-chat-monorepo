@@ -102,6 +102,7 @@ Renders a list of available channels to select. Connects to socket events for re
 | `sort` | `ChannelSort` | Array defining sort priority. |
 | `options` | `ChannelQueryOptions` | Additional query options. |
 | `className` | `string` | Custom CSS wrapper class name. |
+| `showOnlineStatus`| `boolean` | Show online/offline indicator dots on channel item avatars for friend channels. |
 | `onChannelSelect` | `(channel: Channel) => void` | Event when user clicks a row. |
 
 ### Component Overrides
@@ -213,6 +214,8 @@ Advanced engine for rendering real-time message feeds via infinite cursor virtua
 | `TypingIndicatorComponent` | `React.ComponentType` | Loader elements reflecting incoming keystrokes. |
 | `MessageReactionsComponent` | `React.ComponentType<MessageReactionsProps>` | Interactive emoji tag list wrapper. |
 | `EmptyStateIndicator` | `React.ComponentType` | Graphic displayed prior to starting discussion. |
+| `MediaLightboxComponent`| `React.ComponentType<MediaLightboxProps>`| Replaces the default MediaLightbox entirely. |
+| `PendingInviteeNotificationComponent` | `React.ComponentType<{ inviteeName?: string, label?: string }>` | Notification banner for the inviter in a direct channel when the invitee is pending. |
 
 ### Localization (I18n)
 
@@ -229,6 +232,11 @@ Advanced engine for rendering real-time message feeds via infinite cursor virtua
 | `pendingOverlaySubtitle` | `string` | Label for invite helper. |
 | `pendingAcceptLabel` | `string` | Label for affirmative selection. |
 | `pendingRejectLabel` | `string` | Label for negative selection. |
+| `pendingSkipLabel` | `string` | Label for skip button on direct messaging channels. |
+| `skippedOverlayTitle` | `string` | Header for skipped channel overlay. |
+| `skippedOverlaySubtitle` | `string` | Helper text for skipped channel overlay. |
+| `skippedAcceptLabel` | `string` | Re-accept label on skipped overlay. |
+| `pendingInviteeLabel` | `string \| ((inviteeName?: string) => string)` | Text shown to the inviter while waiting for the invitee. |
 
 ### Example
 
@@ -453,6 +461,7 @@ A standalone modal component that handles the creation of Direct messages and Gr
 | `cancelButtonLabel` | `string` | Text for the cancel action button. |
 | `createButtonLabel` | `string` | Text for the create channel submit button. |
 | `creatingButtonLabel` | `string` | Loading state text for the submit button. |
+| `messageButtonLabel` | `string` | Label for the action button when opening an existing direct message. |
 
 ### Example
 

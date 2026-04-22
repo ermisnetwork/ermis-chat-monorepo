@@ -337,6 +337,58 @@ export const NotificationRow = ({ channel }) => {
 };
 ```
 
+### `useOnlineUsers`
+
+A global listener that aggregates user presence data from the `client.activeConnection` and `user.presence.changed` events across all tracked friend channels.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| None | `N/A` | Does not accept arguments. |
+
+**Returns:** `Record<string, OnlineStatus>` (A dictionary mapping user IDs to their `OnlineStatus` object).
+
+**Example:**
+```tsx
+import { useOnlineUsers } from '@ermis-network/ermis-chat-react';
+
+export const ActiveFriendsList = () => {
+  const onlineUsers = useOnlineUsers();
+  const onlineCount = Object.values(onlineUsers).filter(u => u.isOnline).length;
+
+  return <div>Total Online Friends: {onlineCount}</div>;
+};
+```
+
+### `useOnlineStatus`
+
+Retrieves the specific online/offline state of a peer within a 1-on-1 "friend" channel.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `channel` | `Channel \| null \| undefined` | Target channel instance. |
+
+**Returns:** `{ isOnline: boolean, lastActive?: string }`
+
+**Example:**
+```tsx
+import { useOnlineStatus, useChannel } from '@ermis-network/ermis-chat-react';
+
+export const FriendStatusBadge = () => {
+  const { channel } = useChannel();
+  const { isOnline, lastActive } = useOnlineStatus(channel);
+
+  if (!channel) return null;
+
+  return (
+    <div className="status-indicator">
+      <span className={isOnline ? "text-green-500" : "text-gray-400"}>
+        {isOnline ? "Online" : "Offline"}
+      </span>
+    </div>
+  );
+};
+```
+
 ---
 
 ## 3. Message Loading & Feeds

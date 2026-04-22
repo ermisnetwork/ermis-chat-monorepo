@@ -70,7 +70,8 @@ Media files attached to incoming channel messages rely on the internal `<Attachm
 
 Because the list relies on the Core SDK `Attachment` type structures, rendering behavior differs organically based on file parsing: 
 - Image URLs and Videos are fetched through aspect-ratio constrained boxes to avoid UI layout shifts, accompanied by blur-thumbs while caching.
+- By default, clicking on Images and Videos will open them in the full-screen `<MediaLightbox />` which allows zooming, panning, and authenticated downloading.
 - Audio formats expose native browser HTML5 players.
 - Binary blobs/PDF files render as generic file-download blocks. 
 
-If overriding the `regular` MessageRenderer completely, you will typically need to import and invoke `<AttachmentList attachments={message.attachments} />` securely inside your markup if you want uploaded files to be retrievable seamlessly. Alternatively, you can use `<MessageAttachment attachment={item} />` in a loop for granular individual positioning.
+If overriding the `regular` MessageRenderer completely, you will typically need to import and invoke `<AttachmentList attachments={message.attachments} />` securely inside your markup if you want uploaded files to be retrievable seamlessly. Alternatively, you can use `<MessageAttachment attachment={item} />` in a loop for granular individual positioning. Note that `AttachmentProps` now accepts an `onClick?: () => void` prop if you wish to trigger a lightbox or custom overlay manually.

@@ -198,6 +198,25 @@ await channel.blockUser();
 await channel.unblockUser();
 ```
 
+### Accept / Reject / Skip Invite
+
+When invited to a direct messaging channel, the invited user initially has a `pending` role. They must respond to the invite before they can send messages.
+
+- **Accept**: Joins the channel as a full member.
+- **Reject**: Declines the invitation and closes the channel for the user.
+- **Skip**: Silently ignores the invitation, allowing the user to bypass the channel without formally rejecting it (useful for clearing pending queues).
+
+```typescript
+// Accept the invitation
+await channel.acceptInvite();
+
+// Reject the invitation
+await channel.rejectInvite();
+
+// Skip the invitation
+await channel.skipInvite();
+```
+
 ### Truncate Channel
 
 Remove all messages from the channel while keeping the channel itself intact.

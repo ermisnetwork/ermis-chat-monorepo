@@ -219,3 +219,39 @@ if (!isImagePreloaded(url)) {
    setDisplaySpinner(true);
 }
 ```
+
+---
+
+## Type & System Checks
+
+These semantic helper functions replace hardcoded string comparisons (like `channel.type === 'messaging'` or `message.type === 'system'`). Using these ensures robust UI logic when evaluating permissions or visual states.
+
+### Channel Type Utilities
+
+- `isGroupChannel(channel)`: Checks if the channel supports group messaging.
+- `isDirectChannel(channel)`: Checks if the channel is a 1-on-1 direct message.
+- `isTopicChannel(channel)`: Checks if the channel is a threaded topic.
+- `isPublicGroupChannel(channel)`: Checks if it's an open group (like livestream channels).
+- `hasTopicsEnabled(channel)`: Validates if the channel structure supports opening topics.
+- `supportsBlocking(channel)`: Checks if the channel allows peer blocking.
+
+### Channel Role Utilities
+
+- `isPendingMember(member)`: Checks if the user is in the `pending` invite state.
+- `isSkippedMember(member)`: Checks if the user explicitly skipped the channel invite.
+- `isOwnerMember(member)`: Validates owner permissions.
+- `isFriendChannel(channel)`: Syntactic sugar combining `isDirectChannel` and checking that both members have `owner` roles natively.
+- `canManageChannel(channel, userId)`: Evaluates if the specific user has moderation privileges.
+- `canRemoveTargetMember(...)`, `canBanTargetMember(...)`, `canPromoteTargetMember(...)`, `canDemoteTargetMember(...)`: Helper functions to compute if the current user can execute administrative actions against a target member object.
+
+### Message & Attachment Utilities
+
+- `isSystemMessage(message)`: Validates if the message is a system notification (`message.type === 'system'`).
+- `isStickerMessage(message)`: Validates if the message is a sticker.
+- `isRegularMessage(message)`: Validates if the message is a standard user text or file message.
+- `isSignalMessage(message)`: Validates if the message is an invisible UI trigger (`signal`).
+- `isImageAttachment(attachment)`: Checks if the media is an image.
+- `isVideoAttachment(attachment)`: Checks if the media is a video.
+- `isVoiceRecordingAttachment(attachment)`: Checks if the media is an audio recording.
+- `isLinkPreviewAttachment(attachment)`: Checks if the attachment is a scraped URL metadata block.
+- `isImage(attachment)` / `isVideo(attachment)`: Granular checks on the attachment type.

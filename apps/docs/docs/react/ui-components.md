@@ -20,6 +20,7 @@ A versatile graphic component that handles profile image rendering, fallback ini
 | `name` | `string` | String for initial fallbacks. |
 | `size` | `number` | Dimension in pixels (Default 36). |
 | `className` | `string` | Custom CSS injection. |
+| `disableLightbox`| `boolean` | Prevent the image from opening in a full-screen lightbox on click. |
 
 ### Example
 If an `image` is passed as null or fails to load, `<Avatar />` handles gracefully extracting initials from the `name` prompt automatically.
@@ -56,6 +57,10 @@ A preset layout element placed atop the channel container, displaying the active
 | `renderTitle` | `(channel: Channel) => React.ReactNode` | Bypass central views. |
 | `AvatarComponent`| `React.ComponentType<AvatarProps>`| Override left graphic. |
 | `className` | `string` | Adjust boundary styles. |
+| `showOnlineStatus` | `boolean` | Show online/offline indicator for direct friend channels (default: `true`). |
+| `onlineLabel` | `string` | I18n label for "Online" subtitle. |
+| `offlineLabel` | `string` | I18n label for "Offline" subtitle. |
+| `OnlineIndicatorComponent`| `React.ComponentType<{ isOnline: boolean }>` | Custom online indicator component. |
 
 ### Example
 ```tsx
@@ -68,6 +73,21 @@ export const CustomHeader = ({ channel }) => (
   />
 );
 ```
+
+---
+
+## `<MediaLightbox />`
+
+A standalone component for viewing images and videos in a full-screen interactive lightbox. Includes zoom, panning, and secure authenticated file downloading.
+
+### Props
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `items` | `MediaLightboxItem[]` | Array of media objects (`{ type: 'image' \| 'video', src, alt, posterSrc }`). |
+| `initialIndex` | `number` | Starting index when opened. |
+| `isOpen` | `boolean` | Whether the lightbox is visible. |
+| `onClose` | `() => void` | Event triggered to close the lightbox. |
 
 ---
 
