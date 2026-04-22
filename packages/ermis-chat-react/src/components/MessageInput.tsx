@@ -16,6 +16,7 @@ import { buildUserMap, replaceMentionsForPreview, moveCaretToEnd } from '../util
 import { getMentionHtml } from '../hooks/useMentions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { CHANNEL_ROLES } from '../channelRoleUtils';
+import { isTopicChannel } from '../channelTypeUtils';
 import type { MentionMember, MessageInputProps, FilePreviewItem } from '../types';
 
 export type { MessageInputProps, SendButtonProps, AttachButtonProps, EmojiPickerProps, EmojiButtonProps } from '../types';
@@ -54,6 +55,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   const [hasContent, setHasContent] = useState(false);
 
   const { role, isGroupChannel: isTeamChannel, hasCapability } = useChannelCapabilities();
+  const isTopic = isTopicChannel(activeChannel);
   const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
 
   // Slow Mode Logic
@@ -242,9 +244,9 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     toggleEmojiPicker,
   } = useEmojiPicker({ editableRef, setHasContent });
 
-  // Build member list from channel state (only for team channels)
+  // Build member list from channel state (only for team channels and topics)
   const members = useMemo<MentionMember[]>(() => {
-    if (!isTeamChannel) return [];
+    if (!(isTeamChannel || isTopic)) return [];
     const list: MentionMember[] = [];
     const stateMembers = activeChannel?.state?.members as Record<string, unknown> | undefined;
     if (stateMembers && typeof stateMembers === 'object') {
@@ -258,7 +260,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       }
     }
     return list;
-  }, [activeChannel, isTeamChannel]);
+  }, [activeChannel, isTeamChannel, isTopic]);
 
   const {
     showSuggestions, filteredMembers, highlightIndex,
@@ -289,7 +291,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     setFiles,
     hasContent,
     setHasContent,
-    isTeamChannel,
+    isTeamChannel: isTeamChannel || isTopic,
     buildPayload,
     reset,
     syncMessages,
@@ -324,12 +326,12 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     const content = el?.textContent?.trim() ?? '';
     setHasContent(content.length > 0 || files.length > 0);
     setKeywordError(null); // clear keyword error if user modifies input
-    if (isTeamChannel && !disableMentions) {
+    if ((isTeamChannel || isTopic) && !disableMentions) {
       mentionHandleInput();
     }
     // Send typing indicator (SDK throttles to 1 event per 2s)
     activeChannel?.keystroke();
-  }, [isTeamChannel, disableMentions, mentionHandleInput, files.length, activeChannel]);
+  }, [isTeamChannel, isTopic, disableMentions, mentionHandleInput, files.length, activeChannel]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -346,7 +348,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
           return;
         }
       }
-      if (isTeamChannel && !disableMentions) {
+      if ((isTeamChannel || isTopic) && !disableMentions) {
         const consumed = mentionHandleKeyDown(e);
         if (consumed) return;
       }
@@ -357,7 +359,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
         }
       }
     },
-    [isTeamChannel, disableMentions, mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, reset],
+    [isTeamChannel, isTopic, disableMentions, mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, reset],
   );
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -469,7 +471,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       {/* Text input + send row */}
       <div className={`ermis-message-input__row${(!canSendMessage || isSlowModeBlocked || keywordError) ? ' ermis-message-input__row--banners-active' : ''}`}>
         <div className="ermis-message-input__editable-wrapper">
-          {canSendMessage && isTeamChannel && !disableMentions && showSuggestions && (
+          {canSendMessage && (isTeamChannel || isTopic) && !disableMentions && showSuggestions && (
             <MentionSuggestionsComponent
               members={filteredMembers}
               highlightIndex={highlightIndex}
