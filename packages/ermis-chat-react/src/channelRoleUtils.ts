@@ -1,3 +1,6 @@
+import type { Channel } from '@ermis-network/ermis-chat-sdk';
+import { isDirectChannel } from './channelTypeUtils';
+
 export const CHANNEL_ROLES = {
   OWNER: 'owner',
   MODERATOR: 'moder',
@@ -46,4 +49,25 @@ export function canPromoteTargetMember(currentUserRole?: string, targetRole?: st
 /** Determines if the current user has the permission to demote a moderator to simple member */
 export function canDemoteTargetMember(currentUserRole?: string, targetRole?: string): boolean {
   return currentUserRole === CHANNEL_ROLES.OWNER && targetRole === CHANNEL_ROLES.MODERATOR;
+}
+
+/** Checks if the user is an owner of the channel */
+export function isOwnerMember(role?: string): boolean {
+  return role === CHANNEL_ROLES.OWNER;
+}
+
+/**
+ * Checks if a direct channel represents a "friend" relationship:
+ * both members must have the 'owner' channel_role.
+ */
+export function isFriendChannel(
+  channel: Channel | null | undefined,
+  targetUserId: string,
+  currentUserId: string,
+): boolean {
+  if (!channel || !isDirectChannel(channel)) return false;
+  const targetMember = channel.state?.members?.[targetUserId];
+  const currentMember = channel.state?.members?.[currentUserId];
+  return isOwnerMember(targetMember?.channel_role as string)
+      && isOwnerMember(currentMember?.channel_role as string);
 }

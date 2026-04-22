@@ -13,6 +13,9 @@ export { useChannelListUpdates } from './hooks/useChannelListUpdates';
 export { useChannelRowUpdates } from './hooks/useChannelRowUpdates';
 export { useBannedState } from './hooks/useBannedState';
 export { useBlockedState } from './hooks/useBlockedState';
+export { useOnlineStatus } from './hooks/useOnlineStatus';
+export type { OnlineStatus } from './hooks/useOnlineStatus';
+export { useOnlineUsers } from './hooks/useOnlineUsers';
 export { usePendingState } from './hooks/usePendingState';
 
 // Components
@@ -73,6 +76,9 @@ export {
 export {
   CHANNEL_ROLES,
   isPendingMember,
+  isSkippedMember,
+  isOwnerMember,
+  isFriendChannel,
   canManageChannel,
   canRemoveTargetMember,
   canBanTargetMember,

@@ -4,6 +4,7 @@ import type { Channel, Event, ChannelFilters } from '@ermis-network/ermis-chat-s
 import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
+import { useOnlineUsers } from '../hooks/useOnlineUsers';
 import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
 import { usePendingState } from '../hooks/usePendingState';
@@ -15,7 +16,7 @@ import type { ChannelActionsProps } from '../types';
 import { TopicModal } from './TopicModal';
 import { DefaultChannelActions, computeDefaultActions } from './ChannelActions';
 import { isDirectChannel, hasTopicsEnabled } from '../channelTypeUtils';
-import { canManageChannel, isPendingMember, isSkippedMember } from '../channelRoleUtils';
+import { canManageChannel, isPendingMember, isSkippedMember, isFriendChannel } from '../channelRoleUtils';
 
 export { DefaultChannelActions } from './ChannelActions';
 export type { ChannelAction, ChannelActionsProps } from '../types';
@@ -119,6 +120,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   hiddenActions,
   actionLabels,
   actionIcons,
+  isOnline,
 }) => {
   const { client } = useChatClient();
   const currentUserId = client.userID;
@@ -177,7 +179,12 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
 
   return (
     <div className={itemClass} onClick={handleClick}>
-      <AvatarComponent image={image} name={name} size={40} disableLightbox />
+      <div className="ermis-channel-list__item-avatar-wrapper">
+        <AvatarComponent image={image} name={name} size={40} disableLightbox />
+        {isOnline !== undefined && (
+          <span className={`ermis-channel-list__online-dot ermis-channel-list__online-dot--${isOnline ? 'online' : 'offline'}`} />
+        )}
+      </div>
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-top-row">
           <div className="ermis-channel-list__item-name">{name}</div>
@@ -283,6 +290,7 @@ type ChannelRowProps = {
   hiddenActions?: string[];
   actionLabels?: import('../types').ChannelActionLabels;
   actionIcons?: import('../types').ChannelActionIcons;
+  isOnline?: boolean;
 };
 
 const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
@@ -304,6 +312,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   hiddenActions,
   actionLabels,
   actionIcons,
+  isOnline,
 }) => {
   // Use the new custom hook to handle all row-level realtime updates
   const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
@@ -365,6 +374,7 @@ const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       hiddenActions={hiddenActions}
       actionLabels={actionLabels}
       actionIcons={actionIcons}
+      isOnline={isOnline}
     />
   );
 });
@@ -580,6 +590,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   hiddenActions,
   actionLabels,
   actionIcons,
+  showOnlineStatus = true,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -675,6 +686,28 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   // Real-time: List manipulation (move to top, add, delete)
   useChannelListUpdates(channels, setChannels);
 
+  // Online status: compute set of online friend user IDs (skip if disabled)
+  const onlineUsers = useOnlineUsers(showOnlineStatus ? channels : []);
+
+  // Helper: get the "other" user ID from a direct channel
+  const getOtherUserId = useCallback((channel: Channel): string | undefined => {
+    if (!isDirectChannel(channel) || !client.userID) return undefined;
+    const members = channel.state?.members;
+    if (!members) return undefined;
+    for (const memberId of Object.keys(members)) {
+      if (memberId !== client.userID) return memberId;
+    }
+    return undefined;
+  }, [client.userID]);
+
+  // Helper: compute isOnline for a channel (undefined for non-friend channels)
+  const getIsOnline = useCallback((channel: Channel): boolean | undefined => {
+    const otherUserId = getOtherUserId(channel);
+    if (!otherUserId || !client.userID) return undefined;
+    if (!isFriendChannel(channel, otherUserId, client.userID)) return undefined;
+    return onlineUsers.has(otherUserId);
+  }, [getOtherUserId, onlineUsers, client.userID]);
+
   const handleSelect = useCallback(
     (channel: Channel) => {
       setActiveChannel(channel);
@@ -743,6 +776,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               hiddenActions={hiddenActions}
               actionLabels={actionLabels}
               actionIcons={actionIcons}
+              isOnline={getIsOnline(channel)}
             />
           );
         })}
@@ -806,6 +840,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               hiddenActions={hiddenActions}
               actionLabels={actionLabels}
               actionIcons={actionIcons}
+              isOnline={getIsOnline(channel)}
             />
           );
         })}

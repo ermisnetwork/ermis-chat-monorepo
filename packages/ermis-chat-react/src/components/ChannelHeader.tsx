@@ -3,9 +3,11 @@ import { useChatClient } from '../hooks/useChatClient';
 import { usePendingState } from '../hooks/usePendingState';
 import { Avatar } from './Avatar';
 import type { ChannelHeaderProps } from '../types';
+import type { OnlineStatus } from '../hooks/useOnlineStatus';
 import { ErmisCallContext } from '../context/ErmisCallContext';
 import { hasTopicsEnabled, isDirectChannel } from '../channelTypeUtils';
-import { isSkippedMember } from '../channelRoleUtils';
+import { isSkippedMember, isFriendChannel } from '../channelRoleUtils';
+import type { Event } from '@ermis-network/ermis-chat-sdk';
 
 export type { ChannelHeaderProps } from '../types';
 
@@ -18,6 +20,8 @@ export type { ChannelHeaderProps } from '../types';
  * - `AvatarComponent` — replace the avatar
  * - `renderTitle(channel)` — fully custom title rendering
  * - `renderRight(channel)` — render content on the right side
+ * - `showOnlineStatus` — show online/offline dot for friend channels (default: true)
+ * - `OnlineIndicatorComponent` — replace the default indicator
  *
  * For a fully custom header, use `Channel`'s `HeaderComponent` prop instead.
  */
@@ -34,6 +38,10 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   audioCallTitle = 'Audio Call',
   videoCallTitle = 'Video Call',
   CallBadgeComponent,
+  showOnlineStatus = true,
+  onlineLabel = 'Online',
+  offlineLabel = 'Offline',
+  OnlineIndicatorComponent,
 }) => {
   const { activeChannel, client, enableCall } = useChatClient();
   const { isPending } = usePendingState(activeChannel, client.userID);
@@ -88,6 +96,62 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
     return undefined;
   }, [activeChannel, client.activeChannels]);
 
+  // ── Online Status (direct friend channels only) ──
+  const currentUserId = client.userID;
+
+  // Get the "other" user's ID from the direct channel.
+  const otherUserId = useMemo(() => {
+    if (!activeChannel || !currentUserId || !isDirectChannel(activeChannel)) return undefined;
+    const members = activeChannel.state?.members;
+    if (!members) return undefined;
+    for (const memberId of Object.keys(members)) {
+      if (memberId !== currentUserId) return memberId;
+    }
+    return undefined;
+  }, [activeChannel, currentUserId]);
+
+  // Check if this is a friend channel (both members are owner).
+  const isFriend = useMemo(() => {
+    if (!otherUserId || !currentUserId || !activeChannel) return false;
+    return isFriendChannel(activeChannel, otherUserId, currentUserId);
+  }, [activeChannel, otherUserId, currentUserId]);
+
+  // Derive online status from watchers + subscribe to realtime events.
+  const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>('unknown');
+
+  useEffect(() => {
+    if (!showOnlineStatus || !isFriend || !otherUserId || !activeChannel) {
+      setOnlineStatus('unknown');
+      return;
+    }
+
+    // Read initial state from watchers.
+    setOnlineStatus(activeChannel.state?.watchers?.[otherUserId] ? 'online' : 'offline');
+
+    const handleWatchingStart = (event: Event) => {
+      if (event.user?.id === otherUserId) {
+        setOnlineStatus('online');
+      }
+    };
+
+    const handleWatchingStop = (event: Event) => {
+      if (event.user?.id === otherUserId) {
+        setOnlineStatus('offline');
+      }
+    };
+
+    const sub1 = activeChannel.on('user.watching.start', handleWatchingStart);
+    const sub2 = activeChannel.on('user.watching.stop', handleWatchingStop);
+
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+    };
+  }, [activeChannel, otherUserId, isFriend, showOnlineStatus]);
+
+  const showOnlineDot = showOnlineStatus && onlineStatus !== 'unknown';
+  const isOnline = onlineStatus === 'online';
+
   if (!activeChannel) return null;
 
   return (
@@ -115,7 +179,21 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
             <div className="ermis-channel-header__name">{channelName}</div>
           </div>
         )}
-        {subtitle && (
+        {/* Online/Offline indicator for friend direct channels */}
+        {showOnlineDot && (
+          OnlineIndicatorComponent ? (
+            <OnlineIndicatorComponent isOnline={isOnline} />
+          ) : (
+            <div className={`ermis-channel-header__online-status ermis-channel-header__online-status--${isOnline ? 'online' : 'offline'}`}>
+              <span className={`ermis-channel-header__online-dot ermis-channel-header__online-dot--${isOnline ? 'online' : 'offline'}`} />
+              <span className="ermis-channel-header__online-label">
+                {isOnline ? onlineLabel : offlineLabel}
+              </span>
+            </div>
+          )
+        )}
+        {/* Consumer-provided subtitle (takes over if set) */}
+        {subtitle && !showOnlineDot && (
           <div className="ermis-channel-header__subtitle">{subtitle}</div>
         )}
       </div>

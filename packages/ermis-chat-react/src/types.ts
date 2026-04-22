@@ -298,6 +298,14 @@ export type ChannelHeaderProps = {
   videoCallTitle?: string;
   /** Custom component to show when a call is active (e.g. "Call in progress" badge) */
   CallBadgeComponent?: React.ComponentType<{ callType: string }>;
+  /** Show online/offline indicator for direct friend channels (default: true) */
+  showOnlineStatus?: boolean;
+  /** I18n label for "Online" subtitle (default: "Online") */
+  onlineLabel?: string;
+  /** I18n label for "Offline" subtitle (default: "Offline") */
+  offlineLabel?: string;
+  /** Custom online indicator component (replaces the default dot + label) */
+  OnlineIndicatorComponent?: React.ComponentType<{ isOnline: boolean }>;
 };
 
 /** Data passed to a fully custom HeaderComponent */
@@ -386,6 +394,8 @@ export type ChannelItemProps = {
   actionLabels?: ChannelActionLabels;
   /** Custom icons for default channel actions */
   actionIcons?: ChannelActionIcons;
+  /** Whether the other user in this direct channel is online (friend channels only) */
+  isOnline?: boolean;
 };
 
 export type ChannelListProps = {
@@ -438,6 +448,8 @@ export type ChannelListProps = {
   actionLabels?: ChannelActionLabels;
   /** Custom icons for default channel actions */
   actionIcons?: ChannelActionIcons;
+  /** Show online/offline indicator dots on channel item avatars for friend channels (default: true) */
+  showOnlineStatus?: boolean;
 };
 
 /* ----------------------------------------------------------
