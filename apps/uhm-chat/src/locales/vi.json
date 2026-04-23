@@ -1,0 +1,40 @@
+{
+  "login": {
+    "title": "Chào mừng bạn",
+    "description": "Đăng nhập nhanh để bắt đầu cuộc trò chuyện.",
+    "email_tab": "Email",
+    "phone_tab": "Số điện thoại",
+    "email_label": "Nhập địa chỉ Email",
+    "email_placeholder": "name@example.com",
+    "phone_label": "Nhập số điện thoại di động",
+    "phone_placeholder": "987 654 321",
+    "send_otp": "Gửi mã OTP",
+    "sending": "Đang gửi...",
+    "otp_label": "Nhập mã OTP 6 số",
+    "otp_desc": "Mã xác nhận đã được gửi đến {{identifier}}",
+    "verify": "Đăng nhập",
+    "verifying": "Đang xác thực...",
+    "back": "Quay lại",
+    "resend": "Gửi lại OTP",
+    "resend_wait": "Gửi lại ({{seconds}}s)",
+    "or_continue": "Hoặc tiếp tục theo cách khác",
+    "hero_title": "Mọi cuộc trò chuyện.\nMột nơi duy nhất.",
+    "hero_subtitle": "Nhắn tin cá nhân, gọi điện hay thảo luận nhóm theo chủ đề. Sắc nét, tinh gọn và bảo mật tuyệt đối với E2EE.",
+    "hero_footer": "© 2026 Uhm Chat bởi Ermis Network. Bảo lưu mọi quyền."
+  },
+  "errors": {
+    "invalid_email": "Vui lòng nhập định dạng Email hợp lệ",
+    "invalid_phone": "Số điện thoại phải từ 9-11 chữ số",
+    "otp_failed": "Gửi mã OTP thất bại",
+    "system_otp_err": "Lỗi hệ thống khi gửi OTP",
+    "otp_incomplete": "Vui lòng nhập đủ mã OTP 6 số",
+    "invalid_session": "Phiên xác thực không hợp lệ. Vui lòng thử lại.",
+    "missing_token": "Không tìm thấy token đăng nhập",
+    "missing_user": "Không thể xác định danh tính User",
+    "wrong_otp": "Mã OTP không chính xác",
+    "system_verify_err": "Lỗi hệ thống khi xác thực OTP",
+    "google_failed": "Đăng nhập Google thất bại",
+    "system_google_err": "Lỗi hệ thống khi đăng nhập Google",
+    "google_connect": "Không thể kết nối với Google"
+  }
+}
