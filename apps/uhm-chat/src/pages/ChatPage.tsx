@@ -1,15 +1,34 @@
+import { useState } from 'react'
 import { ChannelList, Channel, VirtualMessageList, MessageInput, ChannelHeader } from '@ermis-network/ermis-chat-react'
 import { SidebarHeader } from '@/components/SidebarHeader'
+import { ContactsPanel } from '@/features/chat/ContactsPanel'
+import { InvitesPanel } from '@/features/chat/InvitesPanel'
 
 export function ChatPage() {
+  const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites'>('channels')
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:via-[#0a0a0c] dark:to-zinc-900">
       
       {/* Sidebar */}
-      <div className="w-[340px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full flex flex-col bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
-        <SidebarHeader />
-        <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-300 dark:[&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-thumb]:rounded-full">
-          <ChannelList />
+      <div className="w-[340px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
+        
+        {/* Channels Panel */}
+        <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'channels' ? 'translate-x-0' : '-translate-x-full'}`}>
+          <SidebarHeader onNavigate={setActivePanel} />
+          <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-300 dark:[&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-thumb]:rounded-full">
+            <ChannelList />
+          </div>
+        </div>
+
+        {/* Contacts Panel */}
+        <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'contacts' ? 'translate-x-0' : 'translate-x-full'}`}>
+          <ContactsPanel onBack={() => setActivePanel('channels')} />
+        </div>
+
+        {/* Invites Panel */}
+        <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'invites' ? 'translate-x-0' : 'translate-x-full'}`}>
+          <InvitesPanel onBack={() => setActivePanel('channels')} />
         </div>
       </div>
       

@@ -1,8 +1,6 @@
-import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut, X, Check } from 'lucide-react'
+import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,9 +14,11 @@ import { CustomCreateChannelModal } from './custom/CustomCreateChannelModal'
 import { useState } from 'react'
 import { STORAGE_KEYS } from '@/utils/constants'
 
+interface SidebarHeaderProps {
+  onNavigate?: (panel: 'contacts' | 'invites') => void;
+}
 
-
-export function SidebarHeader() {
+export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
   const { t, i18n } = useTranslation()
   const { client } = useChatClient()
   const { user } = useChatUser()
@@ -93,7 +93,7 @@ export function SidebarHeader() {
           </DropdownMenuItem>
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem className="cursor-pointer flex items-center justify-between">
+          <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={() => onNavigate?.('invites')}>
             <div className="flex items-center">
               <Inbox className="mr-2 h-4 w-4" />
               <span>{t('chat.menu_invites', 'Lời mời')}</span>
@@ -105,7 +105,7 @@ export function SidebarHeader() {
             )}
           </DropdownMenuItem>
 
-          <DropdownMenuItem className="cursor-pointer flex items-center justify-between">
+          <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={() => onNavigate?.('contacts')}>
             <div className="flex items-center">
               <Users className="mr-2 h-4 w-4" />
               <span>{t('chat.menu_contacts', 'Danh bạ')}</span>

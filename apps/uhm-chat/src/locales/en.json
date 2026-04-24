@@ -61,7 +61,13 @@
     "create_channel_message": "Message",
     "create_channel_next": "Next",
     "create_channel_back": "Back",
-    "create_channel_empty": "No users found"
+    "create_channel_empty": "No users found",
+    "back": "Back",
+    "search_contacts": "Search contacts...",
+    "accept": "Accept",
+    "decline": "Decline",
+    "no_contacts": "No contacts found.",
+    "no_invites": "No invites found."
   },
   "not_found": {
     "title": "Page not found",

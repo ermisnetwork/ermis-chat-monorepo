@@ -1346,6 +1346,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     console.log('---channels---', channels);
 
+    this.dispatchEvent({
+      type: 'channels.queried',
+    } as unknown as Event<ErmisChatGenerics>);
+
     return channels;
   }
 
