@@ -2,6 +2,8 @@ export const STORAGE_KEYS = {
   USER_ID: 'user_id',
   TOKEN: 'token',
   CALL_SESSION_ID: 'callSessionId',
+  LOCALE: 'locale',
+  THEME: 'theme',
 } as const;
 
 export const API_DEFAULTS = {

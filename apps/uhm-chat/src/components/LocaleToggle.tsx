@@ -1,10 +1,13 @@
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
+import { STORAGE_KEYS } from '@/utils/constants'
 
 export function LocaleToggle() {
   const { i18n } = useTranslation()
   const toggleLocale = () => {
-    i18n.changeLanguage(i18n.language === 'vi' ? 'en' : 'vi')
+    const newLocale = i18n.language === 'vi' ? 'en' : 'vi'
+    i18n.changeLanguage(newLocale)
+    localStorage.setItem(STORAGE_KEYS.LOCALE, newLocale)
   }
 
   return (

@@ -1,14 +1,23 @@
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
+import { STORAGE_KEYS } from '@/utils/constants'
 
 export function ThemeToggle() {
-  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
+  const [isDark, setIsDark] = useState(() => {
+    const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME)
+    if (savedTheme) {
+      return savedTheme === 'dark'
+    }
+    return document.documentElement.classList.contains('dark')
+  })
 
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark')
+      localStorage.setItem(STORAGE_KEYS.THEME, 'dark')
     } else {
       document.documentElement.classList.remove('dark')
+      localStorage.setItem(STORAGE_KEYS.THEME, 'light')
     }
   }, [isDark])
 

@@ -15,6 +15,8 @@ function App() {
   const [isClientReady, setIsClientReady] = useState(false)
   const [isRestoring, setIsRestoring] = useState(true)
 
+  const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) === 'dark' ? 'dark' : 'light'
+
   // Khôi phục phiên đăng nhập từ localStorage khi mount
   useEffect(() => {
     const savedToken = localStorage.getItem(STORAGE_KEYS.TOKEN)
@@ -64,7 +66,7 @@ function App() {
   }
 
   return (
-    <ChatProvider client={chatClient} initialTheme="light">
+    <ChatProvider client={chatClient} initialTheme={savedTheme}>
       <div className="flex h-screen w-full overflow-hidden bg-background">
         <div className="w-80 border-r border-border h-full flex flex-col">
           <div className="p-4 border-b font-semibold text-lg">Uhm Chat</div>
