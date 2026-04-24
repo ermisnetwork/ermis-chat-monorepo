@@ -65,6 +65,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
     <Modal isOpen onClose={onClose} title={title} maxWidth="480px" footer={footer}>
       <UserPicker
         mode="checkbox"
+        friendsOnly={true}
         onSelectionChange={handleSelectionChange}
         excludeUserIds={excludeUserIds}
         pageSize={30}

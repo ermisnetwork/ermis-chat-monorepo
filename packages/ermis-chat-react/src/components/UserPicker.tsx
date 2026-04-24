@@ -8,6 +8,7 @@ import type {
   UserPickerSelectedBoxProps,
   UserPickerUser,
 } from '../types';
+import { isFriendChannel } from '../channelRoleUtils';
 
 /* ---------- Constants ---------- */
 const DEFAULT_PAGE_SIZE = 30;
@@ -131,6 +132,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
   emptyText = 'No users found.',
   loadingMoreText = 'Loading more...',
   selectedEmptyLabel,
+  friendsOnly,
 }) => {
   const { client } = useChatClient();
   const currentUserId = client?.userID;
@@ -180,13 +182,51 @@ export const UserPicker: React.FC<UserPickerProps> = ({
     const fetchUsers = async () => {
       if (!client) return;
 
-      const cacheKey = `${client.userID || 'anon'}-${pageSize}`;
+      const cacheKey = friendsOnly 
+        ? `${client.userID || 'anon'}-friends` 
+        : `${client.userID || 'anon'}-${pageSize}`;
+
       if (globalUsersCache[cacheKey] && globalUsersCache[cacheKey].users.length > 0) {
         const cached = globalUsersCache[cacheKey];
         setAllUsers(cached.users);
         setHasMore(cached.hasMore);
         setPage(cached.page);
         setLoading(false);
+        return;
+      }
+
+      if (friendsOnly) {
+        const friends: UserPickerUser[] = [];
+        const seenIds = new Set<string>();
+        
+        for (const channel of Object.values(client.activeChannels)) {
+          const members = channel.state?.members;
+          if (!members) continue;
+
+          for (const [memberId, member] of Object.entries(members)) {
+            if (memberId === client.userID) continue;
+            
+            if (isFriendChannel(channel, memberId, client.userID as string) && !seenIds.has(memberId)) {
+              if (member.user) {
+                friends.push(member.user as UserPickerUser);
+                seenIds.add(memberId);
+              }
+            }
+          }
+        }
+        
+        if (active) {
+          setAllUsers(friends);
+          setHasMore(false);
+          setPage(1);
+          setLoading(false);
+
+          globalUsersCache[cacheKey] = {
+            users: friends,
+            page: 1,
+            hasMore: false,
+          };
+        }
         return;
       }
 
@@ -262,7 +302,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
 
   /* ---------- 4. Remote search fallback ---------- */
   useEffect(() => {
-    if (!search.trim() || localFilteredUsers.length > 0) {
+    if (!search.trim() || localFilteredUsers.length > 0 || friendsOnly) {
       setRemoteUsers([]);
       setIsSearching(false);
       return;
@@ -290,9 +330,13 @@ export const UserPicker: React.FC<UserPickerProps> = ({
   }, [search, localFilteredUsers.length, client]);
 
   /* ---------- 5. Derived display list ---------- */
-  const usersToDisplay = (search.trim() && localFilteredUsers.length === 0)
-    ? remoteUsers
-    : localFilteredUsers;
+  const usersToDisplay = useMemo(() => {
+    const list = (search.trim() && localFilteredUsers.length === 0)
+      ? remoteUsers
+      : localFilteredUsers;
+    return list.filter(u => !excludeSet.has(u.id));
+  }, [search, localFilteredUsers, remoteUsers, excludeSet]);
+
   const isListLoading = loading || isSearching || isPendingFilter;
 
   /* ---------- 6. Selection handlers ---------- */

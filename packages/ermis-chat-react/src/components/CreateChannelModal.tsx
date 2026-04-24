@@ -356,6 +356,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
             <UserPicker
               key={tab}
               mode={tab === 'messaging' ? 'radio' : 'checkbox'}
+              friendsOnly={tab === 'team'}
               onSelectionChange={setSelectedUsers}
               initialSelectedUsers={selectedUsers}
               emptyText={emptyStateLabel}

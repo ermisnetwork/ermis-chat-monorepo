@@ -1421,6 +1421,7 @@ export type UserPickerProps = {
   emptyText?: string;
   loadingMoreText?: string;
   selectedEmptyLabel?: string;
+  friendsOnly?: boolean;
 };
 
 /* ----------------------------------------------------------
