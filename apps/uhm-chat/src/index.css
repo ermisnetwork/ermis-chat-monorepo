@@ -10,7 +10,7 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    --primary: 262.1 83.3% 57.8%;
+    --primary: 258 81% 61%;
     --primary-foreground: 210 40% 98%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
@@ -22,7 +22,7 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 262.1 83.3% 57.8%;
+    --ring: 258 81% 61%;
     --radius: 0.75rem;
   }
  
@@ -33,7 +33,7 @@
     --card-foreground: 0 0% 98%;
     --popover: 240 10% 3.9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 262.1 83.3% 57.8%;
+    --primary: 258 81% 61%;
     --primary-foreground: 210 40% 98%;
     --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
@@ -45,7 +45,7 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
-    --ring: 262.1 83.3% 57.8%;
+    --ring: 258 81% 61%;
   }
 }
  
@@ -56,5 +56,10 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+.bg-chat-pattern {
+  background-image: radial-gradient(hsl(var(--foreground)/0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 

@@ -8,6 +8,7 @@ description: "Guidelines and architecture strict standards for developing and ma
 When modifying, maintaining, or adding features to the **Uhm Chat** Web Application (`apps/uhm-chat`), you **MUST** adhere to the following architectural, localization, and performance standards. This application consumes the core SDK but is a consumer-facing React App utilizing a modern stack (TailwindCSS, Radix UI, Vite).
 
 ## 1. Architecture & Structure (Feature-Based)
+- **Route-based Pages (CRITICAL):** All top-level views (e.g., `ChatPage.tsx`, `LoginPage.tsx`, `NotFoundPage.tsx`) MUST be placed in the `src/pages/` directory. `App.tsx` should only be responsible for global context providers and routing logic (e.g., using `react-router-dom`).
 - **Feature-Based Modularization (CRITICAL):** Do not dump all components into the global `src/components/` folder. Group related files by domain features (e.g., `src/features/chat/`, `src/features/auth/`, `src/features/settings/`).
 - **Core UI Separation:** The `src/components/ui/` directory is strictly reserved for "dumb" UI elements provided by **shadcn/ui** or core design primitives (e.g., `Button.tsx`, `Tabs.tsx`). Do not include any Ermis SDK logic in these primitive components.
 - **Smart Hooks over Local State:** Complex calculations and logic should be extracted into the `src/hooks/` or `src/utils/` directory.

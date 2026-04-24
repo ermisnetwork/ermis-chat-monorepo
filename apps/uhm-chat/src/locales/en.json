@@ -36,5 +36,9 @@
     "google_failed": "Google login failed",
     "system_google_err": "System error during Google login",
     "google_connect": "Could not connect to Google"
+  },
+  "chat": {
+    "search_channels": "Search...",
+    "empty_dropdown": "No functions yet"
   }
 }

@@ -7,11 +7,11 @@ import { GoogleLogin } from '@react-oauth/google'
 import { ErmisAuthProvider } from '@ermis-network/ermis-chat-sdk'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useTranslation } from 'react-i18next'
-import uhmLogo from '../../assets/uhm.svg'
-import { parseJwt, validateEmail, validatePhone, normalizePhone } from '../../utils/helpers'
-import { STORAGE_KEYS, API_DEFAULTS, OTP_CONFIG } from '../../utils/constants'
-import { ThemeToggle } from '../ThemeToggle'
-import { LocaleToggle } from '../LocaleToggle'
+import uhmLogo from '../assets/uhm.svg'
+import { parseJwt, validateEmail, validatePhone, normalizePhone } from '../utils/helpers'
+import { STORAGE_KEYS, API_DEFAULTS, OTP_CONFIG } from '../utils/constants'
+import { ThemeToggle } from '../components/ThemeToggle'
+import { LocaleToggle } from '../components/LocaleToggle'
 
 interface LoginPageProps {
   onLoginSuccess: (userId: string, token: string) => void

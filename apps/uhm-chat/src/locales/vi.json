@@ -36,5 +36,9 @@
     "google_failed": "Đăng nhập Google thất bại",
     "system_google_err": "Lỗi hệ thống khi đăng nhập Google",
     "google_connect": "Không thể kết nối với Google"
+  },
+  "chat": {
+    "search_channels": "Tìm kiếm...",
+    "empty_dropdown": "Chưa có chức năng"
   }
 }

@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
-import { ChatProvider, ChannelList, Channel, VirtualMessageList, MessageInput } from '@ermis-network/ermis-chat-react'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { ChatProvider } from '@ermis-network/ermis-chat-react'
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk'
-import { LoginPage } from '@/components/Login/LoginPage'
+import { LoginPage } from '@/pages/LoginPage'
+import { ChatPage } from '@/pages/ChatPage'
+import { NotFoundPage } from '@/pages/NotFoundPage'
 import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants'
 import '@ermis-network/ermis-chat-react/dist/index.css'
 
@@ -10,12 +13,21 @@ const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || 'default-project'
 
 const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_DEFAULTS.BASE_URL)
 
-function App() {
+// Component xử lý điều hướng an toàn sau khi login
+function AuthRoute({ isAuthenticated, isRestoring, children }: { isAuthenticated: boolean, isRestoring: boolean, children: React.ReactNode }) {
+  if (isRestoring) return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950" />
+  if (!isAuthenticated) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
+// Component chính chứa logic Auth và Routing
+function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isClientReady, setIsClientReady] = useState(false)
   const [isRestoring, setIsRestoring] = useState(true)
 
   const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) === 'dark' ? 'dark' : 'light'
+  const navigate = useNavigate()
 
   // Khôi phục phiên đăng nhập từ localStorage khi mount
   useEffect(() => {
@@ -49,43 +61,49 @@ function App() {
     ).then(() => {
       setIsClientReady(true)
       setIsAuthenticated(true)
+      navigate('/', { replace: true })
     }).catch(err => console.error('Failed to connect user:', err))
   }
 
-  // Đang kiểm tra phiên cũ
+  // Nếu đang loading auth
   if (isRestoring) {
     return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950" />
   }
 
-  if (!isAuthenticated) {
-    return <LoginPage onLoginSuccess={handleLoginSuccess} />
-  }
-
-  if (!isClientReady) {
-    return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">Đang kết nối đến Uhm Chat...</div>
-  }
-
   return (
     <ChatProvider client={chatClient} initialTheme={savedTheme}>
-      <div className="flex h-screen w-full overflow-hidden bg-background">
-        <div className="w-80 border-r border-border h-full flex flex-col">
-          <div className="p-4 border-b font-semibold text-lg">Uhm Chat</div>
-          <div className="flex-1 overflow-y-auto">
-            <ChannelList />
-          </div>
-        </div>
-        <div className="flex-1 flex flex-col">
-          <Channel>
-            <div className="flex-1 overflow-y-auto">
-              <VirtualMessageList />
-            </div>
-            <div className="p-4 border-t">
-              <MessageInput />
-            </div>
-          </Channel>
-        </div>
-      </div>
+      <Routes>
+        <Route 
+          path="/login" 
+          element={
+            isAuthenticated ? <Navigate to="/" replace /> : <LoginPage onLoginSuccess={handleLoginSuccess} />
+          } 
+        />
+        
+        <Route 
+          path="/" 
+          element={
+            <AuthRoute isAuthenticated={isAuthenticated} isRestoring={isRestoring}>
+              {!isClientReady ? (
+                <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">Đang kết nối đến Uhm Chat...</div>
+              ) : (
+                <ChatPage />
+              )}
+            </AuthRoute>
+          } 
+        />
+        
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
     </ChatProvider>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   )
 }
 
