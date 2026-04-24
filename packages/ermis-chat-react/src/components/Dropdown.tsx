@@ -9,22 +9,7 @@ export const closeAllDropdowns = () => {
   document.dispatchEvent(new CustomEvent(CLOSE_ALL_EVENT));
 };
 
-export interface DropdownProps {
-  /** Whether the dropdown is open */
-  isOpen: boolean;
-  /** Rect from getBoundingClientRect() of the anchor element */
-  anchorRect: DOMRect | null;
-  /** Callback when dropdown requests to close (e.g., click outside, scroll, Escape) */
-  onClose: () => void;
-  /** Dropdown menu content */
-  children: React.ReactNode;
-  /** Horizontal alignment relative to the anchor. Default: 'left' */
-  align?: 'left' | 'right';
-  /** Optional custom CSS class for the container */
-  className?: string;
-  /** Optional custom CSS style for the container */
-  style?: React.CSSProperties;
-}
+import type { DropdownProps } from '../types';
 
 export const Dropdown: React.FC<DropdownProps> = ({
   isOpen,

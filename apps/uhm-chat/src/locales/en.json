@@ -45,7 +45,20 @@
     "menu_invites": "Invites",
     "menu_contacts": "Contacts",
     "menu_logout": "Log Out",
-    "menu_profile_anonymous": "Anonymous User"
+    "menu_profile_anonymous": "Anonymous User",
+    "create_channel_title": "New Message",
+    "create_channel_direct": "Direct",
+    "create_channel_group": "Group",
+    "create_channel_group_name": "Channel Name",
+    "create_channel_group_name_placeholder": "Enter channel name (required)",
+    "create_channel_group_desc": "Description",
+    "create_channel_group_desc_placeholder": "Optional description",
+    "create_channel_group_public": "Public Channel",
+    "create_channel_search": "Search users...",
+    "create_channel_cancel": "Cancel",
+    "create_channel_create": "Create",
+    "create_channel_creating": "Creating...",
+    "create_channel_message": "Message"
   },
   "not_found": {
     "title": "Page not found",

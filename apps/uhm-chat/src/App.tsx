@@ -7,6 +7,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { ChatPage } from '@/pages/ChatPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants'
+import { UhmModal } from '@/components/custom/UhmModal'
 import '@ermis-network/ermis-chat-react/dist/index.css'
 
 // Khởi tạo client với các thông số từ env
@@ -19,6 +20,11 @@ function AuthRoute({ isAuthenticated, isRestoring, children }: { isAuthenticated
   if (isRestoring) return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950" />
   if (!isAuthenticated) return <Navigate to="/login" replace />
   return <>{children}</>
+}
+
+// Cấu hình các component UI tùy biến cho Ermis Chat SDK
+const chatComponents = {
+  ModalComponent: UhmModal as any,
 }
 
 // Component chính chứa logic Auth và Routing
@@ -73,7 +79,7 @@ function AppContent() {
   }
 
   return (
-    <ChatProvider client={chatClient} initialTheme={savedTheme}>
+    <ChatProvider client={chatClient} initialTheme={savedTheme} components={chatComponents}>
       <Routes>
         <Route 
           path="/login" 

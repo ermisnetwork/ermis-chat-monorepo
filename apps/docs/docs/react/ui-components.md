@@ -276,3 +276,60 @@ export const AddMembersPanel = ({ existingMemberIds }) => {
   );
 };
 ```
+
+---
+
+## `<Modal />`
+
+A flexible overlay component that serves as the foundation for the UI Kit's dialog windows (like `CreateChannelModal`, `TopicModal`, etc.). The `Modal` component is designed to be overridden globally via the `ChatProvider`'s `components` registry to seamlessly integrate with your application's design system (e.g., Shadcn UI or Radix).
+
+### Props
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `isOpen` | `boolean` | Controls whether the modal is visible. |
+| `onClose` | `() => void` | Event triggered to dismiss the modal. |
+| `title` | `string` | Header text displayed at the top of the modal. |
+| `children` | `React.ReactNode` | The main content of the modal. |
+| `className` | `string` | Custom CSS wrapper class name. |
+| `disableBackdropClick`| `boolean` | Prevent closing the modal when clicking outside of it. |
+
+### Example
+```tsx
+import { Modal } from '@ermis-network/ermis-chat-react';
+
+export const MyCustomDialog = ({ isOpen, onClose }) => (
+  <Modal isOpen={isOpen} onClose={onClose} title="Warning">
+    <p>Are you sure you want to proceed?</p>
+    <button onClick={onClose}>Cancel</button>
+  </Modal>
+);
+```
+
+---
+
+## `<Panel />`
+
+A sliding drawer or side-panel component, typically used for the Right-sidebar contexts like `ChannelInfo` and `MessageSearchPanel`. Like `Modal`, it can be globally overridden via the Component Registry.
+
+### Props
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `isOpen` | `boolean` | Controls whether the panel is visible. |
+| `onClose` | `() => void` | Event triggered to dismiss the panel. |
+| `title` | `string` | Header text displayed at the top of the panel. |
+| `children` | `React.ReactNode` | The main content of the panel. |
+| `className` | `string` | Custom CSS wrapper class name. |
+
+### Example
+```tsx
+import { Panel } from '@ermis-network/ermis-chat-react';
+
+export const SettingsDrawer = ({ isOpen, onClose }) => (
+  <Panel isOpen={isOpen} onClose={onClose} title="Settings">
+    <div>Theme configuration options...</div>
+  </Panel>
+);
+```
+

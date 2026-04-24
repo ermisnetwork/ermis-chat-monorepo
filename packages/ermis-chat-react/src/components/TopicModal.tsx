@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import type { CreateTopicData, EditTopicData } from '@ermis-network/ermis-chat-sdk';
-import { Modal } from './Modal';
+import { Modal as DefaultModal } from './Modal';
 import { useChatClient } from '../hooks/useChatClient';
+import { useChatComponents } from '../context/ChatComponentsContext';
 import type { TopicModalProps } from '../types';
 
 const DEFAULT_TOPIC_ICONS = ['💬', '🔥', '🚀', '⭐', '💡', '🎉', '📌', '📁', '🎨', '💻', '📈', '🤝'];
@@ -24,6 +25,8 @@ export const TopicModal: React.FC<TopicModalProps> = React.memo(({
   savingButtonLabel = topic ? 'Saving...' : 'Creating...',
 }) => {
   const { activeChannel, client } = useChatClient();
+  const { ModalComponent } = useChatComponents();
+  const Modal = ModalComponent || DefaultModal;
   
   const originalName = (topic?.data?.name as string) || '';
   const originalImage = (topic?.data?.image as string) || '';

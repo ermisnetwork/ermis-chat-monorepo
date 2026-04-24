@@ -3,7 +3,8 @@ import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import { useMessageActions } from '../hooks/useMessageActions';
 import { useChatClient } from '../hooks/useChatClient';
 import type { MessageActionsBoxProps } from '../types';
-import { Dropdown, closeAllDropdowns } from './Dropdown';
+import { Dropdown as DefaultDropdown, closeAllDropdowns } from './Dropdown';
+import { useChatComponents } from '../context/ChatComponentsContext';
 
 // Aliased for backward compatibility
 export const closeAllActionBoxes = closeAllDropdowns;
@@ -26,6 +27,8 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
   deleteForEveryoneLabel = 'Delete for everyone',
 }) => {
   const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel } = useChatClient();
+  const { DropdownComponent } = useChatComponents();
+  const Dropdown = DropdownComponent || DefaultDropdown;
   const [anchorRect, setAnchorRect] = React.useState<DOMRect | null>(null);
   const actions = useMessageActions(message, isOwnMessage);
 

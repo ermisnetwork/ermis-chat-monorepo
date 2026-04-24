@@ -18,6 +18,7 @@ The top-level provider for the chat application. It manages the global state con
 | ---- | ---- | ----------- |
 | `client` | `ErmisChat` | The initialized SDK client instance. |
 | `children` | `React.ReactNode` | Child components requiring context. |
+| `components` | `ChatComponentsContextValue` | Global UI primitive components registry (e.g. overriding default Modals, Panels). |
 | `initialTheme` | `'dark' \| 'light'` | Initial layout theme (default: `'dark'`). |
 
 ### Example

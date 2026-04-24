@@ -121,7 +121,17 @@
 /* User Picker Wrap */
 .ermis-create-channel__users {
   margin-top: var(--ermis-spacing-sm, 0.5rem);
+  display: flex;
+  flex-direction: column;
 }
+
+/* .ermis-create-channel__users--team {
+  height: 280px;
+}
+
+.ermis-create-channel__users--messaging {
+  height: 400px;
+} */
 
 .ermis-create-channel__users-title {
   font-size: var(--ermis-font-size-sm, 0.875rem);

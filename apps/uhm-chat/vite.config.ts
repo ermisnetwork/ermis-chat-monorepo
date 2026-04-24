@@ -12,6 +12,9 @@ export default defineConfig({
     },
     dedupe: ['react', 'react-dom'],
   },
+  css: {
+    devSourcemap: true,
+  },
   server: {
     port: 3001,
     strictPort: true,

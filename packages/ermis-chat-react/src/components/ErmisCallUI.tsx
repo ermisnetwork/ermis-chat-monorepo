@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useCallContext } from '../hooks/useCallContext';
-import { Modal } from './Modal';
+import { Modal as DefaultModal } from './Modal';
 import { Avatar } from './Avatar';
+import { useChatComponents } from '../context/ChatComponentsContext';
 import { CallStatus } from '@ermis-network/ermis-chat-sdk';
 import type { ErmisCallUIProps } from '../types';
 
@@ -83,6 +84,9 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
     upgradeCall,
     callDuration,
   } = useCallContext();
+
+  const { ModalComponent } = useChatComponents();
+  const Modal = ModalComponent || DefaultModal;
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);

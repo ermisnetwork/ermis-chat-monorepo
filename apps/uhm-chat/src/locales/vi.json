@@ -45,7 +45,20 @@
     "menu_invites": "Lời mời",
     "menu_contacts": "Danh bạ",
     "menu_logout": "Đăng xuất",
-    "menu_profile_anonymous": "Người dùng ẩn danh"
+    "menu_profile_anonymous": "Người dùng ẩn danh",
+    "create_channel_title": "Tạo tin nhắn mới",
+    "create_channel_direct": "Trực tiếp",
+    "create_channel_group": "Nhóm",
+    "create_channel_group_name": "Tên kênh",
+    "create_channel_group_name_placeholder": "Nhập tên kênh (bắt buộc)",
+    "create_channel_group_desc": "Mô tả",
+    "create_channel_group_desc_placeholder": "Mô tả (không bắt buộc)",
+    "create_channel_group_public": "Kênh công khai",
+    "create_channel_search": "Tìm kiếm người dùng...",
+    "create_channel_cancel": "Hủy",
+    "create_channel_create": "Tạo",
+    "create_channel_creating": "Đang tạo...",
+    "create_channel_message": "Nhắn tin"
   },
   "not_found": {
     "title": "Trang không tồn tại",

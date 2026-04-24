@@ -3,7 +3,8 @@ import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../../hooks/useChatClient';
 import { replaceMentionsForPreview, buildUserMap, formatRelativeDate } from '../../utils';
 import { Avatar } from '../Avatar';
-import { Panel } from '../Panel';
+import { Panel as DefaultPanel } from '../Panel';
+import { useChatComponents } from '../../context/ChatComponentsContext';
 import type { AvatarProps, SearchResultMessage, MessageSearchPanelProps } from '../../types';
 
 /* ----------------------------------------------------------
@@ -58,11 +59,13 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
   AvatarComponent = Avatar,
   placeholder = 'Search messages...',
   title = 'Search Messages',
-  emptyText = 'No messages found',
+  emptyText = 'No messages found.',
   loadingText = 'Searching...',
   debounceMs = 500,
 }) => {
   const { setJumpToMessageId } = useChatClient();
+  const { PanelComponent } = useChatComponents();
+  const Panel = PanelComponent || DefaultPanel;
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResultMessage[]>([]);

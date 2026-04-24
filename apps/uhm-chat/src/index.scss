@@ -1,7 +1,7 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
- 
+
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -25,7 +25,7 @@
     --ring: 258 81% 61%;
     --radius: 0.75rem;
   }
- 
+
   .dark {
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
@@ -48,7 +48,7 @@
     --ring: 258 81% 61%;
   }
 }
- 
+
 @layer base {
   * {
     @apply border-border;
@@ -59,7 +59,18 @@
 }
 
 .bg-chat-pattern {
-  background-image: radial-gradient(hsl(var(--foreground)/0.05) 1px, transparent 1px);
+  background-image: radial-gradient(hsl(var(--foreground) / 0.05) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
+.uhm-chat-app {
+  .ermis-create-channel {
+    &__body {
+      padding: 0;
+    }
+
+    &__users {
+      margin-top: 0;
+    }
+  }
+}

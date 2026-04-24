@@ -56,9 +56,13 @@ export type ChatContextValue = {
   enableCall?: boolean;
 };
 
+import type { ChatComponentsContextValue } from './context/ChatComponentsContext';
+
 export type ChatProviderProps = {
   client: ErmisChat;
   children: React.ReactNode;
+  /** Global UI primitive components registry */
+  components?: ChatComponentsContextValue;
   /** Initial theme, defaults to 'dark' */
   initialTheme?: Theme;
   /** Enable direct call feature (Audio/Video). If enabled, configures internal CallProvider */
@@ -921,7 +925,7 @@ export type FilesPreviewProps = {
 };
 
 /* --------------------------------------------------------------------------
- * Modal Components
+ * Primitive Components Props
  * -------------------------------------------------------------------------- */
 
 export interface ModalProps {
@@ -934,6 +938,38 @@ export interface ModalProps {
   hideCloseButton?: boolean;
   closeOnOutsideClick?: boolean;
 }
+
+export interface DropdownProps {
+  /** Whether the dropdown is open */
+  isOpen: boolean;
+  /** Rect from getBoundingClientRect() of the anchor element */
+  anchorRect: DOMRect | null;
+  /** Callback when dropdown requests to close (e.g., click outside, scroll, Escape) */
+  onClose: () => void;
+  /** Dropdown menu content */
+  children: React.ReactNode;
+  /** Horizontal alignment relative to the anchor. Default: 'left' */
+  align?: 'left' | 'right';
+  /** Optional custom CSS class for the container */
+  className?: string;
+  /** Optional custom CSS style for the container */
+  style?: React.CSSProperties;
+}
+
+export type PanelProps = {
+  /** Whether the panel is visible */
+  isOpen: boolean;
+  /** Called when user clicks the back button */
+  onClose: () => void;
+  /** Panel title shown in the header */
+  title?: string;
+  /** Panel body content */
+  children: React.ReactNode;
+  /** Optional header content (replaces default title + back button) */
+  headerContent?: React.ReactNode;
+  /** Additional CSS class name */
+  className?: string;
+};
 
 /* ----------------------------------------------------------
    Channel Info types
@@ -1391,6 +1427,45 @@ export type UserPickerProps = {
    Create Channel Modal Props
    ---------------------------------------------------------- */
 
+export type CreateChannelTabsProps = {
+  activeTab: 'messaging' | 'team';
+  onTabChange: (tab: 'messaging' | 'team') => void;
+  disabled?: boolean;
+  directTabLabel?: string;
+  groupTabLabel?: string;
+};
+
+export type CreateChannelFooterProps = {
+  tab: 'messaging' | 'team';
+  step: 1 | 2;
+  onCancel: () => void;
+  onNext: () => void;
+  onBack: () => void;
+  onCreate: () => void;
+  isCreating: boolean;
+  isValid: boolean;
+  hasExistingDirectChannel?: boolean;
+  cancelButtonLabel?: string;
+  createButtonLabel?: string;
+  creatingButtonLabel?: string;
+  messageButtonLabel?: string;
+};
+
+export type CreateChannelGroupFieldsProps = {
+  name: string;
+  onNameChange: (name: string) => void;
+  description: string;
+  onDescriptionChange: (desc: string) => void;
+  isPublic: boolean;
+  onPublicChange: (isPublic: boolean) => void;
+  disabled?: boolean;
+  groupNameLabel?: string;
+  groupNamePlaceholder?: string;
+  groupDescriptionLabel?: string;
+  groupDescriptionPlaceholder?: string;
+  groupPublicLabel?: string;
+};
+
 export type CreateChannelModalProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -1399,6 +1474,11 @@ export type CreateChannelModalProps = {
   /** Override visual components */
   AvatarComponent?: React.ComponentType<AvatarProps>;
   UserItemComponent?: React.ComponentType<UserPickerItemProps>;
+  TabsComponent?: React.ComponentType<CreateChannelTabsProps>;
+  FooterComponent?: React.ComponentType<CreateChannelFooterProps>;
+  GroupFieldsComponent?: React.ComponentType<CreateChannelGroupFieldsProps>;
+  SearchInputComponent?: React.ComponentType<{ value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; placeholder: string }>;
+  SelectedBoxComponent?: React.ComponentType<UserPickerSelectedBoxProps>;
 
   /** i18n labels */
   title?: string;

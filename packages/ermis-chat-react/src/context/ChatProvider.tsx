@@ -3,6 +3,7 @@ import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-s
 import type { Theme, ChatContextValue, ChatProviderProps, ReadStateEntry } from '../types';
 import { ErmisCallProvider } from '../components/ErmisCallProvider';
 import { ErmisCallUI } from '../components/ErmisCallUI';
+import { ChatComponentsContext } from './ChatComponentsContext';
 
 export type { Theme, ChatContextValue, ChatProviderProps } from '../types';
 
@@ -11,6 +12,7 @@ export const ChatContext = createContext<ChatContextValue | null>(null);
 export const ChatProvider: React.FC<ChatProviderProps> = ({
   client,
   children,
+  components = {},
   initialTheme = 'light',
   enableCall = false,
   callSessionId,
@@ -87,12 +89,14 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   );
 
   const content = (
-    <ChatContext.Provider value={value}>
-      <div className={`ermis-chat ermis-chat--${theme}`}>
-        {children}
-        {enableCall && CallUIView}
-      </div>
-    </ChatContext.Provider>
+    <ChatComponentsContext.Provider value={components}>
+      <ChatContext.Provider value={value}>
+        <div className={`ermis-chat ermis-chat--${theme}`}>
+          {children}
+          {enableCall && CallUIView}
+        </div>
+      </ChatContext.Provider>
+    </ChatComponentsContext.Provider>
   );
 
   if (enableCall) {

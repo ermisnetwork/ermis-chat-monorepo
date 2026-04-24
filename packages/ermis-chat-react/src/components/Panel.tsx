@@ -1,19 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-export type PanelProps = {
-  /** Whether the panel is visible */
-  isOpen: boolean;
-  /** Called when user clicks the back button */
-  onClose: () => void;
-  /** Panel title shown in the header */
-  title?: string;
-  /** Panel body content */
-  children: React.ReactNode;
-  /** Optional header content (replaces default title + back button) */
-  headerContent?: React.ReactNode;
-  /** Additional CSS class name */
-  className?: string;
-};
+import type { PanelProps } from '../types';
 
 /**
  * Reusable sliding panel component.

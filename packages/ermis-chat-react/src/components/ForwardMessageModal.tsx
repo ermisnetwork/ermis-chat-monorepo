@@ -3,7 +3,8 @@ import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
-import { Modal } from './Modal';
+import { Modal as DefaultModal } from './Modal';
+import { useChatComponents } from '../context/ChatComponentsContext';
 import type { ForwardMessageModalProps, ForwardChannelItemProps, AvatarProps } from '../types';
 import { isTopicChannel } from '../channelTypeUtils';
 
@@ -58,6 +59,8 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   SearchInputComponent,
 }) => {
   const { client, activeChannel } = useChatClient();
+  const { ModalComponent } = useChatComponents();
+  const Modal = ModalComponent || DefaultModal;
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);

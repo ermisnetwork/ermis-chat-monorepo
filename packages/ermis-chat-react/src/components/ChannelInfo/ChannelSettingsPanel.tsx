@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Panel } from '../Panel';
+import { Panel as DefaultPanel } from '../Panel';
+import { useChatComponents } from '../../context/ChatComponentsContext';
 import { useChatClient } from '../../hooks/useChatClient';
 import type { ChannelSettingsPanelProps } from '../../types';
 import { isGroupChannel } from '../../channelTypeUtils';
@@ -21,10 +22,11 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
   ],
   workspaceTopicsTitle = 'Workspace Topics',
   topicsFeatureName = 'Topics',
-  topicsFeatureDescription = 'Enable sub-channels and discussions',
+  topicsFeatureDescription = 'Allow users to reply to messages with dedicated conversation threads. Disabling this hides the reply-in-topic button for everyone.',
 }) => {
-  // Config state
   const { client } = useChatClient();
+  const { PanelComponent } = useChatComponents();
+  const Panel = PanelComponent || DefaultPanel;
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
   const isOwner = currentUserRole === CHANNEL_ROLES.OWNER;

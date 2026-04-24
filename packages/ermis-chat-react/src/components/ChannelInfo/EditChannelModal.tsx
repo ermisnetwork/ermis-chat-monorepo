@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Modal } from '../Modal';
+import { Modal as DefaultModal } from '../Modal';
+import { useChatComponents } from '../../context/ChatComponentsContext';
 import type { EditChannelModalProps, EditChannelData } from '../../types';
 import { isGroupChannel } from '../../channelTypeUtils';
 
@@ -30,6 +31,8 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
   const originalDescription = (channel.data?.description as string) || '';
   const originalPublic = Boolean(channel.data?.public);
   const isTeamOrMeetingChannel = isGroupChannel(channel);
+  const { ModalComponent } = useChatComponents();
+  const Modal = ModalComponent || DefaultModal;
 
   // Form state
   const [name, setName] = useState(originalName);

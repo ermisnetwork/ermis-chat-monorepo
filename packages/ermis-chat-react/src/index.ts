@@ -57,7 +57,7 @@ export { MessageActionsBox } from './components/MessageActionsBox';
 export type { MessageActionsBoxProps } from './types';
 
 export { Dropdown, closeAllDropdowns } from './components/Dropdown';
-export type { DropdownProps } from './components/Dropdown';
+export type { DropdownProps } from './types';
 
 export { MessageReactions } from './components/MessageReactions';
 export type { MessageReactionsProps, ReactionUser, LatestReaction } from './types';

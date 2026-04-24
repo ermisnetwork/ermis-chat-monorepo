@@ -1439,12 +1439,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           channel.data.topics_enabled = true;
         }
         channelState.topics = channelState.topics || [];
+        event.user = getUserInfo(event.user?.id || '', users);
         break;
       case 'channel.topic.disabled':
         if (channel.data) {
           channel.data.topics_enabled = false;
         }
         channelState.topics = [];
+        event.user = getUserInfo(event.user?.id || '', users);
         break;
       case 'channel.updated':
         if (event.channel) {
@@ -1576,18 +1578,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           channel.data.is_pinned = false;
         }
         break;
-      case 'channel.topic.disabled':
-        if (channel.data) {
-          channel.data.topics_enabled = false;
-        }
-        event.user = getUserInfo(event.user?.id || '', users);
-        break;
-      case 'channel.topic.enabled':
-        if (channel.data) {
-          channel.data.topics_enabled = true;
-        }
-        event.user = getUserInfo(event.user?.id || '', users);
-        break;
+
       case 'channel.topic.created':
         const members = event.channel?.members || [];
         const enrichedMembers = enrichWithUserInfo(members, users);

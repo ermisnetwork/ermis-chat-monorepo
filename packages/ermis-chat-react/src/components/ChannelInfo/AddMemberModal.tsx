@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Modal } from '../Modal';
+import { Modal as DefaultModal } from '../Modal';
 import { UserPicker } from '../UserPicker';
 import { Avatar } from '../Avatar';
+import { useChatComponents } from '../../context/ChatComponentsContext';
 import type { AddMemberModalProps, UserPickerUser } from '../../types';
 
 export const AddMemberModal: React.FC<AddMemberModalProps> = ({
@@ -19,6 +20,8 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   UserItemComponent,
   SearchInputComponent,
 }) => {
+  const { ModalComponent } = useChatComponents();
+  const Modal = ModalComponent || DefaultModal;
   const [selectedUsers, setSelectedUsers] = useState<UserPickerUser[]>([]);
   const [isAdding, setIsAdding] = useState(false);
 
