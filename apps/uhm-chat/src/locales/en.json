@@ -1,0 +1,40 @@
+{
+  "login": {
+    "title": "Welcome",
+    "description": "Sign in securely to start chatting.",
+    "email_tab": "Email",
+    "phone_tab": "Phone Number",
+    "email_label": "Enter Email Address",
+    "email_placeholder": "name@example.com",
+    "phone_label": "Enter Mobile Number",
+    "phone_placeholder": "987 654 321",
+    "send_otp": "Send OTP",
+    "sending": "Sending...",
+    "otp_label": "Enter 6-digit OTP",
+    "otp_desc": "Verification code has been sent to {{identifier}}",
+    "verify": "Log In",
+    "verifying": "Verifying...",
+    "back": "Go Back",
+    "resend": "Resend OTP",
+    "resend_wait": "Resend in {{seconds}}s",
+    "or_continue": "Or continue with",
+    "hero_title": "Every conversation.\nOne single place.",
+    "hero_subtitle": "Private messaging, direct calls, and topic-based group discussions. Crisp, minimal, and fully secured with E2EE.",
+    "hero_footer": "© 2026 Uhm Chat by Ermis Network. All rights reserved."
+  },
+  "errors": {
+    "invalid_email": "Please enter a valid email format",
+    "invalid_phone": "Phone number must be 9-11 digits",
+    "otp_failed": "Failed to send OTP code",
+    "system_otp_err": "System error while sending OTP",
+    "otp_incomplete": "Please enter the full 6-digit OTP",
+    "invalid_session": "Invalid authentication session. Please try again.",
+    "missing_token": "Login token not found",
+    "missing_user": "Unable to identify user identity",
+    "wrong_otp": "Incorrect OTP code",
+    "system_verify_err": "System error while verifying OTP",
+    "google_failed": "Google login failed",
+    "system_google_err": "System error during Google login",
+    "google_connect": "Could not connect to Google"
+  }
+}

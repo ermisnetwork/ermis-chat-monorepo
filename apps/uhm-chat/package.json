@@ -18,9 +18,11 @@
     "@react-oauth/google": "^0.12.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "i18next": "^24.2.2",
     "lucide-react": "^0.473.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-i18next": "^15.4.1",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7"
   },
