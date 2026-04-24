@@ -113,6 +113,9 @@ DefaultSelectedBox.displayName = 'DefaultSelectedBox';
    UserPicker Component
    ========================================================== */
 
+// Global cache to persist users across UserPicker unmounts/remounts (e.g. during tab switch)
+const globalUsersCache: Record<string, { users: UserPickerUser[], page: number, hasMore: boolean }> = {};
+
 export const UserPicker: React.FC<UserPickerProps> = ({
   mode,
   onSelectionChange,
@@ -176,6 +179,17 @@ export const UserPicker: React.FC<UserPickerProps> = ({
     let active = true;
     const fetchUsers = async () => {
       if (!client) return;
+
+      const cacheKey = `${client.userID || 'anon'}-${pageSize}`;
+      if (globalUsersCache[cacheKey] && globalUsersCache[cacheKey].users.length > 0) {
+        const cached = globalUsersCache[cacheKey];
+        setAllUsers(cached.users);
+        setHasMore(cached.hasMore);
+        setPage(cached.page);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         const response = await client.queryUsers(String(pageSize), 1);
@@ -183,6 +197,12 @@ export const UserPicker: React.FC<UserPickerProps> = ({
           setAllUsers(response.data);
           setHasMore(response.data.length >= pageSize);
           setPage(1);
+
+          globalUsersCache[cacheKey] = {
+            users: response.data,
+            page: 1,
+            hasMore: response.data.length >= pageSize
+          };
         }
       } catch (err) {
         console.error('[UserPicker] Error fetching users:', err);
@@ -205,7 +225,18 @@ export const UserPicker: React.FC<UserPickerProps> = ({
         setAllUsers(prev => {
           const existingIds = new Set(prev.map(u => u.id));
           const newUsers = response.data.filter((u: UserPickerUser) => !existingIds.has(u.id));
-          return [...prev, ...newUsers];
+          const combined = [...prev, ...newUsers];
+
+          if (client) {
+            const cacheKey = `${client.userID || 'anon'}-${pageSize}`;
+            globalUsersCache[cacheKey] = {
+              users: combined,
+              page: nextPage,
+              hasMore: response.data.length >= pageSize
+            };
+          }
+
+          return combined;
         });
         setHasMore(response.data.length >= pageSize);
         setPage(nextPage);

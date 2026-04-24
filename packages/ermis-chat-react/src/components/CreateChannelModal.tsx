@@ -354,6 +354,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         {((tab === 'team' && step === 2) || tab === 'messaging') && (
           <div className={`ermis-create-channel__users ermis-create-channel__users--${tab}`}>
             <UserPicker
+              key={tab}
               mode={tab === 'messaging' ? 'radio' : 'checkbox'}
               onSelectionChange={setSelectedUsers}
               initialSelectedUsers={selectedUsers}
