@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { ChatProvider } from '@ermis-network/ermis-chat-react'
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk'
 import { LoginPage } from '@/pages/LoginPage'
@@ -22,6 +23,7 @@ function AuthRoute({ isAuthenticated, isRestoring, children }: { isAuthenticated
 
 // Component chính chứa logic Auth và Routing
 function AppContent() {
+  const { t } = useTranslation()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isClientReady, setIsClientReady] = useState(false)
   const [isRestoring, setIsRestoring] = useState(true)
@@ -85,7 +87,7 @@ function AppContent() {
           element={
             <AuthRoute isAuthenticated={isAuthenticated} isRestoring={isRestoring}>
               {!isClientReady ? (
-                <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">Đang kết nối đến Uhm Chat...</div>
+                <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">{t('app.connecting')}</div>
               ) : (
                 <ChatPage />
               )}

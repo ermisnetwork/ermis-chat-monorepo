@@ -40,5 +40,13 @@
   "chat": {
     "search_channels": "Tìm kiếm...",
     "empty_dropdown": "Chưa có chức năng"
+  },
+  "not_found": {
+    "title": "Trang không tồn tại",
+    "description": "Xin lỗi, chúng tôi không thể tìm thấy trang bạn đang yêu cầu. Vui lòng kiểm tra lại đường dẫn hoặc quay về trang chủ.",
+    "back_home": "Quay về trang chủ"
+  },
+  "app": {
+    "connecting": "Đang kết nối đến Uhm Chat..."
   }
 }

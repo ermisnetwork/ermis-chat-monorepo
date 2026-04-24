@@ -40,5 +40,13 @@
   "chat": {
     "search_channels": "Search...",
     "empty_dropdown": "No functions yet"
+  },
+  "not_found": {
+    "title": "Page not found",
+    "description": "Sorry, we couldn't find the page you're looking for. Please check the URL or return to the homepage.",
+    "back_home": "Back to Home"
+  },
+  "app": {
+    "connecting": "Connecting to Uhm Chat..."
   }
 }
