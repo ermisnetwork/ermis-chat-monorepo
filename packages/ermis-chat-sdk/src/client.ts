@@ -292,7 +292,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     const setTokenPromise = this._setToken(connectionUser, connectionToken);
     this._setUser(connectionUser);
-    this.state.updateUser({ id: connectionUser.id, name: connectionUser?.name || connectionUser.id, avatar: connectionUser?.avatar || '' });
+    this.state.updateUser({
+      id: connectionUser.id,
+      name: connectionUser?.name || connectionUser.id,
+      avatar: connectionUser?.avatar || '',
+    });
 
     const wsPromise = this.openConnection();
 
@@ -304,6 +308,21 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       const result = await this.setUserPromise;
       // Call SSE after successful connect
       await this.connectToSSE();
+
+      // Automatically fetch full profile asynchronously and dispatch event
+      this.queryUser(connectionUser.id)
+        .then((fullProfile) => {
+          this.user = { ...this.user, ...fullProfile };
+          this.state.updateUser(this.user);
+          this.dispatchEvent({
+            type: 'user.updated',
+            me: this.user,
+          } as unknown as Event<ErmisChatGenerics>);
+        })
+        .catch((err) => {
+          this.logger('error', 'client:connectUser() - failed to fetch full user profile', { err });
+        });
+
       return result;
     } catch (err) {
       this.disconnectUser();
@@ -822,7 +841,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
               const bTime = bLatest ? new Date(bLatest).getTime() : 0;
               return bTime - aTime;
             });
-            parentChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: parentChannel.data } as any);
+            parentChannel._callChannelListeners({
+              ...event,
+              type: 'channel.updated',
+              channel: parentChannel.data,
+            } as any);
           }
         }
       });
@@ -833,7 +856,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         if (parentCid && this.activeChannels[parentCid]) {
           const parentChannel = this.activeChannels[parentCid];
           if (parentChannel.state?.topics && event.channel) {
-            const topicIndex = parentChannel.state.topics.findIndex((t: any) => t.cid === event.cid || t.channel?.cid === event.cid);
+            const topicIndex = parentChannel.state.topics.findIndex(
+              (t: any) => t.cid === event.cid || t.channel?.cid === event.cid,
+            );
             if (topicIndex !== -1) {
               const t = parentChannel.state.topics[topicIndex] as any;
               if (t.data) {
@@ -844,7 +869,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
                 Object.assign(t, event.channel);
               }
             }
-            parentChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: parentChannel.data } as any);
+            parentChannel._callChannelListeners({
+              ...event,
+              type: 'channel.updated',
+              channel: parentChannel.data,
+            } as any);
           }
         }
 
@@ -852,7 +881,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
           const topicChannel = this.activeChannels[event.cid];
           if (event.channel) {
             topicChannel.data = { ...topicChannel.data, ...event.channel };
-            topicChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: topicChannel.data } as any);
+            topicChannel._callChannelListeners({
+              ...event,
+              type: 'channel.updated',
+              channel: topicChannel.data,
+            } as any);
           }
         }
       });
@@ -865,14 +898,20 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         if (parentCid && this.activeChannels[parentCid]) {
           const parentChannel = this.activeChannels[parentCid];
           if (parentChannel.state?.topics) {
-            const topicIndex = parentChannel.state.topics.findIndex((t: any) => t.cid === event.cid || t.channel?.cid === event.cid);
+            const topicIndex = parentChannel.state.topics.findIndex(
+              (t: any) => t.cid === event.cid || t.channel?.cid === event.cid,
+            );
             if (topicIndex !== -1) {
               const t = parentChannel.state.topics[topicIndex] as any;
               if (t.data) t.data.is_closed_topic = isClosed;
               else if (t.channel) t.channel.is_closed_topic = isClosed;
               else t.is_closed_topic = isClosed;
             }
-            parentChannel._callChannelListeners({ ...event, type: 'channel.updated', channel: parentChannel.data } as any);
+            parentChannel._callChannelListeners({
+              ...event,
+              type: 'channel.updated',
+              channel: parentChannel.data,
+            } as any);
           }
         }
 
@@ -885,8 +924,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         }
       });
     }
-
-
 
     if (event.type === 'connection.recovered') {
       postListenerCallbacks.push(() => {
@@ -1475,8 +1512,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     const now = new Date();
     const formattedDate = new Intl.DateTimeFormat('en-US', {
-      month: 'short', day: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', hour12: false,
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
     }).format(now);
 
     const payload = {
@@ -1487,7 +1528,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     const quickChannel = this.channel('meeting', payload);
     await quickChannel.create();
-    
+
     return quickChannel;
   }
 

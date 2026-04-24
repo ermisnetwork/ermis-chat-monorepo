@@ -39,7 +39,13 @@
   },
   "chat": {
     "search_channels": "Search...",
-    "empty_dropdown": "No functions yet"
+    "empty_dropdown": "No functions yet",
+    "menu_theme": "Theme",
+    "menu_locale": "Language",
+    "menu_invites": "Invites",
+    "menu_contacts": "Contacts",
+    "menu_logout": "Log Out",
+    "menu_profile_anonymous": "Anonymous User"
   },
   "not_found": {
     "title": "Page not found",

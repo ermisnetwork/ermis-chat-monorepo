@@ -39,7 +39,13 @@
   },
   "chat": {
     "search_channels": "Tìm kiếm...",
-    "empty_dropdown": "Chưa có chức năng"
+    "empty_dropdown": "Chưa có chức năng",
+    "menu_theme": "Giao diện",
+    "menu_locale": "Ngôn ngữ",
+    "menu_invites": "Lời mời",
+    "menu_contacts": "Danh bạ",
+    "menu_logout": "Đăng xuất",
+    "menu_profile_anonymous": "Người dùng ẩn danh"
   },
   "not_found": {
     "title": "Trang không tồn tại",

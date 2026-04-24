@@ -1,7 +1,7 @@
 export const STORAGE_KEYS = {
   USER_ID: 'user_id',
   TOKEN: 'token',
-  CALL_SESSION_ID: 'callSessionId',
+  CALL_SESSION_ID: 'call_session_id',
   LOCALE: 'locale',
   THEME: 'theme',
 } as const;

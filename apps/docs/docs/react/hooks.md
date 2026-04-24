@@ -4,7 +4,7 @@ sidebar_position: 5
 
 # Hooks
 
-Ermis Chat React provides 19 powerful React hooks that allow you to build completely custom UI interfaces. These hooks directly tap into the core SDK state and real-time events.
+Ermis Chat React provides 22 powerful React hooks that allow you to build completely custom UI interfaces. These hooks directly tap into the core SDK state and real-time events.
 
 ---
 
@@ -36,6 +36,35 @@ export const GlobalHeader = () => {
       <h1>Connected as: {client.user.id}</h1>
       <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>Toggle Theme</button>
     </header>
+  );
+};
+```
+
+
+### `useChatUser`
+
+Retrieves the reactive `user` object from the Core SDK. This hook listens to `user.updated` and `health.check` events, ensuring the UI always reflects the most up-to-date user profile data automatically without needing manual API calls.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| None | `N/A` | Does not accept arguments. |
+
+**Returns:** `{ user: UserResponse | undefined }`
+
+**Example:**
+```tsx
+import { useChatUser } from '@ermis-network/ermis-chat-react';
+
+export const UserProfileBadge = () => {
+  const { user } = useChatUser();
+
+  if (!user) return <p>Loading profile...</p>;
+
+  return (
+    <div className="flex items-center space-x-2">
+      <img src={user.avatar} alt={user.name} className="w-8 h-8 rounded-full" />
+      <span>{user.name}</span>
+    </div>
   );
 };
 ```
@@ -386,6 +415,51 @@ export const FriendStatusBadge = () => {
       </span>
     </div>
   );
+};
+```
+
+
+### `useInviteCount`
+
+Monitors `client.activeChannels` and returns the real-time count of pending channel invitations. It automatically updates when invites are accepted, rejected, skipped, newly created, or when channels are initially queried.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| None | `N/A` | Does not accept arguments. |
+
+**Returns:** `{ inviteCount: number }`
+
+**Example:**
+```tsx
+import { useInviteCount } from '@ermis-network/ermis-chat-react';
+
+export const PendingInvitesBadge = () => {
+  const { inviteCount } = useInviteCount();
+
+  if (inviteCount === 0) return null;
+
+  return <span className="bg-red-500 text-white rounded-full px-2">{inviteCount}</span>;
+};
+```
+
+### `useContactCount`
+
+Monitors `client.activeChannels` and returns the real-time count of established contacts. A contact is defined as a direct messaging channel where both members have the `owner` role.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| None | `N/A` | Does not accept arguments. |
+
+**Returns:** `{ contactCount: number }`
+
+**Example:**
+```tsx
+import { useContactCount } from '@ermis-network/ermis-chat-react';
+
+export const ContactsDisplay = () => {
+  const { contactCount } = useContactCount();
+
+  return <div>Total Contacts: {contactCount}</div>;
 };
 ```
 

@@ -7,6 +7,9 @@ export type { ChatProviderProps, ChatContextValue, Theme } from './context/ChatP
 
 // Hooks
 export { useChatClient } from './hooks/useChatClient';
+export { useChatUser } from './hooks/useChatUser';
+export { useInviteCount } from './hooks/useInviteCount';
+export { useContactCount } from './hooks/useContactCount';
 export { useChannel } from './hooks/useChannel';
 export type { UseChannelReturn } from './hooks/useChannel';
 export { useChannelListUpdates } from './hooks/useChannelListUpdates';

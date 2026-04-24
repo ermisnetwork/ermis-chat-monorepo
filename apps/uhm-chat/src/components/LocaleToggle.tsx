@@ -15,9 +15,9 @@ export function LocaleToggle() {
       variant="outline" 
       size="sm" 
       onClick={toggleLocale} 
-      className="rounded-full px-3 h-8 font-semibold bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-50 shadow-sm transition-all hover:bg-zinc-100 dark:hover:bg-zinc-800 uppercase tracking-wide text-[10px]"
+      className="rounded-full px-2 h-8 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-sm transition-all hover:bg-zinc-100 dark:hover:bg-zinc-800 text-base"
     >
-      {i18n.language || 'VI'}
+      {i18n.language === 'vi' ? '🇻🇳' : '🇬🇧'}
     </Button>
   )
 }
