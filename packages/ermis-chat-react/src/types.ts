@@ -1449,6 +1449,8 @@ export type CreateChannelFooterProps = {
   createButtonLabel?: string;
   creatingButtonLabel?: string;
   messageButtonLabel?: string;
+  nextButtonLabel?: string;
+  backButtonLabel?: string;
 };
 
 export type CreateChannelGroupFieldsProps = {
@@ -1495,6 +1497,9 @@ export type CreateChannelModalProps = {
   createButtonLabel?: string;
   creatingButtonLabel?: string;
   messageButtonLabel?: string;
+  nextButtonLabel?: string;
+  backButtonLabel?: string;
+  emptyStateLabel?: string;
 
   /** File upload configuration for group channel images */
   imageAccept?: string;

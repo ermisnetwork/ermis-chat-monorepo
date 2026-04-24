@@ -58,7 +58,10 @@
     "create_channel_cancel": "Hủy",
     "create_channel_create": "Tạo",
     "create_channel_creating": "Đang tạo...",
-    "create_channel_message": "Nhắn tin"
+    "create_channel_message": "Nhắn tin",
+    "create_channel_next": "Tiếp tục",
+    "create_channel_back": "Quay lại",
+    "create_channel_empty": "Không tìm thấy người dùng"
   },
   "not_found": {
     "title": "Trang không tồn tại",

@@ -58,7 +58,10 @@
     "create_channel_cancel": "Cancel",
     "create_channel_create": "Create",
     "create_channel_creating": "Creating...",
-    "create_channel_message": "Message"
+    "create_channel_message": "Message",
+    "create_channel_next": "Next",
+    "create_channel_back": "Back",
+    "create_channel_empty": "No users found"
   },
   "not_found": {
     "title": "Page not found",

@@ -27,6 +27,9 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   createButtonLabel = 'Create',
   creatingButtonLabel = 'Creating...',
   messageButtonLabel = 'Message',
+  nextButtonLabel = 'Next',
+  backButtonLabel = 'Back',
+  emptyStateLabel = 'No users found',
   TabsComponent,
   FooterComponent,
   GroupFieldsComponent,
@@ -206,6 +209,8 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         createButtonLabel={createButtonLabel}
         creatingButtonLabel={creatingButtonLabel}
         messageButtonLabel={messageButtonLabel}
+        nextButtonLabel={nextButtonLabel}
+        backButtonLabel={backButtonLabel}
       />
     );
   } else if (tab === 'messaging') {
@@ -222,14 +227,14 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
       <div className="ermis-create-channel__footer">
         <button className="ermis-create-channel__btn ermis-create-channel__btn--cancel" onClick={onClose} disabled={isCreating}>{cancelButtonLabel}</button>
         <button className="ermis-create-channel__btn ermis-create-channel__btn--create" onClick={() => { setError(null); setStep(2); }} disabled={isCreating || !isValid}>
-          Next
+          {nextButtonLabel}
         </button>
       </div>
     );
   } else if (tab === 'team' && step === 2) {
     footer = (
       <div className="ermis-create-channel__footer">
-        <button className="ermis-create-channel__btn ermis-create-channel__btn--cancel" onClick={() => { setError(null); setStep(1); }} disabled={isCreating}>Back</button>
+        <button className="ermis-create-channel__btn ermis-create-channel__btn--cancel" onClick={() => { setError(null); setStep(1); }} disabled={isCreating}>{backButtonLabel}</button>
         <button className="ermis-create-channel__btn ermis-create-channel__btn--create" onClick={handleCreate} disabled={isCreating || !isValid}>
           {isCreating ? creatingButtonLabel : createButtonLabel}
         </button>
@@ -352,6 +357,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
               mode={tab === 'messaging' ? 'radio' : 'checkbox'}
               onSelectionChange={setSelectedUsers}
               initialSelectedUsers={selectedUsers}
+              emptyText={emptyStateLabel}
               AvatarComponent={AvatarComponent}
               UserItemComponent={UserItemComponent as any}
               SearchInputComponent={SearchInputComponent as any}
