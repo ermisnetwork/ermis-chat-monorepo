@@ -17,7 +17,7 @@ export function ChatPage() {
         <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'channels' ? 'translate-x-0' : '-translate-x-full'}`}>
           <SidebarHeader onNavigate={setActivePanel} />
           <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-300 dark:[&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-thumb]:rounded-full">
-            <ChannelList />
+            <ChannelList showPendingInvites={false} />
           </div>
         </div>
 

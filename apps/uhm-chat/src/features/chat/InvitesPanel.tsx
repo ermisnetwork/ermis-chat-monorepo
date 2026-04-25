@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Inbox } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useInviteChannels, ChannelItem, Avatar, useChatClient } from '@ermis-network/ermis-chat-react'
 
 interface InvitesPanelProps {
   onBack: () => void
@@ -8,6 +9,8 @@ interface InvitesPanelProps {
 
 export function InvitesPanel({ onBack }: InvitesPanelProps) {
   const { t } = useTranslation()
+  const invites = useInviteChannels()
+  const { setActiveChannel } = useChatClient()
 
   return (
     <div className="flex flex-col h-full bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl">
@@ -25,13 +28,36 @@ export function InvitesPanel({ onBack }: InvitesPanelProps) {
       </div>
 
       {/* List / Empty State */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col items-center justify-center text-center">
-        <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center mb-3">
-          <Inbox className="w-6 h-6 text-zinc-400" />
-        </div>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          {t('chat.no_invites', 'Không có lời mời nào.')}
-        </p>
+      <div className="flex-1 overflow-y-auto">
+        {invites.length === 0 ? (
+          <div className="p-4 flex flex-col items-center justify-center text-center h-full">
+            <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center mb-3">
+              <Inbox className="w-6 h-6 text-zinc-400" />
+            </div>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              {t('chat.no_invites', 'Không có lời mời nào.')}
+            </p>
+          </div>
+        ) : (
+          <div className="py-2">
+            {invites.map((channel) => (
+              <ChannelItem
+                key={channel.cid}
+                channel={channel}
+                AvatarComponent={Avatar}
+                isPending={true}
+                isActive={false}
+                hasUnread={false}
+                unreadCount={0}
+                lastMessageText=""
+                lastMessageUser=""
+                onSelect={(selectedChannel) => {
+                  setActiveChannel(selectedChannel);
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

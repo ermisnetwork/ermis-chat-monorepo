@@ -67,6 +67,7 @@
     "accept": "Accept",
     "decline": "Decline",
     "no_contacts": "No contacts found.",
+    "no_contacts_found": "No matching contacts.",
     "no_invites": "No invites found."
   },
   "not_found": {

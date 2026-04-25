@@ -409,6 +409,8 @@ export type ChannelListProps = {
   renderChannel?: (channel: Channel, isActive: boolean) => React.ReactNode;
   onChannelSelect?: (channel: Channel) => void;
   className?: string;
+  /** Whether to show pending invites visually in the main list (default: true) */
+  showPendingInvites?: boolean;
   /** Array of action IDs to hide from the actions dropdown */
   hiddenActions?: string[];
   LoadingIndicator?: React.ComponentType<{ text?: string }>;

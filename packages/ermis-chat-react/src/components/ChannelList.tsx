@@ -591,6 +591,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   actionLabels,
   actionIcons,
   showOnlineStatus = true,
+  showPendingInvites = true,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -738,7 +739,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
     <div className={`ermis-channel-list${className ? ` ${className}` : ''}`}>
       {/* VList requires its container to have a height to work. */}
       <VList style={{ height: '100%' }}>
-        {pendingChannels.length > 0 && (
+        {showPendingInvites && pendingChannels.length > 0 && (
           <div
             className="ermis-channel-list__accordion-header"
             onClick={() => setIsPendingExpanded(prev => !prev)}
@@ -756,7 +757,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
             </svg>
           </div>
         )}
-        {isPendingExpanded && pendingChannels.map((channel: Channel) => {
+        {showPendingInvites && isPendingExpanded && pendingChannels.map((channel: Channel) => {
           const isActive = activeChannel?.cid === channel.cid;
           return (
             <ChannelRow

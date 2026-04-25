@@ -8,6 +8,8 @@ export type { ChatProviderProps, ChatContextValue, Theme } from './context/ChatP
 // Hooks
 export { useChatClient } from './hooks/useChatClient';
 export { useChatUser } from './hooks/useChatUser';
+export { useInviteChannels } from './hooks/useInviteChannels';
+export { useContactChannels } from './hooks/useContactChannels';
 export { useInviteCount } from './hooks/useInviteCount';
 export { useContactCount } from './hooks/useContactCount';
 export { useChannel } from './hooks/useChannel';

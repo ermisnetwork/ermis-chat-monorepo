@@ -67,6 +67,7 @@
     "accept": "Chấp nhận",
     "decline": "Từ chối",
     "no_contacts": "Không có liên hệ nào.",
+    "no_contacts_found": "Không tìm thấy liên hệ nào.",
     "no_invites": "Không có lời mời nào."
   },
   "not_found": {
