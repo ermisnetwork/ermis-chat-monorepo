@@ -781,11 +781,11 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
             />
           );
         })}
-        {pendingChannels.length > 0 && regularChannels.length > 0 && (
+        {/* {pendingChannels.length > 0 && regularChannels.length > 0 && (
           <div className="ermis-channel-list__accordion-header ermis-channel-list__accordion-header--static">
             <span>{channelsLabel}</span>
           </div>
-        )}
+        )} */}
         {regularChannels.map((channel: Channel) => {
           const isActive = activeChannel?.cid === channel.cid;
           const isTeamWithTopics = hasTopicsEnabled(channel);

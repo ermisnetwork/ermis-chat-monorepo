@@ -245,7 +245,7 @@
 
 .ermis-channel-list__pinned-icon {
   position: absolute;
-  top: -5px;
+  top: 0px;
   right: 0px;
   color: var(--ermis-color-danger, #ef4444);
   display: inline-flex;
