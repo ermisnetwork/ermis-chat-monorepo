@@ -36,7 +36,10 @@ export const useContactCount = () => {
       }, 0);
     };
 
-    const listeners = [client.on('notification.invite_accepted', handleEvent)];
+    const listeners = [
+      client.on('channels.queried', handleEvent),
+      client.on('notification.invite_accepted', handleEvent),
+    ];
 
     return () => {
       listeners.forEach((l) => l.unsubscribe());

@@ -41,6 +41,7 @@ export const useInviteCount = () => {
     };
 
     const listeners = [
+      client.on('channels.queried', handleEvent),
       client.on('notification.invite_accepted', handleEvent),
       client.on('notification.invite_rejected', handleEvent),
       client.on('notification.invite_messaging_skipped', handleEvent),
