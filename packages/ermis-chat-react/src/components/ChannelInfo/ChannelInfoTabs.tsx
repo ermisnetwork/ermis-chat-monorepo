@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, startTransition, useRef } from 'react';
 import { VList } from 'virtua';
 import { ROLE_WEIGHTS, MESSAGING_TABS, ALL_TABS, PENDING_STYLE, READY_STYLE } from './utils';
 import { useBannedState } from '../../hooks/useBannedState';
@@ -39,6 +39,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
   FileItemComponent,
   EmptyStateComponent,
   LoadingComponent,
+  isVisible = true,
 }) => {
   const isMessaging = isDirectChannel(channel);
   const isTopic = Boolean(channel?.data?.parent_cid);
@@ -58,11 +59,43 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
   const contentTab = useDeferredValue(activeTab);
   const isPending = activeTab !== contentTab;
 
-  // Always reset to the first available tab when the user switches channels
+  // Defer attachment fetch for ALL channel types.
+  // Always start null — fetch only when explicitly triggered.
+  const [attachmentsFetchedForCid, setAttachmentsFetchedForCid] = useState<string | null>(null);
+
+  // Track the cid for which data has already been fetched successfully.
+  // Prevents re-fetch when toggling panel visibility (show → hide → show).
+  const lastFetchedCidRef = useRef<string | null>(null);
+
+  // Handle tab switching — trigger fetch when clicking a non-members tab
+  const handleTabChange = useCallback((tab: MediaTab) => {
+    setActiveTab(tab);
+    if (tab !== 'members') {
+      setAttachmentsFetchedForCid((prev) => prev || channel?.cid || null);
+    }
+  }, [channel?.cid]);
+
+  // Reset tab when the user switches channels
   useEffect(() => {
     setActiveTab(availableTabs[0]);
+    setAttachmentsFetchedForCid(null);
+    setAllAttachments([]);
+    lastFetchedCidRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel?.cid, availableTabs]);
+
+  // Auto-trigger fetch for channels where default tab needs attachment data (direct/topic).
+  // Deferred via requestAnimationFrame so panel animation can start first.
+  // Guarded by isVisible — skip when panel is hidden (keep-alive).
+  useEffect(() => {
+    if (!isVisible) return;
+    if (availableTabs[0] === 'members') return;
+    const rafId = requestAnimationFrame(() => {
+      setAttachmentsFetchedForCid(channel?.cid || null);
+    });
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel?.cid, availableTabs, isVisible]);
 
   // Resolve sub-components with defaults
   const MemberItem = MemberItemComponent || MemberListItem;
@@ -100,6 +133,18 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
   );
 
   useEffect(() => {
+    // Skip when panel is hidden (keep-alive: component stays mounted but invisible)
+    if (!isVisible) return;
+
+    // Only fetch when explicitly requested for this specific channel
+    if (!attachmentsFetchedForCid || attachmentsFetchedForCid !== channel?.cid) {
+      setLoading(false);
+      return;
+    }
+
+    // Skip if we already fetched for this channel (avoids re-fetch on show→hide→show)
+    if (lastFetchedCidRef.current === channel?.cid) return;
+
     let active = true;
 
     // Don't fetch media/files if user is banned or blocked
@@ -116,7 +161,11 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
 
         if (active) {
           const items = response?.attachments || [];
-          setAllAttachments(items);
+          // Use startTransition so the heavy list render doesn't block the UI/animation
+          startTransition(() => {
+            setAllAttachments(items);
+          });
+          lastFetchedCidRef.current = channel?.cid || null;
         }
       } catch (err) {
         console.error("Failed to query media for channel info", err);
@@ -129,7 +178,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
     fetchMedia();
 
     return () => { active = false; };
-  }, [channel, isBanned, isBlocked]);
+  }, [channel, isBanned, isBlocked, attachmentsFetchedForCid, isVisible]);
 
   const tabCounts = useMemo<Record<MediaTab, number>>(() => ({
     members: members.length,
@@ -284,7 +333,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
           <button
             key={tab}
             className={`ermis-channel-info__media-tab ${activeTab === tab ? 'ermis-channel-info__media-tab--active' : ''}`}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => handleTabChange(tab)}
           >
             <span className="ermis-channel-info__media-tab-label">
               {tab.charAt(0).toUpperCase() + tab.slice(1)}

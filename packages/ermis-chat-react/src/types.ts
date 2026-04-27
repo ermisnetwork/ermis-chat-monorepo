@@ -402,6 +402,56 @@ export type ChannelItemProps = {
   isOnline?: boolean;
 };
 
+/* ----------------------------------------------------------
+   TopicPill types (for FlatTopicGroupItem)
+   ---------------------------------------------------------- */
+export type TopicPillProps = {
+  /** The topic channel to display as a pill */
+  topic: Channel;
+  /** Size of the topic avatar in pixels (default: 16) */
+  avatarSize?: number;
+};
+
+/* ----------------------------------------------------------
+   TopicList types
+   ---------------------------------------------------------- */
+export type TopicListProps = {
+  /** Parent channel that has topics enabled */
+  channel: Channel;
+  /** Custom channel item component for each topic row */
+  ChannelItemComponent?: React.ComponentType<ChannelItemProps>;
+  /** Custom avatar for the general (parent) topic */
+  GeneralAvatarComponent?: React.ComponentType<AvatarProps>;
+  /** Custom avatar for sub-topic items */
+  TopicAvatarComponent?: React.ComponentType<AvatarProps>;
+  /** Custom avatar component (fallback) */
+  AvatarComponent?: React.ComponentType<AvatarProps>;
+  /** Label for the general topic (default: 'general') */
+  generalTopicLabel?: string;
+  /** Pinned icon component */
+  PinnedIconComponent?: React.ComponentType;
+  /** Custom channel actions component */
+  ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
+  /** Called when a topic is selected */
+  onSelectTopic?: (topic: Channel) => void;
+  /** Handler for Edit Topic action */
+  onEditTopic?: (channel: Channel) => void;
+  /** Handler for Close/Reopen Topic action */
+  onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
+  /** Actions to hide */
+  hiddenActions?: string[];
+  /** Custom action labels */
+  actionLabels?: ChannelActionLabels;
+  /** Custom action icons */
+  actionIcons?: ChannelActionIcons;
+  /** Icon for closed topics */
+  closedTopicIcon?: React.ReactNode;
+  /** Badge label for pending members */
+  pendingBadgeLabel?: string;
+  /** Badge label for blocked members */
+  blockedBadgeLabel?: string;
+};
+
 export type ChannelListProps = {
   filters?: ChannelFilters;
   sort?: ChannelSort;
@@ -430,14 +480,6 @@ export type ChannelListProps = {
   emptyStateLabel?: string;
   /** Label for the blocked channel badge hover */
   blockedBadgeLabel?: string;
-  /** Custom component for rendering topic group */
-  ChannelTopicGroupComponent?: React.ComponentType<any>;
-  /** Custom avatar component for general topic */
-  GeneralTopicAvatarComponent?: React.ComponentType<any>;
-  /** Custom avatar component for other topics */
-  TopicAvatarComponent?: React.ComponentType<any>;
-  /** Name for the general topic (default: "general") */
-  generalTopicLabel?: string;
   /** Handler when Add Topic button is clicked on a team channel */
   onAddTopic?: (channel: Channel) => void;
   /** Optional custom emoji picker for TopicModal */
@@ -456,6 +498,18 @@ export type ChannelListProps = {
   actionIcons?: ChannelActionIcons;
   /** Show online/offline indicator dots on channel item avatars for friend channels (default: true) */
   showOnlineStatus?: boolean;
+  /** Handler when a topic-enabled channel is clicked — enables drill-down mode */
+  onTopicDrillDown?: (channel: Channel) => void;
+  /** Max number of topic pills shown in the preview strip (default: 3) */
+  maxVisibleTopics?: number;
+  /** Label for the overflow indicator when topics exceed maxVisibleTopics (default: '...') */
+  moreTopicsLabel?: string;
+  /** Label for the general topic pill (default: 'general') */
+  generalTopicLabel?: string;
+  /** Custom component for rendering each topic pill in the preview strip */
+  TopicPillComponent?: React.ComponentType<TopicPillProps>;
+  /** Custom component to replace the entire flat topic group item */
+  FlatTopicGroupItemComponent?: React.ComponentType<any>;
 };
 
 /* ----------------------------------------------------------
@@ -1218,6 +1272,8 @@ export type ChannelInfoTabsProps = {
   FileItemComponent?: React.ComponentType<ChannelInfoFileItemProps>;
   EmptyStateComponent?: React.ComponentType<ChannelInfoEmptyStateProps>;
   LoadingComponent?: React.ComponentType;
+  /** Whether the tabs panel is currently visible — controls data fetching (default: true) */
+  isVisible?: boolean;
 };
 
 export type ChannelInfoProps = {
@@ -1231,6 +1287,8 @@ export type ChannelInfoProps = {
   onClose?: () => void;
   /** Custom Title String for the banner */
   title?: string;
+  /** Whether the panel is visible — controls data fetching timing (default: true) */
+  isVisible?: boolean;
 
   /** Custom components to replace internal sections */
   HeaderComponent?: React.ComponentType<ChannelInfoHeaderProps>;

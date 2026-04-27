@@ -20,25 +20,23 @@ interface SidebarHeaderProps {
 
 export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
   const { t, i18n } = useTranslation()
-  const { client } = useChatClient()
+  const { client, theme, setTheme } = useChatClient()
   const { user } = useChatUser()
   const { inviteCount } = useInviteCount()
   const { contactCount } = useContactCount()
-
-  const [isDark, setIsDark] = useState(() => {
-    return document.documentElement.classList.contains('dark')
-  })
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 
   const toggleTheme = () => {
+    const isDark = theme === 'dark'
     const newTheme = !isDark
-    setIsDark(newTheme)
     if (newTheme) {
       document.documentElement.classList.add('dark')
       localStorage.setItem(STORAGE_KEYS.THEME, 'dark')
+      setTheme('dark')
     } else {
       document.documentElement.classList.remove('dark')
       localStorage.setItem(STORAGE_KEYS.THEME, 'light')
+      setTheme('light')
     }
   }
 
@@ -125,7 +123,7 @@ export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
               <span>{t('chat.menu_theme', 'Giao diện')}</span>
             </div>
             <span className="text-xs text-zinc-500 dark:text-zinc-400 capitalize">
-              {isDark ? 'Dark' : 'Light'}
+              {theme === 'dark' ? 'Dark' : 'Light'}
             </span>
           </DropdownMenuItem>
 

@@ -48,13 +48,23 @@ export function useChannelListUpdates(
       }
 
       setChannels((prev) => {
-        const idx = prev.findIndex((ch) => ch.cid === eventCid);
-        if (idx <= 0) {
-          // Already at top or not found — just create a new reference
-          return idx === 0 ? [...prev] : prev;
+        let targetIdx = prev.findIndex((ch) => ch.cid === eventCid);
+
+        // If not found directly, check if this is a topic message — move the parent channel to top
+        if (targetIdx < 0) {
+          const topicChannel = client.activeChannels[eventCid];
+          const parentCid = topicChannel?.data?.parent_cid as string | undefined;
+          if (parentCid) {
+            targetIdx = prev.findIndex((ch) => ch.cid === parentCid);
+          }
         }
 
-        const channel = prev[idx];
+        if (targetIdx <= 0) {
+          // Already at top or not found — just create a new reference
+          return targetIdx === 0 ? [...prev] : prev;
+        }
+
+        const channel = prev[targetIdx];
 
         // Don't move banned channels to the top
         if (channel.state?.membership?.banned) {
@@ -63,7 +73,7 @@ export function useChannelListUpdates(
 
         // Move channel to the top
         const updated = [...prev];
-        const [ch] = updated.splice(idx, 1);
+        const [ch] = updated.splice(targetIdx, 1);
         updated.unshift(ch);
         return updated;
       });

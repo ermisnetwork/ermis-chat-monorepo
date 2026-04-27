@@ -118,8 +118,26 @@ export function computeDefaultActions(
         label: isClosed ? (actionLabels?.reopenTopic || 'Reopen topic') : (actionLabels?.closeTopic || 'Close topic'),
         icon: isClosed ? (actionIcons?.ReopenTopicIcon || <UnlockIcon />) : (actionIcons?.CloseTopicIcon || <LockIcon />),
         isDanger: !isClosed,
-        onClick: (ch) => {
-          options?.onToggleCloseTopic?.(ch, isClosed);
+        onClick: async (ch) => {
+          if (options?.onToggleCloseTopic) {
+            options.onToggleCloseTopic(ch, isClosed);
+            return;
+          }
+          // Default behavior: call SDK API directly
+          const parentCid = ch.data?.parent_cid as string | undefined;
+          if (!parentCid) return;
+          try {
+            const client = ch.getClient();
+            const parentChannel = client.activeChannels[parentCid];
+            if (!parentChannel) return;
+            if (isClosed) {
+              await parentChannel.reopenTopic(ch.cid);
+            } else {
+              await parentChannel.closeTopic(ch.cid);
+            }
+          } catch (err) {
+            console.error('Failed to toggle topic close state', err);
+          }
         },
       });
     }

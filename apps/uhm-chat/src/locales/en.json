@@ -68,7 +68,12 @@
     "decline": "Decline",
     "no_contacts": "No contacts found.",
     "no_contacts_found": "No matching contacts.",
-    "no_invites": "No invites found."
+    "no_invites": "No invites found.",
+    "topics_general": "general",
+    "topics_count": "{{count}} topics",
+    "topics_create": "Create topic",
+    "topics_channel_info": "Channel info",
+    "topics_section": "Topics"
   },
   "not_found": {
     "title": "Page not found",

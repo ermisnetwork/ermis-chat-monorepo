@@ -22,13 +22,19 @@ export { useOnlineStatus } from './hooks/useOnlineStatus';
 export type { OnlineStatus } from './hooks/useOnlineStatus';
 export { useOnlineUsers } from './hooks/useOnlineUsers';
 export { usePendingState } from './hooks/usePendingState';
+export { useTopicGroupUpdates } from './hooks/useTopicGroupUpdates';
 
 // Components
 export { Avatar } from './components/Avatar';
 export type { AvatarProps } from './components/Avatar';
 
-export { ChannelList, ChannelItem, ChannelTopicGroup } from './components/ChannelList';
+export { ChannelList, ChannelItem, ChannelRow, DefaultPinnedIcon } from './components/ChannelList';
 export type { ChannelListProps, ChannelItemProps } from './components/ChannelList';
+
+export { FlatTopicGroupItem } from './components/FlatTopicGroupItem';
+export type { TopicPillProps, TopicListProps } from './types';
+
+export { TopicList } from './components/TopicList';
 
 export { DefaultChannelActions, computeDefaultActions } from './components/ChannelActions';
 export type { ChannelAction, ChannelActionsProps } from './types';
@@ -68,7 +74,7 @@ export { MessageQuickReactions } from './components/MessageQuickReactions';
 
 export { useMessageActions } from './hooks/useMessageActions';
 
-export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview } from './utils';
+export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview, getLastMessagePreview } from './utils';
 export {
   isGroupChannel,
   isDirectChannel,

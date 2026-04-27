@@ -68,7 +68,12 @@
     "decline": "Từ chối",
     "no_contacts": "Không có liên hệ nào.",
     "no_contacts_found": "Không tìm thấy liên hệ nào.",
-    "no_invites": "Không có lời mời nào."
+    "no_invites": "Không có lời mời nào.",
+    "topics_general": "chung",
+    "topics_count": "{{count}} chủ đề",
+    "topics_create": "Tạo chủ đề",
+    "topics_channel_info": "Thông tin kênh",
+    "topics_section": "Chủ đề"
   },
   "not_found": {
     "title": "Trang không tồn tại",

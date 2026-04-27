@@ -1,5 +1,6 @@
 import type { MentionMember } from './types';
-import type { Attachment, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
+import type { Attachment, FormatMessageResponse, Channel } from '@ermis-network/ermis-chat-sdk';
+import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
 
 /**
  * Format a Date or date-string to a short time string (HH:MM).
@@ -239,4 +240,76 @@ export function extractDomain(url: string): string {
   } catch {
     return url;
   }
+}
+
+/**
+ * Get a human-readable preview string for the last message,
+ * handling regular, system, and signal message types.
+ */
+export function getLastMessagePreview(
+  channel: Channel,
+  myUserId?: string,
+): { text: string; user: string; timestamp?: string | Date } {
+  const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
+  if (!lastMsg) return { text: '', user: '' };
+
+  const timestamp = lastMsg.created_at;
+
+  const msgType = lastMsg.type || 'regular';
+  const rawText = lastMsg.text ?? '';
+
+  if (msgType === 'system') {
+    const userMap = buildUserMap(channel.state);
+    return { text: parseSystemMessage(rawText, userMap), user: '', timestamp };
+  }
+
+  if (msgType === 'signal') {
+    const result = parseSignalMessage(rawText, myUserId || '');
+    return { text: result?.text || rawText, user: '', timestamp };
+  }
+
+  // Display 'Sticker' if message is a sticker
+  if (msgType === 'sticker' || (lastMsg as Record<string, unknown>).sticker_url) {
+    return { text: 'Sticker', user: lastMsg.user?.name || lastMsg.user_id || '', timestamp };
+  }
+
+  // Regular / other
+  let displayText = rawText;
+  if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
+    const att = lastMsg.attachments[0];
+    const type = att.type || '';
+    switch (type) {
+      case 'image':
+        displayText = '📷 Photo';
+        break;
+      case 'video':
+        displayText = '🎬 Video';
+        break;
+      case 'voiceRecording':
+        displayText = '🎤 Voice message';
+        break;
+      default:
+        displayText = '📎 File';
+        break;
+    }
+    if (lastMsg.attachments.length > 1) {
+      displayText += ` +${lastMsg.attachments.length - 1}`;
+    }
+  }
+
+  // Format mentions if necessary
+  const lastMsgRecord = lastMsg as Record<string, unknown>;
+  const mentionedUsers = lastMsgRecord.mentioned_users as string[] | undefined;
+  const mentionedAll = lastMsgRecord.mentioned_all as boolean | undefined;
+
+  if (displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
+    const userMap = buildUserMap(channel.state);
+    displayText = replaceMentionsForPreview(displayText, lastMsg as any, userMap);
+  }
+
+  return {
+    text: displayText,
+    user: lastMsg.user?.name || lastMsg.user_id || '',
+    timestamp,
+  };
 }

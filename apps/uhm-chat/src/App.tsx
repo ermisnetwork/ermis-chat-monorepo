@@ -39,6 +39,13 @@ function AppContent() {
 
   // Khôi phục phiên đăng nhập từ localStorage khi mount
   useEffect(() => {
+    // Khôi phục theme cho document
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+
     const savedToken = localStorage.getItem(STORAGE_KEYS.TOKEN)
     const savedUserId = localStorage.getItem(STORAGE_KEYS.USER_ID)
 

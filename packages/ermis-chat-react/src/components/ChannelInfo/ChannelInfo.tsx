@@ -205,6 +205,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     AvatarComponent = Avatar,
     onClose,
     title: titleProp,
+    isVisible = true,
     HeaderComponent = DefaultChannelInfoHeader,
     CoverComponent = DefaultChannelInfoCover,
     ActionsComponent = DefaultChannelInfoActions,
@@ -473,6 +474,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
             FileItemComponent={FileItemComponent}
             EmptyStateComponent={EmptyStateComponent}
             LoadingComponent={LoadingComponent}
+            isVisible={isVisible}
           />
 
           {showAddMemberModal && (() => {
