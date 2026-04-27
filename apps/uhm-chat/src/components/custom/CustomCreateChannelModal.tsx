@@ -6,25 +6,6 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CreateChannelModal } from '@ermis-network/ermis-chat-react'
 import { useTranslation } from 'react-i18next'
 
-const CustomAvatarComponent = ({ image, name, size = 36, className = '' }: any) => {
-  const initials = name ? name.substring(0, 2).toUpperCase() : '?'
-
-  return (
-    <div
-      className={`relative flex shrink-0 overflow-hidden rounded-full ${className}`}
-      style={{ width: size, height: size }}
-    >
-      {image ? (
-        <img src={image} alt={name || 'Avatar'} className="aspect-square h-full w-full object-cover" />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-primary/10 text-primary font-medium text-xs">
-          {initials}
-        </div>
-      )}
-    </div>
-  )
-}
-
 const CustomUserItemComponent = ({ user, selected, disabled, mode, onToggle, AvatarComponent }: any) => {
   const handleClick = () => {
     if (!disabled) onToggle(user)
@@ -236,7 +217,6 @@ export function CustomCreateChannelModal({ isOpen, onClose }: { isOpen: boolean,
       SearchInputComponent={CustomSearchInputComponent}
       SelectedBoxComponent={CustomSelectedBoxComponent}
       UserItemComponent={CustomUserItemComponent}
-      AvatarComponent={CustomAvatarComponent}
     />
   )
 }

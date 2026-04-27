@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { MediaLightbox } from './MediaLightbox';
+import { getAvatarGradient } from '../utils/avatarColors';
 import type { AvatarProps } from '../types';
 
 export type { AvatarProps } from '../types';
@@ -85,7 +86,7 @@ export const Avatar: React.FC<AvatarProps> = React.memo(({
         {/* 1. Underlying Fallback (Placeholder) */}
         <div
           className="ermis-avatar ermis-avatar--fallback"
-          style={contentStyle}
+          style={{ ...contentStyle, background: getAvatarGradient(name) }}
           title={name}
         >
           {initials}

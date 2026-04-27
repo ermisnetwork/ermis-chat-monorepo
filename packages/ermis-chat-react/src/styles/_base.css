@@ -23,7 +23,6 @@
 }
 
 .ermis-avatar--fallback {
-  background: linear-gradient(135deg, var(--ermis-accent) 0%, var(--ermis-accent-hover) 100%);
   color: #fff;
   font-weight: 600;
   font-family: var(--ermis-font-family);
