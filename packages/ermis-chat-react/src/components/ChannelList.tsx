@@ -15,7 +15,7 @@ import type { ChannelActionsProps } from '../types';
 import { TopicModal } from './TopicModal';
 import { DefaultChannelActions, computeDefaultActions } from './ChannelActions';
 import { FlatTopicGroupItem } from './FlatTopicGroupItem';
-import { isDirectChannel, hasTopicsEnabled } from '../channelTypeUtils';
+import { isDirectChannel, isGroupChannel, hasTopicsEnabled } from '../channelTypeUtils';
 import { canManageChannel, isPendingMember, isSkippedMember, isFriendChannel } from '../channelRoleUtils';
 
 export { DefaultChannelActions } from './ChannelActions';
@@ -84,6 +84,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   const name = channel.data?.name || channel.cid;
   const image = channel.data?.image as string | undefined;
   const showUnread = hasUnread && !isActive;
+  const avatarClassName = isGroupChannel(channel) ? 'ermis-avatar-wrapper--group' : undefined;
 
   const timestampText = useMemo(() => {
     if (!lastMessageTimestamp) return null;
@@ -110,7 +111,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   return (
     <div className={itemClass} onClick={handleClick}>
       <div className="ermis-channel-list__item-avatar-wrapper">
-        <AvatarComponent image={image} name={name} size={40} disableLightbox />
+        <AvatarComponent image={image} name={name} size={40} disableLightbox className={avatarClassName} />
         {isOnline !== undefined && (
           <span className={`ermis-channel-list__online-dot ermis-channel-list__online-dot--${isOnline ? 'online' : 'offline'}`} />
         )}

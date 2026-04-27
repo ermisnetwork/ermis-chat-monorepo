@@ -10,7 +10,7 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    --primary: 258 81% 61%;
+    --primary: 261 81% 61%;
     --primary-foreground: 210 40% 98%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
@@ -22,7 +22,7 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 258 81% 61%;
+    --ring: 261 81% 61%;
     --radius: 0.75rem;
   }
 
@@ -33,7 +33,7 @@
     --card-foreground: 0 0% 98%;
     --popover: 240 10% 3.9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 258 81% 61%;
+    --primary: 261 81% 61%;
     --primary-foreground: 210 40% 98%;
     --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
@@ -45,7 +45,7 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
-    --ring: 258 81% 61%;
+    --ring: 261 81% 61%;
   }
 }
 
@@ -73,4 +73,81 @@
       margin-top: 0;
     }
   }
+}
+
+/* ============================================================
+   Uhm Chat – Brand Token Overrides
+   Palette: #7949EC (primary) · #5027B1 (deep) · #AC6AFF (lavender) · #4608CB (royal)
+   ============================================================ */
+
+/* --- Dark mode (default) --- */
+.ermis-chat,
+.ermis-chat--dark {
+  /* Core brand */
+  --ermis-accent: #7949EC;
+  --ermis-accent-hover: #AC6AFF;
+  --ermis-bg-active: rgba(121, 73, 236, 0.12);
+
+  /* Backgrounds – deep navy-purple */
+  --ermis-bg-primary: #1a1828;
+  --ermis-bg-secondary: #211f30;
+  --ermis-bg-hover: rgba(121, 73, 236, 0.08);
+  --ermis-border: rgba(172, 106, 255, 0.12);
+
+  /* Bubbles */
+  --ermis-bubble-other-bg: #252336;
+
+  /* Quotes */
+  --ermis-quote-other-bg: rgba(121, 73, 236, 0.1);
+  --ermis-quote-other-bg-hover: rgba(121, 73, 236, 0.18);
+  --ermis-quote-own-bg: rgba(121, 73, 236, 0.2);
+  --ermis-quote-own-bg-hover: rgba(121, 73, 236, 0.3);
+
+  /* Call UI */
+  --ermis-call-bg: linear-gradient(135deg, #1a1828 0%, #211f30 50%, #1e1a2e 100%);
+  --ermis-call-pulse: rgba(121, 73, 236, 0.4);
+}
+
+/* --- Light mode --- */
+.ermis-chat--light {
+  /* Core brand */
+  --ermis-accent: #7949EC;
+  --ermis-accent-hover: #5027B1;
+  --ermis-bg-active: rgba(121, 73, 236, 0.08);
+
+  /* Backgrounds – pure white */
+  --ermis-bg-primary: #ffffff;
+  --ermis-bg-secondary: #ffffff;
+  --ermis-bg-hover: rgba(121, 73, 236, 0.05);
+  --ermis-border: rgba(80, 39, 177, 0.08);
+
+  /* Bubbles */
+  --ermis-bubble-other-bg: #f3f4f6;
+
+  /* Quotes */
+  --ermis-quote-other-bg: rgba(121, 73, 236, 0.08);
+  --ermis-quote-other-bg-hover: rgba(121, 73, 236, 0.14);
+
+  /* Call UI */
+  --ermis-call-bg: linear-gradient(135deg, #ffffff 0%, #f9fafb 50%, #f3f4f6 100%);
+  --ermis-call-pulse: rgba(121, 73, 236, 0.3);
+}
+
+/* ============================================================
+   Uhm Chat – Channel List UI Overrides
+   ============================================================ */
+
+/* --- Unread badge: brand purple gradient + glow --- */
+.ermis-channel-list__unread-badge {
+  background: linear-gradient(135deg, #7949EC, #AC6AFF) !important;
+  box-shadow: 0 2px 8px rgba(121, 73, 236, 0.35);
+}
+
+/* --- Avatar shape: group/team channels use rounded-square --- */
+.ermis-avatar-wrapper--group {
+  border-radius: 25% !important;
+}
+
+.ermis-avatar-wrapper--group .ermis-avatar--fallback {
+  border-radius: 25%;
 }

@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { GoogleOAuthProvider } from '@react-oauth/google'
+import '@ermis-network/ermis-chat-react/dist/index.css'
 import './index.scss'
 import './i18n'
 import App from './App.tsx'

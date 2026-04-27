@@ -62,7 +62,7 @@ export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
   }
 
   return (
-    <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 bg-white/50 dark:bg-zinc-950/50 backdrop-blur-md sticky top-0 z-10 shrink-0">
+    <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md sticky top-0 z-10 shrink-0">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button

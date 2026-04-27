@@ -156,11 +156,11 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         <div className="flex flex-col lg:flex-row overflow-hidden rounded-[2rem] bg-white dark:bg-zinc-900 shadow-2xl border border-zinc-200/50 dark:border-zinc-800/50">
           
           {/* Cột trái (Giới thiệu) */}
-          <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-zinc-900 via-zinc-900 to-indigo-950 p-10 xl:p-12 text-white relative overflow-hidden flex-col justify-between">
+          <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-zinc-900 via-zinc-900 to-[#12082a] p-10 xl:p-12 text-white relative overflow-hidden flex-col justify-between">
             {/* Background decorations */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
-              <div className="absolute -top-1/4 -left-1/4 w-[40rem] h-[40rem] rounded-full bg-purple-600/20 blur-[120px]" />
-              <div className="absolute bottom-1/4 right-0 w-[30rem] h-[30rem] rounded-full bg-blue-600/20 blur-[100px]" />
+              <div className="absolute -top-1/4 -left-1/4 w-[40rem] h-[40rem] rounded-full bg-[#7949EC]/20 blur-[120px]" />
+              <div className="absolute bottom-1/4 right-0 w-[30rem] h-[30rem] rounded-full bg-[#5027B1]/20 blur-[100px]" />
             </div>
             
             <div className="relative z-10">
@@ -190,7 +190,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
             {/* Background decoration for mobile */}
             <div className="lg:hidden pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="h-[30rem] w-[30rem] rounded-full bg-purple-500/10 blur-[100px]" />
+              <div className="h-[30rem] w-[30rem] rounded-full bg-[#AC6AFF]/10 blur-[100px]" />
             </div>
 
             <div className="z-10 w-full max-w-md">
@@ -244,7 +244,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                               }}
                               placeholder={t('login.email_placeholder')} 
                               disabled={loading}
-                              className={`bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 h-12 rounded-xl focus-visible:ring-purple-500 ${fieldError && loginMode === 'email' ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                              className={`bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 h-12 rounded-xl focus-visible:ring-[#7949EC] ${fieldError && loginMode === 'email' ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                             />
                             {fieldError && loginMode === 'email' && (
                               <p className="text-xs text-destructive mt-1 animate-in fade-in duration-200">{fieldError}</p>
@@ -253,7 +253,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
                           <TabsContent value="phone" className="mt-0 space-y-2.5 outline-none">
                             <Label htmlFor="phone" className="text-zinc-700 dark:text-zinc-300 font-semibold">{t('login.phone_label')}</Label>
-                            <div className="flex rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 overflow-hidden focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-transparent transition-all h-12">
+                            <div className="flex rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 overflow-hidden focus-within:ring-2 focus-within:ring-[#7949EC] focus-within:border-transparent transition-all h-12">
                               <div className="flex items-center justify-center bg-zinc-100 dark:bg-zinc-900 px-4 border-r border-zinc-200 dark:border-zinc-800">
                                 <span className="mr-2 text-base select-none">🇻🇳</span>
                                 <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 select-none">+84</span>
@@ -276,7 +276,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                             )}
                           </TabsContent>
 
-                          <Button type="submit" disabled={loading} className="w-full h-12 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-base transition-colors shadow-lg shadow-purple-500/20">
+                          <Button type="submit" disabled={loading} className="w-full h-12 rounded-xl bg-[#7949EC] hover:bg-[#5027B1] text-white font-semibold text-base transition-colors shadow-lg shadow-[#7949EC]/20">
                             {loading ? t('login.sending') : t('login.send_otp')}
                           </Button>
                         </form>
@@ -337,14 +337,14 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                                   document.getElementById(`otp-input-${focusIdx === 6 ? 5 : focusIdx}`)?.focus()
                                 }
                               }}
-                              className="h-12 w-10 sm:h-14 sm:w-12 rounded-xl text-center text-xl font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus-visible:ring-purple-500 focus-visible:border-transparent transition-all"
+                              className="h-12 w-10 sm:h-14 sm:w-12 rounded-xl text-center text-xl font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus-visible:ring-[#7949EC] focus-visible:border-transparent transition-all"
                             />
                           ))}
                         </div>
                       </div>
 
                       <div className="flex flex-col gap-4">
-                        <Button type="submit" disabled={loading || otpCode.length < 6} className="w-full h-12 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-base transition-colors shadow-lg shadow-purple-500/20">
+                        <Button type="submit" disabled={loading || otpCode.length < 6} className="w-full h-12 rounded-xl bg-[#7949EC] hover:bg-[#5027B1] text-white font-semibold text-base transition-colors shadow-lg shadow-[#7949EC]/20">
                           {loading ? t('login.verifying') : t('login.verify')}
                         </Button>
                         <div className="flex gap-3">

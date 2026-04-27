@@ -6,6 +6,8 @@ import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
 import { InvitesPanel } from '@/features/chat/InvitesPanel'
 import { TopicsPanel } from '@/features/chat/TopicsPanel'
+import { ChannelListSkeleton } from '@/features/chat/ChannelListSkeleton'
+import { ChannelListEmpty } from '@/features/chat/ChannelListEmpty'
 
 export function ChatPage() {
   const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
@@ -46,10 +48,10 @@ export function ChatPage() {
   )
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:via-[#0a0a0c] dark:to-zinc-900">
+    <div className="flex h-screen w-full overflow-hidden">
       
       {/* Sidebar */}
-      <div className="w-[340px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
+      <div className="w-[340px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
         
         {/* Channels Panel */}
         <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'channels' ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -57,6 +59,8 @@ export function ChatPage() {
           <ChannelList
             showPendingInvites={false}
             onTopicDrillDown={handleTopicDrillDown}
+            LoadingIndicator={ChannelListSkeleton}
+            EmptyStateIndicator={ChannelListEmpty}
           />
         </div>
 
@@ -87,7 +91,7 @@ export function ChatPage() {
       <div className="flex-1 flex flex-col relative min-w-0">
         <Channel>
           {/* Background pattern layer */}
-          <div className="absolute inset-0 bg-chat-pattern pointer-events-none opacity-[0.03] dark:opacity-[0.05]"></div>
+          {/* <div className="absolute inset-0 bg-chat-pattern pointer-events-none opacity-[0.03] dark:opacity-[0.05]"></div> */}
           
           <ChannelHeader renderRight={renderHeaderRight} />
 

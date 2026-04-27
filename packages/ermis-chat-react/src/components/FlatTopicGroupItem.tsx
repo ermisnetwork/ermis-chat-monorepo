@@ -136,7 +136,7 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   return (
     <div className={itemClass} onClick={handleClick}>
       <div className="ermis-channel-list__item-avatar-wrapper">
-        <AvatarComponent image={image} name={name} size={40} disableLightbox />
+        <AvatarComponent image={image} name={name} size={40} disableLightbox className="ermis-avatar-wrapper--group" />
       </div>
       <div className="ermis-channel-list__item-content">
         {/* Row 1: name + pinned + timestamp */}

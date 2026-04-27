@@ -8,7 +8,6 @@ import { ChatPage } from '@/pages/ChatPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants'
 import { UhmModal } from '@/components/custom/UhmModal'
-import '@ermis-network/ermis-chat-react/dist/index.css'
 
 // Khởi tạo client với các thông số từ env
 const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || 'default-project'
