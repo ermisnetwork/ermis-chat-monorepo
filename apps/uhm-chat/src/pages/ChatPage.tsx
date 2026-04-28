@@ -10,6 +10,9 @@ import { TopicsPanel } from '@/features/chat/TopicsPanel'
 import { ChannelListSkeleton } from '@/features/chat/ChannelListSkeleton'
 import { ChannelListEmpty } from '@/features/chat/ChannelListEmpty'
 import { UhmChannelActions } from '@/features/chat/UhmChannelActions'
+import { ChannelEmptyState } from '@/features/chat/ChannelEmptyState'
+import { CustomCreateChannelModal } from '@/components/custom/CustomCreateChannelModal'
+import { useUIStore } from '@/store/useUIStore'
 
 export function ChatPage() {
   const { t } = useTranslation()
@@ -18,6 +21,8 @@ export function ChatPage() {
   const [showChannelInfo, setShowChannelInfo] = useState(false)
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
+  
+  const { isCreateChannelModalOpen, closeCreateChannelModal } = useUIStore()
 
   // Localized action labels passed to SDK ChannelList/TopicList
   const actionLabels = useMemo(() => ({
@@ -110,7 +115,7 @@ export function ChatPage() {
       
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col relative min-w-0">
-        <Channel>
+        <Channel EmptyStateIndicator={ChannelEmptyState}>
           {/* Background pattern layer */}
           {/* <div className="absolute inset-0 bg-chat-pattern pointer-events-none opacity-[0.03] dark:opacity-[0.05]"></div> */}
           
@@ -137,6 +142,13 @@ export function ChatPage() {
           </div>
         </div>
       </div>
+
+      {isCreateChannelModalOpen && (
+        <CustomCreateChannelModal
+          isOpen={isCreateChannelModalOpen}
+          onClose={closeCreateChannelModal}
+        />
+      )}
     </div>
   )
 }

@@ -75,7 +75,10 @@
     "topics_channel_info": "Thông tin kênh",
     "topics_section": "Chủ đề",
     "empty_title": "Chưa có cuộc trò chuyện nào",
-    "empty_subtitle": "Bắt đầu cuộc trò chuyện bằng cách nhấn nút + ở trên."
+    "empty_subtitle": "Bắt đầu cuộc trò chuyện bằng cách nhấn nút + ở trên.",
+    "empty_channel_title": "Chào mừng đến với Uhm Chat",
+    "empty_channel_subtitle": "Chọn một cuộc trò chuyện từ danh sách hoặc tạo không gian mới để bắt đầu.",
+    "empty_channel_cta": "Tạo kênh trò chuyện"
   },
   "not_found": {
     "title": "Trang không tồn tại",

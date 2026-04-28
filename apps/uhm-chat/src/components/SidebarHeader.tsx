@@ -10,8 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useTranslation } from 'react-i18next'
 import { useChatClient, useChatUser, useInviteCount, useContactCount, Avatar } from '@ermis-network/ermis-chat-react'
-import { CustomCreateChannelModal } from './custom/CustomCreateChannelModal'
-import { useState } from 'react'
+import { useUIStore } from '@/store/useUIStore'
 import { STORAGE_KEYS } from '@/utils/constants'
 
 interface SidebarHeaderProps {
@@ -24,7 +23,7 @@ export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
   const { user } = useChatUser()
   const { inviteCount } = useInviteCount()
   const { contactCount } = useContactCount()
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const { openCreateChannelModal } = useUIStore()
 
   const toggleTheme = () => {
     const isDark = theme === 'dark'
@@ -159,17 +158,10 @@ export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
         variant="ghost"
         size="icon"
         className="rounded-full hover:bg-primary/10 hover:text-primary transition-all active:scale-95 text-primary shrink-0"
-        onClick={() => setIsCreateModalOpen(true)}
+        onClick={openCreateChannelModal}
       >
         <Plus className="w-5 h-5" />
       </Button>
-
-      {isCreateModalOpen && (
-        <CustomCreateChannelModal
-          isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
-        />
-      )}
     </div>
   )
 }

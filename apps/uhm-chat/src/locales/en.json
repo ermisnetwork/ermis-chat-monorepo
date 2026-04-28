@@ -75,7 +75,10 @@
     "topics_channel_info": "Channel info",
     "topics_section": "Topics",
     "empty_title": "No conversations yet",
-    "empty_subtitle": "Start a conversation by tapping the + button above."
+    "empty_subtitle": "Start a conversation by tapping the + button above.",
+    "empty_channel_title": "Welcome to Uhm Chat",
+    "empty_channel_subtitle": "Select a conversation from the list or create a new space to get started.",
+    "empty_channel_cta": "Create a new channel"
   },
   "not_found": {
     "title": "Page not found",
