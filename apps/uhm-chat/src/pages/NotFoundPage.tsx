@@ -6,7 +6,7 @@ export function NotFoundPage() {
   const { t } = useTranslation()
 
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 p-4">
+    <div className="flex h-screen w-full flex-col items-center justify-center bg-zinc-50 dark:bg-[#1a1828] p-4">
       <div className="text-center space-y-5 max-w-md">
         <h1 className="text-8xl font-black text-zinc-200 dark:text-zinc-800">404</h1>
         <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">

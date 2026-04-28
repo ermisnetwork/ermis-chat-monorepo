@@ -44,7 +44,7 @@ const CustomSearchInputComponent = ({ value, onChange, placeholder }: any) => {
         value={value}
         onChange={onChange}
         autoFocus
-        className="pl-9 h-10 bg-zinc-100 dark:bg-zinc-900 border-none shadow-inner rounded-lg focus-visible:ring-1 focus-visible:ring-primary/50"
+        className="pl-9 h-10 bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner rounded-lg focus-visible:ring-1 focus-visible:ring-primary/50"
       />
     </div>
   )
@@ -54,9 +54,9 @@ const CustomSelectedBoxComponent = ({ users, onRemove, AvatarComponent, emptyLab
   if (!users || users.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-2 mb-4 p-2 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-zinc-200 dark:border-zinc-800 min-h-[48px] max-h-[120px] overflow-y-auto">
+    <div className="flex flex-wrap gap-2 mb-4 p-2 bg-zinc-50 dark:bg-[#211f30]/50 rounded-lg border border-zinc-200 dark:border-[#3a3555] min-h-[48px] max-h-[120px] overflow-y-auto">
       {users.map((u: any) => (
-        <div key={u.id} className="flex items-center gap-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-full pl-1 pr-2 py-1 shadow-sm">
+        <div key={u.id} className="flex items-center gap-1.5 bg-white dark:bg-[#2a2640] border border-zinc-200 dark:border-[#3a3555] rounded-full pl-1 pr-2 py-1 shadow-sm">
           <AvatarComponent image={u.avatar} name={u.name || u.id} size={20} />
           <span className="text-xs font-medium truncate max-w-[100px]">{u.name || u.id}</span>
           <button
@@ -168,7 +168,7 @@ const CustomGroupFieldsComponent = ({
           disabled={disabled}
           maxLength={500}
           rows={3}
-          className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+          className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50 resize-none dark:bg-[#1a1828] dark:border-[#3a3555] dark:placeholder:text-zinc-500"
         />
       </div>
       <div className="flex items-center justify-between py-2">
@@ -177,7 +177,7 @@ const CustomGroupFieldsComponent = ({
           type="button"
           role="switch"
           aria-checked={isPublic}
-          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${isPublic ? 'bg-primary' : 'bg-zinc-200 dark:bg-zinc-700'}`}
+          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${isPublic ? 'bg-primary' : 'bg-zinc-200 dark:bg-[#3a3555]'}`}
           onClick={() => onPublicChange(!isPublic)}
           disabled={disabled}
         >

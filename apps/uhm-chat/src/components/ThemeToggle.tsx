@@ -24,7 +24,7 @@ export function ThemeToggle() {
       variant="outline" 
       size="sm" 
       onClick={toggleTheme} 
-      className="rounded-full w-8 h-8 p-0 overflow-hidden bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-50 shadow-sm transition-all hover:bg-zinc-100 dark:hover:bg-zinc-800"
+      className="rounded-full w-8 h-8 p-0 overflow-hidden bg-white dark:bg-[#211f30] border-zinc-200 dark:border-[#3a3555] text-zinc-900 dark:text-zinc-50 shadow-sm transition-all hover:bg-zinc-100 dark:hover:bg-[#2a2640]"
     >
       <span className="text-xs">{isDark ? '🌙' : '☀️'}</span>
     </Button>

@@ -84,9 +84,9 @@ export function ContactsPanel({ onBack }: ContactsPanelProps) {
   )
 
   return (
-    <div className="flex flex-col h-full bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl">
+    <div className="flex flex-col h-full bg-white/60 dark:bg-[#1a1828]/60 backdrop-blur-xl">
       {/* Header */}
-      <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/50 dark:bg-zinc-950/50 backdrop-blur-md z-10">
+      <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/50 dark:bg-[#1a1828]/50 backdrop-blur-md z-10">
         <Button
           variant="ghost"
           size="icon"
@@ -112,7 +112,7 @@ export function ContactsPanel({ onBack }: ContactsPanelProps) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('chat.search_contacts', 'Tìm kiếm liên hệ...')}
-            className="pl-9 h-9 rounded-full bg-zinc-100 dark:bg-zinc-900 border-none shadow-inner text-sm focus-visible:ring-1 focus-visible:ring-primary/50"
+            className="pl-9 h-9 rounded-full bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner text-sm focus-visible:ring-1 focus-visible:ring-primary/50"
           />
         </div>
       </div>
@@ -121,7 +121,7 @@ export function ContactsPanel({ onBack }: ContactsPanelProps) {
       <div className="flex-1 overflow-y-auto">
         {totalCount === 0 ? (
           <div className="p-4 flex flex-col items-center justify-center text-center h-full">
-            <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center mb-3">
+            <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-[#211f30] flex items-center justify-center mb-3">
               <User className="w-6 h-6 text-zinc-400" />
             </div>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -135,7 +135,7 @@ export function ContactsPanel({ onBack }: ContactsPanelProps) {
             {grouped.map(({ letter, channels }) => (
               <div key={letter}>
                 {/* Sticky letter header */}
-                <div className="sticky top-0 z-[5] px-4 py-1.5 bg-zinc-50/90 dark:bg-zinc-900/90 backdrop-blur-sm border-b border-zinc-100 dark:border-zinc-800/50">
+                <div className="sticky top-0 z-[5] px-4 py-1.5 bg-zinc-50/90 dark:bg-[#211f30]/90 backdrop-blur-sm border-b border-zinc-100 dark:border-zinc-800/50">
                   <span className="text-xs font-bold text-primary/80 dark:text-primary/70 uppercase tracking-wider">
                     {letter}
                   </span>

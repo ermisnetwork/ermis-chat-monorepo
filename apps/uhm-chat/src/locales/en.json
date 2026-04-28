@@ -84,5 +84,32 @@
   },
   "app": {
     "connecting": "Connecting to Uhm Chat..."
+  },
+  "actions": {
+    "pin_channel": "Pin channel",
+    "unpin_channel": "Unpin channel",
+    "pin_topic": "Pin topic",
+    "unpin_topic": "Unpin topic",
+    "block_user": "Block user",
+    "unblock_user": "Unblock user",
+    "edit_topic": "Edit topic",
+    "close_topic": "Close topic",
+    "reopen_topic": "Reopen topic",
+    "create_topic": "Create topic",
+    "delete_channel": "Delete channel",
+    "leave_channel": "Leave channel",
+    "more_actions": "More actions",
+    "confirm_delete_title": "Delete Channel",
+    "confirm_delete_message": "Are you sure you want to delete <bold>{{name}}</bold>? This action cannot be undone and all messages will be lost.",
+    "confirm_leave_title": "Leave Channel",
+    "confirm_leave_message": "Are you sure you want to leave <bold>{{name}}</bold>? You will need to be re-invited to rejoin.",
+    "confirm_block_title": "Block User",
+    "confirm_block_message": "Are you sure you want to block <bold>{{name}}</bold>? You will no longer receive their messages.",
+    "confirm_unblock_title": "Unblock User",
+    "confirm_unblock_message": "Are you sure you want to unblock <bold>{{name}}</bold>? They will be able to send you messages again.",
+    "confirm_close_topic_title": "Close Topic",
+    "confirm_close_topic_message": "Are you sure you want to close <bold>{{name}}</bold>? Members will not be able to send new messages.",
+    "confirm_yes": "Confirm",
+    "confirm_cancel": "Cancel"
   }
 }

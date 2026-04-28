@@ -150,10 +150,10 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
   }
 
   return (
-    <div className="flex min-h-screen bg-zinc-50 dark:bg-zinc-950 items-center justify-center p-4 sm:p-8">
+    <div className="flex min-h-screen bg-zinc-50 dark:bg-[#1a1828] items-center justify-center p-4 sm:p-8">
       {/* Container chính: card bọc toàn bộ chia đôi trên màn lớn */}
       <div className="w-full max-w-6xl">
-        <div className="flex flex-col lg:flex-row overflow-hidden rounded-[2rem] bg-white dark:bg-zinc-900 shadow-2xl border border-zinc-200/50 dark:border-zinc-800/50">
+        <div className="flex flex-col lg:flex-row overflow-hidden rounded-[2rem] bg-white dark:bg-[#211f30] shadow-2xl border border-zinc-200/50 dark:border-zinc-800/50">
           
           {/* Cột trái (Giới thiệu) */}
           <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-zinc-900 via-zinc-900 to-[#12082a] p-10 xl:p-12 text-white relative overflow-hidden flex-col justify-between">
@@ -181,7 +181,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
           </div>
 
           {/* Cột phải (Form đăng nhập) */}
-          <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-12 relative overflow-hidden bg-white dark:bg-zinc-900">
+          <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-12 relative overflow-hidden bg-white dark:bg-[#211f30]">
             {/* Selectors */}
             <div className="absolute top-4 right-4 sm:top-6 sm:right-6 flex gap-3 z-50">
               <LocaleToggle />
@@ -223,9 +223,9 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                         setError('')
                         setFieldError('')
                       }} className="w-full">
-                        <TabsList className="relative mb-6 grid w-full grid-cols-2 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl h-12">
+                        <TabsList className="relative mb-6 grid w-full grid-cols-2 p-1 bg-zinc-100 dark:bg-[#2a2640] rounded-xl h-12">
                           <div
-                            className={`absolute left-1 top-1 bottom-1 w-[calc(50%-0.25rem)] rounded-lg bg-white dark:bg-zinc-900 shadow-sm transition-transform duration-300 ease-out ${loginMode === 'phone' ? 'translate-x-full' : 'translate-x-0'}`}
+                            className={`absolute left-1 top-1 bottom-1 w-[calc(50%-0.25rem)] rounded-lg bg-white dark:bg-[#211f30] shadow-sm transition-transform duration-300 ease-out ${loginMode === 'phone' ? 'translate-x-full' : 'translate-x-0'}`}
                           />
                           <TabsTrigger value="email" className="relative z-10 rounded-lg py-2 data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors font-medium text-zinc-500 dark:text-zinc-400 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-50">{t('login.email_tab')}</TabsTrigger>
                           <TabsTrigger value="phone" className="relative z-10 rounded-lg py-2 data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors font-medium text-zinc-500 dark:text-zinc-400 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-50">{t('login.phone_tab')}</TabsTrigger>
@@ -244,7 +244,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                               }}
                               placeholder={t('login.email_placeholder')} 
                               disabled={loading}
-                              className={`bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 h-12 rounded-xl focus-visible:ring-[#7949EC] ${fieldError && loginMode === 'email' ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                              className={`bg-zinc-50 dark:bg-[#1a1828] border-zinc-200 dark:border-zinc-800 h-12 rounded-xl focus-visible:ring-[#7949EC] ${fieldError && loginMode === 'email' ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                             />
                             {fieldError && loginMode === 'email' && (
                               <p className="text-xs text-destructive mt-1 animate-in fade-in duration-200">{fieldError}</p>
@@ -253,8 +253,8 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
                           <TabsContent value="phone" className="mt-0 space-y-2.5 outline-none">
                             <Label htmlFor="phone" className="text-zinc-700 dark:text-zinc-300 font-semibold">{t('login.phone_label')}</Label>
-                            <div className="flex rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 overflow-hidden focus-within:ring-2 focus-within:ring-[#7949EC] focus-within:border-transparent transition-all h-12">
-                              <div className="flex items-center justify-center bg-zinc-100 dark:bg-zinc-900 px-4 border-r border-zinc-200 dark:border-zinc-800">
+                            <div className="flex rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#1a1828] overflow-hidden focus-within:ring-2 focus-within:ring-[#7949EC] focus-within:border-transparent transition-all h-12">
+                              <div className="flex items-center justify-center bg-zinc-100 dark:bg-[#211f30] px-4 border-r border-zinc-200 dark:border-zinc-800">
                                 <span className="mr-2 text-base select-none">🇻🇳</span>
                                 <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 select-none">+84</span>
                               </div>
@@ -337,7 +337,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                                   document.getElementById(`otp-input-${focusIdx === 6 ? 5 : focusIdx}`)?.focus()
                                 }
                               }}
-                              className="h-12 w-10 sm:h-14 sm:w-12 rounded-xl text-center text-xl font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus-visible:ring-[#7949EC] focus-visible:border-transparent transition-all"
+                              className="h-12 w-10 sm:h-14 sm:w-12 rounded-xl text-center text-xl font-bold bg-zinc-50 dark:bg-[#1a1828] border-zinc-200 dark:border-zinc-800 focus-visible:ring-[#7949EC] focus-visible:border-transparent transition-all"
                             />
                           ))}
                         </div>
@@ -351,7 +351,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                           <Button type="button" variant="outline" disabled={loading} onClick={() => setOtpSent(false)} className="flex-1 h-12 rounded-xl border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium">
                             {t('login.back')}
                           </Button>
-                          <Button type="button" variant="secondary" disabled={countdown > 0 || loading} onClick={handleSendOtp} className="flex-1 h-12 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-medium transition-colors">
+                          <Button type="button" variant="secondary" disabled={countdown > 0 || loading} onClick={handleSendOtp} className="flex-1 h-12 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-[#2a2640] dark:hover:bg-[#332e50] text-zinc-700 dark:text-zinc-300 font-medium transition-colors">
                             {countdown > 0 ? t('login.resend_wait').replace('{{seconds}}', countdown.toString()) : t('login.resend')}
                           </Button>
                         </div>
@@ -366,7 +366,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                           <span className="w-full border-t border-zinc-200 dark:border-zinc-800" />
                         </div>
                         <div className="relative flex justify-center text-xs uppercase">
-                          <span className="bg-white dark:bg-zinc-900 px-3 text-zinc-500 dark:text-zinc-400 font-semibold tracking-wider">
+                          <span className="bg-white dark:bg-[#211f30] px-3 text-zinc-500 dark:text-zinc-400 font-semibold tracking-wider">
                             {t('login.or_continue')}
                           </span>
                         </div>

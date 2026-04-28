@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChannelList, Channel, VirtualMessageList, MessageInput, ChannelHeader, ChannelInfo } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
 import { Info } from 'lucide-react'
@@ -8,13 +9,31 @@ import { InvitesPanel } from '@/features/chat/InvitesPanel'
 import { TopicsPanel } from '@/features/chat/TopicsPanel'
 import { ChannelListSkeleton } from '@/features/chat/ChannelListSkeleton'
 import { ChannelListEmpty } from '@/features/chat/ChannelListEmpty'
+import { UhmChannelActions } from '@/features/chat/UhmChannelActions'
 
 export function ChatPage() {
+  const { t } = useTranslation()
   const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
   const [drillDownChannel, setDrillDownChannel] = useState<ChannelType | null>(null)
   const [showChannelInfo, setShowChannelInfo] = useState(false)
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
+
+  // Localized action labels passed to SDK ChannelList/TopicList
+  const actionLabels = useMemo(() => ({
+    pinChannel: t('actions.pin_channel'),
+    unpinChannel: t('actions.unpin_channel'),
+    pinTopic: t('actions.pin_topic'),
+    unpinTopic: t('actions.unpin_topic'),
+    blockUser: t('actions.block_user'),
+    unblockUser: t('actions.unblock_user'),
+    editTopic: t('actions.edit_topic'),
+    closeTopic: t('actions.close_topic'),
+    reopenTopic: t('actions.reopen_topic'),
+    createTopic: t('actions.create_topic'),
+    deleteChannel: t('actions.delete_channel'),
+    leaveChannel: t('actions.leave_channel'),
+  }), [t])
 
   const handleTopicDrillDown = useCallback((channel: ChannelType) => {
     setDrillDownChannel(channel)
@@ -61,6 +80,8 @@ export function ChatPage() {
             onTopicDrillDown={handleTopicDrillDown}
             LoadingIndicator={ChannelListSkeleton}
             EmptyStateIndicator={ChannelListEmpty}
+            ChannelActionsComponent={UhmChannelActions}
+            actionLabels={actionLabels}
           />
         </div>
 
@@ -104,7 +125,7 @@ export function ChatPage() {
 
       {/* Right Panel — ChannelInfo (instant layout snap + smooth content fade) */}
       <div className={`shrink-0 overflow-hidden border-l border-zinc-200/50 dark:border-zinc-800/50 ${showChannelInfo ? 'w-[360px]' : 'w-0 border-l-0'}`}>
-        <div className={`w-[360px] h-full bg-white dark:bg-zinc-950 transition-opacity duration-200 ease-in ${showChannelInfo ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`w-[360px] h-full bg-white dark:bg-[#1a1828] transition-opacity duration-200 ease-in ${showChannelInfo ? 'opacity-100' : 'opacity-0'}`}>
           <div className="w-full h-full overflow-y-auto">
             {hasOpenedInfo && (
               <ChannelInfo

@@ -72,7 +72,7 @@ export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
           >
             <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-300" />
             {inviteCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 border-2 border-white dark:border-zinc-950" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 border-2 border-white dark:border-[#1a1828]" />
             )}
           </Button>
         </DropdownMenuTrigger>
@@ -151,7 +151,7 @@ export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
         <Input
           type="text"
           placeholder={t('chat.search_channels', 'Tìm kiếm...')}
-          className="pl-9 h-9 rounded-full bg-zinc-100 dark:bg-zinc-900 border-none shadow-inner text-sm focus-visible:ring-1 focus-visible:ring-primary/50"
+          className="pl-9 h-9 rounded-full bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner text-sm focus-visible:ring-1 focus-visible:ring-primary/50"
         />
       </div>
 

@@ -8,17 +8,17 @@ import React from 'react'
 const SkeletonRow = React.memo(() => (
   <div className="flex items-center gap-3 px-4 py-3">
     {/* Avatar skeleton */}
-    <div className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-800 animate-pulse shrink-0" />
+    <div className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse shrink-0" />
 
     {/* Content skeleton */}
     <div className="flex-1 min-w-0 space-y-2">
       {/* Top row: name + timestamp */}
       <div className="flex items-center justify-between gap-3">
-        <div className="h-3.5 w-28 rounded-md bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
-        <div className="h-3 w-10 rounded-md bg-zinc-100 dark:bg-zinc-800/60 animate-pulse" />
+        <div className="h-3.5 w-28 rounded-md bg-zinc-200 dark:bg-[#2a2640] animate-pulse" />
+        <div className="h-3 w-10 rounded-md bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" />
       </div>
       {/* Bottom row: last message */}
-      <div className="h-3 w-40 rounded-md bg-zinc-100 dark:bg-zinc-800/50 animate-pulse" />
+      <div className="h-3 w-40 rounded-md bg-zinc-100 dark:bg-[#2a2640]/50 animate-pulse" />
     </div>
   </div>
 ))
@@ -42,7 +42,7 @@ export const ChannelListSkeleton: React.FC<{ text?: string }> = React.memo(() =>
       <div key={i} className="flex items-center gap-3 px-4 py-3" style={{ animationDelay: `${i * 60}ms` }}>
         {/* Avatar — alternate shapes for visual variety */}
         <div
-          className={`w-10 h-10 shrink-0 bg-zinc-200 dark:bg-zinc-800 animate-pulse ${
+          className={`w-10 h-10 shrink-0 bg-zinc-200 dark:bg-[#2a2640] animate-pulse ${
             i % 3 === 0 ? 'rounded-[25%]' : 'rounded-full'
           }`}
         />
@@ -51,16 +51,16 @@ export const ChannelListSkeleton: React.FC<{ text?: string }> = React.memo(() =>
         <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center justify-between gap-3">
             <div
-              className={`h-3.5 rounded-md bg-zinc-200 dark:bg-zinc-800 animate-pulse ${widths.name}`}
+              className={`h-3.5 rounded-md bg-zinc-200 dark:bg-[#2a2640] animate-pulse ${widths.name}`}
               style={{ animationDelay: `${i * 80}ms` }}
             />
             <div
-              className="h-3 w-10 rounded-md bg-zinc-100 dark:bg-zinc-800/60 animate-pulse"
+              className="h-3 w-10 rounded-md bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse"
               style={{ animationDelay: `${i * 100}ms` }}
             />
           </div>
           <div
-            className={`h-3 rounded-md bg-zinc-100 dark:bg-zinc-800/50 animate-pulse ${widths.msg}`}
+            className={`h-3 rounded-md bg-zinc-100 dark:bg-[#2a2640]/50 animate-pulse ${widths.msg}`}
             style={{ animationDelay: `${i * 100 + 40}ms` }}
           />
         </div>

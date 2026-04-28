@@ -84,5 +84,32 @@
   },
   "app": {
     "connecting": "Đang kết nối đến Uhm Chat..."
+  },
+  "actions": {
+    "pin_channel": "Ghim kênh",
+    "unpin_channel": "Bỏ ghim kênh",
+    "pin_topic": "Ghim chủ đề",
+    "unpin_topic": "Bỏ ghim chủ đề",
+    "block_user": "Chặn người dùng",
+    "unblock_user": "Bỏ chặn người dùng",
+    "edit_topic": "Chỉnh sửa chủ đề",
+    "close_topic": "Đóng chủ đề",
+    "reopen_topic": "Mở lại chủ đề",
+    "create_topic": "Tạo chủ đề",
+    "delete_channel": "Xóa kênh",
+    "leave_channel": "Rời kênh",
+    "more_actions": "Thêm tùy chọn",
+    "confirm_delete_title": "Xóa kênh",
+    "confirm_delete_message": "Bạn có chắc chắn muốn xóa <bold>{{name}}</bold>? Hành động này không thể hoàn tác và toàn bộ tin nhắn sẽ bị mất.",
+    "confirm_leave_title": "Rời kênh",
+    "confirm_leave_message": "Bạn có chắc chắn muốn rời <bold>{{name}}</bold>? Bạn sẽ cần được mời lại để tham gia.",
+    "confirm_block_title": "Chặn người dùng",
+    "confirm_block_message": "Bạn có chắc chắn muốn chặn <bold>{{name}}</bold>? Bạn sẽ không nhận được tin nhắn từ họ nữa.",
+    "confirm_unblock_title": "Bỏ chặn người dùng",
+    "confirm_unblock_message": "Bạn có chắc chắn muốn bỏ chặn <bold>{{name}}</bold>? Họ sẽ có thể gửi tin nhắn cho bạn.",
+    "confirm_close_topic_title": "Đóng chủ đề",
+    "confirm_close_topic_message": "Bạn có chắc chắn muốn đóng <bold>{{name}}</bold>? Thành viên sẽ không thể gửi tin nhắn mới.",
+    "confirm_yes": "Xác nhận",
+    "confirm_cancel": "Hủy"
   }
 }

@@ -27,24 +27,24 @@
   }
 
   .dark {
-    --background: 240 10% 3.9%;
+    --background: 248 25% 13%;          /* #1a1828 — brand base */
     --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
+    --card: 246 22% 16%;                /* #211f30 — slightly elevated */
     --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
+    --popover: 246 22% 16%;             /* #211f30 — match card for popovers/dropdowns */
     --popover-foreground: 0 0% 98%;
-    --primary: 261 81% 61%;
+    --primary: 261 81% 61%;             /* #7949EC — brand purple */
     --primary-foreground: 210 40% 98%;
-    --secondary: 240 3.7% 15.9%;
+    --secondary: 248 20% 18%;           /* subtle purple-tinted secondary */
     --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
+    --muted: 248 18% 20%;              /* #2a2640 — muted purple-tinted */
     --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
+    --accent: 248 25% 20%;             /* purple-tinted hover/accent bg */
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
+    --border: 248 18% 20%;             /* subtle purple-tinted border */
+    --input: 248 18% 20%;
     --ring: 261 81% 61%;
   }
 }

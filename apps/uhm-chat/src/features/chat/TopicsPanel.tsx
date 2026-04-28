@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Hash, Plus, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -9,6 +10,7 @@ import {
   canManageChannel,
 } from '@ermis-network/ermis-chat-react'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
+import { UhmChannelActions } from './UhmChannelActions'
 
 interface TopicsPanelProps {
   channel: Channel
@@ -19,7 +21,7 @@ interface TopicsPanelProps {
 
 /** Custom general avatar using lucide Hash icon + TailwindCSS */
 const GeneralAvatar = () => (
-  <div className="w-6 h-6 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-zinc-800">
+  <div className="w-6 h-6 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-[#2a2640]">
     <Hash className="w-3.5 h-3.5" />
   </div>
 )
@@ -31,7 +33,7 @@ const TopicEmojiAvatar = ({ image }: { image?: string | null }) => {
     emoji = image.replace('emoji://', '')
   }
   return (
-    <div className="w-6 h-6 rounded-full flex items-center justify-center text-sm bg-zinc-100 dark:bg-zinc-800">
+    <div className="w-6 h-6 rounded-full flex items-center justify-center text-sm bg-zinc-100 dark:bg-[#2a2640]">
       {emoji}
     </div>
   )
@@ -50,10 +52,19 @@ export function TopicsPanel({ channel, onBack, onCreateTopic, onShowChannelInfo 
   const userRole = channel.state?.members?.[currentUserId || '']?.channel_role
   const canManage = canManageChannel(userRole)
 
+  // Localized action labels for topic actions
+  const actionLabels = useMemo(() => ({
+    pinTopic: t('actions.pin_topic'),
+    unpinTopic: t('actions.unpin_topic'),
+    editTopic: t('actions.edit_topic'),
+    closeTopic: t('actions.close_topic'),
+    reopenTopic: t('actions.reopen_topic'),
+  }), [t])
+
   return (
-    <div className="flex flex-col h-full bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl">
+    <div className="flex flex-col h-full bg-white/60 dark:bg-[#1a1828]/60 backdrop-blur-xl">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md z-10">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/80 dark:bg-[#1a1828]/80 backdrop-blur-md z-10">
         <Button
           variant="ghost"
           size="icon"
@@ -108,6 +119,8 @@ export function TopicsPanel({ channel, onBack, onCreateTopic, onShowChannelInfo 
           generalTopicLabel={t('chat.topics_general', 'general')}
           GeneralAvatarComponent={GeneralAvatar as any}
           TopicAvatarComponent={TopicEmojiAvatar as any}
+          ChannelActionsComponent={UhmChannelActions}
+          actionLabels={actionLabels}
         />
       </div>
     </div>

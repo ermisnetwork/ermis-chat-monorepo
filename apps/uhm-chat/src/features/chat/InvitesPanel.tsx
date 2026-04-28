@@ -13,9 +13,9 @@ export function InvitesPanel({ onBack }: InvitesPanelProps) {
   const { setActiveChannel } = useChatClient()
 
   return (
-    <div className="flex flex-col h-full bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl">
+    <div className="flex flex-col h-full bg-white/60 dark:bg-[#1a1828]/60 backdrop-blur-xl">
       {/* Header */}
-      <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/50 dark:bg-zinc-950/50 backdrop-blur-md z-10">
+      <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/50 dark:bg-[#1a1828]/50 backdrop-blur-md z-10">
         <Button
           variant="ghost"
           size="icon"
@@ -31,7 +31,7 @@ export function InvitesPanel({ onBack }: InvitesPanelProps) {
       <div className="flex-1 overflow-y-auto">
         {invites.length === 0 ? (
           <div className="p-4 flex flex-col items-center justify-center text-center h-full">
-            <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center mb-3">
+            <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-[#211f30] flex items-center justify-center mb-3">
               <Inbox className="w-6 h-6 text-zinc-400" />
             </div>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">

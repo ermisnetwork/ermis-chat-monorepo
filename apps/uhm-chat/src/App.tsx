@@ -16,7 +16,7 @@ const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_D
 
 // Component xử lý điều hướng an toàn sau khi login
 function AuthRoute({ isAuthenticated, isRestoring, children }: { isAuthenticated: boolean, isRestoring: boolean, children: React.ReactNode }) {
-  if (isRestoring) return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950" />
+  if (isRestoring) return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]" />
   if (!isAuthenticated) return <Navigate to="/login" replace />
   return <>{children}</>
 }
@@ -81,7 +81,7 @@ function AppContent() {
 
   // Nếu đang loading auth
   if (isRestoring) {
-    return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950" />
+    return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]" />
   }
 
   return (
@@ -99,7 +99,7 @@ function AppContent() {
           element={
             <AuthRoute isAuthenticated={isAuthenticated} isRestoring={isRestoring}>
               {!isClientReady ? (
-                <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">{t('app.connecting')}</div>
+                <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]">{t('app.connecting')}</div>
               ) : (
                 <ChatPage />
               )}
