@@ -18,6 +18,7 @@ import { isPendingMember } from '../channelRoleUtils';
 export function useChannelListUpdates(
   channels: Channel[],
   setChannels: React.Dispatch<React.SetStateAction<Channel[]>>,
+  onOwnMessageNew?: () => void,
 ): void {
   const { client, activeChannel, setActiveChannel } = useChatClient();
 
@@ -25,17 +26,23 @@ export function useChannelListUpdates(
   const activeChannelRef = useRef(activeChannel);
   activeChannelRef.current = activeChannel;
 
+  // Ref to always have the latest callback without re-subscribing
+  const onOwnMessageNewRef = useRef(onOwnMessageNew);
+  onOwnMessageNewRef.current = onOwnMessageNew;
+
   useEffect(() => {
     // --- message.new: re-sort + auto mark-read ---
     const handleNewMessage = (event: Event) => {
       const eventCid = event.cid;
       if (!eventCid) return;
 
+      const isOwnMessage = event.user?.id === client.userID;
+
       // If the new message is on the active channel and from someone else,
       // mark it as read immediately so unreadCount resets to 0.
       // Skip markRead if the current user is banned, blocked, or pending in that channel.
       const active = activeChannelRef.current;
-      if (active?.cid === eventCid && event.user?.id !== client.userID) {
+      if (active?.cid === eventCid && !isOwnMessage) {
         const isBannedInActive = Boolean(active.state?.membership?.banned);
         const isBlockedInActive = isDirectChannel(active) && Boolean(active.state?.membership?.blocked);
         const isPendingActive = isPendingMember(active.state?.membership?.channel_role as string);
@@ -77,6 +84,13 @@ export function useChannelListUpdates(
         updated.unshift(ch);
         return updated;
       });
+
+      // Notify the component layer that the current user sent a message
+      // so it can scroll to top. Use setTimeout(0) to ensure React has
+      // flushed the setChannels state update before the scroll fires.
+      if (isOwnMessage && onOwnMessageNewRef.current) {
+        setTimeout(() => onOwnMessageNewRef.current?.(), 0);
+      }
     };
 
     // --- channel.deleted: remove from list and reset active ---

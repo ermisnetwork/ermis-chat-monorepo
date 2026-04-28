@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { VList } from 'virtua';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { VList, type VListHandle } from 'virtua';
 import type { Channel, Event, ChannelFilters } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
@@ -347,6 +347,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   generalTopicLabel = 'general',
   TopicPillComponent,
   FlatTopicGroupItemComponent,
+  scrollToTopOnOwnMessage = true,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -354,6 +355,14 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   const [isPendingExpanded, setIsPendingExpanded] = useState(true);
   const [addingTopicForChannel, setAddingTopicForChannel] = useState<Channel | null>(null);
   const [editingTopicForChannel, setEditingTopicForChannel] = useState<Channel | null>(null);
+
+  // Ref for imperative scroll control on the virtualized list
+  const vlistRef = useRef<VListHandle>(null);
+
+  // Scroll to top when the current user sends a message
+  const handleOwnMessageNew = useCallback(() => {
+    vlistRef.current?.scrollToIndex(0);
+  }, []);
 
   const handleAddTopicClick = useCallback((channel: Channel) => {
     if (onAddTopic) {
@@ -440,7 +449,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   }, [loadChannels]);
 
   // Real-time: List manipulation (move to top, add, delete)
-  useChannelListUpdates(channels, setChannels);
+  useChannelListUpdates(channels, setChannels, scrollToTopOnOwnMessage ? handleOwnMessageNew : undefined);
 
   // Online status: compute set of online friend user IDs (skip if disabled)
   const onlineUsers = useOnlineUsers(showOnlineStatus ? channels : []);
@@ -493,7 +502,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   return (
     <div className={`ermis-channel-list${className ? ` ${className}` : ''}`}>
       {/* VList requires its container to have a height to work. */}
-      <VList style={{ height: '100%' }}>
+      <VList ref={vlistRef} style={{ height: '100%' }}>
         {showPendingInvites && pendingChannels.length > 0 && (
           <div
             className="ermis-channel-list__accordion-header"

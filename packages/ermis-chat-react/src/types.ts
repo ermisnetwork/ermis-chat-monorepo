@@ -450,6 +450,8 @@ export type TopicListProps = {
   pendingBadgeLabel?: string;
   /** Badge label for blocked members */
   blockedBadgeLabel?: string;
+  /** Auto-scroll the topic list to the top when the current user sends a message (default: true) */
+  scrollToTopOnOwnMessage?: boolean;
 };
 
 export type ChannelListProps = {
@@ -510,6 +512,8 @@ export type ChannelListProps = {
   TopicPillComponent?: React.ComponentType<TopicPillProps>;
   /** Custom component to replace the entire flat topic group item */
   FlatTopicGroupItemComponent?: React.ComponentType<any>;
+  /** Auto-scroll the channel list to the top when the current user sends a message (default: true) */
+  scrollToTopOnOwnMessage?: boolean;
 };
 
 /* ----------------------------------------------------------

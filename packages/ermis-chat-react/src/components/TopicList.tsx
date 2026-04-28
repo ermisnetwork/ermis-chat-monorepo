@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { VList } from 'virtua';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { VList, type VListHandle } from 'virtua';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useTopicGroupUpdates } from '../hooks/useTopicGroupUpdates';
@@ -48,10 +48,40 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
   closedTopicIcon,
   pendingBadgeLabel,
   blockedBadgeLabel,
+  scrollToTopOnOwnMessage = true,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const currentUserId = client.userID;
   const { topics } = useTopicGroupUpdates(channel, currentUserId);
+
+  // Ref for imperative scroll control on the virtualized list
+  const vlistRef = useRef<VListHandle>(null);
+
+  // Auto-scroll to top when the current user sends a message in any topic
+  useEffect(() => {
+    if (!scrollToTopOnOwnMessage || !currentUserId) return;
+
+    const subs: { unsubscribe: () => void }[] = [];
+
+    const handleNewMessage = (event: { user?: { id?: string } }) => {
+      if (event.user?.id === currentUserId) {
+        setTimeout(() => vlistRef.current?.scrollToIndex(0), 0);
+      }
+    };
+
+    // Listen on parent channel
+    subs.push(channel.on('message.new', handleNewMessage));
+
+    // Listen on all sub-topics
+    const currentTopics = channel.state?.topics || [];
+    currentTopics.forEach((t: Channel) => {
+      subs.push(t.on('message.new', handleNewMessage));
+    });
+
+    return () => {
+      subs.forEach((s) => s.unsubscribe());
+    };
+  }, [channel, channel.state?.topics, currentUserId, scrollToTopOnOwnMessage]);
 
   // Default edit topic handler: open built-in TopicModal when no custom handler is provided
   const [editingTopic, setEditingTopic] = useState<Channel | null>(null);
@@ -98,7 +128,7 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
 
   return (
     <>
-    <VList style={{ height: '100%' }}>
+    <VList ref={vlistRef} style={{ height: '100%' }}>
       {/* General (parent channel) — no actions menu */}
       <ChannelRow
         channel={generalProxy as Channel}
