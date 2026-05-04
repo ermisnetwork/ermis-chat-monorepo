@@ -92,6 +92,21 @@
     "retry": "Try again",
     "connection_restored": "Connection restored"
   },
+  "search": {
+    "placeholder": "Search channels, topics, users...",
+    "my_channels": "My Channels",
+    "topics": "Topics",
+    "public_channels": "Public Channels",
+    "users": "Users",
+    "no_results": "No results found",
+    "no_results_desc": "Try a different search term",
+    "user_hint": "Enter email or phone number to search",
+    "public_badge": "Public",
+    "topic_in": "in: {{channel}}",
+    "prompt_title": "Search everything",
+    "prompt_desc": "Find channels, topics, or people",
+    "type_more": "Enter at least 2 characters"
+  },
   "actions": {
     "pin_channel": "Pin channel",
     "unpin_channel": "Unpin channel",

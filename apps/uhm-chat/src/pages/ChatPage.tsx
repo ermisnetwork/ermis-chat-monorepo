@@ -7,6 +7,7 @@ import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
 import { InvitesPanel } from '@/features/chat/InvitesPanel'
 import { TopicsPanel } from '@/features/chat/TopicsPanel'
+import { SearchPanel } from '@/features/chat/SearchPanel'
 import { ChannelListSkeleton } from '@/features/chat/ChannelListSkeleton'
 import { ChannelListEmpty } from '@/features/chat/ChannelListEmpty'
 import { UhmChannelActions } from '@/features/chat/UhmChannelActions'
@@ -18,10 +19,12 @@ import { useUIStore } from '@/store/useUIStore'
 
 export function ChatPage() {
   const { t } = useTranslation()
-  const { client } = useChatClient()
+  const { client, setActiveChannel } = useChatClient()
   const { status, retryConnection } = useConnectionStatus(client)
 
   const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
+  const [isSearchMode, setIsSearchMode] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [drillDownChannel, setDrillDownChannel] = useState<ChannelType | null>(null)
   const [showChannelInfo, setShowChannelInfo] = useState(false)
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
@@ -84,15 +87,40 @@ export function ChatPage() {
         
         {/* Channels Panel */}
         <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'channels' ? 'translate-x-0' : '-translate-x-full'}`}>
-          <SidebarHeader onNavigate={setActivePanel} />
-          <ChannelList
-            showPendingInvites={false}
-            onTopicDrillDown={handleTopicDrillDown}
-            LoadingIndicator={ChannelListSkeleton}
-            EmptyStateIndicator={ChannelListEmpty}
-            ChannelActionsComponent={UhmChannelActions}
-            actionLabels={actionLabels}
+          <SidebarHeader
+            onNavigate={setActivePanel}
+            isSearchMode={isSearchMode}
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            onSearchOpen={() => setIsSearchMode(true)}
+            onSearchClose={() => { setIsSearchMode(false); setSearchQuery('') }}
           />
+
+          {/* ChannelList — always mounted to avoid re-fetching */}
+          <div className="flex-1 overflow-hidden relative">
+            <ChannelList
+              showPendingInvites={false}
+              onTopicDrillDown={handleTopicDrillDown}
+              LoadingIndicator={ChannelListSkeleton}
+              EmptyStateIndicator={ChannelListEmpty}
+              ChannelActionsComponent={UhmChannelActions}
+              actionLabels={actionLabels}
+            />
+
+            {/* SearchPanel overlay — zoom animation on top of ChannelList */}
+            <div className={`absolute inset-0 z-10 transition-all duration-200 ease-out ${
+              isSearchMode
+                ? 'scale-100 opacity-100'
+                : 'scale-95 opacity-0 pointer-events-none'
+            }`}>
+              {isSearchMode && (
+                <SearchPanel
+                  searchQuery={searchQuery}
+                  onSelectChannel={() => { setIsSearchMode(false); setSearchQuery('') }}
+                />
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Topics Panel (drill-down) */}

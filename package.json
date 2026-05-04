@@ -35,5 +35,9 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "resolutions": {
+    "react": "19.2.5",
+    "react-dom": "19.2.5"
   }
 }

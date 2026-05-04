@@ -1,4 +1,5 @@
-import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut } from 'lucide-react'
+import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut, ArrowLeft, X } from 'lucide-react'
+import { useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -15,15 +16,37 @@ import { STORAGE_KEYS } from '@/utils/constants'
 
 interface SidebarHeaderProps {
   onNavigate?: (panel: 'contacts' | 'invites') => void;
+  // Search mode control — managed by parent (ChatPage)
+  isSearchMode?: boolean;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
+  onSearchOpen?: () => void;
+  onSearchClose?: () => void;
 }
 
-export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
+export function SidebarHeader({
+  onNavigate,
+  isSearchMode = false,
+  searchQuery = '',
+  onSearchQueryChange,
+  onSearchOpen,
+  onSearchClose,
+}: SidebarHeaderProps) {
   const { t, i18n } = useTranslation()
   const { client, theme, setTheme } = useChatClient()
   const { user } = useChatUser()
   const { inviteCount } = useInviteCount()
   const { contactCount } = useContactCount()
   const { openCreateChannelModal } = useUIStore()
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  // Auto-focus when entering search mode
+  useEffect(() => {
+    if (isSearchMode) {
+      const timer = setTimeout(() => searchInputRef.current?.focus(), 50)
+      return () => clearTimeout(timer)
+    }
+  }, [isSearchMode])
 
   const toggleTheme = () => {
     const isDark = theme === 'dark'
@@ -62,107 +85,137 @@ export function SidebarHeader({ onNavigate }: SidebarHeaderProps) {
 
   return (
     <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md sticky top-0 z-10 shrink-0">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="relative rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 shrink-0"
-          >
-            <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-300" />
-            {inviteCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 border-2 border-white dark:border-[#1a1828]" />
-            )}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuItem className="flex items-center gap-3 py-2 cursor-default focus:bg-transparent">
-            <Avatar
-              image={user?.avatar}
-              name={user?.name || user?.id}
-              size={32}
-            />
-            <div className="flex flex-col overflow-hidden">
-              <span className="font-medium text-sm truncate">
-                {user?.name || user?.id || t('chat.menu_profile_anonymous', 'Anonymous')}
+
+      {/* Left button: Back (search mode) or Hamburger menu (normal) */}
+      {isSearchMode ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onSearchClose}
+          className="rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 shrink-0"
+        >
+          <ArrowLeft className="w-5 h-5 text-zinc-600 dark:text-zinc-300" />
+        </Button>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 shrink-0"
+            >
+              <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-300" />
+              {inviteCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 border-2 border-white dark:border-[#1a1828]" />
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuItem className="flex items-center gap-3 py-2 cursor-default focus:bg-transparent">
+              <Avatar
+                image={user?.avatar}
+                name={user?.name || user?.id}
+                size={32}
+              />
+              <div className="flex flex-col overflow-hidden">
+                <span className="font-medium text-sm truncate">
+                  {user?.name || user?.id || t('chat.menu_profile_anonymous', 'Anonymous')}
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={() => onNavigate?.('invites')}>
+              <div className="flex items-center">
+                <Inbox className="mr-2 h-4 w-4" />
+                <span>{t('chat.menu_invites', 'Lời mời')}</span>
+              </div>
+              {inviteCount > 0 && (
+                <span className="text-xs font-semibold bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-1.5 py-0.5 rounded-md">
+                  {inviteCount}
+                </span>
+              )}
+            </DropdownMenuItem>
+
+            <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={() => onNavigate?.('contacts')}>
+              <div className="flex items-center">
+                <Users className="mr-2 h-4 w-4" />
+                <span>{t('chat.menu_contacts', 'Danh bạ')}</span>
+              </div>
+              {contactCount > 0 && (
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {contactCount}
+                </span>
+              )}
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={toggleTheme}>
+              <div className="flex items-center">
+                <Palette className="mr-2 h-4 w-4" />
+                <span>{t('chat.menu_theme', 'Giao diện')}</span>
+              </div>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400 capitalize">
+                {theme === 'dark' ? 'Dark' : 'Light'}
               </span>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
+            </DropdownMenuItem>
 
-          <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={() => onNavigate?.('invites')}>
-            <div className="flex items-center">
-              <Inbox className="mr-2 h-4 w-4" />
-              <span>{t('chat.menu_invites', 'Lời mời')}</span>
-            </div>
-            {inviteCount > 0 && (
-              <span className="text-xs font-semibold bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-1.5 py-0.5 rounded-md">
-                {inviteCount}
+            <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={toggleLocale}>
+              <div className="flex items-center">
+                <Globe className="mr-2 h-4 w-4" />
+                <span>{t('chat.menu_locale', 'Ngôn ngữ')}</span>
+              </div>
+              <span className="text-base">
+                {i18n.language === 'vi' ? '🇻🇳' : '🇬🇧'}
               </span>
-            )}
-          </DropdownMenuItem>
+            </DropdownMenuItem>
 
-          <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={() => onNavigate?.('contacts')}>
-            <div className="flex items-center">
-              <Users className="mr-2 h-4 w-4" />
-              <span>{t('chat.menu_contacts', 'Danh bạ')}</span>
-            </div>
-            {contactCount > 0 && (
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {contactCount}
-              </span>
-            )}
-          </DropdownMenuItem>
+            <DropdownMenuSeparator />
 
-          <DropdownMenuSeparator />
+            <DropdownMenuItem className="cursor-pointer text-red-500 focus:text-red-500 focus:bg-red-50 dark:focus:bg-red-950/50" onClick={handleLogout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              <span>{t('chat.menu_logout', 'Đăng xuất')}</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
-          <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={toggleTheme}>
-            <div className="flex items-center">
-              <Palette className="mr-2 h-4 w-4" />
-              <span>{t('chat.menu_theme', 'Giao diện')}</span>
-            </div>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400 capitalize">
-              {theme === 'dark' ? 'Dark' : 'Light'}
-            </span>
-          </DropdownMenuItem>
-
-          <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={toggleLocale}>
-            <div className="flex items-center">
-              <Globe className="mr-2 h-4 w-4" />
-              <span>{t('chat.menu_locale', 'Ngôn ngữ')}</span>
-            </div>
-            <span className="text-base">
-              {i18n.language === 'vi' ? '🇻🇳' : '🇬🇧'}
-            </span>
-          </DropdownMenuItem>
-
-          <DropdownMenuSeparator />
-
-          <DropdownMenuItem className="cursor-pointer text-red-500 focus:text-red-500 focus:bg-red-50 dark:focus:bg-red-950/50" onClick={handleLogout}>
-            <LogOut className="mr-2 h-4 w-4" />
-            <span>{t('chat.menu_logout', 'Đăng xuất')}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
+      {/* Search Input — single input, dual behavior */}
       <div className="relative flex-1">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
         <Input
+          ref={searchInputRef}
           type="text"
+          value={isSearchMode ? searchQuery : ''}
+          onChange={(e) => onSearchQueryChange?.(e.target.value)}
+          onFocus={() => { if (!isSearchMode) onSearchOpen?.() }}
+          readOnly={!isSearchMode}
           placeholder={t('chat.search_channels', 'Tìm kiếm...')}
-          className="pl-9 h-9 rounded-full bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner text-sm focus-visible:ring-1 focus-visible:ring-primary/50"
+          className={`pl-9 h-9 rounded-full bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner text-sm focus-visible:ring-1 focus-visible:ring-primary/50 ${isSearchMode ? 'pr-8' : 'cursor-pointer'
+            }`}
         />
+        {isSearchMode && searchQuery && (
+          <button
+            onClick={() => onSearchQueryChange?.('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="rounded-full hover:bg-primary/10 hover:text-primary transition-all active:scale-95 text-primary shrink-0"
-        onClick={openCreateChannelModal}
-      >
-        <Plus className="w-5 h-5" />
-      </Button>
+      {/* Right button: + (only in normal mode) */}
+      {!isSearchMode && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="rounded-full hover:bg-primary/10 hover:text-primary transition-all active:scale-95 text-primary shrink-0"
+          onClick={openCreateChannelModal}
+        >
+          <Plus className="w-5 h-5" />
+        </Button>
+      )}
     </div>
   )
 }
-

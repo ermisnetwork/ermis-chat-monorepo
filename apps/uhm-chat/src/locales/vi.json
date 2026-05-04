@@ -92,6 +92,21 @@
     "retry": "Thử lại",
     "connection_restored": "Đã kết nối lại"
   },
+  "search": {
+    "placeholder": "Tìm kênh, chủ đề, người dùng...",
+    "my_channels": "Kênh của tôi",
+    "topics": "Chủ đề",
+    "public_channels": "Kênh công khai",
+    "users": "Người dùng",
+    "no_results": "Không tìm thấy kết quả",
+    "no_results_desc": "Thử từ khóa khác",
+    "user_hint": "Nhập email hoặc số điện thoại để tìm",
+    "public_badge": "Công khai",
+    "topic_in": "trong: {{channel}}",
+    "prompt_title": "Tìm kiếm mọi thứ",
+    "prompt_desc": "Tìm kênh, chủ đề hoặc người dùng",
+    "type_more": "Nhập ít nhất 2 ký tự"
+  },
   "actions": {
     "pin_channel": "Ghim kênh",
     "unpin_channel": "Bỏ ghim kênh",
