@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChannelList, Channel, VirtualMessageList, MessageInput, ChannelHeader, ChannelInfo, useChatClient } from '@ermis-network/ermis-chat-react'
+import { ChannelList, Channel, VirtualMessageList, MessageInput, ChannelHeader, ChannelInfo, useChatClient, TopicModal } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
 import { Info } from 'lucide-react'
 import { SidebarHeader } from '@/components/SidebarHeader'
@@ -30,7 +30,14 @@ export function ChatPage() {
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
 
-  const { isCreateChannelModalOpen, closeCreateChannelModal } = useUIStore()
+  const {
+    isCreateChannelModalOpen,
+    closeCreateChannelModal,
+    topicAction,
+    openCreateTopicModal,
+    openEditTopicModal,
+    closeTopicModal
+  } = useUIStore()
 
   // Localized action labels passed to SDK ChannelList/TopicList
   const actionLabels = useMemo(() => ({
@@ -101,6 +108,8 @@ export function ChatPage() {
             <ChannelList
               showPendingInvites={false}
               onTopicDrillDown={handleTopicDrillDown}
+              onAddTopic={openCreateTopicModal}
+              onEditTopic={openEditTopicModal}
               LoadingIndicator={ChannelListSkeleton}
               EmptyStateIndicator={ChannelListEmpty}
               ChannelActionsComponent={UhmChannelActions}
@@ -128,7 +137,8 @@ export function ChatPage() {
             <TopicsPanel
               channel={drillDownChannel}
               onBack={handleBackFromTopics}
-              onCreateTopic={(ch) => console.log('Create topic for', ch.cid)}
+              onCreateTopic={openCreateTopicModal}
+              onEditTopic={openEditTopicModal}
               onShowChannelInfo={() => { setHasOpenedInfo(true); setInfoChannel(drillDownChannel); setShowChannelInfo(true) }}
             />
           )}
@@ -179,6 +189,20 @@ export function ChatPage() {
         <CustomCreateChannelModal
           isOpen={isCreateChannelModalOpen}
           onClose={closeCreateChannelModal}
+        />
+      )}
+      {topicAction.type === 'create' && topicAction.channel && (
+        <TopicModal
+          isOpen={true}
+          onClose={closeTopicModal}
+          parentChannel={topicAction.channel}
+        />
+      )}
+      {topicAction.type === 'edit' && topicAction.channel && (
+        <TopicModal
+          isOpen={true}
+          onClose={closeTopicModal}
+          topic={topicAction.channel}
         />
       )}
     </div>

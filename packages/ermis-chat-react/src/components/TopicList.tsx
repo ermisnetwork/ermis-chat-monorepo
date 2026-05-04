@@ -9,6 +9,7 @@ import { ChannelItem } from './ChannelList';
 import { Avatar } from './Avatar';
 import { DefaultPinnedIcon } from './ChannelList';
 import { TopicModal } from './TopicModal';
+import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
 import type { TopicListProps } from '../types';
 
 /* ----------------------------------------------------------
@@ -108,13 +109,27 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
     });
   }, [channel, generalTopicLabel]);
 
+  const markChannelRead = useCallback((ch: Channel) => {
+    const ms = ch.state?.membership as Record<string, unknown> | undefined;
+    const chState = ch.state as unknown as Record<string, unknown> | undefined;
+    const isBannedInChannel = Boolean(ms?.banned);
+    const isPending = isPendingMember(ms?.channel_role as string);
+    const isSkipped = isSkippedMember(ms?.channel_role as string);
+
+    if (!isBannedInChannel && !isPending && !isSkipped && (chState?.unreadCount as number) > 0) {
+      ch.markRead().catch(() => { });
+      if (chState) chState.unreadCount = 0;
+    }
+  }, []);
+
   const handleSelectGeneral = useCallback(() => {
     if (onSelectTopic) {
       onSelectTopic(channel);
     } else {
       setActiveChannel(channel);
     }
-  }, [channel, onSelectTopic, setActiveChannel]);
+    markChannelRead(channel);
+  }, [channel, onSelectTopic, setActiveChannel, markChannelRead]);
 
   const handleSelectTopic = useCallback((topic: Channel) => {
     if (onSelectTopic) {
@@ -122,7 +137,8 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
     } else {
       setActiveChannel(topic);
     }
-  }, [onSelectTopic, setActiveChannel]);
+    markChannelRead(topic);
+  }, [onSelectTopic, setActiveChannel, markChannelRead]);
 
   /** Null actions component for the general item */
   const NoActions = useCallback(() => null, []);

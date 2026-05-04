@@ -16,6 +16,7 @@ interface TopicsPanelProps {
   channel: Channel
   onBack: () => void
   onCreateTopic?: (channel: Channel) => void
+  onEditTopic?: (topic: Channel) => void
   onShowChannelInfo?: (channel: Channel) => void
 }
 
@@ -39,7 +40,7 @@ const TopicEmojiAvatar = ({ image }: { image?: string | null }) => {
   )
 }
 
-export function TopicsPanel({ channel, onBack, onCreateTopic, onShowChannelInfo }: TopicsPanelProps) {
+export function TopicsPanel({ channel, onBack, onCreateTopic, onEditTopic, onShowChannelInfo }: TopicsPanelProps) {
   const { t } = useTranslation()
   const { client } = useChatClient()
   const currentUserId = client.userID
@@ -121,6 +122,7 @@ export function TopicsPanel({ channel, onBack, onCreateTopic, onShowChannelInfo 
           TopicAvatarComponent={TopicEmojiAvatar as any}
           ChannelActionsComponent={UhmChannelActions}
           actionLabels={actionLabels}
+          onEditTopic={onEditTopic}
         />
       </div>
     </div>

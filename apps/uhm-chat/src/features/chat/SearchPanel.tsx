@@ -271,6 +271,9 @@ export function SearchPanel({ searchQuery, onSelectChannel }: SearchPanelProps) 
     (channel: Channel) => {
       setActiveChannel(channel)
       onSelectChannel(channel)
+      if (channel.state && (channel.state as any).unreadCount > 0) {
+        channel.markRead().catch(() => {})
+      }
     },
     [setActiveChannel, onSelectChannel],
   )
@@ -279,6 +282,9 @@ export function SearchPanel({ searchQuery, onSelectChannel }: SearchPanelProps) 
     (topic: Channel) => {
       setActiveChannel(topic)
       onSelectChannel(topic)
+      if (topic.state && (topic.state as any).unreadCount > 0) {
+        topic.markRead().catch(() => {})
+      }
     },
     [setActiveChannel, onSelectChannel],
   )
