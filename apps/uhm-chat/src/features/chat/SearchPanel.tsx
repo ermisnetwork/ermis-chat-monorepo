@@ -102,7 +102,7 @@ function ChannelResultItem({
 }) {
   const name = (channel.data?.name as string) || channel.cid
   const image = channel.data?.image as string | undefined
-  const typeBadge = channel.type === 'GROUP' ? '' : 'DM'
+  const typeBadge = ['team', 'meeting'].includes(channel.type) ? 'GROUP' : 'DM'
 
   return (
     <button
