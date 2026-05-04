@@ -407,9 +407,14 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       }
     };
 
-    this.messageSets.forEach((set) => _updateUserMessages(set.messages, user));
+    this.messageSets.forEach((set) => {
+      _updateUserMessages(set.messages, user);
+      // Create a new array reference to trigger React re-render
+      set.messages = [...set.messages];
+    });
 
     _updateUserMessages(this.pinnedMessages, user);
+    this.pinnedMessages = [...this.pinnedMessages];
   };
 
   deleteUserMessages = (user: UserResponse<ErmisChatGenerics>, hardDelete = false) => {

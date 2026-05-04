@@ -74,9 +74,8 @@ export const MemberListItem = React.memo(({
     </div>
   );
 }, (prev, next) => {
-  return prev.member?.user_id === next.member?.user_id &&
-         prev.member?.channel_role === next.member?.channel_role &&
-         prev.member?.banned === next.member?.banned &&
+  return prev.member === next.member &&
+         prev.AvatarComponent === next.AvatarComponent &&
          prev.canRemove === next.canRemove &&
          prev.canBan === next.canBan &&
          prev.canUnban === next.canUnban &&

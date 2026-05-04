@@ -7,6 +7,7 @@ import { ChatPage } from '@/pages/ChatPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants'
 import { UhmModal } from '@/components/custom/UhmModal'
+import { Toaster } from 'sonner'
 
 // Initialize client with env variables
 const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || ''
@@ -111,6 +112,11 @@ function AppContent() {
 
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      <Toaster 
+        richColors 
+        position="top-right" 
+        duration={3000}
+      />
     </ChatProvider>
   )
 }

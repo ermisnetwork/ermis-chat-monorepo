@@ -13,6 +13,8 @@ import { useTranslation } from 'react-i18next'
 import { useChatClient, useChatUser, useInviteCount, useContactCount, Avatar } from '@ermis-network/ermis-chat-react'
 import { useUIStore } from '@/store/useUIStore'
 import { STORAGE_KEYS } from '@/utils/constants'
+import { ProfileModal } from '@/features/settings/ProfileModal'
+import { useState } from 'react'
 
 interface SidebarHeaderProps {
   onNavigate?: (panel: 'contacts' | 'invites') => void;
@@ -39,6 +41,7 @@ export function SidebarHeader({
   const { contactCount } = useContactCount()
   const { openCreateChannelModal } = useUIStore()
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
 
   // Auto-focus when entering search mode
   useEffect(() => {
@@ -110,8 +113,11 @@ export function SidebarHeader({
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56">
-            <DropdownMenuItem className="flex items-center gap-3 py-2 cursor-default focus:bg-transparent">
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuItem 
+              className="flex items-center gap-3 cursor-pointer transition-colors"
+              onClick={() => setIsProfileModalOpen(true)}
+            >
               <Avatar
                 image={user?.avatar}
                 name={user?.name || user?.id}
@@ -120,6 +126,12 @@ export function SidebarHeader({
               <div className="flex flex-col overflow-hidden">
                 <span className="font-medium text-sm truncate">
                   {user?.name || user?.id || t('chat.menu_profile_anonymous', 'Anonymous')}
+                </span>
+                <span 
+                  className="text-[10px] text-zinc-500 truncate"
+                  title={user?.id}
+                >
+                  {user?.id}
                 </span>
               </div>
             </DropdownMenuItem>
@@ -216,6 +228,12 @@ export function SidebarHeader({
           <Plus className="w-5 h-5" />
         </Button>
       )}
+
+      {/* Profile Modal */}
+      <ProfileModal 
+        isOpen={isProfileModalOpen} 
+        onClose={() => setIsProfileModalOpen(false)} 
+      />
     </div>
   )
 }

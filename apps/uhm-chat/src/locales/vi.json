@@ -133,5 +133,19 @@
     "confirm_close_topic_message": "Bạn có chắc chắn muốn đóng <bold>{{name}}</bold>? Thành viên sẽ không thể gửi tin nhắn mới.",
     "confirm_yes": "Xác nhận",
     "confirm_cancel": "Hủy"
+  },
+  "profile": {
+    "title": "Thông tin cá nhân",
+    "edit_avatar": "Đổi ảnh đại diện",
+    "name_label": "Tên hiển thị",
+    "name_placeholder": "Nhập tên của bạn",
+    "save": "Lưu thay đổi",
+    "saving": "Đang lưu...",
+    "cancel": "Hủy",
+    "success": "Cập nhật thành công",
+    "error": "Cập nhật thất bại",
+    "error_name_short": "Tên quá ngắn (tối thiểu 2 ký tự)",
+    "error_name_long": "Tên quá dài (tối đa 50 ký tự)",
+    "error_invalid_name": "Tên chứa ký tự không hợp lệ"
   }
 }

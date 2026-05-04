@@ -133,5 +133,19 @@
     "confirm_close_topic_message": "Are you sure you want to close <bold>{{name}}</bold>? Members will not be able to send new messages.",
     "confirm_yes": "Confirm",
     "confirm_cancel": "Cancel"
+  },
+  "profile": {
+    "title": "Personal Profile",
+    "edit_avatar": "Change Avatar",
+    "name_label": "Display Name",
+    "name_placeholder": "Enter your name",
+    "save": "Save Changes",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "success": "Update successful",
+    "error": "Update failed",
+    "error_name_short": "Name too short (min 2 characters)",
+    "error_name_long": "Name too long (max 50 characters)",
+    "error_invalid_name": "Name contains invalid characters"
   }
 }

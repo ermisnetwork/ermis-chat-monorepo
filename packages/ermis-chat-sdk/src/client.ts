@@ -728,21 +728,76 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   };
 
   _updateMemberWatcherReferences = (user: UserResponse<ErmisChatGenerics>) => {
-    const refMap = this.state.userChannelReferences[user.id] || {};
-    for (const channelID in refMap) {
-      const channel = this.activeChannels[channelID];
+    // Iterate through all active channels to ensure we update members even if they haven't sent messages yet
+    Object.values(this.activeChannels).forEach((channel) => {
       if (channel?.state) {
+        let hasChange = false;
         if (channel.state.members[user.id]) {
-          channel.state.members[user.id].user = user;
+          channel.state.members = {
+            ...channel.state.members,
+            [user.id]: {
+              ...channel.state.members[user.id],
+              user,
+            },
+          };
+          hasChange = true;
+
+          // Update display name/image for 1-1 Messaging Channels
+          if (channel.data?.type === 'messaging') {
+            const members = Object.values(channel.state.members);
+            if (members.length === 2) {
+              const otherMember = members.find((m) => m.user?.id !== this.userID);
+              if (otherMember && otherMember.user?.id === user.id) {
+                channel.data.name = user.name || user.id;
+                channel.data.image = user.avatar || '';
+              }
+            }
+          }
         }
         if (channel.state.watchers[user.id]) {
-          channel.state.watchers[user.id] = user;
+          channel.state.watchers = {
+            ...channel.state.watchers,
+            [user.id]: user,
+          };
+          hasChange = true;
         }
         if (channel.state.read[user.id]) {
-          channel.state.read[user.id].user = user;
+          channel.state.read = {
+            ...channel.state.read,
+            [user.id]: {
+              ...channel.state.read[user.id],
+              user,
+            },
+          };
+          hasChange = true;
+        }
+
+        if (hasChange) {
+          // Trigger channel update for Sidebar and Header
+          channel._callChannelListeners({
+            type: 'channel.updated',
+            channel: channel.data,
+            cid: channel.cid,
+          } as any);
+
+          // Trigger member update specifically for Member List components
+          if (channel.state.members[user.id]) {
+            channel._callChannelListeners({
+              type: 'member.updated',
+              member: channel.state.members[user.id],
+              cid: channel.cid,
+            } as any);
+          }
+
+          // Trigger general user update at channel level
+          channel._callChannelListeners({
+            type: 'user.updated',
+            user: user,
+            cid: channel.cid,
+          } as any);
         }
       }
-    }
+    });
   };
 
   _updateUserReferences = this._updateMemberWatcherReferences;
@@ -752,13 +807,29 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     for (const channelID in refMap) {
       const channel = this.activeChannels[channelID];
-
       if (!channel) continue;
 
       const state = channel.state;
 
-      /** update the messages from this user. */
+      /** Update the message objects from this user in the state. */
       state?.updateUserMessages(user);
+
+      // Trigger re-render for message list components
+      channel._callChannelListeners({
+        type: 'channel.updated',
+        channel: channel.data,
+        cid: channel.cid,
+      } as any);
+
+      // Force MessageList refresh by dispatching an update for the last message
+      const lastMessage = state?.messages[state.messages.length - 1];
+      if (lastMessage) {
+        channel._callChannelListeners({
+          type: 'message.updated',
+          message: lastMessage,
+          cid: channel.cid,
+        } as any);
+      }
     }
   };
 
@@ -1061,45 +1132,43 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       const data = JSON.parse(event.data);
 
       this.logger('info', `client:connectToSSE() - SSE message received event :  ${JSON.stringify(data)}`, { event });
-
+      console.log('----connectToSSE----', data)
       if (data.type === 'AccountUserChainProjects') {
-        let user: UserResponse = {
-          name: data.name,
+        const userInfo: UserResponse<ErmisChatGenerics> = {
           id: data.id,
+          name: data.name,
           avatar: data.avatar,
           about_me: data.about_me,
           project_id: data.project_id,
         };
 
-        if (this.user?.id === user.id) {
-          this.user = { ...this.user, ...user };
+        // 1. Update current user info if ID matches
+        if (this.user?.id === userInfo.id) {
+          this.user = { ...this.user, ...userInfo };
         }
 
-        this.state.updateUser(user);
+        // 2. Update Client State
+        this.state.updateUser(userInfo);
 
-        const userInfo = {
-          id: user.id,
-          name: user.name ? user.name : user.id,
-          avatar: user?.avatar || '',
+        const minimalUserInfo = {
+          id: userInfo.id,
+          name: userInfo.name || userInfo.id,
+          avatar: userInfo.avatar || '',
         };
 
-        this._updateMemberWatcherReferences(userInfo);
-        this._updateUserMessageReferences(userInfo);
-
-        Object.values(this.activeChannels).forEach((channel) => {
-          if (channel.data?.type === 'messaging' && Object.keys(channel.state.members).length === 2) {
-            const otherMember = Object.values(channel.state.members).find((member) => member.user?.id !== this.userID);
-            if (otherMember && otherMember.user?.id === user.id) {
-              // Cập nhật tên và avatar channel theo user vừa đổi thông tin
-              channel.data.name = user.name || user.id;
-              channel.data.image = user.avatar || '';
-            }
-          }
-        });
+        // 3. Update references and trigger re-renders
+        this._updateMemberWatcherReferences(minimalUserInfo);
+        this._updateUserMessageReferences(minimalUserInfo);
 
         if (onCallBack) {
           onCallBack(data);
         }
+
+        this.dispatchEvent({
+          type: 'user.updated',
+          user: userInfo,
+          me: this.user?.id === userInfo.id ? this.user : undefined,
+        } as any);
       }
     };
     this.eventSource.onerror = (event: any) => {
@@ -1241,6 +1310,20 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       this.user.avatar = response.avatar;
       const new_user = { ...this.user, avatar: response.avatar };
       this.state.updateUser(new_user);
+
+      const userInfo = {
+        id: this.user.id,
+        name: this.user.name ? this.user.name : this.user.id,
+        avatar: this.user?.avatar || '',
+      };
+
+      this._updateMemberWatcherReferences(userInfo);
+      this._updateUserMessageReferences(userInfo);
+
+      this.dispatchEvent({
+        type: 'user.updated',
+        me: this.user,
+      } as unknown as Event<ErmisChatGenerics>);
     }
 
     return response;
@@ -1249,6 +1332,23 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     let response = await this.patch<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/update', updates);
     this.user = response;
     this.state.updateUser(response);
+
+    if (this.user) {
+      const userInfo = {
+        id: this.user.id,
+        name: this.user.name ? this.user.name : this.user.id,
+        avatar: this.user?.avatar || '',
+      };
+
+      this._updateMemberWatcherReferences(userInfo);
+      this._updateUserMessageReferences(userInfo);
+
+      this.dispatchEvent({
+        type: 'user.updated',
+        me: this.user,
+      } as unknown as Event<ErmisChatGenerics>);
+    }
+
     return response;
   }
 
