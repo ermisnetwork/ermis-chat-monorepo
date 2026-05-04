@@ -86,7 +86,11 @@
     "back_home": "Back to Home"
   },
   "app": {
-    "connecting": "Connecting to Uhm Chat..."
+    "connecting": "Connecting to server...",
+    "reconnecting": "Reconnecting...",
+    "offline": "No internet connection",
+    "retry": "Try again",
+    "connection_restored": "Connection restored"
   },
   "actions": {
     "pin_channel": "Pin channel",

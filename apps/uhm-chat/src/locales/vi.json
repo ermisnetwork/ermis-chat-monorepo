@@ -86,7 +86,11 @@
     "back_home": "Quay về trang chủ"
   },
   "app": {
-    "connecting": "Đang kết nối đến Uhm Chat..."
+    "connecting": "Đang kết nối đến máy chủ...",
+    "reconnecting": "Đang kết nối lại...",
+    "offline": "Không có kết nối mạng",
+    "retry": "Thử lại",
+    "connection_restored": "Đã kết nối lại"
   },
   "actions": {
     "pin_channel": "Ghim kênh",

@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChannelList, Channel, VirtualMessageList, MessageInput, ChannelHeader, ChannelInfo } from '@ermis-network/ermis-chat-react'
+import { ChannelList, Channel, VirtualMessageList, MessageInput, ChannelHeader, ChannelInfo, useChatClient } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
 import { Info } from 'lucide-react'
 import { SidebarHeader } from '@/components/SidebarHeader'
@@ -12,16 +12,21 @@ import { ChannelListEmpty } from '@/features/chat/ChannelListEmpty'
 import { UhmChannelActions } from '@/features/chat/UhmChannelActions'
 import { ChannelEmptyState } from '@/features/chat/ChannelEmptyState'
 import { CustomCreateChannelModal } from '@/components/custom/CustomCreateChannelModal'
+import { ConnectionStatusBanner } from '@/features/chat/ConnectionStatusBanner'
+import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useUIStore } from '@/store/useUIStore'
 
 export function ChatPage() {
   const { t } = useTranslation()
+  const { client } = useChatClient()
+  const { status, retryConnection } = useConnectionStatus(client)
+
   const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
   const [drillDownChannel, setDrillDownChannel] = useState<ChannelType | null>(null)
   const [showChannelInfo, setShowChannelInfo] = useState(false)
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
-  
+
   const { isCreateChannelModalOpen, closeCreateChannelModal } = useUIStore()
 
   // Localized action labels passed to SDK ChannelList/TopicList
@@ -115,10 +120,10 @@ export function ChatPage() {
       
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col relative min-w-0">
+        {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
+        <ConnectionStatusBanner status={status} onRetry={retryConnection} />
+
         <Channel EmptyStateIndicator={ChannelEmptyState}>
-          {/* Background pattern layer */}
-          {/* <div className="absolute inset-0 bg-chat-pattern pointer-events-none opacity-[0.03] dark:opacity-[0.05]"></div> */}
-          
           <ChannelHeader renderRight={renderHeaderRight} />
 
           <VirtualMessageList />
@@ -152,4 +157,3 @@ export function ChatPage() {
     </div>
   )
 }
-

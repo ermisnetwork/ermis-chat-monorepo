@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { useTranslation } from 'react-i18next'
 import { ChatProvider } from '@ermis-network/ermis-chat-react'
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk'
 import { LoginPage } from '@/pages/LoginPage'
@@ -9,36 +8,34 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants'
 import { UhmModal } from '@/components/custom/UhmModal'
 
-// Khởi tạo client với các thông số từ env
-const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || 'default-project'
+// Initialize client with env variables
+const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || ''
 
 const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_DEFAULTS.BASE_URL)
 
-// Component xử lý điều hướng an toàn sau khi login
+// Auth guard component for protected routes
 function AuthRoute({ isAuthenticated, isRestoring, children }: { isAuthenticated: boolean, isRestoring: boolean, children: React.ReactNode }) {
   if (isRestoring) return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]" />
   if (!isAuthenticated) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
-// Cấu hình các component UI tùy biến cho Ermis Chat SDK
+// Custom UI component overrides for Ermis Chat SDK
 const chatComponents = {
   ModalComponent: UhmModal as any,
 }
 
-// Component chính chứa logic Auth và Routing
+// Main component containing Auth and Routing logic
 function AppContent() {
-  const { t } = useTranslation()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isClientReady, setIsClientReady] = useState(false)
   const [isRestoring, setIsRestoring] = useState(true)
 
   const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) === 'dark' ? 'dark' : 'light'
   const navigate = useNavigate()
 
-  // Khôi phục phiên đăng nhập từ localStorage khi mount
+  // Restore login session from localStorage on mount
   useEffect(() => {
-    // Khôi phục theme cho document
+    // Restore theme for document
     if (savedTheme === 'dark') {
       document.documentElement.classList.add('dark')
     } else {
@@ -49,37 +46,46 @@ function AppContent() {
     const savedUserId = localStorage.getItem(STORAGE_KEYS.USER_ID)
 
     if (savedToken && savedUserId) {
+      // Fire-and-forget: connectUser runs in background, WS errors handled by
+      // useConnectionStatus hook in ChatPage (connection.changed event)
       chatClient.connectUser(
         { id: savedUserId },
         savedToken
-      ).then(() => {
-        setIsClientReady(true)
-        setIsAuthenticated(true)
-      }).catch(() => {
-        // Token hết hạn hoặc không hợp lệ → xoá và yêu cầu đăng nhập lại
-        localStorage.removeItem(STORAGE_KEYS.TOKEN)
-        localStorage.removeItem(STORAGE_KEYS.USER_ID)
-        localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID)
-      }).finally(() => {
-        setIsRestoring(false)
+      ).catch((err) => {
+        // Distinguish WS failure (network, COOP) vs Auth failure (expired token)
+        const parsed = (() => { try { return JSON.parse(err.message) } catch { return err } })()
+        const isWSFailure = parsed?.isWSFailure || err?.isWSFailure
+
+        if (!isWSFailure) {
+          // Token expired or invalid → clear and require re-login
+          localStorage.removeItem(STORAGE_KEYS.TOKEN)
+          localStorage.removeItem(STORAGE_KEYS.USER_ID)
+          localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID)
+          setIsAuthenticated(false)
+        }
       })
+
+      // Always navigate to ChatPage, WS errors shown via banner in ChatPage
+      setIsAuthenticated(true)
+      setIsRestoring(false)
     } else {
       setIsRestoring(false)
     }
   }, [])
 
   const handleLoginSuccess = (userId: string, token: string) => {
+    // Always navigate to ChatPage regardless of WS connection status
+    setIsAuthenticated(true)
+    navigate('/', { replace: true })
+
+    // Fire-and-forget: WS connection runs in background
     chatClient.connectUser(
       { id: userId },
       token
-    ).then(() => {
-      setIsClientReady(true)
-      setIsAuthenticated(true)
-      navigate('/', { replace: true })
-    }).catch(err => console.error('Failed to connect user:', err))
+    ).catch(err => console.error('Failed to connect user:', err))
   }
 
-  // Nếu đang loading auth
+  // Show blank screen while restoring auth
   if (isRestoring) {
     return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]" />
   }
@@ -87,26 +93,22 @@ function AppContent() {
   return (
     <ChatProvider client={chatClient} initialTheme={savedTheme} components={chatComponents}>
       <Routes>
-        <Route 
-          path="/login" 
+        <Route
+          path="/login"
           element={
             isAuthenticated ? <Navigate to="/" replace /> : <LoginPage onLoginSuccess={handleLoginSuccess} />
-          } 
+          }
         />
-        
-        <Route 
-          path="/" 
+
+        <Route
+          path="/"
           element={
             <AuthRoute isAuthenticated={isAuthenticated} isRestoring={isRestoring}>
-              {!isClientReady ? (
-                <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]">{t('app.connecting')}</div>
-              ) : (
-                <ChatPage />
-              )}
+              <ChatPage />
             </AuthRoute>
-          } 
+          }
         />
-        
+
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </ChatProvider>
