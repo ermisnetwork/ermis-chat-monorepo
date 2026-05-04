@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { VList, VListHandle } from 'virtua';
+import { VList as _VList, VListHandle } from 'virtua';
+const VList = _VList as any;
 import { Avatar } from './Avatar';
 import type { MentionSuggestionsProps } from '../types';
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useTransition } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
-import { VList, type VListHandle } from 'virtua';
+import { VList as _VList, type VListHandle } from 'virtua';
+const VList = _VList as any;
 import type {
   UserPickerProps,
   UserPickerItemProps,

@@ -1,5 +1,8 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { VList, type VListHandle } from 'virtua';
+import { VList as _VList, type VListHandle } from 'virtua';
+
+// Workaround for React 19 JSX element type mismatch with virtua's VList
+const VList = _VList as any;
 import type { MessageLabel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useBannedState } from '../hooks/useBannedState';

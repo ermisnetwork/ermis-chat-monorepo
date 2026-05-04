@@ -12,6 +12,8 @@ import { MentionSuggestions } from './MentionSuggestions';
 import { FilesPreview } from './FilesPreview';
 import { ReplyPreview } from './ReplyPreview';
 import { EditPreview } from './EditPreview';
+import { PreviewOverlay } from './PreviewOverlay';
+import { usePreviewState } from '../hooks/usePreviewState';
 import { buildUserMap, replaceMentionsForPreview, moveCaretToEnd } from '../utils';
 import { getMentionHtml } from '../hooks/useMentions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
@@ -46,11 +48,15 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     <>Slow mode is active. You can send another message in <strong>{cooldown}s</strong>.</>
   ),
   closedTopicLabel = 'This topic is closed.',
+  PreviewOverlayComponent = PreviewOverlay,
+  previewOverlayTitle = 'You are viewing a public channel.',
+  joinChannelLabel = 'Join Channel',
 }) => {
   const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
+  const { isPreviewMode } = usePreviewState(activeChannel, client.userID);
   const editableRef = React.useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
 
@@ -415,6 +421,20 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
           <span>{closedTopicLabel}</span>
         </div>
       </div>
+    );
+  }
+
+  // Show Preview Overlay for public channels when the user has not joined
+  if (isPreviewMode) {
+    return (
+      <PreviewOverlayComponent
+        title={previewOverlayTitle}
+        buttonLabel={joinChannelLabel}
+        onJoin={() => {
+          activeChannel?.acceptInvite('join').catch(e => console.error('Failed to join public channel', e));
+        }}
+        className={className}
+      />
     );
   }
 

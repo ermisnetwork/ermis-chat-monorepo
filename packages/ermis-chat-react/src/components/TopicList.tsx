@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { VList, type VListHandle } from 'virtua';
+import { VList as _VList, type VListHandle } from 'virtua';
+const VList = _VList as any;
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
 import { useTopicGroupUpdates } from '../hooks/useTopicGroupUpdates';

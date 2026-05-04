@@ -22,7 +22,7 @@ export function isDirectChannel(channel: Channel | null | undefined): boolean {
 
 /** Channel is a topic (sub-channel of a group channel) */
 export function isTopicChannel(channel: Channel | null | undefined): boolean {
-  return channel ? (channel.type === 'topic' || Boolean(channel.data?.parent_cid)) : false;
+  return channel ? channel.type === 'topic' || Boolean(channel.data?.parent_cid) : false;
 }
 
 /** Channel is a public group that users can join without invite */

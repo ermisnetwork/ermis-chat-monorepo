@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useChatClient } from '../../hooks/useChatClient';
 import { useBannedState } from '../../hooks/useBannedState';
 import { useBlockedState } from '../../hooks/useBlockedState';
+import { usePreviewState } from '../../hooks/usePreviewState';
 import { Avatar } from '../Avatar';
 import { DefaultChannelInfoTabs } from './ChannelInfoTabs';
 import { AddMemberModal } from './AddMemberModal';
@@ -273,6 +274,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const channel = channelProp || activeChannel;
   const { isBanned } = useBannedState(channel, client?.userID);
   const { isBlocked } = useBlockedState(channel, client?.userID);
+  const { isPreviewMode } = usePreviewState(channel, client?.userID);
 
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
@@ -428,31 +430,43 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
           <span className="ermis-channel-info__banned-banner-text">You have been banned from this channel</span>
         </div>
       )}
+      {!isBanned && isPreviewMode && (
+        <div className="ermis-channel-info__preview-actions">
+          <button
+            className="ermis-channel-info__join-btn"
+            onClick={() => channel?.acceptInvite('join').catch(e => console.error('Failed to join public channel', e))}
+          >
+            Join Channel
+          </button>
+        </div>
+      )}
       {!isBanned && (
         <>
-          <ActionsComponent
-            onSearchClick={() => setShowSearchPanel(true)}
-            onSettingsClick={() => setShowSettingsPanel(true)}
-            onLeaveChannel={handleLeaveChannel}
-            onDeleteChannel={handleDeleteChannel}
-            onBlockUser={handleBlockUser}
-            onUnblockUser={handleUnblockUser}
-            onCloseTopic={handleCloseTopic}
-            onReopenTopic={handleReopenTopic}
-            isTeamChannel={isTeamChannel}
-            isTopic={isTopic}
-            isClosedTopic={isClosedTopic}
-            isBlocked={isBlocked}
-            currentUserRole={currentUserRole}
-            searchLabel={actionsSearchLabel}
-            settingsLabel={actionsSettingsLabel}
-            deleteLabel={actionsDeleteLabel}
-            leaveLabel={actionsLeaveLabel}
-            blockLabel={actionsBlockLabel}
-            unblockLabel={actionsUnblockLabel}
-            closeTopicLabel={actionsCloseTopicLabel}
-            reopenTopicLabel={actionsReopenTopicLabel}
-          />
+          {!isPreviewMode && (
+            <ActionsComponent
+              onSearchClick={() => setShowSearchPanel(true)}
+              onSettingsClick={() => setShowSettingsPanel(true)}
+              onLeaveChannel={handleLeaveChannel}
+              onDeleteChannel={handleDeleteChannel}
+              onBlockUser={handleBlockUser}
+              onUnblockUser={handleUnblockUser}
+              onCloseTopic={handleCloseTopic}
+              onReopenTopic={handleReopenTopic}
+              isTeamChannel={isTeamChannel}
+              isTopic={isTopic}
+              isClosedTopic={isClosedTopic}
+              isBlocked={isBlocked}
+              currentUserRole={currentUserRole}
+              searchLabel={actionsSearchLabel}
+              settingsLabel={actionsSettingsLabel}
+              deleteLabel={actionsDeleteLabel}
+              leaveLabel={actionsLeaveLabel}
+              blockLabel={actionsBlockLabel}
+              unblockLabel={actionsUnblockLabel}
+              closeTopicLabel={actionsCloseTopicLabel}
+              reopenTopicLabel={actionsReopenTopicLabel}
+            />
+          )}
 
           <TabsComponent
             channel={channel}
@@ -460,7 +474,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
             AvatarComponent={AvatarComponent}
             currentUserId={currentUserId}
             currentUserRole={currentUserRole}
-            onAddMemberClick={isTeamChannel ? handleAddMemberClick : undefined}
+            onAddMemberClick={isTeamChannel && !isPreviewMode ? handleAddMemberClick : undefined}
             onRemoveMember={handleRemoveMember}
             onBanMember={handleBanMember}
             onUnbanMember={handleUnbanMember}
@@ -475,6 +489,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
             EmptyStateComponent={EmptyStateComponent}
             LoadingComponent={LoadingComponent}
             isVisible={isVisible}
+            isPreviewMode={isPreviewMode}
           />
 
           {showAddMemberModal && (() => {

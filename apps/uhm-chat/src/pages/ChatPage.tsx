@@ -19,7 +19,7 @@ import { useUIStore } from '@/store/useUIStore'
 
 export function ChatPage() {
   const { t } = useTranslation()
-  const { client, setActiveChannel } = useChatClient()
+  const { client } = useChatClient()
   const { status, retryConnection } = useConnectionStatus(client)
 
   const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
@@ -81,10 +81,10 @@ export function ChatPage() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      
+
       {/* Sidebar */}
       <div className="w-[340px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
-        
+
         {/* Channels Panel */}
         <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'channels' ? 'translate-x-0' : '-translate-x-full'}`}>
           <SidebarHeader
@@ -108,11 +108,10 @@ export function ChatPage() {
             />
 
             {/* SearchPanel overlay — zoom animation on top of ChannelList */}
-            <div className={`absolute inset-0 z-10 transition-all duration-200 ease-out ${
-              isSearchMode
+            <div className={`absolute inset-0 z-10 transition-all duration-200 ease-out ${isSearchMode
                 ? 'scale-100 opacity-100'
                 : 'scale-95 opacity-0 pointer-events-none'
-            }`}>
+              }`}>
               {isSearchMode && (
                 <SearchPanel
                   searchQuery={searchQuery}
@@ -145,7 +144,7 @@ export function ChatPage() {
           <InvitesPanel onBack={() => setActivePanel('channels')} />
         </div>
       </div>
-      
+
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col relative min-w-0">
         {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
@@ -155,7 +154,7 @@ export function ChatPage() {
           <ChannelHeader renderRight={renderHeaderRight} />
 
           <VirtualMessageList />
-          
+
           {/* Message Input Floating Card */}
           <MessageInput />
         </Channel>

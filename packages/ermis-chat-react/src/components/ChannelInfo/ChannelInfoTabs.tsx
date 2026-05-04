@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, startTransition, useRef } from 'react';
-import { VList } from 'virtua';
+import { VList as _VList } from 'virtua';
+const VList = _VList as any;
 import { ROLE_WEIGHTS, MESSAGING_TABS, ALL_TABS, PENDING_STYLE, READY_STYLE } from './utils';
 import { useBannedState } from '../../hooks/useBannedState';
 import { useBlockedState } from '../../hooks/useBlockedState';
@@ -40,6 +41,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
   EmptyStateComponent,
   LoadingComponent,
   isVisible = true,
+  isPreviewMode = false,
 }) => {
   const isMessaging = isDirectChannel(channel);
   const isTopic = Boolean(channel?.data?.parent_cid);
@@ -147,8 +149,8 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
 
     let active = true;
 
-    // Don't fetch media/files if user is banned or blocked
-    if (isBanned || isBlocked) {
+    // Don't fetch media/files if user is banned or blocked or in preview mode
+    if (isBanned || isBlocked || isPreviewMode) {
       setAllAttachments([]);
       setLoading(false);
       return;
@@ -178,7 +180,7 @@ export const DefaultChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo
     fetchMedia();
 
     return () => { active = false; };
-  }, [channel, isBanned, isBlocked, attachmentsFetchedForCid, isVisible]);
+  }, [channel, isBanned, isBlocked, isPreviewMode, attachmentsFetchedForCid, isVisible]);
 
   const tabCounts = useMemo<Record<MediaTab, number>>(() => ({
     members: members.length,

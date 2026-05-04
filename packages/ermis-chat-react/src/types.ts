@@ -636,7 +636,7 @@ export type MessageListProps = {
   closedTopicReopenLabel?: string;
 
   /** Custom component for pending invitee notification in direct channels */
-  PendingInviteeNotificationComponent?: React.ComponentType<{ inviteeName?: string, label?: string }>;
+  PendingInviteeNotificationComponent?: React.ComponentType<{ inviteeName?: string; label?: string }>;
   /** I18n Label for pending invitee notification */
   pendingInviteeLabel?: string | ((inviteeName?: string) => string);
 };
@@ -750,6 +750,18 @@ export type EmojiPickerProps = {
   onClose: () => void;
 };
 
+/** Props for the preview overlay when a user has not joined a public channel */
+export type PreviewOverlayProps = {
+  /** Title shown in the preview overlay */
+  title?: string;
+  /** Label for the join button */
+  buttonLabel?: string;
+  /** Action when the join button is clicked */
+  onJoin?: () => void;
+  /** Custom class name */
+  className?: string;
+};
+
 /** Props passed to the emoji button component */
 export type EmojiButtonProps = {
   /** Whether the picker is currently open */
@@ -807,6 +819,13 @@ export type MessageInputProps = {
   slowModeLabel?: (cooldown: number) => React.ReactNode;
   /** I18n Label for closed topic */
   closedTopicLabel?: string;
+  
+  /** Custom component for the Preview Overlay (shown instead of input in unjoined public channels) */
+  PreviewOverlayComponent?: React.ComponentType<PreviewOverlayProps>;
+  /** I18n Title for Preview Overlay */
+  previewOverlayTitle?: string;
+  /** I18n Label for Join Button in Preview Overlay */
+  joinChannelLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -1263,6 +1282,7 @@ export type ChannelInfoTabsProps = {
   onUnbanMember?: (id: string) => void;
   onPromoteMember?: (id: string) => void;
   onDemoteMember?: (id: string) => void;
+  isPreviewMode?: boolean;
 
   /** Label for the 'Add Member' button in the Members tab (default: 'Add Member') */
   addMemberButtonLabel?: string;
@@ -1544,7 +1564,11 @@ export type CreateChannelModalProps = {
   TabsComponent?: React.ComponentType<CreateChannelTabsProps>;
   FooterComponent?: React.ComponentType<CreateChannelFooterProps>;
   GroupFieldsComponent?: React.ComponentType<CreateChannelGroupFieldsProps>;
-  SearchInputComponent?: React.ComponentType<{ value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; placeholder: string }>;
+  SearchInputComponent?: React.ComponentType<{
+    value: string;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    placeholder: string;
+  }>;
   SelectedBoxComponent?: React.ComponentType<UserPickerSelectedBoxProps>;
 
   /** i18n labels */

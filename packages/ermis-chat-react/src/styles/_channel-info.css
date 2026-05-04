@@ -960,3 +960,31 @@
   font-weight: 500;
   color: var(--ermis-text-secondary);
 }
+
+.ermis-channel-info__preview-actions {
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ermis-border);
+}
+
+.ermis-channel-info__join-btn {
+  width: 100%;
+  justify-content: center;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: var(--ermis-radius-lg);
+  background-color: var(--ermis-accent);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.ermis-channel-info__join-btn:hover {
+  opacity: 0.9;
+}
+
+.ermis-channel-info__join-btn:active {
+  transform: scale(0.98);
+}

@@ -1,0 +1,38 @@
+/* ----------------------------------------------------------
+   PreviewOverlay
+   ---------------------------------------------------------- */
+.ermis-preview-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ermis-spacing-md);
+  background-color: var(--ermis-bg-secondary);
+  border-top: 1px solid var(--ermis-border);
+  font-family: var(--ermis-font-family);
+}
+
+.ermis-preview-overlay__text {
+  font-size: var(--ermis-font-size-sm);
+  color: var(--ermis-text-secondary);
+  font-weight: 500;
+}
+
+.ermis-preview-overlay__button {
+  background-color: var(--ermis-accent);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--ermis-radius-md);
+  padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
+  font-size: var(--ermis-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.ermis-preview-overlay__button:hover {
+  opacity: 0.9;
+}
+
+.ermis-preview-overlay__button:active {
+  transform: scale(0.98);
+}
