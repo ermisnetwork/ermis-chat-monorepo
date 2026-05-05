@@ -2,7 +2,9 @@ import React from 'react';
 import { useTypingIndicator, type TypingUser } from '../hooks/useTypingIndicator';
 
 export type TypingIndicatorProps = {
-  /** Custom render function for the typing text */
+  /** Custom render function for the typing text (I18n) */
+  typingIndicatorLabel?: (users: TypingUser[]) => string;
+  /** Custom render function for the typing text (JSX) */
   renderText?: (users: TypingUser[]) => React.ReactNode;
 };
 
@@ -10,14 +12,21 @@ export type TypingIndicatorProps = {
  * Displays a "X is typing..." indicator below the message list.
  * Automatically subscribes to typing events via the useTypingIndicator hook.
  */
-export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(({ renderText }) => {
+export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(({ typingIndicatorLabel, renderText }) => {
   const { typingUsers } = useTypingIndicator();
 
   const isActive = typingUsers.length > 0;
 
-  const text = isActive
-    ? (renderText ? renderText(typingUsers) : formatTypingText(typingUsers))
-    : null;
+  let text: React.ReactNode = null;
+  if (isActive) {
+    if (renderText) {
+      text = renderText(typingUsers);
+    } else if (typingIndicatorLabel) {
+      text = typingIndicatorLabel(typingUsers);
+    } else {
+      text = formatTypingText(typingUsers);
+    }
+  }
 
   return (
     <div className={`ermis-typing-indicator${isActive ? ' ermis-typing-indicator--active' : ''}`}>

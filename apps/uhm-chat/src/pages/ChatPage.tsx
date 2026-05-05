@@ -193,6 +193,20 @@ export function ChatPage() {
             collapseLabel={t('overlays.collapse')}
             unpinLabel={t('overlays.unpin')}
             stickerLabel={t('overlays.sticker')}
+            typingIndicatorLabel={(users) => {
+              const names = users.map((u) => u.name || u.id);
+              if (names.length === 1) {
+                return t('overlays.typing.isTyping', { name: names[0] });
+              }
+              if (names.length === 2) {
+                return t('overlays.typing.areTyping', { name1: names[0], name2: names[1] });
+              }
+              return t('overlays.typing.multipleTyping', { 
+                name1: names[0], 
+                name2: names[1], 
+                count: names.length - 2 
+              });
+            }}
           />
 
           {/* Message Input Floating Card */}

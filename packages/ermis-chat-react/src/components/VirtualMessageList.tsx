@@ -153,6 +153,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   collapseLabel,
   unpinLabel,
   stickerLabel,
+  typingIndicatorLabel,
 }) => {
   const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -545,7 +546,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       </VList>
 
       {/* Typing indicator */}
-      {showTypingIndicator && <TypingIndicatorComponent />}
+      {showTypingIndicator && <TypingIndicatorComponent typingIndicatorLabel={typingIndicatorLabel} />}
 
       {/* Jump to latest button */}
       {hasNewer && (

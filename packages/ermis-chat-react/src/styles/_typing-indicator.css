@@ -12,6 +12,10 @@
   font-size: 12px;
   color: var(--ermis-text-secondary);
   overflow: hidden;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
 }
 
 .ermis-typing-indicator__dots {
@@ -53,7 +57,9 @@
 }
 
 @keyframes ermis-typing-bounce {
-  0%, 80%, 100% {
+  0%,
+  80%,
+  100% {
     transform: scale(0.6);
     opacity: 0.4;
   }

@@ -199,6 +199,11 @@
     "seeAll": "Xem tất cả",
     "collapse": "Thu gọn",
     "unpin": "Bỏ ghim tin nhắn",
-    "sticker": "Sticker"
+    "sticker": "Sticker",
+    "typing": {
+      "isTyping": "{{name}} đang soạn tin...",
+      "areTyping": "{{name1}} và {{name2}} đang soạn tin...",
+      "multipleTyping": "{{name1}}, {{name2}} và {{count}} người khác đang soạn tin..."
+    }
   }
 }

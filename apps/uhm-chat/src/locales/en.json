@@ -200,6 +200,11 @@
     "seeAll": "See all",
     "collapse": "Collapse",
     "unpin": "Unpin message",
-    "sticker": "Sticker"
+    "sticker": "Sticker",
+    "typing": {
+      "isTyping": "{{name}} is typing...",
+      "areTyping": "{{name1}} and {{name2}} are typing...",
+      "multipleTyping": "{{name1}}, {{name2}} and {{count}} others are typing..."
+    }
   }
 }

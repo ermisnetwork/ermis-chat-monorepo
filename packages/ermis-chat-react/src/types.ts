@@ -652,6 +652,8 @@ export type MessageListProps = {
   unpinLabel?: string;
   /** I18n Label for sticker message preview */
   stickerLabel?: string;
+  /** I18n Label for typing indicator */
+  typingIndicatorLabel?: (users: Array<{ id: string; name?: string }>) => string;
 };
 
 /* ----------------------------------------------------------
