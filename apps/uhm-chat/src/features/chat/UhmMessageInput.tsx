@@ -19,11 +19,9 @@ import {
   replaceMentionsForPreview,
   getMentionHtml,
   useMentions,
-  useStickerPicker,
 } from '@ermis-network/ermis-chat-react';
-import { Paperclip, SendHorizonal } from 'lucide-react';
-import { EmojiPickerPopover } from './EmojiPickerPopover';
-import { StickerPickerPopover } from './StickerPickerPopover';
+import { Paperclip, SendHorizonal, Smile, Cat } from 'lucide-react';
+import { useUIStore } from '@/store/useUIStore';
 
 export const UhmMessageInput: React.FC = () => {
   const { t } = useTranslation();
@@ -155,7 +153,7 @@ export const UhmMessageInput: React.FC = () => {
     document.execCommand('insertText', false, plainText);
   }, []);
 
-  const handleEmojiSelect = useCallback((emoji: { native: string }) => {
+  const handleEmojiSelect = useCallback((emojiNative: string) => {
     const el = editableRef.current;
     if (el) {
       el.focus();
@@ -163,23 +161,20 @@ export const UhmMessageInput: React.FC = () => {
       if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
         range.deleteContents();
-        const textNode = document.createTextNode(emoji.native);
+        const textNode = document.createTextNode(emojiNative);
         range.insertNode(textNode);
         range.setStartAfter(textNode);
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
       } else {
-        el.innerHTML += emoji.native;
+        el.innerHTML += emojiNative;
       }
       handleInput();
     }
   }, [handleInput]);
 
-  const { stickerPickerOpen, toggleStickerPicker, closeStickerPicker } = useStickerPicker({
-    activeChannel,
-    stickerIframeUrl: 'https://sticker.ermis.network'
-  });
+  const { openEmojiPicker, openStickerPicker, pickerAction } = useUIStore();
 
   useEffect(() => {
     if (activeChannel && editableRef.current) {
@@ -346,14 +341,47 @@ export const UhmMessageInput: React.FC = () => {
               <Paperclip className="w-[18px] h-[18px]" />
             </button>
 
-            <EmojiPickerPopover onEmojiSelect={handleEmojiSelect} disabled={disabledInput} />
-            <StickerPickerPopover
-              open={stickerPickerOpen}
-              onOpenChange={(isOpen) => isOpen ? toggleStickerPicker() : closeStickerPicker()}
-              stickerIframeUrl="https://sticker.ermis.network"
+            <button
+              type="button"
+              disabled={disabledInput || !!editingMessage}
+              className={`picker-trigger inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                pickerAction.type === 'emoji' 
+                  ? 'text-primary bg-primary/10' 
+                  : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
+              }`}
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                openEmojiPicker(rect, handleEmojiSelect);
+              }}
+              title={t('chat.addEmoji', 'Add Emoji')}
+            >
+              <Smile className="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
               disabled={disabledInput || !!editingMessage || !!quotedMessage}
-              title={t('chat.sendSticker', 'Send Sticker')}
-            />
+              className={`picker-trigger inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                pickerAction.type === 'sticker' 
+                  ? 'text-primary bg-primary/10' 
+                  : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
+              }`}
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                openStickerPicker(rect, (url) => {
+                  if (activeChannel) {
+                    activeChannel.sendMessage({
+                      text: '',
+                      attachments: [],
+                      sticker_url: url,
+                    });
+                  }
+                });
+              }}
+              title={t('chat.addSticker', 'Add Sticker')}
+            >
+              <Cat className="w-[18px] h-[18px]" />
+            </button>
           </div>
 
           <button

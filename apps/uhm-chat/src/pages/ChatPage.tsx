@@ -18,6 +18,7 @@ import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useUIStore } from '@/store/useUIStore'
 import { UhmMessageActions } from '@/features/chat/UhmMessageActions'
 import { UhmMessageInput } from '@/features/chat/UhmMessageInput'
+import { GlobalPickers } from '@/features/chat/GlobalPickers'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
@@ -234,6 +235,7 @@ export function ChatPage() {
           topic={topicAction.channel}
         />
       )}
+      <GlobalPickers />
     </div>
   )
 }

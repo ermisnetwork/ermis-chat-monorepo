@@ -24,6 +24,10 @@
     --input: 240 5.9% 90%;
     --ring: 261 81% 61%;
     --radius: 0.75rem;
+
+    /* Chat Pattern Variables - Light (Subtle Waves) */
+    --chat-pattern-opacity: 0.04;
+    --chat-pattern-image: url("data:image/svg+xml,%3Csvg width='52' height='26' viewBox='0 0 52 26' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%237949ec' fill-opacity='1'%3E%3Cpath d='M10 10c0-2.21-1.79-4-4-4-3.314 0-6-2.686-6-6h2c0 2.21 1.79 4 4 4 3.314 0 6 2.686 6 6 0 2.21 1.79 4 4 4 3.314 0 6 2.686 6 6 0 2.21 1.79 4 4 4v2c-3.314 0-6-2.686-6-6 0-2.21-1.79-4-4-4-3.314 0-6-2.686-6-6zm25.464-1.95l8.486 8.486-1.414 1.414-8.486-8.486 1.414-1.414z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
 
   .dark {
@@ -46,6 +50,10 @@
     --border: 248 18% 20%; /* subtle purple-tinted border */
     --input: 248 18% 20%;
     --ring: 261 81% 61%;
+
+    /* Chat Pattern Variables - Dark (Subtle Waves) */
+    --chat-pattern-opacity: 0.02;
+    --chat-pattern-image: url("data:image/svg+xml,%3Csvg width='52' height='26' viewBox='0 0 52 26' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M10 10c0-2.21-1.79-4-4-4-3.314 0-6-2.686-6-6h2c0 2.21 1.79 4 4 4 3.314 0 6 2.686 6 6 0 2.21 1.79 4 4 4 3.314 0 6 2.686 6 6 0 2.21 1.79 4 4 4v2c-3.314 0-6-2.686-6-6 0-2.21-1.79-4-4-4-3.314 0-6-2.686-6-6zm25.464-1.95l8.486 8.486-1.414 1.414-8.486-8.486 1.414-1.414z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
 }
 
@@ -150,4 +158,38 @@
 
 .ermis-avatar-wrapper--group .ermis-avatar--fallback {
   border-radius: 25%;
+}
+
+/* ============================================================
+   Uhm Chat – Message List Background Pattern
+   ============================================================ */
+.ermis-message-list {
+  position: relative;
+  background-color: var(--ermis-bg-primary) !important;
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    opacity: var(--chat-pattern-opacity);
+    background-image: var(--chat-pattern-image);
+    background-size: 52px 26px;
+    background-repeat: repeat;
+    background-attachment: fixed;
+    pointer-events: none;
+  }
+
+  .ermis-message-list__vlist {
+    position: relative;
+    z-index: 1;
+    background: transparent !important;
+  }
+
+  /* Ensure Empty state is above pattern */
+  .ermis-empty {
+    position: relative;
+    z-index: 2;
+  }
 }

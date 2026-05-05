@@ -12,6 +12,16 @@ interface UIState {
   openCreateTopicModal: (parentChannel: ChannelType) => void;
   openEditTopicModal: (topic: ChannelType) => void;
   closeTopicModal: () => void;
+
+  // Global Pickers State
+  pickerAction: { 
+    type: 'emoji' | 'sticker' | null; 
+    anchorRect: DOMRect | null;
+    onSelect?: (data: any) => void;
+  };
+  openEmojiPicker: (anchorRect: DOMRect, onSelect: (emoji: any) => void) => void;
+  openStickerPicker: (anchorRect: DOMRect, onSelect: (sticker: any) => void) => void;
+  closePickers: () => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -24,4 +34,9 @@ export const useUIStore = create<UIState>((set) => ({
   openCreateTopicModal: (parentChannel) => set({ topicAction: { type: 'create', channel: parentChannel } }),
   openEditTopicModal: (topic) => set({ topicAction: { type: 'edit', channel: topic } }),
   closeTopicModal: () => set({ topicAction: { type: null, channel: null } }),
+
+  pickerAction: { type: null, anchorRect: null },
+  openEmojiPicker: (anchorRect, onSelect) => set({ pickerAction: { type: 'emoji', anchorRect, onSelect } }),
+  openStickerPicker: (anchorRect, onSelect) => set({ pickerAction: { type: 'sticker', anchorRect, onSelect } }),
+  closePickers: () => set({ pickerAction: { type: null, anchorRect: null } }),
 }));
