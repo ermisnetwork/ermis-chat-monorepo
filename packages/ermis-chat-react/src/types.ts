@@ -581,6 +581,8 @@ export type MessageListProps = {
   loadMoreLimit?: number;
   /** Custom date separator component */
   DateSeparatorComponent?: React.ComponentType<DateSeparatorProps>;
+  /** Locale string for date separator labels (e.g. 'vi', 'en-US'). Falls back to browser default. */
+  dateLocale?: string;
   /** Custom message item component (replaces the entire row) */
   MessageItemComponent?: React.ComponentType<MessageItemProps>;
   /** Custom system message item component */
@@ -668,6 +670,8 @@ export type MessageReactionsProps = {
   onClickReaction?: (type: string) => void;
   /** Whether interactions are disabled */
   disabled?: boolean;
+  /** Whether the message is from the current user */
+  isOwnMessage?: boolean;
 };
 
 /* ----------------------------------------------------------

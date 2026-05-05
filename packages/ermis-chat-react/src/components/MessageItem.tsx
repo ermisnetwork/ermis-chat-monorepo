@@ -76,7 +76,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
 }) => {
   const { activeChannel, client } = useChatClient();
   const { hasCapability } = useChannelCapabilities();
-  
+
   const canReact = hasCapability('send-reaction');
 
   const userName = message.user?.name || message.user_id;
@@ -174,15 +174,15 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
               {formatTime(message.created_at)}
               <InlineStatusIcon status={message.status} isOwnMessage={isOwnMessage} isLastInGroup={isLastInGroup} />
             </span>
-          </MessageBubble>
 
-          {/* Actions: hover buttons + dropdown menu */}
-          {!isSystemMessage(message) && (
-            <MessageActionsBoxComponent
-              message={message}
-              isOwnMessage={isOwnMessage}
-            />
-          )}
+            {/* Actions: hover buttons + dropdown menu */}
+            {!isSystemMessage(message) && (
+              <MessageActionsBoxComponent
+                message={message}
+                isOwnMessage={isOwnMessage}
+              />
+            )}
+          </MessageBubble>
 
           {/* Message Reactions */}
           {MessageReactionsComponent && (
@@ -192,6 +192,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
               latestReactions={(message as any).latest_reactions}
               onClickReaction={handleReactionToggle}
               disabled={!canReact}
+              isOwnMessage={isOwnMessage}
             />
           )}
         </div>

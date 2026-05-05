@@ -16,9 +16,10 @@ import { CustomCreateChannelModal } from '@/components/custom/CustomCreateChanne
 import { ConnectionStatusBanner } from '@/features/chat/ConnectionStatusBanner'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useUIStore } from '@/store/useUIStore'
+import { UhmMessageActions } from '@/features/chat/UhmMessageActions'
 
 export function ChatPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { client } = useChatClient()
   const { status, retryConnection } = useConnectionStatus(client)
 
@@ -118,8 +119,8 @@ export function ChatPage() {
 
             {/* SearchPanel overlay — zoom animation on top of ChannelList */}
             <div className={`absolute inset-0 z-10 transition-all duration-200 ease-out ${isSearchMode
-                ? 'scale-100 opacity-100'
-                : 'scale-95 opacity-0 pointer-events-none'
+              ? 'scale-100 opacity-100'
+              : 'scale-95 opacity-0 pointer-events-none'
               }`}>
               {isSearchMode && (
                 <SearchPanel
@@ -163,7 +164,10 @@ export function ChatPage() {
         <Channel EmptyStateIndicator={ChannelEmptyState}>
           <ChannelHeader renderRight={renderHeaderRight} />
 
-          <VirtualMessageList />
+          <VirtualMessageList
+            MessageActionsBoxComponent={UhmMessageActions}
+            dateLocale={i18n.language}
+          />
 
           {/* Message Input Floating Card */}
           <MessageInput />

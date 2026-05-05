@@ -134,6 +134,23 @@
     "confirm_yes": "Confirm",
     "confirm_cancel": "Cancel"
   },
+  "message_actions": {
+    "reply": "Reply",
+    "forward": "Forward",
+    "more": "More",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "edit": "Edit",
+    "copy": "Copy",
+    "delete_for_me": "Delete for me",
+    "delete_for_everyone": "Delete for everyone",
+    "confirm_delete_everyone_title": "Delete for everyone",
+    "confirm_delete_everyone_message": "This message will be permanently deleted for all participants. This action cannot be undone.",
+    "confirm_delete_for_me_title": "Delete for me",
+    "confirm_delete_for_me_message": "This message will be removed from your view. Other participants can still see it.",
+    "confirm_delete_yes": "Delete",
+    "copy_success": "Copied to clipboard"
+  },
   "profile": {
     "title": "Personal Profile",
     "edit_avatar": "Change Avatar",

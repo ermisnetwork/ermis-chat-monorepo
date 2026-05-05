@@ -113,6 +113,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   messageRenderers: customRenderers,
   loadMoreLimit = 25,
   DateSeparatorComponent = DefaultDateSeparator,
+  dateLocale,
   MessageItemComponent = MessageItem,
   SystemMessageItemComponent = SystemMessageItem,
   JumpToLatestButton = DefaultJumpToLatest,
@@ -339,7 +340,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       const showDateSeparator =
         !prevMsg || getDateKey(message.created_at) !== getDateKey(prevMsg.created_at);
       const dateSeparator = showDateSeparator ? (
-        <DateSeparatorComponent label={formatDateLabel(message.created_at)} />
+        <DateSeparatorComponent label={formatDateLabel(message.created_at, dateLocale)} />
       ) : null;
 
       if (renderMessage) {
@@ -440,6 +441,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     ReadReceiptsComponent,
     ReadReceiptsTooltipComponent,
     readReceiptsMaxAvatars,
+    dateLocale,
   ]);
 
   if (isBanned || isBlocked) {

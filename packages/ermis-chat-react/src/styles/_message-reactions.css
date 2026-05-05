@@ -15,6 +15,10 @@
   pointer-events: none;
 }
 
+.ermis-message-reactions--own {
+  justify-content: flex-end;
+}
+
 .ermis-message-reactions__item {
   position: relative; /* For tooltip */
   display: inline-flex;

@@ -17,6 +17,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = React.memo(({
   latestReactions,
   onClickReaction,
   disabled,
+  isOwnMessage,
 }) => {
   const { client } = useChatClient();
   const currentUserId = client?.userID;
@@ -24,7 +25,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = React.memo(({
   if (!reactionCounts || Object.keys(reactionCounts).length === 0) return null;
 
   return (
-    <div className={`ermis-message-reactions${disabled ? ' ermis-message-reactions--disabled' : ''}`}>
+    <div className={`ermis-message-reactions${disabled ? ' ermis-message-reactions--disabled' : ''}${isOwnMessage ? ' ermis-message-reactions--own' : ''}`}>
       {Object.entries(reactionCounts).map(([type, count]) => {
         const isOwn = 
           ownReactions?.some((r) => r.type === type) ||

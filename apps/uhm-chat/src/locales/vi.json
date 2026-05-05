@@ -134,6 +134,23 @@
     "confirm_yes": "Xác nhận",
     "confirm_cancel": "Hủy"
   },
+  "message_actions": {
+    "reply": "Trả lời",
+    "forward": "Chuyển tiếp",
+    "more": "Thêm",
+    "pin": "Ghim",
+    "unpin": "Bỏ ghim",
+    "edit": "Chỉnh sửa",
+    "copy": "Sao chép",
+    "delete_for_me": "Xóa cho tôi",
+    "delete_for_everyone": "Xóa cho mọi người",
+    "confirm_delete_everyone_title": "Xóa cho mọi người",
+    "confirm_delete_everyone_message": "Tin nhắn này sẽ bị xóa vĩnh viễn cho tất cả thành viên. Hành động này không thể hoàn tác.",
+    "confirm_delete_for_me_title": "Xóa cho tôi",
+    "confirm_delete_for_me_message": "Tin nhắn này sẽ bị xóa khỏi giao diện của bạn. Các thành viên khác vẫn có thể thấy nó.",
+    "confirm_delete_yes": "Xóa",
+    "copy_success": "Đã sao chép vào bộ nhớ tạm"
+  },
   "profile": {
     "title": "Thông tin cá nhân",
     "edit_avatar": "Đổi ảnh đại diện",

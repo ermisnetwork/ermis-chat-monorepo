@@ -27,23 +27,23 @@
   }
 
   .dark {
-    --background: 248 25% 13%;          /* #1a1828 — brand base */
+    --background: 248 25% 13%; /* #1a1828 — brand base */
     --foreground: 0 0% 98%;
-    --card: 246 22% 16%;                /* #211f30 — slightly elevated */
+    --card: 246 22% 16%; /* #211f30 — slightly elevated */
     --card-foreground: 0 0% 98%;
-    --popover: 246 22% 16%;             /* #211f30 — match card for popovers/dropdowns */
+    --popover: 246 22% 16%; /* #211f30 — match card for popovers/dropdowns */
     --popover-foreground: 0 0% 98%;
-    --primary: 261 81% 61%;             /* #7949EC — brand purple */
+    --primary: 261 81% 61%; /* #7949EC — brand purple */
     --primary-foreground: 210 40% 98%;
-    --secondary: 248 20% 18%;           /* subtle purple-tinted secondary */
+    --secondary: 248 20% 18%; /* subtle purple-tinted secondary */
     --secondary-foreground: 0 0% 98%;
-    --muted: 248 18% 20%;              /* #2a2640 — muted purple-tinted */
+    --muted: 248 18% 20%; /* #2a2640 — muted purple-tinted */
     --muted-foreground: 240 5% 64.9%;
-    --accent: 248 25% 20%;             /* purple-tinted hover/accent bg */
+    --accent: 248 25% 20%; /* purple-tinted hover/accent bg */
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 248 18% 20%;             /* subtle purple-tinted border */
+    --border: 248 18% 20%; /* subtle purple-tinted border */
     --input: 248 18% 20%;
     --ring: 261 81% 61%;
   }
@@ -84,8 +84,8 @@
 .ermis-chat,
 .ermis-chat--dark {
   /* Core brand */
-  --ermis-accent: #7949EC;
-  --ermis-accent-hover: #AC6AFF;
+  --ermis-accent: #7949ec;
+  --ermis-accent-hover: #ac6aff;
   --ermis-bg-active: rgba(121, 73, 236, 0.12);
 
   /* Backgrounds – deep navy-purple */
@@ -111,8 +111,8 @@
 /* --- Light mode --- */
 .ermis-chat--light {
   /* Core brand */
-  --ermis-accent: #7949EC;
-  --ermis-accent-hover: #5027B1;
+  --ermis-accent: #7949ec;
+  --ermis-accent-hover: #5027b1;
   --ermis-bg-active: rgba(121, 73, 236, 0.08);
 
   /* Backgrounds – pure white */
@@ -139,7 +139,7 @@
 
 /* --- Unread badge: brand purple gradient + glow --- */
 .ermis-channel-list__unread-badge {
-  background: linear-gradient(135deg, #7949EC, #AC6AFF) !important;
+  background: linear-gradient(135deg, #7949ec, #ac6aff) !important;
   box-shadow: 0 2px 8px rgba(121, 73, 236, 0.35);
 }
 

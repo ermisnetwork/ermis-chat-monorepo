@@ -74,7 +74,7 @@ export { MessageQuickReactions } from './components/MessageQuickReactions';
 
 export { useMessageActions } from './hooks/useMessageActions';
 
-export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview, getLastMessagePreview } from './utils';
+export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview, getLastMessagePreview, buildUserMap } from './utils';
 export { getAvatarGradient } from './utils/avatarColors';
 export {
   isGroupChannel,

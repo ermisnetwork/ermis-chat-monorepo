@@ -43,8 +43,10 @@ export function getDateKey(date: Date | string | undefined): string {
 
 /**
  * Format a date into a human-friendly label (Today / Yesterday / full date).
+ * When `locale` is provided, "Today" / "Yesterday" are localised via
+ * `Intl.RelativeTimeFormat` and the full date uses that locale for formatting.
  */
-export function formatDateLabel(date: Date | string | undefined): string {
+export function formatDateLabel(date: Date | string | undefined, locale?: string): string {
   if (!date) return '';
   const d = date instanceof Date ? date : new Date(date);
   const now = new Date();
@@ -53,9 +55,26 @@ export function formatDateLabel(date: Date | string | undefined): string {
   const diffMs = today.getTime() - msgDay.getTime();
   const diffDays = Math.round(diffMs / 86400000);
 
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  return d.toLocaleDateString(undefined, {
+  if (diffDays === 0) {
+    if (locale && typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
+      const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+      // Format -0 days → "today" / "hôm nay" etc.
+      const parts = rtf.formatToParts(0, 'day');
+      const label = parts.map(p => p.value).join('');
+      return label.charAt(0).toUpperCase() + label.slice(1);
+    }
+    return 'Today';
+  }
+  if (diffDays === 1) {
+    if (locale && typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
+      const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+      const parts = rtf.formatToParts(-1, 'day');
+      const label = parts.map(p => p.value).join('');
+      return label.charAt(0).toUpperCase() + label.slice(1);
+    }
+    return 'Yesterday';
+  }
+  return d.toLocaleDateString(locale || undefined, {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
