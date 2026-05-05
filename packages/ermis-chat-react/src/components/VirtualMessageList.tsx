@@ -148,6 +148,11 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   closedTopicReopenLabel = 'Reopen Topic',
   PendingInviteeNotificationComponent = DefaultPendingInviteeNotification,
   pendingInviteeLabel,
+  pinnedMessagesLabel,
+  seeAllLabel,
+  collapseLabel,
+  unpinLabel,
+  stickerLabel,
 }) => {
   const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -504,7 +509,17 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
   return (
     <div ref={containerRef} className={`ermis-message-list${className ? ` ${className}` : ''}`}>
-      {showPinnedMessages && <PinnedMessagesComponent onClickMessage={scrollToMessage} AvatarComponent={AvatarComponent} />}
+      {showPinnedMessages && (
+        <PinnedMessagesComponent 
+          onClickMessage={scrollToMessage} 
+          AvatarComponent={AvatarComponent}
+          pinnedMessagesLabel={pinnedMessagesLabel}
+          seeAllLabel={seeAllLabel}
+          collapseLabel={collapseLabel}
+          unpinLabel={unpinLabel}
+          stickerLabel={stickerLabel}
+        />
+      )}
 
       {messages.length === 0 && (
         EmptyStateIndicator === DefaultEmpty

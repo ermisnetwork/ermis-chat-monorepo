@@ -3,7 +3,7 @@ import { useChatClient } from './useChatClient';
 import { useChannelCapabilities } from './useChannelCapabilities';
 import { usePreviewState } from './usePreviewState';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
-import { isSignalMessage, isSystemMessage } from '../messageTypeUtils';
+import { isSignalMessage, isSystemMessage, isStickerMessage } from '../messageTypeUtils';
 
 export type MessageActionList = {
   canEdit: boolean;
@@ -55,9 +55,10 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
 
     const isSystem = isSystemMessage(message);
     const isSignal = isSignalMessage(message);
+    const isSticker = isStickerMessage(message);
     const isPinned = isPinnedFlag;
 
-    const canEdit = !isPreviewMode && !isSystem && !isSignal && isOwnMessage;
+    const canEdit = !isPreviewMode && !isSystem && !isSignal && !isSticker && isOwnMessage;
 
     // Delete for everyone:
     // + Team channel: only the owner can perform this action natively.

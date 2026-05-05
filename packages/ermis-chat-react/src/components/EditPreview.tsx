@@ -40,6 +40,7 @@ function getAttachmentSummary(attachments: any[]): string {
 export const EditPreview: React.FC<{
   message: FormatMessageResponse;
   onDismiss: () => void;
+  editingMessageLabel?: string;
 }> = React.memo(({
   message,
   onDismiss,

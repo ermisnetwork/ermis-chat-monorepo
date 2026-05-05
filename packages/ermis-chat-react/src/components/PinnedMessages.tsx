@@ -15,6 +15,8 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   onClickMessage,
   onUnpin,
   AvatarComponent,
+  unpinLabel = 'Unpin message',
+  stickerLabel = 'Sticker',
 }) => {
   const { activeChannel } = useChatClient();
   const userName = message.user?.name || message.user_id || 'Unknown';
@@ -32,7 +34,7 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
     const firstAttach = message.attachments![0];
     previewText = firstAttach.title || `${firstAttach.type || 'file'}`;
   } else if (isSticker) {
-    previewText = 'Sticker';
+    previewText = stickerLabel;
   }
 
   // Convert @userId → @UserName in preview text
@@ -67,8 +69,8 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
       <button
         className="ermis-pinned-messages__unpin-btn"
         onClick={(e) => { e.stopPropagation(); onUnpin?.(message.id); }}
-        title="Unpin message"
-        aria-label="Unpin message"
+        title={unpinLabel}
+        aria-label={unpinLabel}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="2" y1="2" x2="22" y2="22" />
@@ -89,6 +91,11 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
   PinnedMessageItemComponent = DefaultPinnedMessageItem,
   onClickMessage,
   maxCollapsed = 1,
+  pinnedMessagesLabel,
+  seeAllLabel = 'See all',
+  collapseLabel = 'Collapse',
+  unpinLabel = 'Unpin message',
+  stickerLabel = 'Sticker',
 }) => {
   const { activeChannel, client, messages } = useChatClient();
   const [expanded, setExpanded] = useState(false);
@@ -134,14 +141,17 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
           <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
         </svg>
         <span className="ermis-pinned-messages__label">
-          {pinnedMessages.length} pinned message{pinnedMessages.length > 1 ? 's' : ''}
+          {typeof pinnedMessagesLabel === 'function' 
+            ? pinnedMessagesLabel(pinnedMessages.length) 
+            : pinnedMessagesLabel || `${pinnedMessages.length} pinned message${pinnedMessages.length > 1 ? 's' : ''}`
+          }
         </span>
         {hasMore && (
           <button
             className="ermis-pinned-messages__toggle"
             onClick={(e) => { e.stopPropagation(); toggleExpanded(); }}
           >
-            {expanded ? 'Collapse' : 'See all'}
+            {expanded ? collapseLabel : seeAllLabel}
           </button>
         )}
       </div>
@@ -156,6 +166,8 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
             onClickMessage={onClickMessage}
             onUnpin={handleUnpin}
             AvatarComponent={AvatarComponent}
+            unpinLabel={unpinLabel}
+            stickerLabel={stickerLabel}
           />
         ))}
       </div>

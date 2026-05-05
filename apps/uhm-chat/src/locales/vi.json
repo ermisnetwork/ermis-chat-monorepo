@@ -78,7 +78,20 @@
     "empty_subtitle": "Bắt đầu cuộc trò chuyện bằng cách nhấn nút + ở trên.",
     "empty_channel_title": "Chào mừng đến với Uhm Chat",
     "empty_channel_subtitle": "Chọn một cuộc trò chuyện từ danh sách hoặc tạo không gian mới để bắt đầu.",
-    "empty_channel_cta": "Tạo kênh trò chuyện"
+    "empty_channel_cta": "Tạo kênh trò chuyện",
+    "attachFile": "Đính kèm file",
+    "addEmoji": "Thêm Emoji",
+    "sendSticker": "Gửi Sticker",
+    "send": "Gửi",
+    "placeholder": "Nhập tin nhắn...",
+    "replyingTo": "Đang trả lời",
+    "editingMessage": "Đang chỉnh sửa",
+    "bannedLabel": "Bạn đã bị cấm khỏi kênh này",
+    "blockedLabel": "Bạn đã chặn người dùng này. Bỏ chặn để gửi tin nhắn.",
+    "closedTopic": "Chủ đề này đã đóng.",
+    "previewTitle": "Bạn đang xem một kênh công khai.",
+    "joinChannel": "Tham gia kênh",
+    "linksDisabled": "Tin nhắn bị chặn: Chức năng gửi link bị vô hiệu hóa cho thành viên."
   },
   "not_found": {
     "title": "Trang không tồn tại",
@@ -164,5 +177,28 @@
     "error_name_short": "Tên quá ngắn (tối thiểu 2 ký tự)",
     "error_name_long": "Tên quá dài (tối đa 50 ký tự)",
     "error_invalid_name": "Tên chứa ký tự không hợp lệ"
+  },
+  "overlays": {
+    "bannedTitle": "Bạn đã bị cấm",
+    "bannedSubtitle": "Bạn đã bị cấm khỏi kênh này và không thể gửi hoặc nhận tin nhắn.",
+    "pendingTitle": "Lời mời tham gia",
+    "pendingSubtitle": "Bạn đã được mời tham gia kênh này. Bạn có đồng ý không?",
+    "skippedTitle": "Đã bỏ qua lời mời",
+    "skippedSubtitle": "Bạn đã bỏ qua lời mời này. Bạn sẽ không nhận được tin nhắn.",
+    "closedTopicTitle": "Chủ đề đã đóng",
+    "closedTopicSubtitle": "Chủ đề này đã bị đóng. Không thể gửi tin nhắn mới.",
+    "accept": "Chấp nhận",
+    "reject": "Từ chối",
+    "skip": "Bỏ qua",
+    "reopen": "Mở lại",
+    "blockedTitle": "Bạn đã chặn người dùng này",
+    "blockedSubtitle": "Bỏ chặn để tiếp tục trò chuyện",
+    "pendingInviteeLabel": "{{name}} cần chấp nhận lời mời để xem tin nhắn bạn đã gửi",
+    "jumpToLatest": "↓ Chuyển đến tin nhắn mới nhất",
+    "pinnedMessagesLabel": "{{count}} tin nhắn đã ghim",
+    "seeAll": "Xem tất cả",
+    "collapse": "Thu gọn",
+    "unpin": "Bỏ ghim tin nhắn",
+    "sticker": "Sticker"
   }
 }

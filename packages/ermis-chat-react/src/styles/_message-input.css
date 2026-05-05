@@ -129,6 +129,51 @@
   overflow: hidden;
 }
 
+/* --- Sticker button --- */
+.ermis-message-input__sticker-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  color: var(--ermis-text-secondary);
+  transition: color var(--ermis-transition);
+  flex-shrink: 0;
+}
+
+.ermis-message-input__sticker-btn:hover,
+.ermis-message-input__sticker-btn--active {
+  color: var(--ermis-accent);
+}
+
+.ermis-message-input__sticker-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --- Sticker picker container --- */
+.ermis-message-input__sticker-picker-container {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: var(--ermis-spacing-xs);
+  z-index: 100;
+  border-radius: var(--ermis-radius-lg);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.ermis-message-input__sticker-iframe {
+  border: none;
+  width: 320px;
+  height: 400px;
+  background: var(--ermis-bg-primary);
+  display: block;
+}
+
 /* --- Files preview --- */
 .ermis-files-preview {
   display: flex;

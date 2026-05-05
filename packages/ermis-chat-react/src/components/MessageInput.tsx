@@ -6,8 +6,9 @@ import { usePendingState } from '../hooks/usePendingState';
 import { useMentions } from '../hooks/useMentions';
 import { useFileUpload } from '../hooks/useFileUpload';
 import { useEmojiPicker } from '../hooks/useEmojiPicker';
+import { useStickerPicker } from '../hooks/useStickerPicker';
 import { useMessageSend } from '../hooks/useMessageSend';
-import { DefaultSendButton, DefaultAttachButton, DefaultEmojiButton } from './MessageInputDefaults';
+import { DefaultSendButton, DefaultAttachButton, DefaultEmojiButton, DefaultStickerButton, DefaultStickerPicker } from './MessageInputDefaults';
 import { MentionSuggestions } from './MentionSuggestions';
 import { FilesPreview } from './FilesPreview';
 import { ReplyPreview } from './ReplyPreview';
@@ -37,6 +38,10 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   onBeforeSend,
   EmojiPickerComponent,
   EmojiButtonComponent = DefaultEmojiButton,
+  StickerPickerComponent = DefaultStickerPicker,
+  StickerButtonComponent = DefaultStickerButton,
+  disableStickers = false,
+  stickerIframeUrl = 'https://sticker.ermis.network',
   ReplyPreviewComponent = ReplyPreview,
   EditPreviewComponent = EditPreview,
   bannedLabel = 'You have been banned from this channel',
@@ -51,6 +56,8 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   PreviewOverlayComponent = PreviewOverlay,
   previewOverlayTitle = 'You are viewing a public channel.',
   joinChannelLabel = 'Join Channel',
+  replyingToLabel,
+  editingMessageLabel,
 }) => {
   const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -250,6 +257,12 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     toggleEmojiPicker,
   } = useEmojiPicker({ editableRef, setHasContent });
 
+  const {
+    stickerPickerOpen,
+    toggleStickerPicker,
+    closeStickerPicker,
+  } = useStickerPicker({ activeChannel, stickerIframeUrl });
+
   // Build member list from channel state (only for team channels and topics)
   const members = useMemo<MentionMember[]>(() => {
     if (!(isTeamChannel || isTopic)) return [];
@@ -447,6 +460,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
         <ReplyPreviewComponent
           message={quotedMessage}
           onDismiss={() => setQuotedMessage(null)}
+          replyingToLabel={replyingToLabel}
         />
       )}
 
@@ -455,6 +469,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
         <EditPreviewComponent
           message={editingMessage}
           onDismiss={cancelEdit}
+          editingMessageLabel={editingMessageLabel}
         />
       )}
 
@@ -536,15 +551,26 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
           {EmojiPickerComponent && (
             <EmojiButtonComponent active={emojiPickerOpen} onClick={isSlowModeBlocked ? () => { } : toggleEmojiPicker} />
           )}
+
+          {/* Sticker button — shown unless disabled */}
+          {!disableStickers && StickerButtonComponent && (
+            <StickerButtonComponent active={stickerPickerOpen} onClick={isSlowModeBlocked || !!editingMessage || !!quotedMessage ? () => { } : toggleStickerPicker} />
+          )}
         </div>
-        <SendButton disabled={!hasContent || sending || isStillUploading || isSlowModeBlocked} onClick={handleSend} />
+
+        <SendButton disabled={!hasContent || sending || !!editingMessage || isSlowModeBlocked || !canSendMessage || isStillUploading} onClick={handleSend} />
       </div>
 
-      {/* Emoji picker — positioned above input */}
+      {/* Emoji Picker Dropdown */}
       {EmojiPickerComponent && emojiPickerOpen && (
         <div className="ermis-message-input__emoji-picker">
           <EmojiPickerComponent onSelect={handleEmojiSelect} onClose={handleEmojiClose} />
         </div>
+      )}
+
+      {/* Sticker Picker Dropdown */}
+      {!disableStickers && StickerPickerComponent && stickerPickerOpen && (
+        <StickerPickerComponent stickerIframeUrl={stickerIframeUrl} onClose={closeStickerPicker} />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Hash, MessageSquare, Globe, Users, Search } from 'lucide-react'
 import { useChatClient, Avatar } from '@ermis-network/ermis-chat-react'
@@ -325,7 +325,6 @@ export function SearchPanel({ searchQuery, onSelectChannel }: SearchPanelProps) 
   // ── Derived state ────────────────────────────────────────────
 
   const hasQuery = searchQuery.trim().length > 0
-  const isAnyLoading = isSearchingPublic || isSearchingUsers
 
   return (
     <div className="h-full w-full overflow-y-auto bg-white dark:bg-[#1a1828]">

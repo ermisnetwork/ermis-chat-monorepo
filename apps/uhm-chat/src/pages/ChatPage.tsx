@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChannelList, Channel, VirtualMessageList, MessageInput, ChannelHeader, ChannelInfo, useChatClient, TopicModal } from '@ermis-network/ermis-chat-react'
+import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, TopicModal } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
 import { Info } from 'lucide-react'
 import { SidebarHeader } from '@/components/SidebarHeader'
@@ -17,6 +17,7 @@ import { ConnectionStatusBanner } from '@/features/chat/ConnectionStatusBanner'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useUIStore } from '@/store/useUIStore'
 import { UhmMessageActions } from '@/features/chat/UhmMessageActions'
+import { UhmMessageInput } from '@/features/chat/UhmMessageInput'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
@@ -167,10 +168,34 @@ export function ChatPage() {
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
             dateLocale={i18n.language}
+            bannedOverlayTitle={t('overlays.bannedTitle', 'You are banned')}
+            bannedOverlaySubtitle={t('overlays.bannedSubtitle', 'You have been banned from this channel and cannot send or receive messages.')}
+            pendingOverlayTitle={t('overlays.pendingTitle', 'Channel Invitation')}
+            pendingOverlaySubtitle={t('overlays.pendingSubtitle', 'You have been invited to join this channel. Do you accept?')}
+            pendingRejectLabel={t('overlays.reject', 'Decline')}
+            pendingAcceptLabel={t('overlays.accept', 'Accept')}
+            pendingSkipLabel={t('overlays.skip', 'Skip')}
+            skippedOverlayTitle={t('overlays.skippedTitle', 'Invitation Skipped')}
+            skippedOverlaySubtitle={t('overlays.skippedSubtitle', 'You skipped this invitation. You will not receive messages.')}
+            skippedAcceptLabel={t('overlays.accept', 'Accept')}
+            closedTopicOverlayTitle={t('overlays.closedTopicTitle', 'Topic Closed')}
+            closedTopicOverlaySubtitle={t('overlays.closedTopicSubtitle', 'This topic is closed. No new messages can be sent.')}
+            closedTopicReopenLabel={t('overlays.reopen', 'Reopen')}
+            emptyTitle={t('chat.empty_title')}
+            emptySubtitle={t('chat.empty_subtitle')}
+            jumpToLatestLabel={t('overlays.jumpToLatest')}
+            blockedOverlayTitle={t('overlays.blockedTitle')}
+            blockedOverlaySubtitle={t('overlays.blockedSubtitle')}
+            pendingInviteeLabel={(name) => t('overlays.pendingInviteeLabel', { name })}
+            pinnedMessagesLabel={(count) => t('overlays.pinnedMessagesLabel', { count })}
+            seeAllLabel={t('overlays.seeAll')}
+            collapseLabel={t('overlays.collapse')}
+            unpinLabel={t('overlays.unpin')}
+            stickerLabel={t('overlays.sticker')}
           />
 
           {/* Message Input Floating Card */}
-          <MessageInput />
+          <UhmMessageInput />
         </Channel>
       </div>
 

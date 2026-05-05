@@ -75,7 +75,7 @@
 
 .ermis-mention-suggestions__item:hover,
 .ermis-mention-suggestions__item--highlighted {
-  background-color: var(--ermis-bg-secondary);
+  background-color: var(--ermis-bg-active);
 }
 
 .ermis-mention-suggestions__name {

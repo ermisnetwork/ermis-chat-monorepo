@@ -22,7 +22,14 @@ export { useOnlineStatus } from './hooks/useOnlineStatus';
 export type { OnlineStatus } from './hooks/useOnlineStatus';
 export { useOnlineUsers } from './hooks/useOnlineUsers';
 export { usePendingState } from './hooks/usePendingState';
+export { usePreviewState } from './hooks/usePreviewState';
 export { useTopicGroupUpdates } from './hooks/useTopicGroupUpdates';
+export { useMessageSend } from './hooks/useMessageSend';
+export { useFileUpload } from './hooks/useFileUpload';
+export { useEmojiPicker } from './hooks/useEmojiPicker';
+export { useStickerPicker } from './hooks/useStickerPicker';
+export type { UseStickerPickerOptions } from './hooks/useStickerPicker';
+export { useChannelCapabilities } from './hooks/useChannelCapabilities';
 
 // Components
 export { Avatar } from './components/Avatar';
@@ -146,7 +153,10 @@ export type { FilePreviewItem, FilesPreviewProps } from './components/FilesPrevi
 export { MentionSuggestions } from './components/MentionSuggestions';
 export type { MentionSuggestionsProps } from './components/MentionSuggestions';
 
-export { useMentions } from './hooks/useMentions';
+export { EditPreview } from './components/EditPreview';
+export { PreviewOverlay } from './components/PreviewOverlay';
+
+export { useMentions, getMentionHtml } from './hooks/useMentions';
 export type { MentionMember, MentionPayload, UseMentionsOptions, UseMentionsReturn } from './hooks/useMentions';
 
 export { useScrollToMessage } from './hooks/useScrollToMessage';

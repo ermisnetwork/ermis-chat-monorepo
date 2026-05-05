@@ -34,11 +34,11 @@
   /* Quote message */
   --ermis-quote-other-bg: rgba(99, 102, 241, 0.1);
   --ermis-quote-other-bg-hover: rgba(99, 102, 241, 0.18);
-  --ermis-quote-own-bg: rgba(99, 102, 241, 0.2);
-  --ermis-quote-own-bg-hover: rgba(99, 102, 241, 0.3);
-  --ermis-quote-own-border: rgba(255, 255, 255, 0.4);
-  --ermis-quote-own-author: rgba(255, 255, 255, 0.9);
-  --ermis-quote-own-text: rgba(255, 255, 255, 0.65);
+  --ermis-quote-own-bg: rgba(255, 255, 255, 0.2);
+  --ermis-quote-own-bg-hover: rgba(255, 255, 255, 0.3);
+  --ermis-quote-own-border: rgba(255, 255, 255, 0.5);
+  --ermis-quote-own-author: #ffffff;
+  --ermis-quote-own-text: rgba(255, 255, 255, 0.75);
 
   /* Typography */
   --ermis-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
@@ -109,13 +109,13 @@
   --ermis-bubble-other-text: var(--ermis-text-primary);
 
   /* Quote message */
-  --ermis-quote-other-bg: rgba(99, 102, 241, 0.08);
-  --ermis-quote-other-bg-hover: rgba(99, 102, 241, 0.14);
-  --ermis-quote-own-bg: rgba(0, 0, 0, 0.25);
-  --ermis-quote-own-bg-hover: rgba(0, 0, 0, 0.4);
-  --ermis-quote-own-border: rgba(255, 255, 255, 0.6);
-  --ermis-quote-own-author: rgba(255, 255, 255, 0.95);
-  --ermis-quote-own-text: rgba(255, 255, 255, 0.8);
+  --ermis-quote-other-bg: rgba(99, 102, 241, 0.06);
+  --ermis-quote-other-bg-hover: rgba(99, 102, 241, 0.12);
+  --ermis-quote-own-bg: rgba(255, 255, 255, 0.3);
+  --ermis-quote-own-bg-hover: rgba(255, 255, 255, 0.4);
+  --ermis-quote-own-border: rgba(255, 255, 255, 0.7);
+  --ermis-quote-own-author: #ffffff;
+  --ermis-quote-own-text: rgba(255, 255, 255, 0.85);
 
   /* Signal messages (call events) */
   --ermis-signal-success: #229A16;

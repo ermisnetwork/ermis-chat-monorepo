@@ -50,7 +50,7 @@ const CustomSearchInputComponent = ({ value, onChange, placeholder }: any) => {
   )
 }
 
-const CustomSelectedBoxComponent = ({ users, onRemove, AvatarComponent, emptyLabel }: any) => {
+const CustomSelectedBoxComponent = ({ users, onRemove, AvatarComponent }: any) => {
   if (!users || users.length === 0) return null;
 
   return (

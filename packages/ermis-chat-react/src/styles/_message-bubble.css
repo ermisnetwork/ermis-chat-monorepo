@@ -6,7 +6,7 @@
   padding: var(--ermis-spacing-xs) var(--ermis-spacing-sm);
   border-left: 3px solid var(--ermis-accent);
   background-color: var(--ermis-quote-other-bg);
-  border-radius: 0 var(--ermis-radius-sm) var(--ermis-radius-sm) 0;
+  border-radius: var(--ermis-radius-sm);
   cursor: pointer;
   max-width: 100%;
   transition: background-color 0.15s;
@@ -17,24 +17,10 @@
   background-color: var(--ermis-quote-other-bg-hover);
 }
 
-.ermis-quoted-message--own {
-  border-left-color: var(--ermis-quote-own-border);
-  background-color: var(--ermis-quote-own-bg);
-  border-radius: var(--ermis-radius-sm);
-}
-
-.ermis-quoted-message--own:hover {
-  background-color: var(--ermis-quote-own-bg-hover);
-}
-
 .ermis-quoted-message__author {
   font-size: var(--ermis-font-size-xs);
   font-weight: 600;
   color: var(--ermis-accent);
-}
-
-.ermis-quoted-message--own .ermis-quoted-message__author {
-  color: var(--ermis-quote-own-author);
 }
 
 .ermis-quoted-message__text {
@@ -43,10 +29,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.ermis-quoted-message--own .ermis-quoted-message__text {
-  color: var(--ermis-quote-own-text);
 }
 
 /* Light theme: same approach works since we darken the accent bg */

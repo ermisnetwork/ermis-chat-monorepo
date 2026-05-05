@@ -78,7 +78,20 @@
     "empty_subtitle": "Start a conversation by tapping the + button above.",
     "empty_channel_title": "Welcome to Uhm Chat",
     "empty_channel_subtitle": "Select a conversation from the list or create a new space to get started.",
-    "empty_channel_cta": "Create a new channel"
+    "empty_channel_cta": "Create a new channel",
+    "attachFile": "Attach file",
+    "addEmoji": "Add Emoji",
+    "sendSticker": "Send Sticker",
+    "send": "Send",
+    "placeholder": "Type a message...",
+    "replyingTo": "Replying to",
+    "editingMessage": "Editing message",
+    "bannedLabel": "You have been banned from this channel",
+    "blockedLabel": "You have blocked this user. Unblock to send messages.",
+    "closedTopic": "This topic is closed.",
+    "previewTitle": "You are viewing a public channel.",
+    "joinChannel": "Join Channel",
+    "linksDisabled": "Message blocked: Sending links is disabled for members."
   },
   "not_found": {
     "title": "Page not found",
@@ -164,5 +177,29 @@
     "error_name_short": "Name too short (min 2 characters)",
     "error_name_long": "Name too long (max 50 characters)",
     "error_invalid_name": "Name contains invalid characters"
+  },
+  "overlays": {
+    "bannedTitle": "You are banned",
+    "bannedSubtitle": "You have been banned from this channel and cannot send or receive messages.",
+    "pendingTitle": "Channel Invitation",
+    "pendingSubtitle": "You have been invited to join this channel. Do you accept?",
+    "skippedTitle": "Invitation Skipped",
+    "skippedSubtitle": "You skipped this invitation. You will not receive messages.",
+    "closedTopicTitle": "Topic Closed",
+    "closedTopicSubtitle": "This topic is closed. No new messages can be sent.",
+    "accept": "Accept",
+    "reject": "Decline",
+    "skip": "Skip",
+    "reopen": "Reopen",
+    "blockedTitle": "You have blocked this user",
+    "blockedSubtitle": "Unblock to continue the conversation",
+    "pendingInviteeLabel": "{{name}} needs to accept your invitation to see the messages you've sent",
+    "jumpToLatest": "↓ Jump to latest",
+    "pinnedMessagesLabel": "{{count}} pinned message",
+    "pinnedMessagesLabel_plural": "{{count}} pinned messages",
+    "seeAll": "See all",
+    "collapse": "Collapse",
+    "unpin": "Unpin message",
+    "sticker": "Sticker"
   }
 }

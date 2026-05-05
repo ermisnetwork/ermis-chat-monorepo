@@ -1132,7 +1132,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       const data = JSON.parse(event.data);
 
       this.logger('info', `client:connectToSSE() - SSE message received event :  ${JSON.stringify(data)}`, { event });
-      console.log('----connectToSSE----', data)
       if (data.type === 'AccountUserChainProjects') {
         const userInfo: UserResponse<ErmisChatGenerics> = {
           id: data.id,

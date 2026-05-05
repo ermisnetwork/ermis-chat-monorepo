@@ -24,7 +24,7 @@ export function isSystemMessage(message: any): boolean {
 }
 
 export function isStickerMessage(message: any): boolean {
-  return message?.type === MESSAGE_TYPES.STICKER;
+  return message?.type === MESSAGE_TYPES.STICKER || Boolean(message?.sticker_url);
 }
 
 export function isRegularMessage(message: any): boolean {

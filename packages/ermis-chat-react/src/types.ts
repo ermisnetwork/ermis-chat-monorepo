@@ -641,6 +641,17 @@ export type MessageListProps = {
   PendingInviteeNotificationComponent?: React.ComponentType<{ inviteeName?: string; label?: string }>;
   /** I18n Label for pending invitee notification */
   pendingInviteeLabel?: string | ((inviteeName?: string) => string);
+
+  /** I18n Label for pinned messages header */
+  pinnedMessagesLabel?: string | ((count: number) => string);
+  /** I18n Label for seeing all pinned messages */
+  seeAllLabel?: string;
+  /** I18n Label for collapsing pinned messages */
+  collapseLabel?: string;
+  /** I18n Label for unpinning a message */
+  unpinLabel?: string;
+  /** I18n Label for sticker message preview */
+  stickerLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -823,6 +834,10 @@ export type MessageInputProps = {
   slowModeLabel?: (cooldown: number) => React.ReactNode;
   /** I18n Label for closed topic */
   closedTopicLabel?: string;
+  /** I18n Label for replying state */
+  replyingToLabel?: string;
+  /** I18n Label for editing state */
+  editingMessageLabel?: string;
   
   /** Custom component for the Preview Overlay (shown instead of input in unjoined public channels) */
   PreviewOverlayComponent?: React.ComponentType<PreviewOverlayProps>;
@@ -830,6 +845,15 @@ export type MessageInputProps = {
   previewOverlayTitle?: string;
   /** I18n Label for Join Button in Preview Overlay */
   joinChannelLabel?: string;
+  
+  /** Disable stickers entirely */
+  disableStickers?: boolean;
+  /** URL for the sticker picker iframe (default: https://sticker.ermis.network) */
+  stickerIframeUrl?: string;
+  /** Custom sticker picker component */
+  StickerPickerComponent?: React.ComponentType<{ stickerIframeUrl: string; onClose: () => void }>;
+  /** Custom sticker button component */
+  StickerButtonComponent?: React.ComponentType<{ active: boolean; onClick: () => void }>;
 };
 
 /* ----------------------------------------------------------
@@ -892,6 +916,8 @@ export type PinnedMessageItemProps = {
   onClickMessage?: (messageId: string) => void;
   onUnpin?: (messageId: string) => void;
   AvatarComponent: React.ComponentType<AvatarProps>;
+  unpinLabel?: string;
+  stickerLabel?: string;
 };
 
 export type PinnedMessagesProps = {
@@ -905,6 +931,12 @@ export type PinnedMessagesProps = {
   onClickMessage?: (messageId: string) => void;
   /** Max messages to show in collapsed state (default: 1) */
   maxCollapsed?: number;
+  /** I18n Labels */
+  pinnedMessagesLabel?: string | ((count: number) => string);
+  seeAllLabel?: string;
+  collapseLabel?: string;
+  unpinLabel?: string;
+  stickerLabel?: string;
 };
 
 /* ----------------------------------------------------------

@@ -48,3 +48,31 @@ export const DefaultEmojiButton: React.FC<{ active: boolean; onClick: () => void
   </button>
 ));
 DefaultEmojiButton.displayName = 'DefaultEmojiButton';
+
+export const DefaultStickerButton: React.FC<{ active: boolean; onClick: () => void }> = React.memo(({
+  active,
+  onClick,
+}) => (
+  <button
+    className={`ermis-message-input__sticker-btn${active ? ' ermis-message-input__sticker-btn--active' : ''}`}
+    onClick={onClick}
+    type="button"
+    aria-label="Sticker"
+  >
+    🐱
+  </button>
+));
+DefaultStickerButton.displayName = 'DefaultStickerButton';
+
+export const DefaultStickerPicker: React.FC<{ stickerIframeUrl: string; onClose: () => void }> = React.memo(({
+  stickerIframeUrl,
+}) => (
+  <div className="ermis-message-input__sticker-picker-container">
+    <iframe
+      src={stickerIframeUrl}
+      title="Sticker Picker"
+      className="ermis-message-input__sticker-iframe"
+    />
+  </div>
+));
+DefaultStickerPicker.displayName = 'DefaultStickerPicker';
