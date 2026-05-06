@@ -654,6 +654,10 @@ export type MessageListProps = {
   stickerLabel?: string;
   /** I18n Label for typing indicator */
   typingIndicatorLabel?: (users: Array<{ id: string; name?: string }>) => string;
+  /** I18n Label for deleted display messages (display_type === 'deleted') */
+  deletedMessageLabel?: string;
+  /** Whether to include hidden (deleted) messages in the initial channel query. Defaults to true. */
+  includeHiddenMessages?: boolean;
 };
 
 /* ----------------------------------------------------------
@@ -748,6 +752,8 @@ export type MessageItemProps = {
   forwardedLabel?: string;
   /** I18n Label for edited state */
   editedLabel?: string;
+  /** I18n Label for deleted display messages (display_type === 'deleted') */
+  deletedMessageLabel?: string;
 };
 
 export type SystemMessageItemProps = {
@@ -840,14 +846,14 @@ export type MessageInputProps = {
   replyingToLabel?: string;
   /** I18n Label for editing state */
   editingMessageLabel?: string;
-  
+
   /** Custom component for the Preview Overlay (shown instead of input in unjoined public channels) */
   PreviewOverlayComponent?: React.ComponentType<PreviewOverlayProps>;
   /** I18n Title for Preview Overlay */
   previewOverlayTitle?: string;
   /** I18n Label for Join Button in Preview Overlay */
   joinChannelLabel?: string;
-  
+
   /** Disable stickers entirely */
   disableStickers?: boolean;
   /** URL for the sticker picker iframe (default: https://sticker.ermis.network) */

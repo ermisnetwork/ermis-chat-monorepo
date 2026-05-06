@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback } from 'react';
+import React, { createContext, useState, useCallback, useRef } from 'react';
 import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import type { Theme, ChatContextValue, ChatProviderProps, ReadStateEntry } from '../types';
 import { ErmisCallProvider } from '../components/ErmisCallProvider';
@@ -38,18 +38,18 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   const [jumpToMessageId, setJumpToMessageId] = useState<string | null>(null);
 
   const activeChannel = activeChannelRaw;
+  const activeChannelCidRef = useRef<string | null>(null);
 
   const setActiveChannel = useCallback((channel: Channel | null) => {
+    const newCid = channel?.cid || null;
+    if (activeChannelCidRef.current === newCid) return;
+    
+    activeChannelCidRef.current = newCid;
     setActiveChannelRaw(channel);
     setQuotedMessage(null);
     setEditingMessage(null);
-    if (channel) {
-      setMessages([...channel.state.latestMessages]);
-      setReadState({ ...channel.state.read });
-    } else {
-      setMessages([]);
-      setReadState({});
-    }
+    setMessages([]);
+    setReadState({});
   }, []);
 
   /** Re-read messages from SDK state into React state */

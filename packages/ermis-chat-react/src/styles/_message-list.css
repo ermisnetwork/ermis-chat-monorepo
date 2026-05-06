@@ -221,6 +221,18 @@
   border: 1px solid #e74c3c;
 }
 
+/* --- Deleted Display Message --- */
+
+.ermis-message-list__deleted-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-style: italic;
+  font-size: var(--ermis-font-size-sm);
+  user-select: none;
+  opacity: 0.5;
+}
+
 /* --- Pinned Message Indicator --- */
 .ermis-message-list__pinned-indicator {
   position: absolute;
@@ -328,8 +340,6 @@
 .ermis-message-list__reopen-btn:active {
   transform: translateY(0);
 }
-
-
 
 /* Unblock button inside blocked overlay */
 .ermis-message-list__unblock-btn {

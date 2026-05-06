@@ -109,6 +109,7 @@ export function ChatPage() {
           {/* ChannelList — always mounted to avoid re-fetching */}
           <div className="flex-1 overflow-hidden relative">
             <ChannelList
+              filters={{ type: ['messaging', 'team'], include_hidden_messages: true } as any}
               showPendingInvites={false}
               onTopicDrillDown={handleTopicDrillDown}
               onAddTopic={openCreateTopicModal}
@@ -207,6 +208,7 @@ export function ChatPage() {
                 count: names.length - 2 
               });
             }}
+            deletedMessageLabel={t('chat.deleted_message', 'This message was deleted')}
           />
 
           {/* Message Input Floating Card */}

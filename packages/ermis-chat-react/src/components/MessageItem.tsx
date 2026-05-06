@@ -7,7 +7,7 @@ import { MessageQuickReactions } from './MessageQuickReactions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { useChatClient } from '../hooks/useChatClient';
 import { formatTime } from '../utils';
-import { isSystemMessage } from '../messageTypeUtils';
+import { isSystemMessage, isDeletedDisplayMessage } from '../messageTypeUtils';
 
 export type { MessageItemProps, SystemMessageItemProps } from '../types';
 
@@ -73,6 +73,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   MessageReactionsComponent = MessageReactions,
   forwardedLabel = 'Forwarded',
   editedLabel = 'Edited',
+  deletedMessageLabel = 'This message was deleted',
 }) => {
   const { activeChannel, client } = useChatClient();
   const { hasCapability } = useChannelCapabilities();
@@ -87,6 +88,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   const oldTexts = (message as any).old_texts;
   const isEdited = oldTexts && oldTexts.length > 0;
   const hasAttachments = message.attachments && message.attachments.length > 0;
+  const isDeletedDisplay = isDeletedDisplayMessage(message);
 
   const handleReactionToggle = React.useCallback(async (type: string) => {
     if (!activeChannel || !canReact) return;
@@ -124,13 +126,49 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
     isFirstInGroup ? 'ermis-message-list__item--group-start' : 'ermis-message-list__item--group-cont',
     isHighlighted ? 'ermis-message-list__item--highlighted' : '',
     isNewMessage ? 'ermis-message-list__item--new' : '',
+    isDeletedDisplay ? 'ermis-message-list__item--deleted-display' : '',
     statusClass,
   ].filter(Boolean).join(' ');
 
   const contentClass = [
     'ermis-message-list__item-content',
-    hasAttachments ? 'ermis-message-list__item-content--has-attachments' : '',
+    hasAttachments && !isDeletedDisplay ? 'ermis-message-list__item-content--has-attachments' : '',
   ].filter(Boolean).join(' ');
+
+  // Deleted display: show icon + label, no actions/reactions/quote/attachments
+  if (isDeletedDisplay) {
+    return (
+      <div className={itemClass} data-message-id={message.id}>
+        {!isOwnMessage && (
+          <div className="ermis-message-list__item-avatar">
+            {isFirstInGroup
+              ? <AvatarComponent image={userAvatar} name={userName} size={28} />
+              : <div style={{ width: 28 }} />
+            }
+          </div>
+        )}
+        <div className={contentClass}>
+          {!isOwnMessage && isFirstInGroup && (
+            <span className="ermis-message-list__item-user">{userName}</span>
+          )}
+          <div className="ermis-message-list__bubble-wrapper">
+            <MessageBubble message={message} isOwnMessage={isOwnMessage}>
+              <span className="ermis-message-list__deleted-text">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                </svg>
+                {deletedMessageLabel}
+              </span>
+              <span className="ermis-message-list__item-time">
+                {formatTime(message.created_at)}
+              </span>
+            </MessageBubble>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={itemClass} data-message-id={message.id}>

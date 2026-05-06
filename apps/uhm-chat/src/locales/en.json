@@ -91,7 +91,8 @@
     "closedTopic": "This topic is closed.",
     "previewTitle": "You are viewing a public channel.",
     "joinChannel": "Join Channel",
-    "linksDisabled": "Message blocked: Sending links is disabled for members."
+    "linksDisabled": "Message blocked: Sending links is disabled for members.",
+    "deleted_message": "This message was deleted"
   },
   "not_found": {
     "title": "Page not found",

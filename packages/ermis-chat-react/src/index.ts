@@ -119,8 +119,10 @@ export {
   isLinkPreviewAttachment,
   isImage,
   isVideo,
+  MESSAGE_DISPLAY_TYPES,
+  isDeletedDisplayMessage,
 } from './messageTypeUtils';
-export type { MessageType, AttachmentType } from './messageTypeUtils';
+export type { MessageType, AttachmentType, MessageDisplayType } from './messageTypeUtils';
 
 export {
   defaultMessageRenderers,

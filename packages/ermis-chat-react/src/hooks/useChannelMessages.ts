@@ -10,7 +10,14 @@ export type UseChannelMessagesOptions = {
   isAtBottomRef: React.MutableRefObject<boolean>;
   /** Called to reset load-more state when channel switches */
   onChannelSwitch?: () => void;
+  /** Whether to include hidden (deleted) messages in the initial channel query */
+  includeHiddenMessages?: boolean;
+  /** Ref to the message list container for smooth opacity transitions */
+  containerRef?: React.RefObject<HTMLDivElement>;
 };
+
+// Track channels that have already been queried with include_hidden_messages globally for the session
+const fullyQueriedChannels = new Set<string>();
 
 /**
  * Schedule multiple scroll-to-bottom attempts with increasing delays.
@@ -29,6 +36,8 @@ export function useChannelMessages({
   jumpingRef,
   isAtBottomRef,
   onChannelSwitch,
+  includeHiddenMessages = true,
+  containerRef,
 }: UseChannelMessagesOptions): void {
   const { client, activeChannel, syncMessages, setReadState } = useChatClient();
 
@@ -60,15 +69,54 @@ export function useChannelMessages({
 
     // Block scroll triggers during channel-switch scroll
     jumpingRef.current = true;
-    // Defer scroll outside React lifecycle to avoid virtua flushSync warning
-    setTimeout(() => {
-      scrollToBottom(false);
-      // Wait long enough for scrollToBottom's internal retries and the browser
-      // to execute the scroll event
+
+    // Instantly hide the list when channel changes
+    const el = containerRef?.current;
+    if (el) {
+      el.style.opacity = '0';
+      el.style.transition = 'none';
+    }
+
+    const fadeListIn = () => {
+      if (!el) return;
+      // Allow virtua a brief moment to measure items after scroll before showing
       setTimeout(() => {
-        jumpingRef.current = false;
-      }, 100);
-    }, 0);
+        el.style.transition = 'opacity 0.1s ease-out';
+        el.style.opacity = '1';
+      }, 50);
+    };
+
+    // Fetch hidden messages if not already done for this channel
+    const cid = activeChannel.cid;
+    if (includeHiddenMessages && cid && !fullyQueriedChannels.has(cid)) {
+      activeChannel
+        .query({
+          messages: { limit: 25, include_hidden_messages: true },
+        })
+        .then(() => {
+          fullyQueriedChannels.add(cid);
+          syncMessages();
+          scheduleScrollToBottom(false);
+          fadeListIn(); // Fade in AFTER query finishes and sync is called
+        })
+        .catch((err) => {
+          console.error('Failed to query channel on select', err);
+          fadeListIn(); // Fade in anyway on error
+        });
+    } else {
+      // Already queried or disabled: sync cache, scroll and fade in quickly
+      syncMessages();
+      setTimeout(() => {
+        scheduleScrollToBottom(false);
+        fadeListIn();
+      }, 0);
+    }
+
+    // Wait long enough for scrollToBottom's internal retries and the browser
+    // to execute the scroll event
+    setTimeout(() => {
+      jumpingRef.current = false;
+    }, 100);
 
     const handleNewMessage = (event: Event) => {
       // Capture scroll state BEFORE sync causes re-render

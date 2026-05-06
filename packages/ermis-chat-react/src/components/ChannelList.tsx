@@ -314,9 +314,9 @@ ChannelRow.displayName = 'ChannelRow';
 
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
-  filters = { type: ['messaging', 'team', 'meeting'], include_pinned_messages: true } as unknown as ChannelFilters,
+  filters = { type: ['messaging', 'team', 'meeting'], include_hidden_messages: true } as unknown as ChannelFilters,
   sort = [],
-  options = { message_limit: 25 } as unknown as ChannelListProps['options'],
+  options = { message_limit: 1 } as unknown as ChannelListProps['options'],
   renderChannel,
   onChannelSelect,
   className,
@@ -414,7 +414,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       const ms = ch.state?.membership as Record<string, unknown> | undefined;
       const isPending = isPendingMember(ms?.channel_role as string);
       const isSkipped = isSkippedMember(ms?.channel_role as string);
-      
+
       if (isSkipped) {
         return; // Filter out completely
       }

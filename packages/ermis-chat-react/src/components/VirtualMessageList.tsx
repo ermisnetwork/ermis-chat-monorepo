@@ -154,15 +154,17 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   unpinLabel,
   stickerLabel,
   typingIndicatorLabel,
+  deletedMessageLabel = 'This message was deleted',
+  includeHiddenMessages = true,
 }) => {
   const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
-  
-  const isSkipped = client.userID 
-    ? isSkippedMember(activeChannel?.state?.members?.[client.userID]?.channel_role as string) || 
-      isSkippedMember(activeChannel?.state?.membership?.channel_role as string)
+
+  const isSkipped = client.userID
+    ? isSkippedMember(activeChannel?.state?.members?.[client.userID]?.channel_role as string) ||
+    isSkippedMember(activeChannel?.state?.membership?.channel_role as string)
     : false;
 
   const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
@@ -291,6 +293,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       loadingMoreRef.current = false;
       loadingNewerRef.current = false;
     }, [setHasMore, setHasNewer]),
+    includeHiddenMessages,
+    containerRef,
   });
 
   const hasOverlay = Boolean(isClosedTopic || isPending || isBanned || isBlocked || isSkipped);
@@ -411,6 +415,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             QuotedMessagePreviewComponent={QuotedMessagePreviewComponent}
             MessageActionsBoxComponent={MessageActionsBoxComponent}
             MessageReactionsComponent={MessageReactionsComponent}
+            deletedMessageLabel={deletedMessageLabel}
           />
           {/* Read receipts — full width, right-aligned */}
           {showReadReceipts && (
@@ -511,8 +516,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   return (
     <div ref={containerRef} className={`ermis-message-list${className ? ` ${className}` : ''}`}>
       {showPinnedMessages && (
-        <PinnedMessagesComponent 
-          onClickMessage={scrollToMessage} 
+        <PinnedMessagesComponent
+          onClickMessage={scrollToMessage}
           AvatarComponent={AvatarComponent}
           pinnedMessagesLabel={pinnedMessagesLabel}
           seeAllLabel={seeAllLabel}
@@ -529,9 +534,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       )}
 
       {pendingInviteeName && (
-        <PendingInviteeNotificationComponent 
-          inviteeName={pendingInviteeName} 
-          label={typeof pendingInviteeLabel === 'function' ? pendingInviteeLabel(pendingInviteeName) : pendingInviteeLabel} 
+        <PendingInviteeNotificationComponent
+          inviteeName={pendingInviteeName}
+          label={typeof pendingInviteeLabel === 'function' ? pendingInviteeLabel(pendingInviteeName) : pendingInviteeLabel}
         />
       )}
 

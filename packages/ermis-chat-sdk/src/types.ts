@@ -116,6 +116,8 @@ export type FormatMessageResponse<ErmisChatGenerics extends ExtendableGenerics =
     updated_at: Date;
   };
 
+export type MessageDisplayType = 'normal' | 'deleted';
+
 export type MessageResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   MessageResponseBase<ErmisChatGenerics> & {
     quoted_message?: MessageResponseBase<ErmisChatGenerics>;
@@ -124,6 +126,7 @@ export type MessageResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
 export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   MessageBase<ErmisChatGenerics> & {
     type: MessageLabel;
+    display_type?: MessageDisplayType;
     channel?: ChannelResponse<ErmisChatGenerics>;
     cid?: string;
     created_at?: string;
@@ -209,6 +212,7 @@ export type ChannelQueryOptions = {
     id_lt?: string;
     id_gt?: string;
     id_around?: string;
+    include_hidden_messages?: boolean;
   };
 };
 
@@ -300,6 +304,8 @@ export type ChannelFilters = {
   parent_cid?: string;
   parent_id?: string;
   include_parent?: boolean;
+  include_hidden_messages?: boolean;
+  include_quoted_messages?: boolean;
 };
 
 export type CreateTopicData = {

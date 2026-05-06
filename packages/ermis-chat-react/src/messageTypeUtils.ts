@@ -62,3 +62,15 @@ export function isImage(attachment: any): boolean {
 export function isVideo(attachment: any): boolean {
   return !!(isVideoAttachment(attachment) || (!attachment.type && attachment.mime_type?.startsWith('video/')));
 }
+
+export const MESSAGE_DISPLAY_TYPES = {
+  NORMAL: 'normal',
+  DELETED: 'deleted',
+} as const;
+
+export type MessageDisplayType = (typeof MESSAGE_DISPLAY_TYPES)[keyof typeof MESSAGE_DISPLAY_TYPES] | string;
+
+/** Check if a message was deleted for current user (display_type === 'deleted') */
+export function isDeletedDisplayMessage(message: any): boolean {
+  return message?.display_type === MESSAGE_DISPLAY_TYPES.DELETED;
+}
