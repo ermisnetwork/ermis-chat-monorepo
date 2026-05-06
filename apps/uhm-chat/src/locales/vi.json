@@ -149,6 +149,8 @@
     "create_topic": "Tạo chủ đề",
     "delete_channel": "Xóa kênh",
     "leave_channel": "Rời kênh",
+    "audio_call": "Cuộc gọi âm thanh",
+    "video_call": "Cuộc gọi video",
     "more_actions": "Thêm tùy chọn",
     "confirm_delete_title": "Xóa kênh",
     "confirm_delete_message": "Bạn có chắc chắn muốn xóa <bold>{{name}}</bold>? Hành động này không thể hoàn tác và toàn bộ tin nhắn sẽ bị mất.",

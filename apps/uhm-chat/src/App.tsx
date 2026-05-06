@@ -89,13 +89,29 @@ function AppContent() {
     ).catch(err => console.error('Failed to connect user:', err))
   }
 
+  const callSessionId = useMemo(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.CALL_SESSION_ID)
+    if (saved) return saved
+    const id = crypto.randomUUID()
+    localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, id)
+    return id
+  }, [])
+
   // Show blank screen while restoring auth
   if (isRestoring) {
     return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]" />
   }
 
   return (
-    <ChatProvider client={chatClient} initialTheme={savedTheme} components={chatComponents}>
+    <ChatProvider 
+      client={chatClient} 
+      initialTheme={savedTheme} 
+      components={chatComponents}
+      enableCall={true}
+      callSessionId={callSessionId}
+      incomingCallAudioPath="/call_incoming.mp3"
+      outgoingCallAudioPath="/call_outgoing.mp3"
+    >
       <Routes>
         <Route
           path="/login"

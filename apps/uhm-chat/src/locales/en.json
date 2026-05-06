@@ -149,6 +149,8 @@
     "create_topic": "Create topic",
     "delete_channel": "Delete channel",
     "leave_channel": "Leave channel",
+    "audio_call": "Audio Call",
+    "video_call": "Video Call",
     "more_actions": "More actions",
     "confirm_delete_title": "Delete Channel",
     "confirm_delete_message": "Are you sure you want to delete <bold>{{name}}</bold>? This action cannot be undone and all messages will be lost.",

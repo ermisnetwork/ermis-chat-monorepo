@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, TopicModal } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
-import { Info } from 'lucide-react'
+import { Info, Phone, Video } from 'lucide-react'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
 import { InvitesPanel } from '@/features/chat/InvitesPanel'
@@ -89,6 +89,36 @@ export function ChatPage() {
     [toggleChannelInfo],
   )
 
+  /** Audio call button injected into ChannelHeader */
+  const renderAudioCallButton = useCallback(
+    (onClick: () => void, disabled?: boolean) => (
+      <button
+        className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        onClick={onClick}
+        title={t('actions.audio_call', 'Audio Call')}
+        disabled={disabled}
+      >
+        <Phone className="w-[18px] h-[18px]" />
+      </button>
+    ),
+    [t],
+  )
+
+  /** Video call button injected into ChannelHeader */
+  const renderVideoCallButton = useCallback(
+    (onClick: () => void, disabled?: boolean) => (
+      <button
+        className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        onClick={onClick}
+        title={t('actions.video_call', 'Video Call')}
+        disabled={disabled}
+      >
+        <Video className="w-[18px] h-[18px]" />
+      </button>
+    ),
+    [t],
+  )
+
   return (
     <div className="flex h-screen w-full overflow-hidden">
 
@@ -171,7 +201,11 @@ export function ChatPage() {
         <ConnectionStatusBanner status={status} onRetry={retryConnection} />
 
         <Channel EmptyStateIndicator={ChannelEmptyState}>
-          <ChannelHeader renderRight={renderHeaderRight} />
+          <ChannelHeader 
+            renderRight={renderHeaderRight} 
+            renderAudioCallButton={renderAudioCallButton}
+            renderVideoCallButton={renderVideoCallButton}
+          />
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
