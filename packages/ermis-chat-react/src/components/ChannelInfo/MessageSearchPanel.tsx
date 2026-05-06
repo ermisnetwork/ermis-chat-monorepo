@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../../hooks/useChatClient';
-import { replaceMentionsForPreview, buildUserMap, formatRelativeDate } from '../../utils';
+import { replaceMentionsForPreview, buildUserMap, formatRelativeDate, removeAccents } from '../../utils';
 import { Avatar } from '../Avatar';
 import { Panel as DefaultPanel } from '../Panel';
 import { useChatComponents } from '../../context/ChatComponentsContext';
@@ -10,7 +10,6 @@ import type { AvatarProps, SearchResultMessage, MessageSearchPanelProps } from '
 /* ----------------------------------------------------------
    Highlight utility (Accent-insensitive)
    ---------------------------------------------------------- */
-const removeAccents = (str: string) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 const HighlightedText: React.FC<{ text: string; term: string }> = React.memo(({ text, term }) => {
   if (!term.trim()) return <>{text}</>;

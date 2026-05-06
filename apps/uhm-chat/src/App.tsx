@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { ChatProvider } from '@ermis-network/ermis-chat-react'
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk'
@@ -7,6 +7,7 @@ import { ChatPage } from '@/pages/ChatPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants'
 import { UhmModal } from '@/components/custom/UhmModal'
+import { UhmForwardMessageModal } from '@/features/chat/UhmForwardMessageModal'
 import { Toaster } from 'sonner'
 
 // Initialize client with env variables
@@ -21,10 +22,6 @@ function AuthRoute({ isAuthenticated, isRestoring, children }: { isAuthenticated
   return <>{children}</>
 }
 
-// Custom UI component overrides for Ermis Chat SDK
-const chatComponents = {
-  ModalComponent: UhmModal as any,
-}
 
 // Main component containing Auth and Routing logic
 function AppContent() {
@@ -33,6 +30,12 @@ function AppContent() {
 
   const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) === 'dark' ? 'dark' : 'light'
   const navigate = useNavigate()
+
+  // Custom UI component overrides for Ermis Chat SDK
+  const chatComponents = useMemo(() => ({
+    ModalComponent: UhmModal as any,
+    ForwardMessageModalComponent: UhmForwardMessageModal,
+  }), [])
 
   // Restore login session from localStorage on mount
   useEffect(() => {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
+import { useChatComponents } from '../context/ChatComponentsContext';
 import { useBannedState } from '../hooks/useBannedState';
 import { useBlockedState } from '../hooks/useBlockedState';
 import { ForwardMessageModal } from './ForwardMessageModal';
@@ -25,9 +26,12 @@ export const Channel: React.FC<ChannelProps> = React.memo(({
   className,
   EmptyStateIndicator = DefaultEmpty,
   HeaderComponent,
-  ForwardMessageModalComponent = ForwardMessageModal,
+  ForwardMessageModalComponent: ForwardMessageModalProp,
 }) => {
   const { activeChannel, client, forwardingMessage, setForwardingMessage } = useChatClient();
+  const { ForwardMessageModalComponent: ForwardMessageModalContext } = useChatComponents();
+
+  const ForwardMessageModalView = ForwardMessageModalProp || ForwardMessageModalContext || ForwardMessageModal;
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
 
@@ -64,7 +68,7 @@ export const Channel: React.FC<ChannelProps> = React.memo(({
       {HeaderComponent && headerData && <HeaderComponent {...headerData} />}
       {children}
       {forwardingMessage && (
-        <ForwardMessageModalComponent
+        <ForwardMessageModalView
           message={forwardingMessage}
           onDismiss={() => setForwardingMessage(null)}
         />

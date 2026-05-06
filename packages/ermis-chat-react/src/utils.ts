@@ -4,6 +4,18 @@ import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-cha
 import { isDeletedDisplayMessage } from './messageTypeUtils';
 
 /**
+ * Remove Vietnamese diacritics (accents) from a string.
+ */
+export function removeAccents(str: string): string {
+  if (!str) return '';
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+}
+
+/**
  * Format a Date or date-string to a short time string (HH:MM).
  */
 export function formatTime(date: Date | string | undefined): string {

@@ -2,10 +2,11 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
+import { removeAccents } from '../utils';
 import { Avatar } from './Avatar';
 import { Modal as DefaultModal } from './Modal';
 import { useChatComponents } from '../context/ChatComponentsContext';
-import type { ForwardMessageModalProps, ForwardChannelItemProps, AvatarProps } from '../types';
+import type { ForwardMessageModalProps, ForwardChannelItemProps } from '../types';
 import { isTopicChannel } from '../channelTypeUtils';
 
 export type { ForwardMessageModalProps, ForwardChannelItemProps } from '../types';
@@ -19,12 +20,20 @@ const DefaultForwardChannelItem: React.FC<ForwardChannelItemProps> = React.memo(
   onToggle,
   AvatarComponent,
 }) => {
+  const { client } = useChatClient();
+  const isTopic = isTopicChannel(channel);
+  const parentCid = channel.data?.parent_cid as string | undefined;
+  const parent = parentCid ? client.activeChannels[parentCid] : null;
+  const parentName = parent?.data?.name || '';
+
   const name = (channel.data?.name || channel.cid) as string;
   const rawImage = channel.data?.image as string | undefined;
   // Parse emoji:// format → extract just the emoji for avatar fallback
   const isEmoji = rawImage?.startsWith('emoji://');
   const image = isEmoji ? undefined : rawImage;
-  const emojiIcon = isEmoji ? rawImage!.replace('emoji://', '') : undefined;
+
+  // Use # for topics without explicit emoji/image
+  const emojiIcon = isEmoji ? rawImage!.replace('emoji://', '') : (isTopic && !image ? '#' : undefined);
 
   return (
     <div
@@ -36,7 +45,12 @@ const DefaultForwardChannelItem: React.FC<ForwardChannelItemProps> = React.memo(
       ) : (
         <AvatarComponent image={image} name={name} size={36} />
       )}
-      <span className="ermis-forward-modal__channel-name">{name}</span>
+      <div className="ermis-forward-modal__channel-name-container">
+        {isTopic && parentName && (
+          <span className="ermis-forward-modal__channel-parent-name">{parentName}</span>
+        )}
+        <span className="ermis-forward-modal__channel-name">{name}</span>
+      </div>
       <div className={`ermis-forward-modal__checkbox ${selected ? 'ermis-forward-modal__checkbox--checked' : ''}`}>
         {selected && (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -67,22 +81,38 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   const [results, setResults] = useState<{ success: string[]; failed: string[] } | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
 
-  /* ---------- Get channels from client state (exclude topics) ---------- */
+  /* ---------- Get channels from client state (include topics) ---------- */
   const channels = useMemo(() => {
-    return (Object.values(client.activeChannels) as Channel[]).filter(
-      (ch) => !isTopicChannel(ch),
-    );
+    return (Object.values(client.activeChannels) as Channel[]);
   }, [client.activeChannels]);
 
   /* ---------- Filter by search ---------- */
   const filteredChannels = useMemo(() => {
     if (!search.trim()) return channels;
     const q = search.toLowerCase();
+    const cleanQ = removeAccents(q);
+    const isStrict = q !== cleanQ;
+
     return channels.filter((ch) => {
-      const name = ((ch.data?.name || ch.cid) as string).toLowerCase();
-      return name.includes(q);
+      const name = (ch.data?.name || ch.cid) as string;
+      const t = name.toLowerCase();
+      const cleanT = removeAccents(t);
+
+      const parentCid = ch.data?.parent_cid as string | undefined;
+      const parent = parentCid ? client.activeChannels[parentCid] : null;
+      const parentName = parent?.data?.name || '';
+      const pt = parentName.toLowerCase();
+      const cleanPT = removeAccents(pt);
+
+      if (isStrict) {
+        // Strict match when query has accents
+        return t.includes(q) || pt.includes(q);
+      } else {
+        // Broad match when query is accent-less
+        return cleanT.includes(cleanQ) || cleanPT.includes(cleanQ);
+      }
     });
-  }, [channels, search]);
+  }, [channels, search, client.activeChannels]);
 
   /* ---------- Toggle selection ---------- */
   const toggleChannel = useCallback((channel: Channel) => {

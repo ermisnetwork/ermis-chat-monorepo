@@ -99,6 +99,16 @@
     "preview_file": "📎 File",
     "preview_sticker": "Sticker"
   },
+  "forward": {
+    "title": "Forward Message",
+    "search_placeholder": "Search channels, topics...",
+    "empty": "No results found",
+    "send": "Send",
+    "sending": "Sending...",
+    "sent_to": "Sent to {{names}}",
+    "failed_to": "Failed to {{names}}",
+    "attachments": "{{count}} attachments"
+  },
   "not_found": {
     "title": "Page not found",
     "description": "Sorry, we couldn't find the page you're looking for. Please check the URL or return to the homepage.",

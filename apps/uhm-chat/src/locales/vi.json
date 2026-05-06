@@ -99,6 +99,16 @@
     "preview_file": "📎 Tệp tin",
     "preview_sticker": "Nhãn dán"
   },
+  "forward": {
+    "title": "Chuyển tiếp tin nhắn",
+    "search_placeholder": "Tìm kiếm kênh, chủ đề...",
+    "empty": "Không tìm thấy kết quả",
+    "send": "Gửi",
+    "sending": "Đang gửi...",
+    "sent_to": "Đã gửi đến {{names}}",
+    "failed_to": "Gửi thất bại đến {{names}}",
+    "attachments": "{{count}} tệp đính kèm"
+  },
   "not_found": {
     "title": "Trang không tồn tại",
     "description": "Xin lỗi, chúng tôi không thể tìm thấy trang bạn đang yêu cầu. Vui lòng kiểm tra lại đường dẫn hoặc quay về trang chủ.",
