@@ -8,7 +8,12 @@ import { useOnlineUsers } from '../hooks/useOnlineUsers';
 import { getLastMessagePreview } from '../utils';
 import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
 import { usePendingState } from '../hooks/usePendingState';
+import {
+  SystemMessageTranslations,
+  SignalMessageTranslations,
+} from '@ermis-network/ermis-chat-sdk';
 import { Avatar } from './Avatar';
+import { useChatComponents } from '../context/ChatComponentsContext';
 import type { ChannelItemProps, ChannelListProps } from '../types';
 
 export type { ChannelListProps, ChannelItemProps } from '../types';
@@ -200,6 +205,29 @@ const DefaultEmpty = React.memo(({ text }: { text?: string }) => (
 ));
 DefaultEmpty.displayName = 'DefaultEmpty';
 
+const DefaultError = React.memo(({ text, onRetry }: { text?: string; onRetry?: () => void }) => (
+  <div className="ermis-channel-list__error">
+    <div className="ermis-channel-list__error-icon">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+    </div>
+    <div className="ermis-channel-list__error-text">{text || 'Failed to load channels'}</div>
+    {onRetry && (
+      <button className="ermis-channel-list__error-retry" onClick={onRetry}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+          <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+          <path d="M21 3v5h-5" />
+        </svg>
+        Retry
+      </button>
+    )}
+  </div>
+));
+DefaultError.displayName = 'DefaultError';
+
 /* ----------------------------------------------------------
    Virtual Row Component to map channel and defer parsing
    ---------------------------------------------------------- */
@@ -229,6 +257,8 @@ type ChannelRowProps = {
   videoMessageLabel?: string;
   voiceRecordingMessageLabel?: string;
   fileMessageLabel?: string;
+  systemMessageTranslations?: SystemMessageTranslations;
+  signalMessageTranslations?: SignalMessageTranslations;
 };
 
 export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
@@ -257,6 +287,8 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   videoMessageLabel,
   voiceRecordingMessageLabel,
   fileMessageLabel,
+  systemMessageTranslations,
+  signalMessageTranslations,
 }) => {
   // Use the new custom hook to handle all row-level realtime updates
   const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
@@ -282,6 +314,8 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
         videoMessageLabel,
         voiceRecordingMessageLabel,
         fileMessageLabel,
+        systemMessageTranslations,
+        signalMessageTranslations,
       }),
     // Recompute if latestMessage changes or we get a force update
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -295,6 +329,8 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       videoMessageLabel,
       voiceRecordingMessageLabel,
       fileMessageLabel,
+      systemMessageTranslations,
+      signalMessageTranslations,
     ]
   );
 
@@ -352,6 +388,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   className,
   LoadingIndicator = DefaultLoading,
   EmptyStateIndicator = DefaultEmpty,
+  ErrorIndicator,
   AvatarComponent = Avatar,
   ChannelItemComponent = ChannelItem,
   pendingInvitesLabel,
@@ -359,6 +396,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   pendingBadgeLabel,
   loadingLabel,
   emptyStateLabel = 'No channels found',
+  errorLabel = 'Failed to load channels',
   blockedBadgeLabel = 'Blocked',
   onAddTopic,
   TopicEmojiPickerComponent,
@@ -385,10 +423,17 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   videoMessageLabel,
   voiceRecordingMessageLabel,
   fileMessageLabel,
+  systemMessageTranslations,
+  signalMessageTranslations,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
+  const { ChannelListErrorIndicator } = useChatComponents();
+
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<any>(null);
+
+  const ActualErrorIndicator = ErrorIndicator || ChannelListErrorIndicator || DefaultError;
   const [isPendingExpanded, setIsPendingExpanded] = useState(true);
   const [addingTopicForChannel, setAddingTopicForChannel] = useState<Channel | null>(null);
   const [editingTopicForChannel, setEditingTopicForChannel] = useState<Channel | null>(null);
@@ -472,10 +517,12 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   const loadChannels = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const result = await client.queryChannels(filters, sort, options as { message_limit?: number });
       setChannels(result);
     } catch (err) {
       console.error('Failed to load channels:', err);
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -534,6 +581,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   );
 
   if (loading) return <LoadingIndicator text={loadingLabel} />;
+  if (error) return <ActualErrorIndicator text={errorLabel} onRetry={loadChannels} />;
   if (channels.length === 0) return <EmptyStateIndicator text={emptyStateLabel} />;
 
   return (
@@ -585,6 +633,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               videoMessageLabel={videoMessageLabel}
               voiceRecordingMessageLabel={voiceRecordingMessageLabel}
               fileMessageLabel={fileMessageLabel}
+              systemMessageTranslations={systemMessageTranslations}
+              signalMessageTranslations={signalMessageTranslations}
             />
           );
         })}
@@ -649,6 +699,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               videoMessageLabel={videoMessageLabel}
               voiceRecordingMessageLabel={voiceRecordingMessageLabel}
               fileMessageLabel={fileMessageLabel}
+              systemMessageTranslations={systemMessageTranslations}
+              signalMessageTranslations={signalMessageTranslations}
             />
           );
         })}
@@ -673,4 +725,4 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   );
 });
 
-ChannelList.displayName = 'ChannelList'; 'ChannelList';
+ChannelList.displayName = 'ChannelList';

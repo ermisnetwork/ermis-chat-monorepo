@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { preloadImage, isImagePreloaded } from '../utils';
+import { preloadImage, isImagePreloaded, formatTime } from '../utils';
 import type { FormatMessageResponse, Attachment, MessageLabel } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage, CallType } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
@@ -582,7 +582,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
 RegularMessage.displayName = 'RegularMessage';
 
 /** System message: centered info text, parsed from raw format */
-export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
+export const SystemMessage: React.FC<MessageRendererProps> = ({ message, systemMessageTranslations }) => {
   const { activeChannel } = useChatClient();
 
   const userMap = useMemo<Record<string, string>>(() => {
@@ -590,8 +590,8 @@ export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
   }, [activeChannel?.state]);
 
   const parsedText = useMemo(
-    () => (message.text ? parseSystemMessage(message.text, userMap) : ''),
-    [message.text, userMap],
+    () => (message.text ? parseSystemMessage(message.text, userMap, systemMessageTranslations) : ''),
+    [message.text, userMap, systemMessageTranslations],
   );
 
   return (
@@ -602,11 +602,11 @@ export const SystemMessage: React.FC<MessageRendererProps> = ({ message }) => {
 };
 
 /** Signal message: call events */
-export const SignalMessage: React.FC<MessageRendererProps> = ({ message }) => {
+export const SignalMessage: React.FC<MessageRendererProps> = ({ message, signalMessageTranslations }) => {
   const { client } = useChatClient();
 
   const rawText = message.text ?? '';
-  const result = rawText ? parseSignalMessage(rawText, client.userID || '') : null;
+  const result = rawText ? parseSignalMessage(rawText, client.userID || '', signalMessageTranslations) : null;
 
   if (!result) {
     return (
@@ -642,6 +642,9 @@ export const SignalMessage: React.FC<MessageRendererProps> = ({ message }) => {
           <span className="ermis-signal-message__duration">{result.duration}</span>
         )}
       </div>
+      <span className="ermis-signal-message__time">
+        {formatTime(message.created_at)}
+      </span>
     </div>
   );
 };

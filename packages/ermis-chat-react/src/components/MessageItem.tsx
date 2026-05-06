@@ -7,7 +7,7 @@ import { MessageQuickReactions } from './MessageQuickReactions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { useChatClient } from '../hooks/useChatClient';
 import { formatTime } from '../utils';
-import { isSystemMessage, isDeletedDisplayMessage, isStickerMessage } from '../messageTypeUtils';
+import { isSystemMessage, isDeletedDisplayMessage, isStickerMessage, isSignalMessage } from '../messageTypeUtils';
 
 export type { MessageItemProps, SystemMessageItemProps } from '../types';
 
@@ -74,6 +74,8 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   forwardedLabel = 'Forwarded',
   editedLabel = 'Edited',
   deletedMessageLabel = 'This message was deleted',
+  systemMessageTranslations,
+  signalMessageTranslations,
 }) => {
   const { activeChannel, client } = useChatClient();
   const { hasCapability } = useChannelCapabilities();
@@ -130,6 +132,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
     isNewMessage ? 'ermis-message-list__item--new' : '',
     isDeletedDisplay ? 'ermis-message-list__item--deleted-display' : '',
     isSticker ? 'ermis-message-list__item--sticker' : '',
+    isSignalMessage(message) ? 'ermis-message-list__item--signal' : '',
     statusClass,
   ].filter(Boolean).join(' ');
 
@@ -197,24 +200,31 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
           />
         )}
         <div className="ermis-message-list__bubble-wrapper">
-          <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!canReact} />
+          {!isSignalMessage(message) && <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!canReact} />}
           <MessageBubble message={message} isOwnMessage={isOwnMessage}>
             {isForwarded && (
               <span className="ermis-message-list__forwarded-indicator">{forwardedLabel}</span>
             )}
-            <MessageRenderer message={message} isOwnMessage={isOwnMessage} />
-            <span className="ermis-message-list__item-time">
-              {isEdited && (
-                <span
-                  className="ermis-message-list__edited-indicator"
-                // data-tooltip={oldTexts.map((ot: any) => `[${formatTime(ot.created_at)}] ${ot.text}`).join('\n')}
-                >
-                  {editedLabel}
-                </span>
-              )}
-              {formatTime(message.created_at)}
-              <InlineStatusIcon status={message.status} isOwnMessage={isOwnMessage} isLastInGroup={isLastInGroup} />
-            </span>
+            <MessageRenderer
+              message={message}
+              isOwnMessage={isOwnMessage}
+              systemMessageTranslations={systemMessageTranslations}
+              signalMessageTranslations={signalMessageTranslations}
+            />
+            {!isSignalMessage(message) && (
+              <span className="ermis-message-list__item-time">
+                {isEdited && (
+                  <span
+                    className="ermis-message-list__edited-indicator"
+                  // data-tooltip={oldTexts.map((ot: any) => `[${formatTime(ot.created_at)}] ${ot.text}`).join('\n')}
+                  >
+                    {editedLabel}
+                  </span>
+                )}
+                {formatTime(message.created_at)}
+                <InlineStatusIcon status={message.status} isOwnMessage={isOwnMessage} isLastInGroup={isLastInGroup} />
+              </span>
+            )}
 
             {/* Actions: hover buttons + dropdown menu */}
             {!isSystemMessage(message) && (
@@ -250,9 +260,14 @@ export const SystemMessageItem: React.FC<SystemMessageItemProps> = React.memo(({
   message,
   isOwnMessage,
   SystemRenderer,
+  systemMessageTranslations,
 }) => (
   <div className="ermis-message-list__system">
-    <SystemRenderer message={message} isOwnMessage={isOwnMessage} />
+    <SystemRenderer
+      message={message}
+      isOwnMessage={isOwnMessage}
+      systemMessageTranslations={systemMessageTranslations}
+    />
   </div>
 ));
 SystemMessageItem.displayName = 'SystemMessageItem';

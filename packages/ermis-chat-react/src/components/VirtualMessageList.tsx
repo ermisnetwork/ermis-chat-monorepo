@@ -155,6 +155,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   stickerLabel,
   typingIndicatorLabel,
   deletedMessageLabel = 'This message was deleted',
+  systemMessageTranslations,
+  signalMessageTranslations,
   includeHiddenMessages = true,
 }) => {
   const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
@@ -370,6 +372,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
               message={message}
               isOwnMessage={isOwnMessage}
               SystemRenderer={renderers.system}
+              systemMessageTranslations={systemMessageTranslations}
             />
           </div>
         );
@@ -416,6 +419,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             MessageActionsBoxComponent={MessageActionsBoxComponent}
             MessageReactionsComponent={MessageReactionsComponent}
             deletedMessageLabel={deletedMessageLabel}
+            systemMessageTranslations={systemMessageTranslations}
+            signalMessageTranslations={signalMessageTranslations}
           />
           {/* Read receipts — full width, right-aligned */}
           {showReadReceipts && (

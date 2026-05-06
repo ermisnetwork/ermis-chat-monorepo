@@ -345,15 +345,17 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
         )}
 
         {/* Fullscreen */}
-        <div className="ermis-call-ui__action-group">
-          <button
-            onClick={toggleFullscreen}
-            className="ermis-call-ui__control-btn"
-            data-tooltip={isFullscreen ? exitFullscreenTitle : fullscreenTitle}
-          >
-            {isFullscreen ? <FinalExitFullscreenIcon /> : <FinalFullscreenIcon />}
-          </button>
-        </div>
+        {callType === 'video' && (
+          <div className="ermis-call-ui__action-group">
+            <button
+              onClick={toggleFullscreen}
+              className="ermis-call-ui__control-btn"
+              data-tooltip={isFullscreen ? exitFullscreenTitle : fullscreenTitle}
+            >
+              {isFullscreen ? <FinalExitFullscreenIcon /> : <FinalFullscreenIcon />}
+            </button>
+          </div>
+        )}
 
         {/* Separator before end call */}
         <div className="ermis-call-ui__controls-separator" />

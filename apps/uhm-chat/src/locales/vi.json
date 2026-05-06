@@ -35,7 +35,8 @@
     "system_verify_err": "Lỗi hệ thống khi xác thực OTP",
     "google_failed": "Đăng nhập Google thất bại",
     "system_google_err": "Lỗi hệ thống khi đăng nhập Google",
-    "google_connect": "Không thể kết nối với Google"
+    "google_connect": "Không thể kết nối với Google",
+    "server_error": "Hệ thống đang bận, vui lòng thử lại sau giây lát."
   },
   "chat": {
     "search_channels": "Tìm kiếm...",
@@ -97,7 +98,21 @@
     "preview_video": "🎬 Video",
     "preview_voice": "🎤 Tin nhắn thoại",
     "preview_file": "📎 Tệp tin",
-    "preview_sticker": "Nhãn dán"
+    "preview_sticker": "Nhãn dán",
+    "call": {
+      "incoming": "Cuộc gọi {{type}} đến",
+      "outgoing": "Cuộc gọi {{type}} đi",
+      "ringing": "Đang đổ chuông...",
+      "connected": "Đã kết nối",
+      "ended": "Cuộc gọi kết thúc",
+      "duration": "Thời lượng: {{duration}}",
+      "calling_you": "đang gọi cho bạn...",
+      "audio": "âm thanh",
+      "video": "video",
+      "error": "Lỗi cuộc gọi"
+    },
+    "channel_list_error": "Không thể tải danh sách",
+    "channel_list_error_hint": "Đã có lỗi xảy ra từ phía máy chủ. Hãy thử làm mới lại."
   },
   "forward": {
     "title": "Chuyển tiếp tin nhắn",
@@ -163,7 +178,23 @@
     "confirm_close_topic_title": "Đóng chủ đề",
     "confirm_close_topic_message": "Bạn có chắc chắn muốn đóng <bold>{{name}}</bold>? Thành viên sẽ không thể gửi tin nhắn mới.",
     "confirm_yes": "Xác nhận",
-    "confirm_cancel": "Hủy"
+    "confirm_cancel": "Hủy",
+    "call": {
+      "accept": "Chấp nhận",
+      "decline": "Từ chối",
+      "end": "Kết thúc",
+      "mute": "Tắt tiếng",
+      "unmute": "Bật tiếng",
+      "video_on": "Bật camera",
+      "video_off": "Tắt camera",
+      "screen_share": "Chia sẻ màn hình",
+      "screen_stop": "Dừng chia sẻ",
+      "upgrade": "Nâng cấp lên Video",
+      "fullscreen": "Toàn màn hình",
+      "exit_fullscreen": "Thoát toàn màn hình",
+      "audio_devices": "Thiết bị âm thanh",
+      "video_devices": "Thiết bị video"
+    }
   },
   "message_actions": {
     "reply": "Trả lời",
@@ -223,5 +254,50 @@
       "areTyping": "{{name1}} và {{name2}} đang soạn tin...",
       "multipleTyping": "{{name1}}, {{name2}} và {{count}} người khác đang soạn tin..."
     }
+  },
+  "system_messages": {
+    "changeName": "{{user}} đã đổi tên kênh thành {{channel}}",
+    "changeAvatar": "{{user}} đã thay đổi ảnh đại diện kênh",
+    "changeDescription": "{{user}} đã thay đổi mô tả kênh",
+    "removed": "{{user}} đã bị xóa khỏi kênh",
+    "banned": "{{user}} đã bị chặn khỏi kênh",
+    "unbanned": "{{user}} đã được bỏ chặn",
+    "promoted": "{{user}} đã được thăng chức thành quản trị viên",
+    "demoted": "{{user}} đã bị hạ chức quản trị viên",
+    "permissionsUpdated": "Quyền hạn của {{user}} đã được cập nhật",
+    "joined": "{{user}} đã tham gia kênh",
+    "declined": "{{user}} đã từ chối lời mời vào kênh",
+    "left": "{{user}} đã rời kênh",
+    "clearedHistory": "{{user}} đã xóa lịch sử trò chuyện",
+    "changeType": "{{user}} đã đổi kênh thành {{type}}",
+    "cooldownOn": "{{user}} đã bật chế độ chờ trong {{duration}}",
+    "cooldownOff": "{{user}} đã tắt chế độ chờ",
+    "bannedWordsUpdated": "{{user}} đã cập nhật danh sách từ cấm",
+    "added": "{{user}} đã được thêm vào kênh",
+    "adminTransfer": "{{admin}} {{user}} đã rời đi và chỉ định {{targetUser}} làm quản trị viên mới",
+    "pinned": "{{user}} đã ghim một tin nhắn",
+    "unpinned": "{{user}} đã bỏ ghim một tin nhắn",
+    "public": "công khai",
+    "private": "riêng tư",
+    "user_fallback": "Người dùng",
+    "admin_fallback": "Quản trị viên"
+  },
+  "signal_messages": {
+    "calling": "Đang gọi...",
+    "incomingAudioCall": "Cuộc gọi thoại đến...",
+    "incomingVideoCall": "Cuộc gọi video đến...",
+    "outgoingAudioCall": "Cuộc gọi thoại đi",
+    "outgoingVideoCall": "Cuộc gọi video đi",
+    "missedAudioCall": "Bạn đã bỏ lỡ cuộc gọi thoại",
+    "missedVideoCall": "Bạn đã bỏ lỡ cuộc gọi video",
+    "cancelAudioCall": "Bạn đã hủy cuộc gọi thoại",
+    "cancelVideoCall": "Bạn đã hủy cuộc gọi video",
+    "rejectedAudioCallRecipient": "Người nhận đã từ chối cuộc gọi",
+    "rejectedAudioCallYou": "Bạn đã từ chối cuộc gọi thoại",
+    "rejectedVideoCallRecipient": "Người nhận đã từ chối cuộc gọi video",
+    "rejectedVideoCallYou": "Bạn đã từ chối cuộc gọi video",
+    "busyRecipient": "Người nhận đang bận",
+    "durationUnitMin": "phút",
+    "durationUnitSec": "giây"
   }
 }

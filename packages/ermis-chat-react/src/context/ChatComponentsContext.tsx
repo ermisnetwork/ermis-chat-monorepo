@@ -6,6 +6,7 @@ export type ChatComponentsContextValue = {
   DropdownComponent?: React.ComponentType<DropdownProps>;
   PanelComponent?: React.ComponentType<PanelProps>;
   ForwardMessageModalComponent?: React.ComponentType<ForwardMessageModalProps>;
+  ChannelListErrorIndicator?: React.ComponentType<{ text?: string; onRetry?: () => void }>;
 };
 
 export const ChatComponentsContext = createContext<ChatComponentsContextValue>({});

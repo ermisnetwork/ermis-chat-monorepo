@@ -7,6 +7,8 @@ import type {
   ChannelSort,
   ChannelQueryOptions,
   UserCallInfo,
+  SystemMessageTranslations,
+  SignalMessageTranslations,
 } from '@ermis-network/ermis-chat-sdk';
 import type { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
@@ -478,7 +480,11 @@ export type ChannelListProps = {
   pendingBadgeLabel?: string;
   /** Label for the loading indicator */
   loadingLabel?: string;
-  /** Label for the empty state indicator */
+  /** Component to display when there is an error loading channels */
+  ErrorIndicator?: React.ComponentType<{ text?: string; onRetry?: () => void }>;
+  /** Label to display in the error indicator */
+  errorLabel?: string;
+  /** Label to display in the empty state indicator */
   emptyStateLabel?: string;
   /** Label for the blocked channel badge hover */
   blockedBadgeLabel?: string;
@@ -494,6 +500,10 @@ export type ChannelListProps = {
   voiceRecordingMessageLabel?: string;
   /** Label for file messages in the preview strip (default: '📎 File') */
   fileMessageLabel?: string;
+  /** Custom translation templates for system messages in the preview strip */
+  systemMessageTranslations?: SystemMessageTranslations;
+  /** Custom translation templates for signal (call) messages in the preview strip */
+  signalMessageTranslations?: SignalMessageTranslations;
   /** Handler when Add Topic button is clicked on a team channel */
   onAddTopic?: (channel: Channel) => void;
   /** Optional custom emoji picker for TopicModal */
@@ -540,6 +550,8 @@ export type AttachmentProps = {
 export type MessageRendererProps = {
   message: FormatMessageResponse;
   isOwnMessage: boolean;
+  systemMessageTranslations?: SystemMessageTranslations;
+  signalMessageTranslations?: SignalMessageTranslations;
 };
 
 export type MessageBubbleProps = {
@@ -668,6 +680,10 @@ export type MessageListProps = {
   typingIndicatorLabel?: (users: Array<{ id: string; name?: string }>) => string;
   /** I18n Label for deleted display messages (display_type === 'deleted') */
   deletedMessageLabel?: string;
+  /** Custom translation templates for system messages */
+  systemMessageTranslations?: SystemMessageTranslations;
+  /** Custom translation templates for signal (call) messages */
+  signalMessageTranslations?: SignalMessageTranslations;
   /** Whether to include hidden (deleted) messages in the initial channel query. Defaults to true. */
   includeHiddenMessages?: boolean;
 };
@@ -766,12 +782,17 @@ export type MessageItemProps = {
   editedLabel?: string;
   /** I18n Label for deleted display messages (display_type === 'deleted') */
   deletedMessageLabel?: string;
+  /** Custom translation templates for system messages */
+  systemMessageTranslations?: SystemMessageTranslations;
+  /** Custom translation templates for signal (call) messages */
+  signalMessageTranslations?: SignalMessageTranslations;
 };
 
 export type SystemMessageItemProps = {
   message: FormatMessageResponse;
   isOwnMessage: boolean;
   SystemRenderer: React.ComponentType<MessageRendererProps>;
+  systemMessageTranslations?: SystemMessageTranslations;
 };
 
 export type SendButtonProps = { disabled: boolean; onClick: () => void };

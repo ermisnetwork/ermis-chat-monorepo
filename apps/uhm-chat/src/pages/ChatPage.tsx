@@ -58,6 +58,55 @@ export function ChatPage() {
     leaveChannel: t('actions.leave_channel'),
   }), [t])
 
+  const systemMessageTranslations = useMemo(() => ({
+    changeName: t('system_messages.changeName'),
+    changeAvatar: t('system_messages.changeAvatar'),
+    changeDescription: t('system_messages.changeDescription'),
+    removed: t('system_messages.removed'),
+    banned: t('system_messages.banned'),
+    unbanned: t('system_messages.unbanned'),
+    promoted: t('system_messages.promoted'),
+    demoted: t('system_messages.demoted'),
+    permissionsUpdated: t('system_messages.permissionsUpdated'),
+    joined: t('system_messages.joined'),
+    declined: t('system_messages.declined'),
+    left: t('system_messages.left'),
+    clearedHistory: t('system_messages.clearedHistory'),
+    changeType: t('system_messages.changeType'),
+    cooldownOn: t('system_messages.cooldownOn'),
+    cooldownOff: t('system_messages.cooldownOff'),
+    bannedWordsUpdated: t('system_messages.bannedWordsUpdated'),
+    added: t('system_messages.added'),
+    adminTransfer: t('system_messages.adminTransfer'),
+    pinned: t('system_messages.pinned'),
+    unpinned: t('system_messages.unpinned'),
+    public: t('system_messages.public'),
+    private: t('system_messages.private'),
+    userFallback: t('system_messages.user_fallback'),
+    adminFallback: t('system_messages.admin_fallback'),
+    durationUnitMin: t('signal_messages.durationUnitMin'),
+    durationUnitSec: t('signal_messages.durationUnitSec'),
+  }), [t])
+
+  const signalMessageTranslations = useMemo(() => ({
+    calling: t('signal_messages.calling'),
+    incomingAudioCall: t('signal_messages.incomingAudioCall'),
+    incomingVideoCall: t('signal_messages.incomingVideoCall'),
+    outgoingAudioCall: t('signal_messages.outgoingAudioCall'),
+    outgoingVideoCall: t('signal_messages.outgoingVideoCall'),
+    missedAudioCall: t('signal_messages.missedAudioCall'),
+    missedVideoCall: t('signal_messages.missedVideoCall'),
+    cancelAudioCall: t('signal_messages.cancelAudioCall'),
+    cancelVideoCall: t('signal_messages.cancelVideoCall'),
+    rejectedAudioCallRecipient: t('signal_messages.rejectedAudioCallRecipient'),
+    rejectedAudioCallYou: t('signal_messages.rejectedAudioCallYou'),
+    rejectedVideoCallRecipient: t('signal_messages.rejectedVideoCallRecipient'),
+    rejectedVideoCallYou: t('signal_messages.rejectedVideoCallYou'),
+    busyRecipient: t('signal_messages.busyRecipient'),
+    durationUnitMin: t('signal_messages.durationUnitMin'),
+    durationUnitSec: t('signal_messages.durationUnitSec'),
+  }), [t])
+
   const handleTopicDrillDown = useCallback((channel: ChannelType) => {
     setDrillDownChannel(channel)
     setActivePanel('topics')
@@ -154,6 +203,8 @@ export function ChatPage() {
               videoMessageLabel={t('chat.preview_video')}
               voiceRecordingMessageLabel={t('chat.preview_voice')}
               fileMessageLabel={t('chat.preview_file')}
+              systemMessageTranslations={systemMessageTranslations}
+              signalMessageTranslations={signalMessageTranslations}
             />
 
             {/* SearchPanel overlay — zoom animation on top of ChannelList */}
@@ -249,6 +300,8 @@ export function ChatPage() {
               });
             }}
             deletedMessageLabel={t('chat.deleted_message', 'This message was deleted')}
+            systemMessageTranslations={systemMessageTranslations}
+            signalMessageTranslations={signalMessageTranslations}
           />
 
           {/* Message Input Floating Card */}

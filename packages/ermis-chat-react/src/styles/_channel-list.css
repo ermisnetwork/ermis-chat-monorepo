@@ -470,3 +470,58 @@
   gap: var(--ermis-spacing-xs);
   margin-top: 2px;
 }
+
+/* --- Error Indicator --- */
+.ermis-channel-list__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ermis-spacing-xl, 32px) var(--ermis-spacing-lg);
+  text-align: center;
+  height: 100%;
+}
+
+.ermis-channel-list__error-icon {
+  color: var(--ermis-color-danger, #ef4444);
+  margin-bottom: var(--ermis-spacing-md);
+  opacity: 0.8;
+}
+
+.ermis-channel-list__error-text {
+  font-size: var(--ermis-font-size-sm);
+  color: var(--ermis-text-primary);
+  font-weight: 500;
+  margin-bottom: var(--ermis-spacing-lg);
+  max-width: 220px;
+  line-height: 1.5;
+}
+
+.ermis-channel-list__error-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ermis-spacing-sm, 8px) var(--ermis-spacing-lg, 16px);
+  background-color: var(--ermis-bg-primary, #fff);
+  color: var(--ermis-text-primary, #111);
+  border: 1px solid var(--ermis-border, #e5e7eb);
+  border-radius: var(--ermis-radius-md, 8px);
+  font-size: var(--ermis-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--ermis-transition, 0.2s ease);
+}
+
+.ermis-channel-list__error-retry:hover {
+  background-color: var(--ermis-bg-hover, #f3f4f6);
+  border-color: var(--ermis-accent);
+  color: var(--ermis-accent);
+}
+
+.ermis-channel-list__error-retry svg {
+  transition: transform 0.5s ease;
+}
+
+.ermis-channel-list__error-retry:hover svg {
+  transform: rotate(180deg);
+}

@@ -1,6 +1,11 @@
 import type { MentionMember } from './types';
 import type { Attachment, FormatMessageResponse, Channel } from '@ermis-network/ermis-chat-sdk';
-import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
+import {
+  parseSystemMessage,
+  parseSignalMessage,
+  SystemMessageTranslations,
+  SignalMessageTranslations,
+} from '@ermis-network/ermis-chat-sdk';
 import { isDeletedDisplayMessage } from './messageTypeUtils';
 
 /**
@@ -288,6 +293,8 @@ export function getLastMessagePreview(
     videoMessageLabel?: string;
     voiceRecordingMessageLabel?: string;
     fileMessageLabel?: string;
+    systemMessageTranslations?: SystemMessageTranslations;
+    signalMessageTranslations?: SignalMessageTranslations;
   },
 ): { text: string; user: string; timestamp?: string | Date } {
   const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
@@ -305,11 +312,11 @@ export function getLastMessagePreview(
 
   if (msgType === 'system') {
     const userMap = buildUserMap(channel.state);
-    return { text: parseSystemMessage(rawText, userMap), user: '', timestamp };
+    return { text: parseSystemMessage(rawText, userMap, options?.systemMessageTranslations), user: '', timestamp };
   }
 
   if (msgType === 'signal') {
-    const result = parseSignalMessage(rawText, myUserId || '');
+    const result = parseSignalMessage(rawText, myUserId || '', options?.signalMessageTranslations);
     return { text: result?.text || rawText, user: '', timestamp };
   }
 

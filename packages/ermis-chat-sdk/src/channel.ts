@@ -1250,25 +1250,51 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       case 'message.deleted':
         if (event.message) {
           this._extendEventWithOwnReactions(event);
-          event.message.display_type = 'deleted';
-          channelState.addMessageSorted(event.message);
-          // if (event.hard_delete) channelState.removeMessage(event.message);
-          // else channelState.addMessageSorted(event.message, false, false);
+          channelState.removeMessage(event.message);
+
+          if (channelState.latestMessages.length === 0) {
+            this.query({ messages: { limit: 1 } })
+              .then(() => {
+                this._callChannelListeners({
+                  type: 'channel.updated',
+                  cid: this.cid,
+                  channel: this.data,
+                } as any);
+              })
+              .catch((err) => {
+                this._client.logger('error', 'Failed to query for new last message after deletion', { err });
+              });
+          }
 
           channelState.removeQuotedMessageReferences(event.message);
-
-          // if (event.message.pinned) {
-          //   channelState.removePinnedMessage(event.message);
-          // }
 
           if ([...channelState.pinnedMessages].some((msg) => msg.id === event.message?.id)) {
             channelState.removePinnedMessage(event.message);
           }
 
+          const msgTime = event.message.created_at ? new Date(event.message.created_at) : null;
+
           for (const userId in channelState.read) {
             if (userId !== event.user?.id && event.message.id === channelState.read[userId].last_read_message_id) {
               // Clear last_read_message_id if the deleted message is the last_read_message_id
               channelState.read[userId] = { ...channelState.read[userId], last_read_message_id: undefined };
+            }
+
+            // Decrement unread_messages if the deleted message was unread for this user
+            const userRead = channelState.read[userId];
+            const lastRead = userRead.last_read ? new Date(userRead.last_read) : new Date(0);
+
+            if (msgTime && msgTime > lastRead) {
+              // Ensure we don't decrement if the message was sent by the user being checked
+              const wasSentByUser = event.message.user?.id === userId || event.message.user_id === userId;
+              const isSystem = event.message.type === 'system';
+
+              if (!wasSentByUser && !isSystem) {
+                userRead.unread_messages = Math.max(0, userRead.unread_messages - 1);
+                if (userId === this.getClient().userID) {
+                  channelState.unreadCount = Math.max(0, channelState.unreadCount - 1);
+                }
+              }
             }
           }
         }

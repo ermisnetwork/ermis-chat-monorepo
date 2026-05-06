@@ -35,7 +35,8 @@
     "system_verify_err": "System error while verifying OTP",
     "google_failed": "Google login failed",
     "system_google_err": "System error during Google login",
-    "google_connect": "Could not connect to Google"
+    "google_connect": "Could not connect to Google",
+    "server_error": "Server is busy, please try again later."
   },
   "chat": {
     "search_channels": "Search...",
@@ -97,7 +98,21 @@
     "preview_video": "🎬 Video",
     "preview_voice": "🎤 Voice message",
     "preview_file": "📎 File",
-    "preview_sticker": "Sticker"
+    "preview_sticker": "Sticker",
+    "call": {
+      "incoming": "Incoming {{type}} call",
+      "outgoing": "Outgoing {{type}} call",
+      "ringing": "Ringing...",
+      "connected": "Connected",
+      "ended": "Call ended",
+      "duration": "Duration: {{duration}}",
+      "calling_you": "is calling you...",
+      "audio": "Audio",
+      "video": "Video",
+      "error": "Call Error"
+    },
+    "channel_list_error": "Unable to load channels",
+    "channel_list_error_hint": "A server issue occurred while fetching your data. Let's try to refresh."
   },
   "forward": {
     "title": "Forward Message",
@@ -118,7 +133,7 @@
     "connecting": "Connecting to server...",
     "reconnecting": "Reconnecting...",
     "offline": "No internet connection",
-    "retry": "Try again",
+    "retry": "Try Again",
     "connection_restored": "Connection restored"
   },
   "search": {
@@ -163,7 +178,23 @@
     "confirm_close_topic_title": "Close Topic",
     "confirm_close_topic_message": "Are you sure you want to close <bold>{{name}}</bold>? Members will not be able to send new messages.",
     "confirm_yes": "Confirm",
-    "confirm_cancel": "Cancel"
+    "confirm_cancel": "Cancel",
+    "call": {
+      "accept": "Accept",
+      "decline": "Decline",
+      "end": "End Call",
+      "mute": "Mute",
+      "unmute": "Unmute",
+      "video_on": "Start Video",
+      "video_off": "Stop Video",
+      "screen_share": "Share Screen",
+      "screen_stop": "Stop Sharing",
+      "upgrade": "Upgrade to Video",
+      "fullscreen": "Fullscreen",
+      "exit_fullscreen": "Exit Fullscreen",
+      "audio_devices": "Audio Devices",
+      "video_devices": "Video Devices"
+    }
   },
   "message_actions": {
     "reply": "Reply",
@@ -214,7 +245,6 @@
     "pendingInviteeLabel": "{{name}} needs to accept your invitation to see the messages you've sent",
     "jumpToLatest": "↓ Jump to latest",
     "pinnedMessagesLabel": "{{count}} pinned message",
-    "pinnedMessagesLabel_plural": "{{count}} pinned messages",
     "seeAll": "See all",
     "collapse": "Collapse",
     "unpin": "Unpin message",
@@ -224,5 +254,50 @@
       "areTyping": "{{name1}} and {{name2}} are typing...",
       "multipleTyping": "{{name1}}, {{name2}} and {{count}} others are typing..."
     }
+  },
+  "system_messages": {
+    "changeName": "{{user}} changed the channel name to {{channel}}",
+    "changeAvatar": "{{user}} changed the channel avatar",
+    "changeDescription": "{{user}} changed the channel description",
+    "removed": "{{user}} was removed from the channel",
+    "banned": "{{user}} was banned from the channel",
+    "unbanned": "{{user}} was unbanned",
+    "promoted": "{{user}} was promoted to moderator",
+    "demoted": "{{user}} was demoted from moderator",
+    "permissionsUpdated": "{{user}}'s permissions were updated",
+    "joined": "{{user}} joined the channel",
+    "declined": "{{user}} declined the channel invitation",
+    "left": "{{user}} left the channel",
+    "clearedHistory": "{{user}} cleared the chat history",
+    "changeType": "{{user}} changed the channel to {{type}}",
+    "cooldownOn": "{{user}} enabled cooldown for {{duration}}",
+    "cooldownOff": "{{user}} disabled cooldown",
+    "bannedWordsUpdated": "{{user}} updated the banned words",
+    "added": "{{user}} was added to the channel",
+    "adminTransfer": "Admin {{user}} left and assigned {{targetUser}} as the new admin",
+    "pinned": "{{user}} pinned a message",
+    "unpinned": "{{user}} unpinned a message",
+    "public": "public",
+    "private": "private",
+    "user_fallback": "User",
+    "admin_fallback": "Admin"
+  },
+  "signal_messages": {
+    "calling": "Calling...",
+    "incomingAudioCall": "Incoming audio call...",
+    "incomingVideoCall": "Incoming video call...",
+    "outgoingAudioCall": "Outgoing audio call",
+    "outgoingVideoCall": "Outgoing video call",
+    "missedAudioCall": "You missed audio call",
+    "missedVideoCall": "You missed video call",
+    "cancelAudioCall": "You cancel audio call",
+    "cancelVideoCall": "You cancel video call",
+    "rejectedAudioCallRecipient": "Recipient rejected audio call",
+    "rejectedAudioCallYou": "You rejected audio call",
+    "rejectedVideoCallRecipient": "Recipient rejected video call",
+    "rejectedVideoCallYou": "You rejected video call",
+    "busyRecipient": "Recipient was busy",
+    "durationUnitMin": "min",
+    "durationUnitSec": "sec"
   }
 }
