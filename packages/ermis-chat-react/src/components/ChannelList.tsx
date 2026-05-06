@@ -223,6 +223,12 @@ type ChannelRowProps = {
   actionLabels?: import('../types').ChannelActionLabels;
   actionIcons?: import('../types').ChannelActionIcons;
   isOnline?: boolean;
+  deletedMessageLabel?: string;
+  stickerMessageLabel?: string;
+  photoMessageLabel?: string;
+  videoMessageLabel?: string;
+  voiceRecordingMessageLabel?: string;
+  fileMessageLabel?: string;
 };
 
 export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
@@ -245,6 +251,12 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   actionLabels,
   actionIcons,
   isOnline,
+  deletedMessageLabel,
+  stickerMessageLabel,
+  photoMessageLabel,
+  videoMessageLabel,
+  voiceRecordingMessageLabel,
+  fileMessageLabel,
 }) => {
   // Use the new custom hook to handle all row-level realtime updates
   const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
@@ -262,10 +274,28 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
 
   // Derive last message preview computation
   const { text: rawLastMessageText, user: rawLastMessageUser, timestamp: rawLastMessageTimestamp } = useMemo(
-    () => getLastMessagePreview(channel, currentUserId),
+    () =>
+      getLastMessagePreview(channel, currentUserId, {
+        deletedMessageLabel,
+        stickerMessageLabel,
+        photoMessageLabel,
+        videoMessageLabel,
+        voiceRecordingMessageLabel,
+        fileMessageLabel,
+      }),
     // Recompute if latestMessage changes or we get a force update
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [channel, channel.state?.latestMessages, updateCount]
+    [
+      channel,
+      channel.state?.latestMessages,
+      updateCount,
+      deletedMessageLabel,
+      stickerMessageLabel,
+      photoMessageLabel,
+      videoMessageLabel,
+      voiceRecordingMessageLabel,
+      fileMessageLabel,
+    ]
   );
 
   // Hide last message preview when banned, blocked, pending or skipped
@@ -349,6 +379,12 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   TopicPillComponent,
   FlatTopicGroupItemComponent,
   scrollToTopOnOwnMessage = true,
+  deletedMessageLabel,
+  stickerMessageLabel,
+  photoMessageLabel,
+  videoMessageLabel,
+  voiceRecordingMessageLabel,
+  fileMessageLabel,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -543,6 +579,12 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               actionLabels={actionLabels}
               actionIcons={actionIcons}
               isOnline={getIsOnline(channel)}
+              deletedMessageLabel={deletedMessageLabel}
+              stickerMessageLabel={stickerMessageLabel}
+              photoMessageLabel={photoMessageLabel}
+              videoMessageLabel={videoMessageLabel}
+              voiceRecordingMessageLabel={voiceRecordingMessageLabel}
+              fileMessageLabel={fileMessageLabel}
             />
           );
         })}
@@ -601,6 +643,12 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               actionLabels={actionLabels}
               actionIcons={actionIcons}
               isOnline={getIsOnline(channel)}
+              deletedMessageLabel={deletedMessageLabel}
+              stickerMessageLabel={stickerMessageLabel}
+              photoMessageLabel={photoMessageLabel}
+              videoMessageLabel={videoMessageLabel}
+              voiceRecordingMessageLabel={voiceRecordingMessageLabel}
+              fileMessageLabel={fileMessageLabel}
             />
           );
         })}

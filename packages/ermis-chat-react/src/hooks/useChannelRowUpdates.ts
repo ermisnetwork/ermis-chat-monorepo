@@ -19,9 +19,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
 
   useEffect(() => {
     setIsBannedInChannel(Boolean(channel.state?.membership?.banned));
-    setIsBlockedInChannel(
-      isDirectChannel(channel) ? Boolean(channel.state?.membership?.blocked) : false
-    );
+    setIsBlockedInChannel(isDirectChannel(channel) ? Boolean(channel.state?.membership?.blocked) : false);
 
     const handleBanned = (event: any) => {
       if (event.member?.user_id === currentUserId) {
@@ -42,6 +40,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
     const sub4 = channel.on('message.read', handleUpdate);
     const sub5 = channel.on('message.updated', handleUpdate);
     const sub6 = channel.on('message.deleted', handleUpdate);
+    const sub6_me = channel.on('message.deleted_for_me', handleUpdate);
     const sub7 = channel.on('channel.updated', handleUpdate);
     const sub8 = channel.on('member.added', handleUpdate);
     const sub9 = channel.on('member.removed', handleUpdate);
@@ -70,6 +69,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub4.unsubscribe();
       sub5.unsubscribe();
       sub6.unsubscribe();
+      sub6_me.unsubscribe();
       sub7.unsubscribe();
       sub8.unsubscribe();
       sub9.unsubscribe();

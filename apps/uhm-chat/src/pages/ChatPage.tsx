@@ -118,6 +118,12 @@ export function ChatPage() {
               EmptyStateIndicator={ChannelListEmpty}
               ChannelActionsComponent={UhmChannelActions}
               actionLabels={actionLabels}
+              deletedMessageLabel={t('chat.deleted_message')}
+              stickerMessageLabel={t('chat.preview_sticker')}
+              photoMessageLabel={t('chat.preview_photo')}
+              videoMessageLabel={t('chat.preview_video')}
+              voiceRecordingMessageLabel={t('chat.preview_voice')}
+              fileMessageLabel={t('chat.preview_file')}
             />
 
             {/* SearchPanel overlay — zoom animation on top of ChannelList */}

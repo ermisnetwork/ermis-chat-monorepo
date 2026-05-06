@@ -92,7 +92,12 @@
     "previewTitle": "You are viewing a public channel.",
     "joinChannel": "Join Channel",
     "linksDisabled": "Message blocked: Sending links is disabled for members.",
-    "deleted_message": "This message was deleted"
+    "deleted_message": "This message was deleted",
+    "preview_photo": "📷 Photo",
+    "preview_video": "🎬 Video",
+    "preview_voice": "🎤 Voice message",
+    "preview_file": "📎 File",
+    "preview_sticker": "Sticker"
   },
   "not_found": {
     "title": "Page not found",

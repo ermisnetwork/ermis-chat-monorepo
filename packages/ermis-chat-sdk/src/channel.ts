@@ -1250,9 +1250,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       case 'message.deleted':
         if (event.message) {
           this._extendEventWithOwnReactions(event);
-          //! NOTE: check lai o day
-          channelState.removeMessage(event.message);
-          channelState.addMessageSorted(event.message, false, false);
+          event.message.display_type = 'deleted';
+          channelState.addMessageSorted(event.message);
           // if (event.hard_delete) channelState.removeMessage(event.message);
           // else channelState.addMessageSorted(event.message, false, false);
 
@@ -1276,7 +1275,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         break;
       case 'message.deleted_for_me':
         if (event.message) {
-          channelState.removeMessage(event.message);
+          event.message.display_type = 'deleted';
+          channelState.addMessageSorted(event.message);
           channelState.removeQuotedMessageReferences(event.message);
 
           if ([...channelState.pinnedMessages].some((msg) => msg.id === event.message?.id)) {
@@ -1592,7 +1592,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         const topic = this.getClient().channel(event.channel_type || '', event.channel_id || '');
         topic.data = event.channel;
         topic._initializeState(topicState, 'latest');
-        
+
         if (!channelState.topics) {
           channelState.topics = [];
         }

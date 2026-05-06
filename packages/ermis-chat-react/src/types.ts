@@ -482,6 +482,18 @@ export type ChannelListProps = {
   emptyStateLabel?: string;
   /** Label for the blocked channel badge hover */
   blockedBadgeLabel?: string;
+  /** Label for deleted messages in the preview strip (default: 'This message was deleted') */
+  deletedMessageLabel?: string;
+  /** Label for sticker messages in the preview strip (default: 'Sticker') */
+  stickerMessageLabel?: string;
+  /** Label for photo messages in the preview strip (default: '📷 Photo') */
+  photoMessageLabel?: string;
+  /** Label for video messages in the preview strip (default: '🎬 Video') */
+  videoMessageLabel?: string;
+  /** Label for voice message in the preview strip (default: '🎤 Voice message') */
+  voiceRecordingMessageLabel?: string;
+  /** Label for file messages in the preview strip (default: '📎 File') */
+  fileMessageLabel?: string;
   /** Handler when Add Topic button is clicked on a team channel */
   onAddTopic?: (channel: Channel) => void;
   /** Optional custom emoji picker for TopicModal */

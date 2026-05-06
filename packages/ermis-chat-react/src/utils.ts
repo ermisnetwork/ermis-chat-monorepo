@@ -1,6 +1,7 @@
 import type { MentionMember } from './types';
 import type { Attachment, FormatMessageResponse, Channel } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage } from '@ermis-network/ermis-chat-sdk';
+import { isDeletedDisplayMessage } from './messageTypeUtils';
 
 /**
  * Format a Date or date-string to a short time string (HH:MM).
@@ -268,6 +269,14 @@ export function extractDomain(url: string): string {
 export function getLastMessagePreview(
   channel: Channel,
   myUserId?: string,
+  options?: {
+    deletedMessageLabel?: string;
+    stickerMessageLabel?: string;
+    photoMessageLabel?: string;
+    videoMessageLabel?: string;
+    voiceRecordingMessageLabel?: string;
+    fileMessageLabel?: string;
+  },
 ): { text: string; user: string; timestamp?: string | Date } {
   const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
   if (!lastMsg) return { text: '', user: '' };
@@ -275,7 +284,12 @@ export function getLastMessagePreview(
   const timestamp = lastMsg.created_at;
 
   const msgType = lastMsg.type || 'regular';
+  const isDeleted = isDeletedDisplayMessage(lastMsg);
   const rawText = lastMsg.text ?? '';
+
+  if (isDeleted) {
+    return { text: options?.deletedMessageLabel || 'This message was deleted', user: '', timestamp };
+  }
 
   if (msgType === 'system') {
     const userMap = buildUserMap(channel.state);
@@ -289,7 +303,7 @@ export function getLastMessagePreview(
 
   // Display 'Sticker' if message is a sticker
   if (msgType === 'sticker' || (lastMsg as Record<string, unknown>).sticker_url) {
-    return { text: 'Sticker', user: lastMsg.user?.name || lastMsg.user_id || '', timestamp };
+    return { text: options?.stickerMessageLabel || 'Sticker', user: lastMsg.user?.name || lastMsg.user_id || '', timestamp };
   }
 
   // Regular / other
@@ -299,16 +313,16 @@ export function getLastMessagePreview(
     const type = att.type || '';
     switch (type) {
       case 'image':
-        displayText = '📷 Photo';
+        displayText = options?.photoMessageLabel || '📷 Photo';
         break;
       case 'video':
-        displayText = '🎬 Video';
+        displayText = options?.videoMessageLabel || '🎬 Video';
         break;
       case 'voiceRecording':
-        displayText = '🎤 Voice message';
+        displayText = options?.voiceRecordingMessageLabel || '🎤 Voice message';
         break;
       default:
-        displayText = '📎 File';
+        displayText = options?.fileMessageLabel || '📎 File';
         break;
     }
     if (lastMsg.attachments.length > 1) {

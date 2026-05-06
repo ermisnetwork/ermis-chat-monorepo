@@ -7,7 +7,7 @@ import { MessageQuickReactions } from './MessageQuickReactions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { useChatClient } from '../hooks/useChatClient';
 import { formatTime } from '../utils';
-import { isSystemMessage, isDeletedDisplayMessage } from '../messageTypeUtils';
+import { isSystemMessage, isDeletedDisplayMessage, isStickerMessage } from '../messageTypeUtils';
 
 export type { MessageItemProps, SystemMessageItemProps } from '../types';
 
@@ -120,6 +120,8 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
     return Date.now() - new Date(message.created_at).getTime() < 1000;
   }, [message.created_at]);
 
+  const isSticker = React.useMemo(() => isStickerMessage(message), [message]);
+
   const itemClass = [
     'ermis-message-list__item',
     isOwnMessage ? 'ermis-message-list__item--own' : 'ermis-message-list__item--other',
@@ -127,6 +129,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
     isHighlighted ? 'ermis-message-list__item--highlighted' : '',
     isNewMessage ? 'ermis-message-list__item--new' : '',
     isDeletedDisplay ? 'ermis-message-list__item--deleted-display' : '',
+    isSticker ? 'ermis-message-list__item--sticker' : '',
     statusClass,
   ].filter(Boolean).join(' ');
 

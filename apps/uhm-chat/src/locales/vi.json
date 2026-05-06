@@ -92,7 +92,12 @@
     "previewTitle": "Bạn đang xem một kênh công khai.",
     "joinChannel": "Tham gia kênh",
     "linksDisabled": "Tin nhắn bị chặn: Chức năng gửi link bị vô hiệu hóa cho thành viên.",
-    "deleted_message": "Tin nhắn đã bị xoá"
+    "deleted_message": "Tin nhắn đã bị xoá",
+    "preview_photo": "📷 Ảnh",
+    "preview_video": "🎬 Video",
+    "preview_voice": "🎤 Tin nhắn thoại",
+    "preview_file": "📎 Tệp tin",
+    "preview_sticker": "Nhãn dán"
   },
   "not_found": {
     "title": "Trang không tồn tại",

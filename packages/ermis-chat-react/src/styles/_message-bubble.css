@@ -736,9 +736,10 @@
 /* --- Sticker message --- */
 .ermis-message-sticker-wrapper {
   position: relative;
-  width: 120px;
-  height: 120px;
+  width: 160px;
+  height: 160px;
   overflow: hidden;
+  border-radius: 10px;
 }
 
 .ermis-message-sticker {
@@ -754,6 +755,42 @@
 
 .ermis-message-sticker.ermis-attachment--loaded {
   opacity: 1;
+}
+
+/* --- Sticker Message Overrides --- */
+.ermis-message-list__item--sticker .ermis-message-bubble {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border: none !important;
+  position: relative;
+  border-radius: 0;
+  display: inline-block; /* Ensure bubble shrinks to fit sticker */
+}
+
+/* Timestamp overlay for stickers */
+.ermis-message-list__item--sticker .ermis-message-list__item-time {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  color: #ffffff;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  margin: 0;
+  line-height: 1.2;
+  font-weight: 500;
+  text-shadow: 0px 1px 3px rgba(0, 0, 0, 0.8), 0px 0px 1px rgba(0, 0, 0, 0.6);
+}
+
+/* Ensure edited indicator and inline status icon styling for sticker */
+.ermis-message-list__item--sticker .ermis-message-list__item-time .ermis-message-list__edited-indicator {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.ermis-message-list__item--sticker .ermis-message-list__item-time svg {
+  color: #ffffff;
+  filter: drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.8));
 }
 
 /* --- Error message --- */
