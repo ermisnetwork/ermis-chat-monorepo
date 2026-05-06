@@ -29,6 +29,7 @@
   font-family: var(--ermis-font-family);
   gap: var(--ermis-spacing-xs);
   position: relative;
+  padding-bottom: 1rem;
 }
 
 .ermis-message-list__vlist {
