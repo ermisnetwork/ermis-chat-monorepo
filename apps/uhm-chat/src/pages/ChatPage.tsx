@@ -19,10 +19,11 @@ import { useUIStore } from '@/store/useUIStore'
 import { UhmMessageActions } from '@/features/chat/UhmMessageActions'
 import { UhmMessageInput } from '@/features/chat/UhmMessageInput'
 import { GlobalPickers } from '@/features/chat/GlobalPickers'
+import { UhmChannelInfoHeader } from '@/features/chat/UhmChannelInfoHeader'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
-  const { client } = useChatClient()
+  const { client, activeChannel } = useChatClient()
   const { status, retryConnection } = useConnectionStatus(client)
 
   const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
@@ -167,6 +168,13 @@ export function ChatPage() {
     ),
     [t],
   )
+
+  const channelInfoTitle = useMemo(() => {
+    const targetChannel = infoChannel || activeChannel
+    if (!targetChannel) return ''
+    const isTopic = !!targetChannel.data?.parent_cid
+    return isTopic ? t('chat.info_title_topic') : t('chat.info_title_channel')
+  }, [infoChannel, activeChannel, t])
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
@@ -318,6 +326,8 @@ export function ChatPage() {
                 channel={infoChannel || undefined}
                 isVisible={showChannelInfo}
                 onClose={() => setShowChannelInfo(false)}
+                title={channelInfoTitle}
+                HeaderComponent={UhmChannelInfoHeader}
               />
             )}
           </div>

@@ -112,7 +112,9 @@
       "error": "Call Error"
     },
     "channel_list_error": "Unable to load channels",
-    "channel_list_error_hint": "A server issue occurred while fetching your data. Let's try to refresh."
+    "channel_list_error_hint": "A server issue occurred while fetching your data. Let's try to refresh.",
+    "info_title_channel": "Channel Info",
+    "info_title_topic": "Topic Info"
   },
   "forward": {
     "title": "Forward Message",
@@ -164,6 +166,7 @@
     "create_topic": "Create topic",
     "delete_channel": "Delete channel",
     "leave_channel": "Leave channel",
+    "close": "Close",
     "audio_call": "Audio Call",
     "video_call": "Video Call",
     "more_actions": "More actions",

@@ -1224,10 +1224,13 @@ export type ChannelInfoActionsProps = {
   onDeleteChannel?: () => void;
   onBlockUser?: () => void;
   onUnblockUser?: () => void;
+  onPin?: () => void;
+  onUnpin?: () => void;
   isTeamChannel?: boolean;
   isTopic?: boolean;
   isClosedTopic?: boolean;
   isBlocked?: boolean;
+  isPinned?: boolean;
   currentUserRole?: string;
   searchLabel?: string;
   settingsLabel?: string;
@@ -1235,6 +1238,8 @@ export type ChannelInfoActionsProps = {
   leaveLabel?: string;
   blockLabel?: string;
   unblockLabel?: string;
+  pinLabel?: string;
+  unpinLabel?: string;
   onCloseTopic?: () => void;
   onReopenTopic?: () => void;
   closeTopicLabel?: string;
@@ -1444,11 +1449,17 @@ export type ChannelInfoProps = {
   actionsSettingsLabel?: string;
   actionsDeleteLabel?: string;
   actionsLeaveLabel?: string;
+  actionsPinLabel?: string;
+  actionsUnpinLabel?: string;
+  actionsPinTopicLabel?: string;
+  actionsUnpinTopicLabel?: string;
 
   /** Action callbacks */
   onSearchClick?: () => void;
   onLeaveChannel?: () => void;
   onDeleteChannel?: () => void;
+  onPinChannel?: () => void;
+  onUnpinChannel?: () => void;
   onAddMemberClick?: () => void;
   onRemoveMember?: (id: string) => void;
   onBanMember?: (id: string) => void;

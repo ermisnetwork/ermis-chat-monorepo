@@ -43,13 +43,20 @@ export const useChannelProfile = (channel: Channel | null | undefined) => {
   useEffect(() => {
     if (!channel) return;
     const updateChannel = () => setChannelUpdateCount(c => c + 1);
-    const sub = channel.on('channel.updated', updateChannel);
-    return () => sub.unsubscribe();
+    const sub1 = channel.on('channel.updated', updateChannel);
+    const sub2 = channel.on('channel.pinned', updateChannel);
+    const sub3 = channel.on('channel.unpinned', updateChannel);
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+      sub3.unsubscribe();
+    };
   }, [channel]);
 
   const channelName = useMemo(() => channel?.data?.name || channel?.cid || 'Unknown Channel', [channel?.data?.name, channel?.cid, channel?.type, channelUpdateCount]);
   const channelImage = useMemo(() => channel?.data?.image as string | undefined, [channel?.data?.image, channelUpdateCount]);
   const channelDescription = useMemo(() => channel?.data?.description as string | undefined, [channel?.data?.description, channelUpdateCount]);
+  const isPinned = useMemo(() => channel?.data?.is_pinned === true, [channel?.data?.is_pinned, channelUpdateCount]);
 
-  return { channelName, channelImage, channelDescription };
+  return { channelName, channelImage, channelDescription, isPinned };
 };

@@ -20,6 +20,16 @@ import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData
 import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
 import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
 
+const PinIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4" /><path d="M9 15l-4.5 4.5" /><path d="M14.5 4l5.5 5.5" /></svg>);
+const UnpinIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4" /><path d="M9 15l-4.5 4.5" /><path d="M14.5 4l5.5 5.5" /><line x1="3" y1="3" x2="21" y2="21" /></svg>);
+const SearchIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>);
+const SettingsIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>);
+const DeleteIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6V20a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>);
+const LeaveIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>);
+const CloseTopicIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>);
+const ReopenTopicIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></svg>);
+const BlockIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg>);
+
 export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.memo(({ title, onClose }) => {
   return (
     <div className="ermis-channel-info__header">
@@ -95,29 +105,30 @@ DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
   onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel,
-  onBlockUser, onUnblockUser, onCloseTopic, onReopenTopic,
-  isTeamChannel, isTopic, isClosedTopic, isBlocked, currentUserRole,
+  onBlockUser, onUnblockUser, onPin, onUnpin, onCloseTopic, onReopenTopic,
+  isTeamChannel, isTopic, isClosedTopic, isBlocked, isPinned, currentUserRole,
   searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', leaveLabel = 'Leave',
-  blockLabel = 'Block', unblockLabel = 'Unblock', closeTopicLabel = 'Close Topic', reopenTopicLabel = 'Reopen Topic'
+  blockLabel = 'Block', unblockLabel = 'Unblock', pinLabel = 'Pin', unpinLabel = 'Unpin',
+  closeTopicLabel = 'Close Topic', reopenTopicLabel = 'Reopen Topic'
 }) => {
   return (
     <div className="ermis-channel-info__actions">
       <button className="ermis-channel-info__action-btn" onClick={onSearchClick} disabled={isBlocked}>
         <div className="ermis-channel-info__action-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
+          <SearchIcon />
         </div>
         <span>{searchLabel}</span>
+      </button>
+      <button className="ermis-channel-info__action-btn" onClick={isPinned ? onUnpin : onPin} disabled={isBlocked}>
+        <div className="ermis-channel-info__action-icon">
+          {isPinned ? <UnpinIcon /> : <PinIcon />}
+        </div>
+        <span>{isPinned ? unpinLabel : pinLabel}</span>
       </button>
       {isTeamChannel && canManageChannel(currentUserRole) && (
         <button className="ermis-channel-info__action-btn" onClick={onSettingsClick}>
           <div className="ermis-channel-info__action-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
+            <SettingsIcon />
           </div>
           <span>{settingsLabel}</span>
         </button>
@@ -126,21 +137,14 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         currentUserRole === CHANNEL_ROLES.OWNER ? (
           <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onDeleteChannel}>
             <div className="ermis-channel-info__action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6V20a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              </svg>
+              <DeleteIcon />
             </div>
             <span>{deleteLabel}</span>
           </button>
         ) : (
           <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onLeaveChannel}>
             <div className="ermis-channel-info__action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                <polyline points="16 17 21 12 16 7"></polyline>
-                <line x1="21" y1="12" x2="9" y2="12"></line>
-              </svg>
+              <LeaveIcon />
             </div>
             <span>{leaveLabel}</span>
           </button>
@@ -151,20 +155,14 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         isClosedTopic ? (
           <button className="ermis-channel-info__action-btn" onClick={onReopenTopic}>
             <div className="ermis-channel-info__action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 9.9-1" />
-              </svg>
+              <ReopenTopicIcon />
             </div>
             <span>{reopenTopicLabel}</span>
           </button>
         ) : (
           <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onCloseTopic}>
             <div className="ermis-channel-info__action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
+              <CloseTopicIcon />
             </div>
             <span>{closeTopicLabel}</span>
           </button>
@@ -175,20 +173,14 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         isBlocked ? (
           <button className="ermis-channel-info__action-btn" onClick={onUnblockUser}>
             <div className="ermis-channel-info__action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-              </svg>
+              <BlockIcon />
             </div>
             <span>{unblockLabel}</span>
           </button>
         ) : (
           <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onBlockUser}>
             <div className="ermis-channel-info__action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-              </svg>
+              <BlockIcon />
             </div>
             <span>{blockLabel}</span>
           </button>
@@ -232,6 +224,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     onUnbanMember: onUnbanMemberProp,
     onPromoteMember: onPromoteMemberProp,
     onDemoteMember: onDemoteMemberProp,
+    onPinChannel: onPinChannelProp,
+    onUnpinChannel: onUnpinChannelProp,
     // Add Member customization
     addMemberModalTitle,
     addMemberSearchPlaceholder,
@@ -262,6 +256,10 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     onUnblockUser: onUnblockUserProp,
     actionsBlockLabel,
     actionsUnblockLabel,
+    actionsPinLabel,
+    actionsUnpinLabel,
+    actionsPinTopicLabel,
+    actionsUnpinTopicLabel,
     actionsCloseTopicLabel,
     actionsReopenTopicLabel,
     // Settings panel customizations
@@ -353,6 +351,18 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     try { await channel.unblockUser(); } catch (e) { console.error('Error unblocking user', e); }
   }, [channel, onUnblockUserProp]);
 
+  const handlePinChannel = useCallback(async () => {
+    if (onPinChannelProp) return onPinChannelProp();
+    if (!channel) return;
+    try { await channel.pin(); } catch (e) { console.error('Error pinning channel', e); }
+  }, [channel, onPinChannelProp]);
+
+  const handleUnpinChannel = useCallback(async () => {
+    if (onUnpinChannelProp) return onUnpinChannelProp();
+    if (!channel) return;
+    try { await channel.unpin(); } catch (e) { console.error('Error unpanning channel', e); }
+  }, [channel, onUnpinChannelProp]);
+
   const handleCloseTopic = useCallback(async () => {
     if (!channel || !parentChannel) return;
     try { await parentChannel.closeTopic(channel.cid); } catch (e) { console.error('Error closing topic', e); }
@@ -364,7 +374,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   }, [channel, parentChannel]);
 
   const { members } = useChannelMembers(channel);
-  const { channelName: profileChannelName, channelImage, channelDescription } = useChannelProfile(channel);
+  const { channelName: profileChannelName, channelImage, channelDescription, isPinned } = useChannelProfile(channel);
 
   let finalChannelName = profileChannelName;
   let finalParentChannelName = parentChannelName;
@@ -450,12 +460,15 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
               onDeleteChannel={handleDeleteChannel}
               onBlockUser={handleBlockUser}
               onUnblockUser={handleUnblockUser}
+              onPin={handlePinChannel}
+              onUnpin={handleUnpinChannel}
               onCloseTopic={handleCloseTopic}
               onReopenTopic={handleReopenTopic}
               isTeamChannel={isTeamChannel}
               isTopic={isTopic}
               isClosedTopic={isClosedTopic}
               isBlocked={isBlocked}
+              isPinned={isPinned}
               currentUserRole={currentUserRole}
               searchLabel={actionsSearchLabel}
               settingsLabel={actionsSettingsLabel}
@@ -463,6 +476,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
               leaveLabel={actionsLeaveLabel}
               blockLabel={actionsBlockLabel}
               unblockLabel={actionsUnblockLabel}
+              pinLabel={isTopic ? (actionsPinTopicLabel || 'Pin topic') : (actionsPinLabel || 'Pin channel')}
+              unpinLabel={isTopic ? (actionsUnpinTopicLabel || 'Unpin topic') : (actionsUnpinLabel || 'Unpin channel')}
               closeTopicLabel={actionsCloseTopicLabel}
               reopenTopicLabel={actionsReopenTopicLabel}
             />
