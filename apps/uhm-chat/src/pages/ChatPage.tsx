@@ -357,6 +357,8 @@ export function ChatPage() {
                 actionsUnblockLabel={t('actions.unblock_user')}
                 actionsDeleteLabel={t('actions.delete_channel')}
                 actionsLeaveLabel={t('actions.leave_channel')}
+                actionsCloseTopicLabel={t('actions.close_topic')}
+                actionsReopenTopicLabel={t('actions.reopen_topic')}
               />
             )}
           </div>

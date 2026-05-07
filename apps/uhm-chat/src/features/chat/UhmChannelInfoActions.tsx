@@ -12,8 +12,8 @@ import {
   UserCheck 
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { ChannelInfoActionsProps } from '@ermis-network/ermis-chat-react';
-import { canManageChannel, CHANNEL_ROLES } from '@ermis-network/ermis-chat-react';
+import { useChatClient, canManageChannel, CHANNEL_ROLES, type ChannelInfoActionsProps } from '@ermis-network/ermis-chat-react';
+import { useActionConfirm, needsConfirmation } from './useActionConfirm';
 
 export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
   onSearchClick,
@@ -44,6 +44,16 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   reopenTopicLabel
 }) => {
   const { t } = useTranslation();
+  const { activeChannel } = useChatClient();
+  const { requestConfirm, confirmDialog } = useActionConfirm();
+
+  const handleActionWithConfirm = (actionId: string, execute: () => void) => {
+    if (activeChannel && needsConfirmation(actionId)) {
+      requestConfirm(actionId, activeChannel, execute);
+    } else {
+      execute();
+    }
+  };
 
   const ActionItem = ({ 
     onClick, 
@@ -114,7 +124,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
             />
           ) : (
             <ActionItem
-              onClick={onCloseTopic}
+              onClick={() => handleActionWithConfirm('close', onCloseTopic)}
               icon={Lock}
               label={closeTopicLabel}
               danger
@@ -126,13 +136,13 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
         {!isTeamChannel && !isTopic && (
           isBlocked ? (
             <ActionItem
-              onClick={onUnblockUser}
+              onClick={() => handleActionWithConfirm('unblock', onUnblockUser)}
               icon={UserCheck}
               label={unblockLabel}
             />
           ) : (
             <ActionItem
-              onClick={onBlockUser}
+              onClick={() => handleActionWithConfirm('block', onBlockUser)}
               icon={Ban}
               label={blockLabel}
               danger
@@ -144,14 +154,14 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
         {isTeamChannel && (
           currentUserRole === CHANNEL_ROLES.OWNER ? (
             <ActionItem
-              onClick={onDeleteChannel}
+              onClick={() => handleActionWithConfirm('delete', onDeleteChannel)}
               icon={Trash2}
               label={deleteLabel}
               danger
             />
           ) : (
             <ActionItem
-              onClick={onLeaveChannel}
+              onClick={() => handleActionWithConfirm('leave', onLeaveChannel)}
               icon={LogOut}
               label={leaveLabel}
               danger
@@ -159,6 +169,9 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
           )
         )}
       </div>
+
+      {/* Confirmation Dialog */}
+      {confirmDialog}
     </div>
   );
 });
