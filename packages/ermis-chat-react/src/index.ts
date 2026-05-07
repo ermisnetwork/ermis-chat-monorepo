@@ -212,6 +212,9 @@ export type {
   AddMemberModalProps,
   AddMemberUserItemProps,
   AddMemberButtonProps,
+  EditChannelModalProps,
+  EditChannelData,
+  TopicModalProps,
 } from './types';
 
 export { UserPicker } from './components/UserPicker';

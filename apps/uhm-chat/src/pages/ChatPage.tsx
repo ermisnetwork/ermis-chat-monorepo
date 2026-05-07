@@ -20,6 +20,9 @@ import { UhmMessageActions } from '@/features/chat/UhmMessageActions'
 import { UhmMessageInput } from '@/features/chat/UhmMessageInput'
 import { GlobalPickers } from '@/features/chat/GlobalPickers'
 import { UhmChannelInfoHeader } from '@/features/chat/UhmChannelInfoHeader'
+import { UhmChannelInfoCover } from '@/features/chat/UhmChannelInfoCover'
+import { UhmEditChannelModal } from '@/features/chat/UhmEditChannelModal'
+import { UhmEditTopicModal } from '@/features/chat/UhmEditTopicModal'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
@@ -328,6 +331,9 @@ export function ChatPage() {
                 onClose={() => setShowChannelInfo(false)}
                 title={channelInfoTitle}
                 HeaderComponent={UhmChannelInfoHeader}
+                CoverComponent={UhmChannelInfoCover}
+                EditChannelModalComponent={UhmEditChannelModal}
+                EditTopicModalComponent={UhmEditTopicModal}
               />
             )}
           </div>
@@ -341,14 +347,13 @@ export function ChatPage() {
         />
       )}
       {topicAction.type === 'create' && topicAction.channel && (
-        <TopicModal
+        <UhmEditTopicModal
           isOpen={true}
           onClose={closeTopicModal}
-          parentChannel={topicAction.channel}
         />
       )}
       {topicAction.type === 'edit' && topicAction.channel && (
-        <TopicModal
+        <UhmEditTopicModal
           isOpen={true}
           onClose={closeTopicModal}
           topic={topicAction.channel}

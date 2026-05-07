@@ -205,6 +205,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     TabsComponent = DefaultChannelInfoTabs,
     AddMemberModalComponent,
     EditChannelModalComponent,
+    EditTopicModalComponent,
     actionsSearchLabel,
     actionsSettingsLabel,
     actionsDeleteLabel,
@@ -552,8 +553,9 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
           })()}
 
           {showEditTopicModal && (() => {
+            const ModalComp = EditTopicModalComponent || TopicModal;
             return (
-              <TopicModal
+              <ModalComp
                 isOpen={true}
                 onClose={() => setShowEditTopicModal(false)}
                 topic={channel}

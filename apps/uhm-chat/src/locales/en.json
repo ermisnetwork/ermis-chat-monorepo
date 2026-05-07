@@ -302,5 +302,33 @@
     "busyRecipient": "Recipient was busy",
     "durationUnitMin": "min",
     "durationUnitSec": "sec"
+  },
+  "edit": {
+    "edit_channel_title": "Edit Channel",
+    "channel_name": "Channel Name",
+    "channel_name_placeholder": "Enter channel name",
+    "description": "Description",
+    "description_placeholder": "Enter description",
+    "public_channel": "Public Channel",
+    "workspace_visibility": "Workspace visibility",
+    "change_avatar": "Change",
+    "new_name_fallback": "New Name",
+    "save_changes": "Save Changes",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "edit_topic_title": "Edit Topic",
+    "create_topic_title": "Create Topic",
+    "topic_name": "Topic Name",
+    "topic_name_placeholder": "Enter topic name",
+    "topic_description_placeholder": "Enter topic description",
+    "topic_preview_fallback": "Topic Preview",
+    "choose_icon": "Choose Icon",
+    "create": "Create",
+    "save": "Save",
+    "creating": "Creating...",
+    "type_public": "Public",
+    "type_team": "Team",
+    "type_topic": "Topic",
+    "edit_btn": "Edit"
   }
 }

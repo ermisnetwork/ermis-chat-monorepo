@@ -302,5 +302,33 @@
     "busyRecipient": "Người nhận đang bận",
     "durationUnitMin": "phút",
     "durationUnitSec": "giây"
+  },
+  "edit": {
+    "edit_channel_title": "Chỉnh sửa kênh",
+    "channel_name": "Tên kênh",
+    "channel_name_placeholder": "Nhập tên kênh",
+    "description": "Mô tả",
+    "description_placeholder": "Nhập mô tả kênh",
+    "public_channel": "Kênh công khai",
+    "workspace_visibility": "Hiển thị trong Workspace",
+    "change_avatar": "Đổi ảnh",
+    "new_name_fallback": "Tên mới",
+    "save_changes": "Lưu thay đổi",
+    "saving": "Đang lưu...",
+    "cancel": "Hủy",
+    "edit_topic_title": "Chỉnh sửa chủ đề",
+    "create_topic_title": "Tạo chủ đề mới",
+    "topic_name": "Tên chủ đề",
+    "topic_name_placeholder": "Nhập tên chủ đề",
+    "topic_description_placeholder": "Nhập mô tả chủ đề",
+    "topic_preview_fallback": "Xem trước chủ đề",
+    "choose_icon": "Chọn biểu tượng",
+    "create": "Tạo mới",
+    "save": "Lưu",
+    "creating": "Đang tạo...",
+    "type_public": "Công khai",
+    "type_team": "Nhóm",
+    "type_topic": "Chủ đề",
+    "edit_btn": "Chỉnh sửa"
   }
 }

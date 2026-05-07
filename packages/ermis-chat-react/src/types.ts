@@ -1257,6 +1257,7 @@ export type ChannelInfoMember = {
 export type EditChannelData = {
   name?: string;
   image?: string;
+  banner?: string;
   description?: string;
   public?: boolean;
 };
@@ -1405,6 +1406,8 @@ export type ChannelInfoProps = {
   AddMemberModalComponent?: React.ComponentType<AddMemberModalProps>;
   /** Custom component replacing the entire EditChannelModal */
   EditChannelModalComponent?: React.ComponentType<EditChannelModalProps>;
+  /** Custom component replacing the entire EditTopicModal */
+  EditTopicModalComponent?: React.ComponentType<TopicModalProps>;
 
   /** Custom sub-component overrides (passed through to TabsComponent) */
   MemberItemComponent?: React.ComponentType<ChannelInfoMemberItemProps>;
