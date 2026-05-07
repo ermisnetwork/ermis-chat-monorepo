@@ -24,6 +24,11 @@ import { UhmChannelInfoCover } from '@/features/chat/UhmChannelInfoCover'
 import { UhmEditChannelModal } from '@/features/chat/UhmEditChannelModal'
 import { UhmEditTopicModal } from '@/features/chat/UhmEditTopicModal'
 import { UhmChannelInfoActions } from '@/features/chat/UhmChannelInfoActions'
+import { UhmChannelInfoTabs } from '@/features/chat/UhmChannelInfoTabs'
+import { UhmMemberItem } from '@/features/chat/UhmMemberItem'
+import { UhmMediaItem } from '@/features/chat/UhmMediaItem'
+import { UhmLinkItem } from '@/features/chat/UhmLinkItem'
+import { UhmFileItem } from '@/features/chat/UhmFileItem'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
@@ -328,12 +333,18 @@ export function ChatPage() {
             {hasOpenedInfo && (
               <ChannelInfo
                 channel={infoChannel || undefined}
+                className="!h-auto !overflow-visible"
                 isVisible={showChannelInfo}
                 onClose={() => setShowChannelInfo(false)}
                 title={channelInfoTitle}
                 HeaderComponent={UhmChannelInfoHeader}
                 CoverComponent={UhmChannelInfoCover}
                 ActionsComponent={UhmChannelInfoActions}
+                TabsComponent={UhmChannelInfoTabs}
+                MemberItemComponent={UhmMemberItem}
+                MediaItemComponent={UhmMediaItem}
+                LinkItemComponent={UhmLinkItem}
+                FileItemComponent={UhmFileItem}
                 EditChannelModalComponent={UhmEditChannelModal}
                 EditTopicModalComponent={UhmEditTopicModal}
                 actionsSearchLabel={t('actions.search')}

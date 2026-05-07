@@ -114,7 +114,13 @@
     "channel_list_error": "Unable to load channels",
     "channel_list_error_hint": "A server issue occurred while fetching your data. Let's try to refresh.",
     "info_title_channel": "Channel Info",
-    "info_title_topic": "Topic Info"
+    "info_title_topic": "Topic Info",
+    "tabs": {
+      "members": "Members",
+      "media": "Media",
+      "links": "Links",
+      "files": "Files"
+    }
   },
   "forward": {
     "title": "Forward Message",
@@ -332,5 +338,18 @@
     "type_team": "Team",
     "type_topic": "Topic",
     "edit_btn": "Edit"
+  },
+  "roles": {
+    "owner": "Owner",
+    "moder": "Moderator",
+    "member": "Member"
+  },
+  "actions_member": {
+    "promote_moder": "Promote to Moderator",
+    "demote_member": "Demote to Member",
+    "unban_member": "Unban Member",
+    "ban_member": "Ban Permanently",
+    "remove_member": "Remove from Group",
+    "add_member": "Add New Member"
   }
 }

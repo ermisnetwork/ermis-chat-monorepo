@@ -114,7 +114,13 @@
     "channel_list_error": "Không thể tải danh sách",
     "channel_list_error_hint": "Đã có lỗi xảy ra từ phía máy chủ. Hãy thử làm mới lại.",
     "info_title_channel": "Thông tin kênh",
-    "info_title_topic": "Thông tin chủ đề"
+    "info_title_topic": "Thông tin chủ đề",
+    "tabs": {
+      "members": "Thành viên",
+      "media": "Ảnh & Video",
+      "links": "Liên kết",
+      "files": "Tệp tin"
+    }
   },
   "forward": {
     "title": "Chuyển tiếp tin nhắn",
@@ -332,5 +338,18 @@
     "type_team": "Nhóm",
     "type_topic": "Chủ đề",
     "edit_btn": "Chỉnh sửa"
+  },
+  "roles": {
+    "owner": "Chủ kênh",
+    "moder": "Quản trị viên",
+    "member": "Thành viên"
+  },
+  "actions_member": {
+    "promote_moder": "Thăng cấp Quản trị",
+    "demote_member": "Gỡ tư cách Quản trị",
+    "unban_member": "Gỡ chặn thành viên",
+    "ban_member": "Chặn vĩnh viễn",
+    "remove_member": "Mời ra khỏi nhóm",
+    "add_member": "Thêm thành viên mới"
   }
 }
