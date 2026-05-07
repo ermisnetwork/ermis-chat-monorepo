@@ -23,6 +23,7 @@ import { UhmChannelInfoHeader } from '@/features/chat/UhmChannelInfoHeader'
 import { UhmChannelInfoCover } from '@/features/chat/UhmChannelInfoCover'
 import { UhmEditChannelModal } from '@/features/chat/UhmEditChannelModal'
 import { UhmEditTopicModal } from '@/features/chat/UhmEditTopicModal'
+import { UhmChannelInfoActions } from '@/features/chat/UhmChannelInfoActions'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
@@ -332,8 +333,19 @@ export function ChatPage() {
                 title={channelInfoTitle}
                 HeaderComponent={UhmChannelInfoHeader}
                 CoverComponent={UhmChannelInfoCover}
+                ActionsComponent={UhmChannelInfoActions}
                 EditChannelModalComponent={UhmEditChannelModal}
                 EditTopicModalComponent={UhmEditTopicModal}
+                actionsSearchLabel={t('actions.search')}
+                actionsSettingsLabel={t('actions.settings')}
+                actionsPinLabel={t('actions.pin_channel')}
+                actionsUnpinLabel={t('actions.unpin_channel')}
+                actionsPinTopicLabel={t('actions.pin_topic')}
+                actionsUnpinTopicLabel={t('actions.unpin_topic')}
+                actionsBlockLabel={t('actions.block_user')}
+                actionsUnblockLabel={t('actions.unblock_user')}
+                actionsDeleteLabel={t('actions.delete_channel')}
+                actionsLeaveLabel={t('actions.leave_channel')}
               />
             )}
           </div>
