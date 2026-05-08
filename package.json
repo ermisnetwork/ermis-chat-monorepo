@@ -17,6 +17,7 @@
     "dev:sdk-watch": "yarn workspace @ermis-network/ermis-chat-sdk dev",
     "dev:react-watch": "yarn workspace @ermis-network/ermis-chat-react dev",
     "dev:uhm": "yarn workspace uhm-chat dev",
+    "build:uhm": "yarn build:sdk && yarn build:react && yarn workspace uhm-chat build",
     "docs": "yarn workspace apps-docs start",
     "prettier": "prettier --check '**/*.{js,ts,tsx,md,css,scss,json}' --ignore-path .prettierignore",
     "prettier-fix": "prettier --write '**/*.{js,ts,tsx,md,css,scss,json}' --ignore-path .prettierignore",

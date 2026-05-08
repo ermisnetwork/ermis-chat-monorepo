@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, startTransition, useRef } from 'react';
-import { VList as _VList } from 'virtua';
-const VList = _VList as any;
+// import { VList as _VList } from 'virtua';
 import { useTranslation } from 'react-i18next';
 import {
   MediaLightbox,
@@ -34,7 +33,7 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
   channel,
   members,
   AvatarComponent,
-  currentUserId,
+  currentUserId: _currentUserId,
   currentUserRole,
   onAddMemberClick,
   onRemoveMember,
@@ -47,7 +46,7 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
   LinkItemComponent,
   FileItemComponent,
   isVisible = true,
-  isPreviewMode = false,
+  isPreviewMode: _isPreviewMode = false,
 }) => {
   const { t } = useTranslation();
   const isMessaging = isDirectChannel(channel);
@@ -174,13 +173,13 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
     }
   }, [mediaItems]);
 
-  const mediaRows = useMemo(() => {
-    const rows: AttachmentItem[][] = [];
-    for (let i = 0; i < mediaItems.length; i += 3) {
-      rows.push(mediaItems.slice(i, i + 3));
-    }
-    return rows;
-  }, [mediaItems]);
+  // const mediaRows = useMemo(() => {
+  //   const rows: AttachmentItem[][] = [];
+  //   for (let i = 0; i < mediaItems.length; i += 3) {
+  //     rows.push(mediaItems.slice(i, i + 3));
+  //   }
+  //   return rows;
+  // }, [mediaItems]);
 
   const TabIcon = ({ type }: { type: MediaTab }) => {
     switch (type) {
@@ -294,7 +293,7 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
                     </button>
                   )}
                   {sortedMembers.map(member => (
-                    <MemberItemComponent
+                    MemberItemComponent ? <MemberItemComponent
                       key={member.user_id}
                       member={member}
                       AvatarComponent={AvatarComponent}
@@ -308,36 +307,36 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
                       canPromote={canPromoteTargetMember(currentUserRole, member.channel_role || 'member')}
                       onDemote={onDemoteMember}
                       canDemote={canDemoteTargetMember(currentUserRole, member.channel_role || 'member')}
-                    />
+                    /> : null
                   ))}
                 </div>
               )}
               {contentTab === 'media' && (
                 <div className="grid grid-cols-3 gap-1 px-1">
                   {mediaItems.map((item, idx) => (
-                    <MediaItemComponent
+                    MediaItemComponent ? <MediaItemComponent
                       key={item.id || idx}
                       item={item}
                       onClick={handleMediaClick}
-                    />
+                    /> : null
                   ))}
                 </div>
               )}
               {contentTab === 'links' && (
                 <div className="flex flex-col gap-1">
                   {linkItems.map((item, idx) => (
-                    <LinkItemComponent key={item.id || idx} item={item} />
+                    LinkItemComponent ? <LinkItemComponent key={item.id || idx} item={item} /> : null
                   ))}
                 </div>
               )}
               {contentTab === 'files' && (
                 <div className="flex flex-col gap-1">
                   {fileItems.map((item, idx) => (
-                    <FileItemComponent
+                    FileItemComponent ? <FileItemComponent
                       key={item.id || idx}
                       item={item}
-                      onClick={(url) => window.open(url, '_blank')}
-                    />
+                      onClick={(url: string) => window.open(url, '_blank')}
+                    /> : null
                   ))}
                 </div>
               )}

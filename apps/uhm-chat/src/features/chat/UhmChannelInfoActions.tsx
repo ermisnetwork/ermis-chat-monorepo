@@ -53,7 +53,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   const { activeChannel } = useChatClient();
   const { requestConfirm, confirmDialog } = useActionConfirm();
 
-  const handleActionWithConfirm = (actionId: string, execute: () => void) => {
+  const handleActionWithConfirm = (actionId: string, execute?: () => void) => {
+    if (!execute) return;
     if (activeChannel && needsConfirmation(actionId)) {
       requestConfirm(actionId, activeChannel, execute);
     } else {
@@ -64,13 +65,13 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   const ActionItem = ({
     onClick,
     icon: Icon,
-    label,
+    label = '',
     danger,
     disabled
   }: {
-    onClick: () => void;
+    onClick?: () => void;
     icon: any;
-    label: string;
+    label?: string;
     danger?: boolean;
     disabled?: boolean;
   }) => (

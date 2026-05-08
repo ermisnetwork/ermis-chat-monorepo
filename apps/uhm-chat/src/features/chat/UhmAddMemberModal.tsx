@@ -6,7 +6,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { X, Loader2, Search, Check } from 'lucide-react';
 
 const CustomSelectedBox: React.FC<UserPickerSelectedBoxProps> = ({
-  users, onRemove, AvatarComponent, emptyLabel,
+  users, onRemove, AvatarComponent, emptyLabel: _emptyLabel,
 }) => {
   if (users.length === 0) return null;
 

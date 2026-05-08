@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Dropdown } from '@ermis-network/ermis-chat-react';
 import type { ChannelInfoMemberItemProps } from '@ermis-network/ermis-chat-react';
 import { CHANNEL_ROLES } from '@ermis-network/ermis-chat-react';
-import { MoreVertical, Shield, UserMinus, Ban, UserCheck, ShieldAlert, ShieldPlus, ShieldMinus, UserX, Trash2 } from 'lucide-react';
+import { MoreVertical, Shield, UserCheck, ShieldAlert, ShieldPlus, ShieldMinus, UserX, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 export const UhmMemberItem: React.FC<ChannelInfoMemberItemProps> = React.memo(({

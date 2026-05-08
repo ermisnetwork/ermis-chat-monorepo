@@ -16,10 +16,10 @@ export const UhmMessageSearchPanel: React.FC<MessageSearchPanelProps> = ({
   const { setJumpToMessageId } = useChatClient();
   const {
     query,
-    setQuery,
+    setQuery: _setQuery,
     results,
     loading,
-    hasMore,
+    hasMore: _hasMore,
     loadingMore,
     handleInputChange,
     handleScroll,

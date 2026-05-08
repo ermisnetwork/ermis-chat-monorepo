@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useCallContext } from '@ermis-network/ermis-chat-react'
 import { CallStatus } from '@ermis-network/ermis-chat-sdk'
@@ -138,7 +138,7 @@ export const UhmCallUI: React.FC = () => {
 
   const peerInfo = isIncoming ? callerInfo : receiverInfo
   const isVideo = callType === 'video'
-  const isConnected = callStatus === CallStatus.CONNECTED
+  // const isConnected = callStatus === CallStatus.CONNECTED
   const isRinging = callStatus === CallStatus.RINGING
 
   // 1. Error View

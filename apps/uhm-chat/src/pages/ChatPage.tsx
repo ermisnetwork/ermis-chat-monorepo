@@ -231,10 +231,10 @@ export function ChatPage() {
           const channel = client.activeChannels[acceptedCid];
           if (channel && isGroupChannel(channel)) {
             // Find all pending topics of this team channel
-            const topics: Channel[] = Object.values(client.activeChannels).filter((ch: any) =>
+            const topics: ChannelType[] = Object.values(client.activeChannels).filter((ch: any) =>
               isTopicChannel(ch) &&
               (ch.data?.parent_cid === acceptedCid || ch.cid.includes(channel.id))
-            ) as Channel[];
+            ) as ChannelType[];
 
             for (const topic of topics) {
               const ms = topic.state?.membership as any;
