@@ -12,6 +12,7 @@ import { parseJwt, validateEmail, validatePhone, normalizePhone } from '../utils
 import { STORAGE_KEYS, API_DEFAULTS, OTP_CONFIG } from '../utils/constants'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { LocaleToggle } from '../components/LocaleToggle'
+import { SEO } from '../components/SEO'
 
 interface LoginPageProps {
   onLoginSuccess: (userId: string, token: string) => void
@@ -151,6 +152,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
   return (
     <div className="flex min-h-screen bg-zinc-50 dark:bg-[#1a1828] items-center justify-center p-4 sm:p-8">
+      <SEO title={`${t('login.title') || 'Đăng nhập'} | Uhm Chat`} />
       {/* Container chính: card bọc toàn bộ chia đôi trên màn lớn */}
       <div className="w-full max-w-6xl">
         <div className="flex flex-col lg:flex-row overflow-hidden rounded-[2rem] bg-white dark:bg-[#211f30] shadow-2xl border border-zinc-200/50 dark:border-zinc-800/50">

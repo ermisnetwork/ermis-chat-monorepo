@@ -343,6 +343,7 @@ export type ChannelActionLabels = {
   closeTopic?: string;
   reopenTopic?: string;
   createTopic?: string;
+  deleteTopic?: string;
   deleteChannel?: string;
   leaveChannel?: string;
 };
@@ -356,6 +357,7 @@ export type ChannelActionIcons = {
   CloseTopicIcon?: React.ReactNode;
   ReopenTopicIcon?: React.ReactNode;
   CreateTopicIcon?: React.ReactNode;
+  DeleteTopicIcon?: React.ReactNode;
   DeleteChannelIcon?: React.ReactNode;
   LeaveChannelIcon?: React.ReactNode;
 };
@@ -394,6 +396,8 @@ export type ChannelItemProps = {
   onEditTopic?: (channel: Channel) => void;
   /** Handler when Close/Reopen Topic action is triggered */
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
+  /** Handler when Delete Topic action is triggered */
+  onDeleteTopic?: (channel: Channel) => void;
   /** Array of action IDs to hide from the actions dropdown */
   hiddenActions?: string[];
   /** Custom labels for default channel actions */
@@ -440,6 +444,8 @@ export type TopicListProps = {
   onEditTopic?: (channel: Channel) => void;
   /** Handler for Close/Reopen Topic action */
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
+  /** Handler for Delete Topic action */
+  onDeleteTopic?: (channel: Channel) => void;
   /** Actions to hide */
   hiddenActions?: string[];
   /** Custom action labels */
@@ -454,6 +460,14 @@ export type TopicListProps = {
   blockedBadgeLabel?: string;
   /** Auto-scroll the topic list to the top when the current user sends a message (default: true) */
   scrollToTopOnOwnMessage?: boolean;
+  deletedMessageLabel?: string;
+  stickerMessageLabel?: string;
+  photoMessageLabel?: string;
+  videoMessageLabel?: string;
+  voiceRecordingMessageLabel?: string;
+  fileMessageLabel?: string;
+  systemMessageTranslations?: SystemMessageTranslations;
+  signalMessageTranslations?: SignalMessageTranslations;
 };
 
 export type ChannelListProps = {
@@ -516,6 +530,8 @@ export type ChannelListProps = {
   onEditTopic?: (channel: Channel) => void;
   /** Handler when Close/Reopen Topic action is triggered */
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
+  /** Handler when Delete Topic action is triggered */
+  onDeleteTopic?: (channel: Channel) => void;
   /** Custom labels for default channel actions */
   actionLabels?: ChannelActionLabels;
   /** Custom icons for default channel actions */
@@ -879,6 +895,10 @@ export type MessageInputProps = {
   replyingToLabel?: string;
   /** I18n Label for editing state */
   editingMessageLabel?: string;
+  /** I18n Label for Drag and Drop overlay */
+  dragAndDropLabel?: string;
+  /** Custom component for Drag and Drop overlay */
+  DragAndDropOverlayComponent?: React.ComponentType<{ dragAndDropLabel: string }>;
 
   /** Custom component for the Preview Overlay (shown instead of input in unjoined public channels) */
   PreviewOverlayComponent?: React.ComponentType<PreviewOverlayProps>;
@@ -1156,6 +1176,13 @@ export type AttachmentItem = {
 
 export type MediaTab = 'members' | 'media' | 'links' | 'files';
 
+export type ChannelInfoTabHeaderProps = {
+  activeTab: MediaTab;
+  onTabChange: (tab: MediaTab) => void;
+  availableTabs: MediaTab[];
+  tabCounts: Record<MediaTab, number>;
+};
+
 /* Sub-component prop types for consumer customization */
 
 export type ChannelInfoMemberItemProps = {
@@ -1171,6 +1198,8 @@ export type ChannelInfoMemberItemProps = {
   canPromote?: boolean;
   onDemote?: (id: string) => void;
   canDemote?: boolean;
+  /** Custom labels for member roles (owner, moder, member, pending) */
+  roleLabels?: Record<string, string>;
 };
 
 export type ChannelInfoMediaItemProps = {
@@ -1244,6 +1273,11 @@ export type ChannelInfoActionsProps = {
   onReopenTopic?: () => void;
   closeTopicLabel?: string;
   reopenTopicLabel?: string;
+  onDeleteTopic?: () => void;
+  deleteTopicLabel?: string;
+  onCreateTopic?: () => void;
+  createTopicLabel?: string;
+  topicsEnabled?: boolean;
 };
 
 export type ChannelInfoMember = {
@@ -1379,8 +1413,13 @@ export type ChannelInfoTabsProps = {
   FileItemComponent?: React.ComponentType<ChannelInfoFileItemProps>;
   EmptyStateComponent?: React.ComponentType<ChannelInfoEmptyStateProps>;
   LoadingComponent?: React.ComponentType;
+  /** Custom component for the tab header buttons */
+  TabHeaderComponent?: React.ComponentType<ChannelInfoTabHeaderProps>;
   /** Whether the tabs panel is currently visible — controls data fetching (default: true) */
   isVisible?: boolean;
+  roleLabels?: Record<string, string>;
+  /** Ref or Element of the parent scrollable container — used for virtualization sync (default: undefined) */
+  scrollContainerRef?: React.RefObject<HTMLDivElement | null> | HTMLDivElement | null;
 };
 
 export type ChannelInfoProps = {
@@ -1416,6 +1455,8 @@ export type ChannelInfoProps = {
   FileItemComponent?: React.ComponentType<ChannelInfoFileItemProps>;
   EmptyStateComponent?: React.ComponentType<ChannelInfoEmptyStateProps>;
   LoadingComponent?: React.ComponentType;
+  /** Custom component for the tab header buttons (passed through to TabsComponent) */
+  TabHeaderComponent?: React.ComponentType<ChannelInfoTabHeaderProps>;
 
   /** Add Member customization (passed through to AddMemberModal) */
   addMemberModalTitle?: string;
@@ -1448,6 +1489,10 @@ export type ChannelInfoProps = {
   editChannelMaxImageSizeError?: string;
 
   /** Action Labels */
+  /** Custom component for the search panel */
+  MessageSearchPanelComponent?: React.ComponentType<MessageSearchPanelProps>;
+  /** Custom component for the channel settings panel */
+  ChannelSettingsPanelComponent?: React.ComponentType<ChannelSettingsPanelProps>;
   actionsSearchLabel?: string;
   actionsSettingsLabel?: string;
   actionsDeleteLabel?: string;
@@ -1478,11 +1523,17 @@ export type ChannelInfoProps = {
   actionsUnblockLabel?: string;
   actionsCloseTopicLabel?: string;
   actionsReopenTopicLabel?: string;
+  actionsDeleteTopicLabel?: string;
+  actionsCreateTopicLabel?: string;
+  onDeleteTopic?: (channel: Channel) => void;
+  onCreateTopic?: (channel: Channel) => void;
 
   /** Settings Panel Topics Labels */
   settingsWorkspaceTopicsTitle?: string;
   settingsTopicsFeatureName?: string;
   settingsTopicsFeatureDescription?: string;
+  /** Custom labels for member roles (owner, moder, member, pending) */
+  roleLabels?: Record<string, string>;
 };
 
 /* ----------------------------------------------------------

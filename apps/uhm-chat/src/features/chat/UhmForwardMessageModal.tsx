@@ -14,6 +14,7 @@ import {
   Avatar,
   removeAccents,
   isTopicChannel,
+  isGroupChannel,
   isStickerMessage,
   isImage,
   isVideo,
@@ -216,8 +217,8 @@ export function UhmForwardMessageModal({
                   key={ch.cid}
                   onClick={() => toggleChannel(ch.cid)}
                   className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 group active:scale-[0.98] ${isSelected
-                      ? 'bg-primary/10 dark:bg-primary/20'
-                      : 'hover:bg-zinc-100 dark:hover:bg-white/5'
+                    ? 'bg-primary/10 dark:bg-primary/20'
+                    : 'hover:bg-zinc-100 dark:hover:bg-white/5'
                     }`}
                 >
                   <div className="relative shrink-0">
@@ -234,7 +235,7 @@ export function UhmForwardMessageModal({
                         image={ch.data?.image as string}
                         name={name}
                         size={40}
-                        className={ch.type === 'team' || ch.type === 'group' ? 'ermis-avatar-wrapper--group' : undefined}
+                        className={isGroupChannel(ch) ? 'ermis-avatar-wrapper--group' : undefined}
                       />
                     )}
                     {isSelected && (

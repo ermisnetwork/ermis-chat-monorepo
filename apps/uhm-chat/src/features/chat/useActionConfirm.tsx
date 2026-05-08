@@ -11,6 +11,10 @@ const CONFIRM_ACTIONS: Record<string, { titleKey: string; messageKey: string }> 
     titleKey: 'actions.confirm_delete_title',
     messageKey: 'actions.confirm_delete_message',
   },
+  delete_topic: {
+    titleKey: 'actions.confirm_delete_topic_title',
+    messageKey: 'actions.confirm_delete_topic_message',
+  },
   leave: {
     titleKey: 'actions.confirm_leave_title',
     messageKey: 'actions.confirm_leave_message',

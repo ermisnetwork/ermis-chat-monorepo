@@ -456,3 +456,38 @@
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
+
+/* ----------------------------------------------------------
+   Drag & Drop Overlay (Global over channel)
+   ---------------------------------------------------------- */
+.ermis-channel__drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background-color: var(--ermis-bg-overlay);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* Let the window drag events pass through */
+}
+
+.ermis-channel__drop-overlay-content {
+  border: 2px dashed var(--ermis-accent);
+  border-radius: var(--ermis-radius-lg);
+  padding: var(--ermis-spacing-xl) var(--ermis-spacing-xxl);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ermis-spacing-md);
+  color: var(--ermis-accent);
+  background-color: var(--ermis-bg-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+
+.ermis-channel__drop-overlay-content span {
+  font-size: var(--ermis-font-size-lg);
+  font-weight: 600;
+  font-family: var(--ermis-font-family);
+}

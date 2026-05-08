@@ -44,6 +44,7 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
   onSelectTopic,
   onEditTopic,
   onToggleCloseTopic,
+  onDeleteTopic,
   hiddenActions,
   actionLabels,
   actionIcons,
@@ -51,6 +52,14 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
   pendingBadgeLabel,
   blockedBadgeLabel,
   scrollToTopOnOwnMessage = true,
+  deletedMessageLabel,
+  stickerMessageLabel,
+  photoMessageLabel,
+  videoMessageLabel,
+  voiceRecordingMessageLabel,
+  fileMessageLabel,
+  systemMessageTranslations,
+  signalMessageTranslations,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const currentUserId = client.userID;
@@ -157,6 +166,15 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
         pendingBadgeLabel={pendingBadgeLabel}
         blockedBadgeLabel={blockedBadgeLabel}
         ChannelActionsComponent={NoActions}
+        hiddenActions={hiddenActions}
+        deletedMessageLabel={deletedMessageLabel}
+        stickerMessageLabel={stickerMessageLabel}
+        photoMessageLabel={photoMessageLabel}
+        videoMessageLabel={videoMessageLabel}
+        voiceRecordingMessageLabel={voiceRecordingMessageLabel}
+        fileMessageLabel={fileMessageLabel}
+        systemMessageTranslations={systemMessageTranslations}
+        signalMessageTranslations={signalMessageTranslations}
       />
       {/* Sub-topics — with full data (last msg, unread, timestamp, pin icon) */}
       {topics.map((topic: Channel) => (
@@ -175,9 +193,18 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
           ChannelActionsComponent={ChannelActionsComponent}
           onEditTopic={handleEditTopic}
           onToggleCloseTopic={onToggleCloseTopic}
+          onDeleteTopic={onDeleteTopic}
           hiddenActions={hiddenActions}
           actionLabels={actionLabels}
           actionIcons={actionIcons}
+          deletedMessageLabel={deletedMessageLabel}
+          stickerMessageLabel={stickerMessageLabel}
+          photoMessageLabel={photoMessageLabel}
+          videoMessageLabel={videoMessageLabel}
+          voiceRecordingMessageLabel={voiceRecordingMessageLabel}
+          fileMessageLabel={fileMessageLabel}
+          systemMessageTranslations={systemMessageTranslations}
+          signalMessageTranslations={signalMessageTranslations}
         />
       ))}
     </VList>

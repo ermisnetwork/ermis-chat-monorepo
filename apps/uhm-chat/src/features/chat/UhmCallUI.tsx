@@ -2,16 +2,16 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useCallContext } from '@ermis-network/ermis-chat-react'
 import { CallStatus } from '@ermis-network/ermis-chat-sdk'
-import { 
-  Phone, 
-  PhoneOff, 
-  Video as VideoIcon, 
-  VideoOff, 
-  Mic, 
-  MicOff, 
-  MonitorUp, 
-  Maximize, 
-  Minimize, 
+import {
+  Phone,
+  PhoneOff,
+  Video as VideoIcon,
+  VideoOff,
+  Mic,
+  MicOff,
+  MonitorUp,
+  Maximize,
+  Minimize,
   AlertCircle,
   ChevronDown
 } from 'lucide-react'
@@ -241,8 +241,8 @@ export const UhmCallUI: React.FC = () => {
       <div
         ref={callContainerRef}
         className={`relative w-full overflow-hidden bg-[#0d0c15] text-white shadow-2xl transition-all duration-500 ${isVideo
-            ? (isFullscreen ? 'fixed inset-0' : 'max-w-5xl aspect-video rounded-[2rem] border border-white/5')
-            : 'max-w-md aspect-[4/5] rounded-[2.5rem] border border-white/5'
+          ? (isFullscreen ? 'fixed inset-0' : 'max-w-5xl aspect-video rounded-[2rem] border border-white/5')
+          : 'max-w-md aspect-[4/5] rounded-[2.5rem] border border-white/5'
           }`}
         onMouseMove={handleMouseMove}
       >
@@ -316,9 +316,9 @@ export const UhmCallUI: React.FC = () => {
               >
                 {isMicMuted ? <MicOff className="w-5 h-5 text-white" /> : <Mic className="w-5 h-5 text-white" />}
               </button>
-              
+
               <div className={`w-px h-6 transition-colors ${isMicMuted ? 'bg-white/20' : 'bg-white/10'}`} />
-              
+
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="h-full pl-1 pr-3 flex items-center justify-center transition-all hover:bg-black/10 active:scale-90 text-white/80 hover:text-white">
@@ -330,8 +330,8 @@ export const UhmCallUI: React.FC = () => {
                   <DropdownMenuSeparator className="bg-white/5" />
                   <DropdownMenuRadioGroup value={selectedAudioDeviceId} onValueChange={switchAudioDevice}>
                     {audioDevices.map((device) => (
-                      <DropdownMenuRadioItem 
-                        key={device.deviceId} 
+                      <DropdownMenuRadioItem
+                        key={device.deviceId}
                         value={device.deviceId}
                         className="focus:bg-indigo-500 focus:text-white cursor-pointer py-2.5 px-3 rounded-lg mx-1"
                       >
@@ -367,8 +367,8 @@ export const UhmCallUI: React.FC = () => {
                   <DropdownMenuRadioGroup value={selectedVideoDeviceId} onValueChange={switchVideoDevice}>
                     {videoDevices.length > 0 ? (
                       videoDevices.map((device) => (
-                        <DropdownMenuRadioItem 
-                          key={device.deviceId} 
+                        <DropdownMenuRadioItem
+                          key={device.deviceId}
                           value={device.deviceId}
                           className="focus:bg-indigo-500 focus:text-white cursor-pointer py-2.5 px-3 rounded-lg mx-1"
                         >

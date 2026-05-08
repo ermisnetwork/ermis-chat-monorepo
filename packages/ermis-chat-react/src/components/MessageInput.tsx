@@ -8,7 +8,8 @@ import { useFileUpload } from '../hooks/useFileUpload';
 import { useEmojiPicker } from '../hooks/useEmojiPicker';
 import { useStickerPicker } from '../hooks/useStickerPicker';
 import { useMessageSend } from '../hooks/useMessageSend';
-import { DefaultSendButton, DefaultAttachButton, DefaultEmojiButton, DefaultStickerButton, DefaultStickerPicker } from './MessageInputDefaults';
+import { useDragAndDrop } from '../hooks/useDragAndDrop';
+import { DefaultSendButton, DefaultAttachButton, DefaultEmojiButton, DefaultStickerButton, DefaultStickerPicker, DefaultDragAndDropOverlay } from './MessageInputDefaults';
 import { MentionSuggestions } from './MentionSuggestions';
 import { FilesPreview } from './FilesPreview';
 import { ReplyPreview } from './ReplyPreview';
@@ -58,6 +59,8 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   joinChannelLabel = 'Join Channel',
   replyingToLabel,
   editingMessageLabel,
+  dragAndDropLabel = 'Drop files here to upload',
+  DragAndDropOverlayComponent = DefaultDragAndDropOverlay,
 }) => {
   const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -212,6 +215,11 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     files, setFiles, fileInputRef,
     handleFilesSelected, handleRemoveFile, handleAttachClick, cleanupFiles,
   } = useFileUpload({ activeChannel, editableRef, setHasContent });
+
+  const { isDragging } = useDragAndDrop(
+    handleFilesSelected,
+    disableAttachments || !canSendMessage || isSlowModeBlocked || !!editingMessage || !!quotedMessage
+  );
 
   // Pre-fill text and legacy attachments when editingMessage is set
   useEffect(() => {
@@ -383,9 +391,17 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
+    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+      if (!disableAttachments && canSendMessage && !isSlowModeBlocked && !editingMessage) {
+        handleFilesSelected(e.clipboardData.files);
+      }
+      return;
+    }
     const plainText = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, plainText);
-  }, []);
+    if (plainText) {
+      document.execCommand('insertText', false, plainText);
+    }
+  }, [disableAttachments, canSendMessage, isSlowModeBlocked, editingMessage, handleFilesSelected]);
 
   if (!activeChannel) return null;
 
@@ -571,6 +587,11 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       {/* Sticker Picker Dropdown */}
       {!disableStickers && StickerPickerComponent && stickerPickerOpen && (
         <StickerPickerComponent stickerIframeUrl={stickerIframeUrl} onClose={closeStickerPicker} />
+      )}
+
+      {/* Drag & Drop Overlay */}
+      {isDragging && (
+        <DragAndDropOverlayComponent dragAndDropLabel={dragAndDropLabel} />
       )}
     </div>
   );

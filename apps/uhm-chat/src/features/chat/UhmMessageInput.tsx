@@ -19,11 +19,22 @@ import {
   replaceMentionsForPreview,
   getMentionHtml,
   useMentions,
+  useDragAndDrop,
 } from '@ermis-network/ermis-chat-react';
 import { Paperclip, SendHorizonal, Smile, Cat } from 'lucide-react';
 import { useUIStore } from '@/store/useUIStore';
 
-export const UhmMessageInput: React.FC = () => {
+import { UhmDragAndDropOverlay } from './UhmDragAndDropOverlay';
+
+export type UhmMessageInputProps = {
+  dragAndDropLabel?: string;
+  DragAndDropOverlayComponent?: React.ComponentType<{ dragAndDropLabel: string }>;
+};
+
+export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
+  dragAndDropLabel,
+  DragAndDropOverlayComponent = UhmDragAndDropOverlay,
+}) => {
   const { t } = useTranslation();
   const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -49,6 +60,11 @@ export const UhmMessageInput: React.FC = () => {
     files, setFiles, fileInputRef,
     handleFilesSelected, handleRemoveFile, handleAttachClick, cleanupFiles,
   } = useFileUpload({ activeChannel, editableRef, setHasContent });
+
+  const { isDragging } = useDragAndDrop(
+    handleFilesSelected,
+    !canSendMessage || !!editingMessage || !!quotedMessage
+  );
 
   // Mentions
   const members = useMemo(() => {
@@ -149,9 +165,17 @@ export const UhmMessageInput: React.FC = () => {
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
+    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+      if (canSendMessage && !editingMessage) {
+        handleFilesSelected(e.clipboardData.files);
+      }
+      return;
+    }
     const plainText = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, plainText);
-  }, []);
+    if (plainText) {
+      document.execCommand('insertText', false, plainText);
+    }
+  }, [canSendMessage, editingMessage, handleFilesSelected]);
 
   const handleEmojiSelect = useCallback((emojiNative: string) => {
     const el = editableRef.current;
@@ -396,6 +420,13 @@ export const UhmMessageInput: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Drag & Drop Overlay */}
+      {isDragging && (
+        <DragAndDropOverlayComponent 
+          dragAndDropLabel={dragAndDropLabel || t('chat.dragAndDrop', 'Thả file vào đây để gửi')} 
+        />
+      )}
     </div>
   );
 };

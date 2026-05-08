@@ -24,6 +24,7 @@ export { useOnlineUsers } from './hooks/useOnlineUsers';
 export { usePendingState } from './hooks/usePendingState';
 export { usePreviewState } from './hooks/usePreviewState';
 export { useTopicGroupUpdates } from './hooks/useTopicGroupUpdates';
+export { useDragAndDrop } from './hooks/useDragAndDrop';
 export { useMessageSend } from './hooks/useMessageSend';
 export { useFileUpload } from './hooks/useFileUpload';
 export { useEmojiPicker } from './hooks/useEmojiPicker';
@@ -81,7 +82,17 @@ export { MessageQuickReactions } from './components/MessageQuickReactions';
 
 export { useMessageActions } from './hooks/useMessageActions';
 
-export { formatTime, getDateKey, formatDateLabel, getMessageUserId, replaceMentionsForPreview, getLastMessagePreview, buildUserMap, removeAccents } from './utils';
+export {
+  formatTime,
+  getDateKey,
+  formatDateLabel,
+  getMessageUserId,
+  replaceMentionsForPreview,
+  getLastMessagePreview,
+  buildUserMap,
+  removeAccents,
+  formatRelativeDate,
+} from './utils';
 export { getAvatarGradient } from './utils/avatarColors';
 export {
   isGroupChannel,
@@ -191,6 +202,11 @@ export {
   DefaultChannelInfoCover,
   DefaultChannelInfoActions,
   DefaultChannelInfoTabs,
+  MessageSearchPanel,
+  HighlightedText,
+  useMessageSearch,
+  ChannelSettingsPanel,
+  useChannelSettings,
 } from './components/ChannelInfo';
 
 export { Modal } from './components/Modal';
@@ -201,6 +217,7 @@ export type {
   ChannelInfoCoverProps,
   ChannelInfoActionsProps,
   ChannelInfoTabsProps,
+  ChannelInfoTabHeaderProps,
   ChannelInfoMemberItemProps,
   ChannelInfoMediaItemProps,
   ChannelInfoLinkItemProps,
@@ -215,6 +232,8 @@ export type {
   EditChannelModalProps,
   EditChannelData,
   TopicModalProps,
+  MessageSearchPanelProps,
+  ChannelSettingsPanelProps,
 } from './types';
 
 export { UserPicker } from './components/UserPicker';

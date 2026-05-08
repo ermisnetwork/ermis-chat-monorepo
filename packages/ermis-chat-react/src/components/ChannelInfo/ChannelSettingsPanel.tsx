@@ -6,6 +6,8 @@ import type { ChannelSettingsPanelProps } from '../../types';
 import { isGroupChannel } from '../../channelTypeUtils';
 import { CHANNEL_ROLES } from '../../channelRoleUtils';
 
+import { useChannelSettings } from './useChannelSettings';
+
 export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.memo(({
   isOpen,
   onClose,
@@ -29,183 +31,35 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
   const Panel = PanelComponent || DefaultPanel;
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
-  const isOwner = currentUserRole === CHANNEL_ROLES.OWNER;
 
-  const [slowMode, setSlowMode] = useState<number>(0);
-  const [topicsEnabled, setTopicsEnabled] = useState<boolean>(false);
-  const [capabilities, setCapabilities] = useState<Record<string, boolean>>({
-    'send-message': true,
-    'send-links': true,
-    'update-own-message': true,
-    'delete-own-message': true,
-    'send-reaction': true,
-    'pin-message': true,
-    'create-poll': true,
-    'vote-poll': true,
+  const {
+    slowMode,
+    setSlowMode,
+    topicsEnabled,
+    setTopicsEnabled,
+    capabilities,
+    toggleCapability,
+    keywords,
+    newKeyword,
+    setNewKeyword,
+    handleAddNewKeyword,
+    handleRemoveKeyword,
+    isSaving,
+    error,
+    isDirty,
+    isOwner,
+    handleSave,
+  } = useChannelSettings({
+    channel: channel as any,
+    isOpen,
+    onClose,
+    currentUserRole,
   });
-
-  const [keywords, setKeywords] = useState<string[]>([]);
-  const [newKeyword, setNewKeyword] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Sync state when panel opens or channel updates
-  useEffect(() => {
-    if (!channel) return;
-
-    const syncData = (dataToSync = channel.data) => {
-      console.log('---syncData---', dataToSync);
-      setSlowMode((dataToSync?.member_message_cooldown as number) || 0);
-      setKeywords((dataToSync?.filter_words as string[]) || []);
-      setTopicsEnabled(dataToSync?.topics_enabled === true);
-
-      const caps = dataToSync?.member_capabilities as string[] || [];
-      setCapabilities({
-        'send-message': caps.includes('send-message'),
-        'send-links': caps.includes('send-links'),
-        'update-own-message': caps.includes('update-own-message'),
-        'delete-own-message': caps.includes('delete-own-message'),
-        'send-reaction': caps.includes('send-reaction'),
-        'pin-message': caps.includes('pin-message'),
-        'create-poll': caps.includes('create-poll'),
-        'vote-poll': caps.includes('vote-poll'),
-      });
-      setError(null);
-    };
-
-    if (isOpen) {
-      syncData();
-    }
-
-    // Listen to real-time changes
-    const subscription = channel.on('channel.updated', (event: any) => {
-      const latestData = event?.channel || channel.data;
-      // Force mutating local channel.data to ensure future syncData hits cache
-      if (event?.channel && channel.data) {
-        Object.assign(channel.data, event.channel);
-      }
-
-      if (isOpen) {
-        syncData(latestData);
-      }
-    });
-
-    return () => {
-      subscription?.unsubscribe();
-    };
-  }, [isOpen, channel]);
-
-  const toggleCapability = (key: string) => {
-    setCapabilities(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  // Compute dirty state
-  const isSlowModeChanged = slowMode !== ((channel?.data?.member_message_cooldown as number) || 0);
-  const isTopicsChanged = topicsEnabled !== (channel?.data?.topics_enabled === true);
-
-  const currentKeywordsSorted = [...keywords].sort().join(',');
-  const originalKeywordsSorted = [...((channel?.data?.filter_words as string[]) || [])].sort().join(',');
-  const isKeywordsChanged = currentKeywordsSorted !== originalKeywordsSorted;
-
-  const originalCapabilities = channel?.data?.member_capabilities as string[] || [];
-  const initialCapabilities: Record<string, boolean> = {
-    'send-message': originalCapabilities.includes('send-message'),
-    'send-links': originalCapabilities.includes('send-links'),
-    'update-own-message': originalCapabilities.includes('update-own-message'),
-    'delete-own-message': originalCapabilities.includes('delete-own-message'),
-    'send-reaction': originalCapabilities.includes('send-reaction'),
-    'pin-message': originalCapabilities.includes('pin-message'),
-    'create-poll': originalCapabilities.includes('create-poll'),
-    'vote-poll': originalCapabilities.includes('vote-poll'),
-  };
-  const isCapabilitiesChanged = Object.keys(capabilities).some(k => capabilities[k] !== initialCapabilities[k]);
-
-  const isDirty = isSlowModeChanged || isKeywordsChanged || isCapabilitiesChanged || isTopicsChanged;
-
-  const handleAddNewKeyword = () => {
-    if (newKeyword.trim()) {
-      const keyword = newKeyword.trim().toLowerCase();
-      if (!keywords.includes(keyword)) {
-        setKeywords(prev => [...prev, keyword]);
-      }
-      setNewKeyword('');
-    }
-  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       handleAddNewKeyword();
-    }
-  };
-
-  const handeRemoveKeyword = (kw: string) => {
-    setKeywords(prev => prev.filter(k => k !== kw));
-  };
-
-  const handleSave = async () => {
-    if (!channel) return;
-    setIsSaving(true);
-    setError(null);
-    try {
-      const dataUpdates: any = {};
-      let capabilitiesArray: string[] | null = null;
-
-      if (isSlowModeChanged) {
-        dataUpdates.member_message_cooldown = slowMode;
-      }
-
-      if (isKeywordsChanged) {
-        dataUpdates.filter_words = keywords;
-      }
-
-      if (isCapabilitiesChanged) {
-        const controlledKeys = Object.keys(capabilities);
-        const originalCaps = (channel.data?.member_capabilities as string[]) || [];
-
-        // Preserve unmanaged original capabilities (e.g. create-call, join-call)
-        const unmanagedCaps = originalCaps.filter(c => !controlledKeys.includes(c));
-
-        // Extract managed capabilities that are currently enabled (true)
-        const managedEnabledCaps = controlledKeys.filter(k => capabilities[k as keyof typeof capabilities]);
-
-        // Merge into the final payload array
-        capabilitiesArray = [...unmanagedCaps, ...managedEnabledCaps];
-      }
-
-      if (Object.keys(dataUpdates).length > 0 || capabilitiesArray !== null) {
-        const payload: any = {};
-
-        if (Object.keys(dataUpdates).length > 0) {
-          payload.data = dataUpdates;
-          if (channel.data) Object.assign(channel.data, dataUpdates);
-        }
-
-        if (capabilitiesArray !== null) {
-          payload.capabilities = capabilitiesArray;
-          if (channel.data) {
-            // Local fallback naming to keep UI synchronous
-            channel.data.member_capabilities = capabilitiesArray;
-          }
-        }
-
-        // Use _update instead of update to safely construct root-level payloads
-        await (channel as any)._update(payload);
-      }
-
-      if (isTopicsChanged) {
-        if (topicsEnabled) {
-          await channel.enableTopics();
-        } else {
-          await channel.disableTopics();
-        }
-      }
-
-      onClose();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to update settings');
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -417,7 +271,7 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
               >
                 {kw}
                 <button
-                  onClick={() => handeRemoveKeyword(kw)}
+                  onClick={() => handleRemoveKeyword(kw)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',

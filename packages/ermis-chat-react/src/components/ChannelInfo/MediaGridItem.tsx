@@ -72,11 +72,19 @@ export const MediaGridItem: React.FC<{
 }, (prev, next) => prev.item.id === next.item.id);
 (MediaGridItem as any).displayName = 'MediaGridItem';
 
-export const MediaRow = React.memo(({ row, onClick }: { row: AttachmentItem[], onClick: (url: string) => void }) => {
+export const MediaRow = React.memo(({ 
+  row, 
+  onClick,
+  MediaItemComponent = MediaGridItem
+}: { 
+  row: AttachmentItem[], 
+  onClick: (url: string) => void,
+  MediaItemComponent?: React.ComponentType<{ item: AttachmentItem, onClick: (url: string) => void }>
+}) => {
   return (
     <div className="ermis-channel-info__media-grid-row">
       {row.map(item => (
-        <MediaGridItem key={item.id} item={item} onClick={onClick} />
+        <MediaItemComponent key={item.id} item={item} onClick={onClick} />
       ))}
       {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, i) => (
         <div key={`empty-${i}`} className="ermis-channel-info__media-item ermis-channel-info__media-item--empty" />

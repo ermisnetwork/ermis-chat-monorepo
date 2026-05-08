@@ -18,6 +18,10 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
     }
 
     const checkPending = () => {
+      // Topics are accessible by default if the user is in the parent channel.
+      // We ignore the individual pending invite state for topics to avoid redundant overlays.
+      if (channel.type === 'topic') return false;
+
       const membership = channel.state?.membership || channel.state?.members?.[currentUserId];
       return isPendingMember(membership?.channel_role as string);
     };

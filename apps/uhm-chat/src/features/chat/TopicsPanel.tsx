@@ -9,7 +9,7 @@ import {
   Avatar,
   canManageChannel,
 } from '@ermis-network/ermis-chat-react'
-import type { Channel } from '@ermis-network/ermis-chat-sdk'
+import type { Channel, SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk'
 import { UhmChannelActions } from './UhmChannelActions'
 
 interface TopicsPanelProps {
@@ -18,6 +18,14 @@ interface TopicsPanelProps {
   onCreateTopic?: (channel: Channel) => void
   onEditTopic?: (topic: Channel) => void
   onShowChannelInfo?: (channel: Channel) => void
+  deletedMessageLabel?: string
+  stickerMessageLabel?: string
+  photoMessageLabel?: string
+  videoMessageLabel?: string
+  voiceRecordingMessageLabel?: string
+  fileMessageLabel?: string
+  systemMessageTranslations?: SystemMessageTranslations
+  signalMessageTranslations?: SignalMessageTranslations
 }
 
 /** Custom general avatar using lucide Hash icon + TailwindCSS */
@@ -40,7 +48,21 @@ const TopicEmojiAvatar = ({ image }: { image?: string | null }) => {
   )
 }
 
-export function TopicsPanel({ channel, onBack, onCreateTopic, onEditTopic, onShowChannelInfo }: TopicsPanelProps) {
+export function TopicsPanel({
+  channel,
+  onBack,
+  onCreateTopic,
+  onEditTopic,
+  onShowChannelInfo,
+  deletedMessageLabel,
+  stickerMessageLabel,
+  photoMessageLabel,
+  videoMessageLabel,
+  voiceRecordingMessageLabel,
+  fileMessageLabel,
+  systemMessageTranslations,
+  signalMessageTranslations,
+}: TopicsPanelProps) {
   const { t } = useTranslation()
   const { client } = useChatClient()
   const currentUserId = client.userID
@@ -60,6 +82,7 @@ export function TopicsPanel({ channel, onBack, onCreateTopic, onEditTopic, onSho
     editTopic: t('actions.edit_topic'),
     closeTopic: t('actions.close_topic'),
     reopenTopic: t('actions.reopen_topic'),
+    deleteTopic: t('actions.delete_topic'),
   }), [t])
 
   return (
@@ -123,6 +146,14 @@ export function TopicsPanel({ channel, onBack, onCreateTopic, onEditTopic, onSho
           ChannelActionsComponent={UhmChannelActions}
           actionLabels={actionLabels}
           onEditTopic={onEditTopic}
+          deletedMessageLabel={deletedMessageLabel}
+          stickerMessageLabel={stickerMessageLabel}
+          photoMessageLabel={photoMessageLabel}
+          videoMessageLabel={videoMessageLabel}
+          voiceRecordingMessageLabel={voiceRecordingMessageLabel}
+          fileMessageLabel={fileMessageLabel}
+          systemMessageTranslations={systemMessageTranslations}
+          signalMessageTranslations={signalMessageTranslations}
         />
       </div>
     </div>

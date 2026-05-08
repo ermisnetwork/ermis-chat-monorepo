@@ -10,10 +10,11 @@ import { useChatClient } from '@ermis-network/ermis-chat-react';
 
 const DEFAULT_TOPIC_ICONS = ['💬', '🔥', '🚀', '⭐', '💡', '🎉', '📌', '📁', '🎨', '💻', '📈', '🤝', '🌈', '⚡', '🤖', '🎮', '🎧', '📚', '🍕', '⚽'];
 
-export const UhmEditTopicModal: React.FC<TopicModalProps> = React.memo(({
+export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
   isOpen,
   onClose,
   topic,
+  parentChannel: propParentChannel,
   title: propTitle,
   nameLabel: propNameLabel,
   namePlaceholder: propNamePlaceholder,
@@ -57,7 +58,7 @@ export const UhmEditTopicModal: React.FC<TopicModalProps> = React.memo(({
       if (topic) {
         // Edit Mode
         const parentCid = topic.data?.parent_cid as string;
-        const parentChannel = client.activeChannels[parentCid] || activeChannel;
+        const parentChannel = client.activeChannels[parentCid] || propParentChannel || activeChannel;
         
         if (!parentChannel) throw new Error("Parent channel not found");
 
@@ -71,7 +72,8 @@ export const UhmEditTopicModal: React.FC<TopicModalProps> = React.memo(({
         }
       } else {
         // Create Mode
-        if (!activeChannel) throw new Error("Active channel not found");
+        const targetChannel = propParentChannel || activeChannel;
+        if (!targetChannel) throw new Error("Parent channel not found");
         
         const payload: any = {
           name: name.trim(),
@@ -79,7 +81,7 @@ export const UhmEditTopicModal: React.FC<TopicModalProps> = React.memo(({
           description: description.trim(),
         };
 
-        await activeChannel.createTopic(payload);
+        await targetChannel.createTopic(payload);
       }
       onClose();
     } catch (err: any) {
@@ -87,7 +89,7 @@ export const UhmEditTopicModal: React.FC<TopicModalProps> = React.memo(({
     } finally {
       setIsSaving(false);
     }
-  }, [client.activeChannels, activeChannel, topic, name, emoji, description, originalName, originalEmoji, originalDescription, onClose]);
+  }, [client.activeChannels, activeChannel, propParentChannel, topic, name, emoji, description, originalName, originalEmoji, originalDescription, onClose]);
 
   const isValid = name.trim().length > 0 && emoji.length > 0;
 
@@ -176,4 +178,4 @@ export const UhmEditTopicModal: React.FC<TopicModalProps> = React.memo(({
   );
 });
 
-UhmEditTopicModal.displayName = 'UhmEditTopicModal';
+UhmTopicModal.displayName = 'UhmTopicModal';

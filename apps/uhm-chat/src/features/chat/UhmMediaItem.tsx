@@ -10,12 +10,14 @@ export const UhmMediaItem: React.FC<{
 
   return (
     <div 
-      className="relative aspect-square cursor-pointer overflow-hidden rounded-xl bg-zinc-100 dark:bg-zinc-800 group"
+      className="flex-1 relative aspect-square cursor-pointer overflow-hidden rounded-xl bg-zinc-100 dark:bg-zinc-800 group"
       onClick={() => onClick(item.url)}
     >
       <img
         src={item.thumb_url || item.url}
         alt={item.file_name}
+        loading="lazy"
+        decoding="async"
         className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
       />
       {isVideo && (

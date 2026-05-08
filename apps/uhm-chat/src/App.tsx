@@ -112,7 +112,7 @@ function AppContent() {
   const handleLoginSuccess = (userId: string, token: string) => {
     // Always navigate to ChatPage regardless of WS connection status
     setIsAuthenticated(true)
-    navigate('/', { replace: true })
+    navigate('/chat', { replace: true })
 
     // Fire-and-forget: WS connection runs in background
     chatClient.connectUser(
@@ -149,12 +149,17 @@ function AppContent() {
         <Route
           path="/login"
           element={
-            isAuthenticated ? <Navigate to="/" replace /> : <LoginPage onLoginSuccess={handleLoginSuccess} />
+            isAuthenticated ? <Navigate to="/chat" replace /> : <LoginPage onLoginSuccess={handleLoginSuccess} />
           }
         />
 
+        <Route 
+          path="/" 
+          element={<Navigate to="/chat" replace />} 
+        />
+
         <Route
-          path="/"
+          path="/chat"
           element={
             <AuthRoute isAuthenticated={isAuthenticated} isRestoring={isRestoring}>
               <ChatPage />

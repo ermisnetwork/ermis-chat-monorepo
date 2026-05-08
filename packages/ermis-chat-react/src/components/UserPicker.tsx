@@ -10,6 +10,7 @@ import type {
   UserPickerUser,
 } from '../types';
 import { isFriendChannel } from '../channelRoleUtils';
+import { removeAccents } from '../utils';
 
 /* ---------- Constants ---------- */
 const DEFAULT_PAGE_SIZE = 30;
@@ -291,12 +292,12 @@ export const UserPicker: React.FC<UserPickerProps> = ({
 
   /* ---------- 3. Local filter ---------- */
   const localFilteredUsers = useMemo(() => {
-    const term = search.toLowerCase().trim();
+    const term = removeAccents(search.toLowerCase().trim());
     if (!term) return allUsers;
     return allUsers.filter(u => {
-      const name = (u.name || '').toLowerCase();
-      const email = (u.email || '').toLowerCase();
-      const phone = (u.phone || '').toLowerCase();
+      const name = removeAccents((u.name || '').toLowerCase());
+      const email = removeAccents((u.email || '').toLowerCase());
+      const phone = removeAccents((u.phone || '').toLowerCase());
       return name.includes(term) || email.includes(term) || phone.includes(term);
     });
   }, [search, allUsers]);

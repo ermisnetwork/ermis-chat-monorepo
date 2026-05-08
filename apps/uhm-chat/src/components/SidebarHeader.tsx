@@ -109,7 +109,9 @@ export function SidebarHeader({
             >
               <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-300" />
               {inviteCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 border-2 border-white dark:border-[#1a1828]" />
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 flex items-center justify-center rounded-full bg-red-500 border border-white dark:border-[#1a1828] text-[9px] font-bold text-white shadow-sm">
+                  {inviteCount > 99 ? '99+' : inviteCount}
+                </span>
               )}
             </Button>
           </DropdownMenuTrigger>

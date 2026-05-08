@@ -36,6 +36,7 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
   reopen: Unlock,
   create_topic: Plus,
   delete: Trash2,
+  delete_topic: Trash2,
   leave: LogOut,
 }
 

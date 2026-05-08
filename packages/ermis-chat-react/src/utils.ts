@@ -78,7 +78,7 @@ export function formatDateLabel(date: Date | string | undefined, locale?: string
       const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
       // Format -0 days → "today" / "hôm nay" etc.
       const parts = rtf.formatToParts(0, 'day');
-      const label = parts.map(p => p.value).join('');
+      const label = parts.map((p) => p.value).join('');
       return label.charAt(0).toUpperCase() + label.slice(1);
     }
     return 'Today';
@@ -87,7 +87,7 @@ export function formatDateLabel(date: Date | string | undefined, locale?: string
     if (locale && typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
       const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
       const parts = rtf.formatToParts(-1, 'day');
-      const label = parts.map(p => p.value).join('');
+      const label = parts.map((p) => p.value).join('');
       return label.charAt(0).toUpperCase() + label.slice(1);
     }
     return 'Yesterday';
@@ -114,7 +114,7 @@ export function replaceMentionsForPreview(
   text: string,
   message: FormatMessageResponse | { mentioned_users?: string[]; mentioned_all?: boolean },
   userMap: Record<string, string>,
-  renderWrapper?: (userId: string, name: string) => string
+  renderWrapper?: (userId: string, name: string) => string,
 ): string {
   const mentionedUsers: string[] = (message as any).mentioned_users ?? [];
   const mentionedAll: boolean = (message as any).mentioned_all ?? false;
@@ -138,7 +138,7 @@ export function replaceMentionsForPreview(
   if (mentionedAll) {
     replacements.push({
       pattern: '@all',
-      label: renderWrapper ? renderWrapper('__all__', 'all') : '@all'
+      label: renderWrapper ? renderWrapper('__all__', 'all') : '@all',
     });
   }
 
@@ -158,14 +158,48 @@ export function replaceMentionsForPreview(
  * Common helper to build a dictionary of User ID -> Display Name
  * from the channel state, used for rendering Mentions and System logs.
  */
-export function buildUserMap(channelState: any): Record<string, string> {
+export function buildUserMap(channelState: any, extraUsers?: Record<string, any>): Record<string, string> {
   const map: Record<string, string> = {};
+
+  // 1. Fallback: Global user cache from client state
+  if (extraUsers && typeof extraUsers === 'object') {
+    for (const [id, user] of Object.entries<any>(extraUsers)) {
+      if (user?.name) {
+        map[id] = user.name;
+      }
+    }
+  }
+
+  // 2. Current members
   const members = channelState?.members;
   if (members && typeof members === 'object') {
     for (const [id, member] of Object.entries<any>(members)) {
-      map[id] = member?.user?.name || member?.user_id || id;
+      const name = member?.user?.name || member?.user_id || id;
+      if (name) map[id] = name;
     }
   }
+
+  // 3. Fallback: scan latest messages
+  const messages = channelState?.latestMessages;
+  if (Array.isArray(messages)) {
+    messages.forEach((msg: any) => {
+      const u = msg.user;
+      if (u?.id && !map[u.id] && u.name) {
+        map[u.id] = u.name;
+      }
+    });
+  }
+
+  // 4. Fallback: check watchers
+  const watchers = channelState?.watchers;
+  if (watchers && typeof watchers === 'object') {
+    for (const [id, user] of Object.entries<any>(watchers)) {
+      if (!map[id] && user?.name) {
+        map[id] = user.name;
+      }
+    }
+  }
+
   return map;
 }
 
@@ -252,7 +286,11 @@ export function formatRelativeDate(dateStr: string): string {
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return `${diffDays}d ago`;
 
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
+  });
 }
 
 /**
@@ -306,12 +344,14 @@ export function getLastMessagePreview(
   const isDeleted = isDeletedDisplayMessage(lastMsg);
   const rawText = lastMsg.text ?? '';
 
+  const client = (channel as any).getClient?.() || (channel as any).client;
+  const userMap = buildUserMap(channel.state, client?.state?.users);
+
   if (isDeleted) {
     return { text: options?.deletedMessageLabel || 'This message was deleted', user: '', timestamp };
   }
 
   if (msgType === 'system') {
-    const userMap = buildUserMap(channel.state);
     return { text: parseSystemMessage(rawText, userMap, options?.systemMessageTranslations), user: '', timestamp };
   }
 
@@ -320,9 +360,13 @@ export function getLastMessagePreview(
     return { text: result?.text || rawText, user: '', timestamp };
   }
 
+  const userId = lastMsg.user_id || '';
+  const senderName = (userId && userMap[userId]) || lastMsg.user?.name || userId || '';
+
   // Display 'Sticker' if message is a sticker
-  if (msgType === 'sticker' || (lastMsg as Record<string, unknown>).sticker_url) {
-    return { text: options?.stickerMessageLabel || 'Sticker', user: lastMsg.user?.name || lastMsg.user_id || '', timestamp };
+  const isSticker = msgType === 'sticker' || (lastMsg as any).sticker_url;
+  if (isSticker) {
+    return { text: options?.stickerMessageLabel || 'Sticker', user: senderName, timestamp };
   }
 
   // Regular / other
@@ -350,18 +394,17 @@ export function getLastMessagePreview(
   }
 
   // Format mentions if necessary
-  const lastMsgRecord = lastMsg as Record<string, unknown>;
+  const lastMsgRecord = lastMsg as any;
   const mentionedUsers = lastMsgRecord.mentioned_users as string[] | undefined;
   const mentionedAll = lastMsgRecord.mentioned_all as boolean | undefined;
 
   if (displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
-    const userMap = buildUserMap(channel.state);
     displayText = replaceMentionsForPreview(displayText, lastMsg as any, userMap);
   }
 
   return {
     text: displayText,
-    user: lastMsg.user?.name || lastMsg.user_id || '',
+    user: senderName,
     timestamp,
   };
 }

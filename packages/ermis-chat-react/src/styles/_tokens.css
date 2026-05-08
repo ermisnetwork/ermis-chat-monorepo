@@ -12,6 +12,7 @@
   --ermis-bg-secondary: #111118;
   --ermis-bg-hover: rgba(255, 255, 255, 0.04);
   --ermis-bg-active: rgba(99, 102, 241, 0.12);
+  --ermis-bg-overlay: rgba(0, 0, 0, 0.4);
   --ermis-border: rgba(255, 255, 255, 0.08);
   --ermis-accent: #6366f1;
   --ermis-accent-hover: #818cf8;
@@ -89,6 +90,7 @@
   --ermis-bg-secondary: #f9fafb;
   --ermis-bg-hover: rgba(0, 0, 0, 0.04);
   --ermis-bg-active: rgba(99, 102, 241, 0.08);
+  --ermis-bg-overlay: rgba(255, 255, 255, 0.6);
   --ermis-border: rgba(0, 0, 0, 0.08);
   --ermis-accent: #6366f1;
   --ermis-accent-hover: #4f46e5;

@@ -1,15 +1,16 @@
 import React from 'react';
-import { 
-  Search, 
-  Settings, 
-  Pin, 
-  PinOff, 
-  LogOut, 
-  Trash2, 
-  Lock, 
-  Unlock, 
-  Ban, 
-  UserCheck 
+import {
+  Search,
+  Settings,
+  Pin,
+  PinOff,
+  LogOut,
+  Trash2,
+  Lock,
+  Unlock,
+  Ban,
+  UserCheck,
+  Plus
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useChatClient, canManageChannel, CHANNEL_ROLES, type ChannelInfoActionsProps } from '@ermis-network/ermis-chat-react';
@@ -26,11 +27,14 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   onUnpin,
   onCloseTopic,
   onReopenTopic,
+  onDeleteTopic,
+  onCreateTopic,
   isTeamChannel,
   isTopic,
   isClosedTopic,
   isBlocked,
   isPinned,
+  topicsEnabled,
   currentUserRole,
   searchLabel,
   settingsLabel,
@@ -41,7 +45,9 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   pinLabel,
   unpinLabel,
   closeTopicLabel,
-  reopenTopicLabel
+  reopenTopicLabel,
+  deleteTopicLabel,
+  createTopicLabel
 }) => {
   const { t } = useTranslation();
   const { activeChannel } = useChatClient();
@@ -55,16 +61,16 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     }
   };
 
-  const ActionItem = ({ 
-    onClick, 
-    icon: Icon, 
-    label, 
-    danger, 
-    disabled 
-  }: { 
-    onClick: () => void; 
-    icon: any; 
-    label: string; 
+  const ActionItem = ({
+    onClick,
+    icon: Icon,
+    label,
+    danger,
+    disabled
+  }: {
+    onClick: () => void;
+    icon: any;
+    label: string;
     danger?: boolean;
     disabled?: boolean;
   }) => (
@@ -74,8 +80,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
       className={`
         flex items-center gap-2.5 w-full px-3 py-2 
         rounded-xl text-sm font-medium transition-all duration-200
-        ${danger 
-          ? 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10' 
+        ${danger
+          ? 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10'
           : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'
         }
         ${disabled ? 'opacity-40 cursor-not-allowed grayscale' : 'active:scale-[0.98]'}
@@ -116,20 +122,30 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
 
         {/* Topic Management Actions */}
         {isTopic && canManageChannel(currentUserRole) && (
-          isClosedTopic ? (
-            <ActionItem
-              onClick={onReopenTopic}
-              icon={Unlock}
-              label={reopenTopicLabel}
-            />
-          ) : (
-            <ActionItem
-              onClick={() => handleActionWithConfirm('close', onCloseTopic)}
-              icon={Lock}
-              label={closeTopicLabel}
-              danger
-            />
-          )
+          <>
+            {isClosedTopic ? (
+              <ActionItem
+                onClick={onReopenTopic}
+                icon={Unlock}
+                label={reopenTopicLabel}
+              />
+            ) : (
+              <ActionItem
+                onClick={() => handleActionWithConfirm('close', onCloseTopic)}
+                icon={Lock}
+                label={closeTopicLabel}
+                danger
+              />
+            )}
+            {currentUserRole === CHANNEL_ROLES.OWNER && onDeleteTopic && (
+              <ActionItem
+                onClick={() => handleActionWithConfirm('delete_topic', onDeleteTopic)}
+                icon={Trash2}
+                label={deleteTopicLabel}
+                danger
+              />
+            )}
+          </>
         )}
 
         {/* Block/Unblock Actions (1-1 messaging only) */}
@@ -148,6 +164,15 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
               danger
             />
           )
+        )}
+
+        {/* Create Topic Action (Team Channels only) */}
+        {isTeamChannel && !isTopic && canManageChannel(currentUserRole) && topicsEnabled && onCreateTopic && (
+          <ActionItem
+            onClick={onCreateTopic}
+            icon={Plus}
+            label={createTopicLabel || t('actions.create_topic')}
+          />
         )}
 
         {/* Leave/Delete Actions (Team Channels only) */}

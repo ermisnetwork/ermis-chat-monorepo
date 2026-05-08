@@ -32,6 +32,7 @@ export function computeDefaultActions(
     onAddTopic?: (channel: Channel) => void;
     onEditTopic?: (channel: Channel) => void;
     onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
+    onDeleteTopic?: (channel: Channel) => void;
     isBlocked?: boolean;
     actionLabels?: ChannelActionLabels;
     actionIcons?: ChannelActionIcons;
@@ -137,6 +138,26 @@ export function computeDefaultActions(
             }
           } catch (err) {
             console.error('Failed to toggle topic close state', err);
+          }
+        },
+      });
+    }
+    // Topic: Delete (owner only)
+    if (role === CHANNEL_ROLES.OWNER) {
+      actions.push({
+        id: 'delete_topic',
+        label: actionLabels?.deleteTopic || 'Delete topic',
+        icon: actionIcons?.DeleteTopicIcon || <TrashIcon />,
+        isDanger: true,
+        onClick: async (ch) => {
+          if (options?.onDeleteTopic) {
+            options.onDeleteTopic(ch);
+            return;
+          }
+          try {
+            await ch.delete();
+          } catch (err) {
+            console.error('Failed to delete topic', err);
           }
         },
       });

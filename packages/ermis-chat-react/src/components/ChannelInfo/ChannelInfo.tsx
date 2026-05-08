@@ -1,15 +1,20 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Virtualizer as _Virtualizer } from 'virtua';
+const Virtualizer = _Virtualizer as any;
 import { useChatClient } from '../../hooks/useChatClient';
 import { useBannedState } from '../../hooks/useBannedState';
 import { useBlockedState } from '../../hooks/useBlockedState';
 import { usePreviewState } from '../../hooks/usePreviewState';
 import { Avatar } from '../Avatar';
-import { DefaultChannelInfoTabs } from './ChannelInfoTabs';
+import { DefaultChannelInfoTabHeader } from './ChannelInfoTabs';
+import { useChannelInfoTabs } from './useChannelInfoTabs';
 import { AddMemberModal } from './AddMemberModal';
 import { EditChannelModal } from './EditChannelModal';
 import { TopicModal } from '../TopicModal';
 import { MessageSearchPanel } from './MessageSearchPanel';
 import { ChannelSettingsPanel } from './ChannelSettingsPanel';
+import { MediaLightbox } from '../MediaLightbox';
+import { PENDING_STYLE, READY_STYLE } from './utils';
 import type {
   ChannelInfoProps,
   ChannelInfoHeaderProps,
@@ -19,6 +24,12 @@ import type {
 import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData';
 import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
 import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
+
+const MemoizedVirtualizer = React.memo(({ scrollRef, startMargin, data, renderItem }: any) => (
+  <Virtualizer scrollRef={scrollRef} startMargin={startMargin} data={data}>
+    {renderItem}
+  </Virtualizer>
+));
 
 const PinIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4" /><path d="M9 15l-4.5 4.5" /><path d="M14.5 4l5.5 5.5" /></svg>);
 const UnpinIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4" /><path d="M9 15l-4.5 4.5" /><path d="M14.5 4l5.5 5.5" /><line x1="3" y1="3" x2="21" y2="21" /></svg>);
@@ -104,12 +115,12 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
 DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
-  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel,
+  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, onDeleteTopic,
   onBlockUser, onUnblockUser, onPin, onUnpin, onCloseTopic, onReopenTopic,
   isTeamChannel, isTopic, isClosedTopic, isBlocked, isPinned, currentUserRole,
   searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', leaveLabel = 'Leave',
   blockLabel = 'Block', unblockLabel = 'Unblock', pinLabel = 'Pin', unpinLabel = 'Unpin',
-  closeTopicLabel = 'Close Topic', reopenTopicLabel = 'Reopen Topic'
+  closeTopicLabel = 'Close Topic', reopenTopicLabel = 'Reopen Topic', deleteTopicLabel = 'Delete Topic'
 }) => {
   return (
     <div className="ermis-channel-info__actions">
@@ -168,6 +179,15 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
           </button>
         )
       )}
+      {/* Topics: Delete Topic for owner */}
+      {isTopic && currentUserRole === CHANNEL_ROLES.OWNER && onDeleteTopic && (
+        <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onDeleteTopic}>
+          <div className="ermis-channel-info__action-icon">
+            <DeleteIcon />
+          </div>
+          <span>{deleteTopicLabel}</span>
+        </button>
+      )}
       {/* Block/Unblock — messaging (1-1) channels only */}
       {!isTeamChannel && !isTopic && (
         isBlocked ? (
@@ -202,7 +222,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     HeaderComponent = DefaultChannelInfoHeader,
     CoverComponent = DefaultChannelInfoCover,
     ActionsComponent = DefaultChannelInfoActions,
-    TabsComponent = DefaultChannelInfoTabs,
+    TabHeaderComponent = DefaultChannelInfoTabHeader,
     AddMemberModalComponent,
     EditChannelModalComponent,
     EditTopicModalComponent,
@@ -210,6 +230,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     actionsSettingsLabel,
     actionsDeleteLabel,
     actionsLeaveLabel,
+    actionsCreateTopicLabel,
     MemberItemComponent,
     MediaItemComponent,
     LinkItemComponent,
@@ -219,6 +240,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     onSearchClick,
     onLeaveChannel: onLeaveChannelProp,
     onDeleteChannel: onDeleteChannelProp,
+    onDeleteTopic: onDeleteTopicProp,
+    onCreateTopic: onCreateTopicProp,
     onAddMemberClick,
     onRemoveMember: onRemoveMemberProp,
     onBanMember: onBanMemberProp,
@@ -236,6 +259,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     addMemberAddingLabel,
     addMemberAddedLabel,
     addMemberButtonLabel,
+    MessageSearchPanelComponent,
+    ChannelSettingsPanelComponent,
     AddMemberButtonComponent,
     // Edit Channel customization
     onEditChannel: onEditChannelProp,
@@ -263,13 +288,17 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     actionsUnpinTopicLabel,
     actionsCloseTopicLabel,
     actionsReopenTopicLabel,
+    actionsDeleteTopicLabel,
     // Settings panel customizations
     settingsWorkspaceTopicsTitle,
     settingsTopicsFeatureName,
     settingsTopicsFeatureDescription,
+    roleLabels,
   } = props;
 
   const { activeChannel, client } = useChatClient();
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
   const channel = channelProp || activeChannel;
   const { isBanned } = useBannedState(channel, client?.userID);
   const { isBlocked } = useBlockedState(channel, client?.userID);
@@ -374,6 +403,12 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     try { await parentChannel.reopenTopic(channel.cid); } catch (e) { console.error('Error reopening topic', e); }
   }, [channel, parentChannel]);
 
+  const handleDeleteTopic = useCallback(async () => {
+    if (onDeleteTopicProp) return onDeleteTopicProp(channel as any);
+    if (!channel) return;
+    try { await channel.delete(); } catch (e) { console.error('Error deleting topic', e); }
+  }, [channel, onDeleteTopicProp]);
+
   const { members } = useChannelMembers(channel);
   const { channelName: profileChannelName, channelImage, channelDescription, isPinned } = useChannelProfile(channel);
 
@@ -411,181 +446,241 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     setShowAddMemberModal(true);
   }, [onAddMemberClick]);
 
+  // virtualizer anchors for page-level virtualization
+  const virtualizerAnchorRef = useRef<HTMLDivElement | null>(null);
+  const [startMargin, setStartMargin] = useState(0);
 
+  // Use the headless tabs hook
+  const tabs = useChannelInfoTabs({
+    channel: channel as any,
+    members: members as any,
+    AvatarComponent,
+    currentUserId,
+    currentUserRole,
+    onAddMemberClick: isTeamChannel && !isPreviewMode ? handleAddMemberClick : undefined,
+    onRemoveMember: handleRemoveMember,
+    onBanMember: handleBanMember,
+    onUnbanMember: handleUnbanMember,
+    onPromoteMember: handlePromoteMember,
+    onDemoteMember: handleDemoteMember,
+    addMemberButtonLabel,
+    AddMemberButtonComponent,
+    MemberItemComponent,
+    MediaItemComponent,
+    LinkItemComponent,
+    FileItemComponent,
+    EmptyStateComponent,
+    LoadingComponent,
+    isVisible,
+    isPreviewMode,
+    roleLabels,
+  });
+
+  // Calculate startMargin for Virtualizer (distance from body top to virtualizer anchor)
+  useEffect(() => {
+    const body = scrollContainerRef.current;
+    const anchor = virtualizerAnchorRef.current;
+    if (!body || !anchor) return;
+    const bodyRect = body.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    setStartMargin(anchorRect.top - bodyRect.top + body.scrollTop);
+  }, [isVisible, tabs.activeTab, isBanned, isPreviewMode]);
 
   if (!channel) return null;
 
   return (
     <div className={`ermis-channel-info ${className}`.trim()}>
       <HeaderComponent title={title} onClose={onClose} />
+      <div className="ermis-channel-info__body" ref={scrollContainerRef}>
+        <CoverComponent
+          channelName={finalChannelName}
+          channelImage={channelImage}
+          channelDescription={channelDescription}
+          AvatarComponent={AvatarComponent}
+          canEdit={canEditChannel}
+          onEditClick={handleEditChannelClick}
+          isPublic={Boolean(channel?.data?.public)}
+          isTeamChannel={isTeamChannel}
+          parentChannelName={finalParentChannelName}
+          isTopic={isTopic}
+        />
 
-      <CoverComponent
-        channelName={finalChannelName}
-        channelImage={channelImage}
-        channelDescription={channelDescription}
-        AvatarComponent={AvatarComponent}
-        canEdit={canEditChannel}
-        onEditClick={handleEditChannelClick}
-        isPublic={Boolean(channel?.data?.public)}
-        isTeamChannel={isTeamChannel}
-        parentChannelName={finalParentChannelName}
-        isTopic={isTopic}
-      />
+        {isBanned && (
+          <div className="ermis-channel-info__banned-banner">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+            </svg>
+            <span className="ermis-channel-info__banned-banner-text">You have been banned from this channel</span>
+          </div>
+        )}
+        {!isBanned && isPreviewMode && (
+          <div className="ermis-channel-info__preview-actions">
+            <button
+              className="ermis-channel-info__join-btn"
+              onClick={() => channel?.acceptInvite('join').catch(e => console.error('Failed to join public channel', e))}
+            >
+              Join Channel
+            </button>
+          </div>
+        )}
+        {!isBanned && (
+          <>
+            {!isPreviewMode && (
+              <ActionsComponent
+                onSearchClick={() => setShowSearchPanel(true)}
+                onSettingsClick={() => setShowSettingsPanel(true)}
+                onLeaveChannel={handleLeaveChannel}
+                onDeleteChannel={handleDeleteChannel}
+                onBlockUser={handleBlockUser}
+                onUnblockUser={handleUnblockUser}
+                onPin={handlePinChannel}
+                onUnpin={handleUnpinChannel}
+                onCloseTopic={handleCloseTopic}
+                onReopenTopic={handleReopenTopic}
+                onDeleteTopic={handleDeleteTopic}
+                onCreateTopic={onCreateTopicProp ? () => onCreateTopicProp(channel) : undefined}
+                isTeamChannel={isTeamChannel}
+                isTopic={isTopic}
+                isClosedTopic={isClosedTopic}
+                isBlocked={isBlocked}
+                isPinned={isPinned}
+                topicsEnabled={channel?.data?.topics_enabled === true}
+                currentUserRole={currentUserRole}
+                searchLabel={actionsSearchLabel}
+                settingsLabel={actionsSettingsLabel}
+                deleteLabel={actionsDeleteLabel}
+                leaveLabel={actionsLeaveLabel}
+                blockLabel={actionsBlockLabel}
+                unblockLabel={actionsUnblockLabel}
+                pinLabel={isTopic ? (actionsPinTopicLabel || 'Pin topic') : (actionsPinLabel || 'Pin channel')}
+                unpinLabel={isTopic ? (actionsUnpinTopicLabel || 'Unpin topic') : (actionsUnpinLabel || 'Unpin channel')}
+                closeTopicLabel={actionsCloseTopicLabel}
+                reopenTopicLabel={actionsReopenTopicLabel}
+                deleteTopicLabel={actionsDeleteTopicLabel}
+                createTopicLabel={actionsCreateTopicLabel}
+              />
+            )}
 
-      {isBanned && (
-        <div className="ermis-channel-info__banned-banner">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
-          </svg>
-          <span className="ermis-channel-info__banned-banner-text">You have been banned from this channel</span>
-        </div>
-      )}
-      {!isBanned && isPreviewMode && (
-        <div className="ermis-channel-info__preview-actions">
-          <button
-            className="ermis-channel-info__join-btn"
-            onClick={() => channel?.acceptInvite('join').catch(e => console.error('Failed to join public channel', e))}
-          >
-            Join Channel
-          </button>
-        </div>
-      )}
-      {!isBanned && (
-        <>
-          {!isPreviewMode && (
-            <ActionsComponent
-              onSearchClick={() => setShowSearchPanel(true)}
-              onSettingsClick={() => setShowSettingsPanel(true)}
-              onLeaveChannel={handleLeaveChannel}
-              onDeleteChannel={handleDeleteChannel}
-              onBlockUser={handleBlockUser}
-              onUnblockUser={handleUnblockUser}
-              onPin={handlePinChannel}
-              onUnpin={handleUnpinChannel}
-              onCloseTopic={handleCloseTopic}
-              onReopenTopic={handleReopenTopic}
-              isTeamChannel={isTeamChannel}
-              isTopic={isTopic}
-              isClosedTopic={isClosedTopic}
-              isBlocked={isBlocked}
-              isPinned={isPinned}
-              currentUserRole={currentUserRole}
-              searchLabel={actionsSearchLabel}
-              settingsLabel={actionsSettingsLabel}
-              deleteLabel={actionsDeleteLabel}
-              leaveLabel={actionsLeaveLabel}
-              blockLabel={actionsBlockLabel}
-              unblockLabel={actionsUnblockLabel}
-              pinLabel={isTopic ? (actionsPinTopicLabel || 'Pin topic') : (actionsPinLabel || 'Pin channel')}
-              unpinLabel={isTopic ? (actionsUnpinTopicLabel || 'Unpin topic') : (actionsUnpinLabel || 'Unpin channel')}
-              closeTopicLabel={actionsCloseTopicLabel}
-              reopenTopicLabel={actionsReopenTopicLabel}
+            <TabHeaderComponent
+              activeTab={tabs.activeTab}
+              onTabChange={tabs.handleTabChange}
+              availableTabs={tabs.availableTabs}
+              tabCounts={{} as any}
             />
-          )}
 
-          <TabsComponent
-            channel={channel}
-            members={members as any}
-            AvatarComponent={AvatarComponent}
-            currentUserId={currentUserId}
-            currentUserRole={currentUserRole}
-            onAddMemberClick={isTeamChannel && !isPreviewMode ? handleAddMemberClick : undefined}
-            onRemoveMember={handleRemoveMember}
-            onBanMember={handleBanMember}
-            onUnbanMember={handleUnbanMember}
-            onPromoteMember={handlePromoteMember}
-            onDemoteMember={handleDemoteMember}
-            addMemberButtonLabel={addMemberButtonLabel}
-            AddMemberButtonComponent={AddMemberButtonComponent}
-            MemberItemComponent={MemberItemComponent}
-            MediaItemComponent={MediaItemComponent}
-            LinkItemComponent={LinkItemComponent}
-            FileItemComponent={FileItemComponent}
-            EmptyStateComponent={EmptyStateComponent}
-            LoadingComponent={LoadingComponent}
-            isVisible={isVisible}
-            isPreviewMode={isPreviewMode}
-          />
+            <div
+              ref={virtualizerAnchorRef}
+              className="ermis-channel-info__media-content"
+              style={tabs.isPending ? PENDING_STYLE : READY_STYLE}
+            >
+              {tabs.isPending || (tabs.loading && tabs.contentTab !== 'members') ? (
+                <tabs.Loading />
+              ) : tabs.isTabEmpty ? (
+                <tabs.EmptyState label={tabs.emptyLabel} />
+              ) : (
+                <MemoizedVirtualizer 
+                  scrollRef={scrollContainerRef} 
+                  startMargin={startMargin} 
+                  data={tabs.vlistData} 
+                  renderItem={tabs.renderVlistItem} 
+                />
+              )}
+            </div>
 
-          {showAddMemberModal && (() => {
-            const ModalComp = AddMemberModalComponent || AddMemberModal;
-            return (
-              <ModalComp
-                channel={channel}
-                currentMembers={members as any}
-                onClose={() => setShowAddMemberModal(false)}
-                AvatarComponent={AvatarComponent}
-                title={addMemberModalTitle}
-                searchPlaceholder={addMemberSearchPlaceholder}
-                loadingText={addMemberLoadingText}
-                emptyText={addMemberEmptyText}
-                addLabel={addMemberAddLabel}
-                addingLabel={addMemberAddingLabel}
-                addedLabel={addMemberAddedLabel}
+            {/* Media Lightbox */}
+            {tabs.lightboxItems.length > 0 && (
+              <MediaLightbox
+                items={tabs.lightboxItems}
+                initialIndex={tabs.lightboxIndex}
+                isOpen={tabs.lightboxOpen}
+                onClose={tabs.closeLightbox}
               />
-            );
-          })()}
+            )}
 
-          {showEditChannelModal && (() => {
-            const EditComp = EditChannelModalComponent || EditChannelModal;
-            return (
-              <EditComp
-                channel={channel}
-                onClose={() => setShowEditChannelModal(false)}
-                onSave={onEditChannelProp}
-                AvatarComponent={AvatarComponent}
-                title={editChannelModalTitle}
-                nameLabel={editChannelNameLabel}
-                descriptionLabel={editChannelDescriptionLabel}
-                namePlaceholder={editChannelNamePlaceholder}
-                descriptionPlaceholder={editChannelDescriptionPlaceholder}
-                publicLabel={editChannelPublicLabel}
-                saveLabel={editChannelSaveLabel}
-                cancelLabel={editChannelCancelLabel}
-                savingLabel={editChannelSavingLabel}
-                changeAvatarLabel={editChannelChangeAvatarLabel}
-                imageAccept={editChannelImageAccept}
-                maxImageSize={editChannelMaxImageSize}
-                maxImageSizeError={editChannelMaxImageSizeError}
-              />
-            );
-          })()}
+            {showAddMemberModal && (() => {
+              const ModalComp = AddMemberModalComponent || AddMemberModal;
+              return (
+                <ModalComp
+                  channel={channel}
+                  currentMembers={members as any}
+                  onClose={() => setShowAddMemberModal(false)}
+                  AvatarComponent={AvatarComponent}
+                  title={addMemberModalTitle}
+                  searchPlaceholder={addMemberSearchPlaceholder}
+                  loadingText={addMemberLoadingText}
+                  emptyText={addMemberEmptyText}
+                  addLabel={addMemberAddLabel}
+                />
+              );
+            })()}
 
-          {showEditTopicModal && (() => {
-            const ModalComp = EditTopicModalComponent || TopicModal;
-            return (
-              <ModalComp
-                isOpen={true}
-                onClose={() => setShowEditTopicModal(false)}
-                topic={channel}
-              />
-            );
-          })()}
-        </>
-      )}
+            {showEditChannelModal && (() => {
+              const ModalComp = EditChannelModalComponent || EditChannelModal;
+              return (
+                <ModalComp
+                  channel={channel}
+                  onClose={() => setShowEditChannelModal(false)}
+                  onSave={onEditChannelProp}
+                  AvatarComponent={AvatarComponent}
+                  title={editChannelModalTitle}
+                  nameLabel={editChannelNameLabel}
+                  descriptionLabel={editChannelDescriptionLabel}
+                  namePlaceholder={editChannelNamePlaceholder}
+                  descriptionPlaceholder={editChannelDescriptionPlaceholder}
+                  publicLabel={editChannelPublicLabel}
+                  saveLabel={editChannelSaveLabel}
+                  cancelLabel={editChannelCancelLabel}
+                  savingLabel={editChannelSavingLabel}
+                  changeAvatarLabel={editChannelChangeAvatarLabel}
+                  imageAccept={editChannelImageAccept}
+                  maxImageSize={editChannelMaxImageSize}
+                  maxImageSizeError={editChannelMaxImageSizeError}
+                />
+              );
+            })()}
+
+            {showEditTopicModal && (() => {
+              const ModalComp = EditTopicModalComponent || TopicModal;
+              return (
+                <ModalComp
+                  isOpen={true}
+                  onClose={() => setShowEditTopicModal(false)}
+                  topic={channel}
+                />
+              );
+            })()}
+          </>
+        )}
+      </div>
 
       {/* Search Panel — slides over entire ChannelInfo body */}
-      {channel && showSearchPanel && (
-        <MessageSearchPanel
-          isOpen={showSearchPanel}
-          onClose={() => setShowSearchPanel(false)}
-          channel={channel}
-          AvatarComponent={AvatarComponent}
-        />
-      )}
+      {channel && showSearchPanel && (() => {
+        const SearchPanel = MessageSearchPanelComponent || MessageSearchPanel;
+        return (
+          <SearchPanel
+            isOpen={showSearchPanel}
+            onClose={() => setShowSearchPanel(false)}
+            channel={channel}
+            AvatarComponent={AvatarComponent}
+          />
+        );
+      })()}
 
       {/* Settings Panel — slides over entire ChannelInfo body */}
-      {channel && showSettingsPanel && (
-        <ChannelSettingsPanel
-          isOpen={showSettingsPanel}
-          onClose={() => setShowSettingsPanel(false)}
-          channel={channel}
-          workspaceTopicsTitle={settingsWorkspaceTopicsTitle}
-          topicsFeatureName={settingsTopicsFeatureName}
-          topicsFeatureDescription={settingsTopicsFeatureDescription}
-        />
-      )}
+      {channel && showSettingsPanel && (() => {
+        const SettingsPanel = ChannelSettingsPanelComponent || ChannelSettingsPanel;
+        return (
+          <SettingsPanel
+            isOpen={showSettingsPanel}
+            onClose={() => setShowSettingsPanel(false)}
+            channel={channel}
+            workspaceTopicsTitle={settingsWorkspaceTopicsTitle}
+            topicsFeatureName={settingsTopicsFeatureName}
+            topicsFeatureDescription={settingsTopicsFeatureDescription}
+          />
+        );
+      })()}
     </div>
   );
 });

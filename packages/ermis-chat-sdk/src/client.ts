@@ -619,10 +619,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * @returns A Blob of the file content.
    */
   async downloadMedia(url: string): Promise<Blob> {
-    const response = await this.axiosInstance.get(url, {
-      responseType: 'blob',
-    });
-    return response.data as Blob;
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`Failed to download media: ${response.statusText}`);
+    }
+    return await response.blob();
   }
 
   errorFromResponse(response: AxiosResponse<APIErrorResponse>): ErrorFromResponse<APIErrorResponse> {

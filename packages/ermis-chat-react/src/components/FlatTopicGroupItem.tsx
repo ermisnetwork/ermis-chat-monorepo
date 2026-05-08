@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
+import { SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk';
 import { useTopicGroupUpdates } from '../hooks/useTopicGroupUpdates';
 import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
 import { DefaultChannelActions, computeDefaultActions } from './ChannelActions';
@@ -47,6 +48,14 @@ type FlatTopicGroupItemProps = {
   hiddenActions?: string[];
   actionLabels?: ChannelActionLabels;
   actionIcons?: ChannelActionIcons;
+  deletedMessageLabel?: string;
+  stickerMessageLabel?: string;
+  photoMessageLabel?: string;
+  videoMessageLabel?: string;
+  voiceRecordingMessageLabel?: string;
+  fileMessageLabel?: string;
+  systemMessageTranslations?: SystemMessageTranslations;
+  signalMessageTranslations?: SignalMessageTranslations;
 };
 
 /* ----------------------------------------------------------
@@ -69,6 +78,14 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   hiddenActions,
   actionLabels,
   actionIcons,
+  deletedMessageLabel,
+  stickerMessageLabel,
+  photoMessageLabel,
+  videoMessageLabel,
+  voiceRecordingMessageLabel,
+  fileMessageLabel,
+  systemMessageTranslations,
+  signalMessageTranslations,
 }) => {
   const { client } = useChatClient();
   const currentUserId = client.userID;
@@ -77,7 +94,20 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   const { updateCount } = useChannelRowUpdates(channel, currentUserId);
 
   // Realtime topic group data (sorted topics, aggregated unread, latest message)
-  const { topics, aggregatedUnreadCount, hasUnread, latestMessagePreview } = useTopicGroupUpdates(channel, currentUserId);
+  const { topics, aggregatedUnreadCount, hasUnread, latestMessagePreview } = useTopicGroupUpdates(
+    channel,
+    currentUserId,
+    {
+      deletedMessageLabel,
+      stickerMessageLabel,
+      photoMessageLabel,
+      videoMessageLabel,
+      voiceRecordingMessageLabel,
+      fileMessageLabel,
+      systemMessageTranslations,
+      signalMessageTranslations,
+    }
+  );
 
   const name = channel.data?.name || channel.cid;
   const image = channel.data?.image as string | undefined;

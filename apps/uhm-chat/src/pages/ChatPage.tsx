@@ -1,6 +1,6 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, TopicModal } from '@ermis-network/ermis-chat-react'
+import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
 import { Info, Phone, Video } from 'lucide-react'
 import { SidebarHeader } from '@/components/SidebarHeader'
@@ -22,18 +22,22 @@ import { GlobalPickers } from '@/features/chat/GlobalPickers'
 import { UhmChannelInfoHeader } from '@/features/chat/UhmChannelInfoHeader'
 import { UhmChannelInfoCover } from '@/features/chat/UhmChannelInfoCover'
 import { UhmEditChannelModal } from '@/features/chat/UhmEditChannelModal'
-import { UhmEditTopicModal } from '@/features/chat/UhmEditTopicModal'
+import { UhmTopicModal } from '@/features/chat/UhmTopicModal'
 import { UhmChannelInfoActions } from '@/features/chat/UhmChannelInfoActions'
-import { UhmChannelInfoTabs } from '@/features/chat/UhmChannelInfoTabs'
+import { UhmChannelInfoTabHeader } from '@/features/chat/UhmChannelInfoTabHeader'
+import { UhmAddMemberButton } from '@/features/chat/UhmAddMemberButton'
+import { UhmAddMemberModal } from '@/features/chat/UhmAddMemberModal'
+import { UhmMessageSearchPanel } from '@/features/chat/UhmMessageSearchPanel'
+import { UhmChannelSettingsPanel } from '@/features/chat/UhmChannelSettingsPanel'
 import { UhmMemberItem } from '@/features/chat/UhmMemberItem'
-import { UhmMediaItem } from '@/features/chat/UhmMediaItem'
-import { UhmLinkItem } from '@/features/chat/UhmLinkItem'
-import { UhmFileItem } from '@/features/chat/UhmFileItem'
+import { SEO } from '@/components/SEO'
+import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
-  const { client, activeChannel } = useChatClient()
+  const { client, activeChannel, setActiveChannel } = useChatClient()
   const { status, retryConnection } = useConnectionStatus(client)
+  const totalUnreadCount = useTotalUnreadCount()
 
   const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
   const [isSearchMode, setIsSearchMode] = useState(false)
@@ -42,7 +46,6 @@ export function ChatPage() {
   const [showChannelInfo, setShowChannelInfo] = useState(false)
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
-
   const {
     isCreateChannelModalOpen,
     closeCreateChannelModal,
@@ -64,6 +67,7 @@ export function ChatPage() {
     closeTopic: t('actions.close_topic'),
     reopenTopic: t('actions.reopen_topic'),
     createTopic: t('actions.create_topic'),
+    deleteTopic: t('actions.delete_topic'),
     deleteChannel: t('actions.delete_channel'),
     leaveChannel: t('actions.leave_channel'),
   }), [t])
@@ -115,6 +119,13 @@ export function ChatPage() {
     busyRecipient: t('signal_messages.busyRecipient'),
     durationUnitMin: t('signal_messages.durationUnitMin'),
     durationUnitSec: t('signal_messages.durationUnitSec'),
+  }), [t])
+
+  const roleLabels = useMemo(() => ({
+    owner: t('roles.owner'),
+    moder: t('roles.moder'),
+    member: t('roles.member'),
+    pending: t('roles.pending'),
   }), [t])
 
   const handleTopicDrillDown = useCallback((channel: ChannelType) => {
@@ -178,6 +189,68 @@ export function ChatPage() {
     [t],
   )
 
+  // Reset UI state when leaving a channel or channel is deleted
+  useEffect(() => {
+    if (!client) return;
+
+    const handleChannelExit = (event: any) => {
+      // In member.removed, event.user is the actor, event.member.user_id is the target.
+      const isTargetMe = event.member?.user_id === client.userID;
+      const isDelete = event.type === 'channel.deleted' || event.type === 'notification.channel_deleted';
+
+      if ((isTargetMe || isDelete) && event.cid) {
+        if (activeChannel?.cid === event.cid || drillDownChannel?.cid === event.cid) {
+          setShowChannelInfo(false);
+          setDrillDownChannel(null);
+          setActiveChannel(null);
+          setActivePanel('channels');
+        }
+      }
+    };
+
+    const listeners = [
+      client.on('member.removed', handleChannelExit),
+      client.on('channel.deleted', handleChannelExit),
+      client.on('notification.channel_deleted', handleChannelExit),
+    ];
+
+    return () => listeners.forEach(l => l.unsubscribe());
+  }, [client, activeChannel, drillDownChannel]);
+
+  // Auto-accept topics when parent channel invitation is accepted
+  useEffect(() => {
+    if (!client) return;
+
+    const handleInviteAccepted = async (event: any) => {
+      if (event.user?.id === client.userID || event.user_id === client.userID) {
+        const acceptedCid = event.cid;
+        if (!acceptedCid) return;
+
+        // Wait a bit for the SDK state to settle
+        setTimeout(async () => {
+          const channel = client.activeChannels[acceptedCid];
+          if (channel && isGroupChannel(channel)) {
+            // Find all pending topics of this team channel
+            const topics: Channel[] = Object.values(client.activeChannels).filter((ch: any) =>
+              isTopicChannel(ch) &&
+              (ch.data?.parent_cid === acceptedCid || ch.cid.includes(channel.id))
+            ) as Channel[];
+
+            for (const topic of topics) {
+              const ms = topic.state?.membership as any;
+              if (isPendingMember(ms?.channel_role)) {
+                topic.acceptInvite('accept').catch(() => { });
+              }
+            }
+          }
+        }, 500);
+      }
+    };
+
+    const sub = client.on('notification.invite_accepted', handleInviteAccepted);
+    return () => sub.unsubscribe();
+  }, [client]);
+
   const channelInfoTitle = useMemo(() => {
     const targetChannel = infoChannel || activeChannel
     if (!targetChannel) return ''
@@ -187,6 +260,7 @@ export function ChatPage() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
+      <SEO title={totalUnreadCount > 0 ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) Uhm Chat` : 'Uhm Chat'} />
 
       {/* Sidebar */}
       <div className="w-[340px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
@@ -248,6 +322,14 @@ export function ChatPage() {
               onCreateTopic={openCreateTopicModal}
               onEditTopic={openEditTopicModal}
               onShowChannelInfo={() => { setHasOpenedInfo(true); setInfoChannel(drillDownChannel); setShowChannelInfo(true) }}
+              deletedMessageLabel={t('chat.deleted_message')}
+              stickerMessageLabel={t('chat.preview_sticker')}
+              photoMessageLabel={t('chat.preview_photo')}
+              videoMessageLabel={t('chat.preview_video')}
+              voiceRecordingMessageLabel={t('chat.preview_voice')}
+              fileMessageLabel={t('chat.preview_file')}
+              systemMessageTranslations={systemMessageTranslations}
+              signalMessageTranslations={signalMessageTranslations}
             />
           )}
         </div>
@@ -269,8 +351,8 @@ export function ChatPage() {
         <ConnectionStatusBanner status={status} onRetry={retryConnection} />
 
         <Channel EmptyStateIndicator={ChannelEmptyState}>
-          <ChannelHeader 
-            renderRight={renderHeaderRight} 
+          <ChannelHeader
+            renderRight={renderHeaderRight}
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
@@ -310,10 +392,10 @@ export function ChatPage() {
               if (names.length === 2) {
                 return t('overlays.typing.areTyping', { name1: names[0], name2: names[1] });
               }
-              return t('overlays.typing.multipleTyping', { 
-                name1: names[0], 
-                name2: names[1], 
-                count: names.length - 2 
+              return t('overlays.typing.multipleTyping', {
+                name1: names[0],
+                name2: names[1],
+                count: names.length - 2
               });
             }}
             deletedMessageLabel={t('chat.deleted_message', 'This message was deleted')}
@@ -329,39 +411,45 @@ export function ChatPage() {
       {/* Right Panel — ChannelInfo (instant layout snap + smooth content fade) */}
       <div className={`shrink-0 overflow-hidden border-l border-zinc-200/50 dark:border-zinc-800/50 ${showChannelInfo ? 'w-[360px]' : 'w-0 border-l-0'}`}>
         <div className={`w-[360px] h-full bg-white dark:bg-[#1a1828] transition-opacity duration-200 ease-in ${showChannelInfo ? 'opacity-100' : 'opacity-0'}`}>
-          <div className="w-full h-full overflow-y-auto">
-            {hasOpenedInfo && (
-              <ChannelInfo
-                channel={infoChannel || undefined}
-                className="!h-auto !overflow-visible"
-                isVisible={showChannelInfo}
-                onClose={() => setShowChannelInfo(false)}
-                title={channelInfoTitle}
-                HeaderComponent={UhmChannelInfoHeader}
-                CoverComponent={UhmChannelInfoCover}
-                ActionsComponent={UhmChannelInfoActions}
-                TabsComponent={UhmChannelInfoTabs}
-                MemberItemComponent={UhmMemberItem}
-                MediaItemComponent={UhmMediaItem}
-                LinkItemComponent={UhmLinkItem}
-                FileItemComponent={UhmFileItem}
-                EditChannelModalComponent={UhmEditChannelModal}
-                EditTopicModalComponent={UhmEditTopicModal}
-                actionsSearchLabel={t('actions.search')}
-                actionsSettingsLabel={t('actions.settings')}
-                actionsPinLabel={t('actions.pin_channel')}
-                actionsUnpinLabel={t('actions.unpin_channel')}
-                actionsPinTopicLabel={t('actions.pin_topic')}
-                actionsUnpinTopicLabel={t('actions.unpin_topic')}
-                actionsBlockLabel={t('actions.block_user')}
-                actionsUnblockLabel={t('actions.unblock_user')}
-                actionsDeleteLabel={t('actions.delete_channel')}
-                actionsLeaveLabel={t('actions.leave_channel')}
-                actionsCloseTopicLabel={t('actions.close_topic')}
-                actionsReopenTopicLabel={t('actions.reopen_topic')}
-              />
-            )}
-          </div>
+          {hasOpenedInfo && (
+            <ChannelInfo
+              channel={infoChannel || undefined}
+              isVisible={showChannelInfo}
+              onClose={() => setShowChannelInfo(false)}
+              title={channelInfoTitle}
+              HeaderComponent={UhmChannelInfoHeader}
+              CoverComponent={UhmChannelInfoCover}
+              ActionsComponent={UhmChannelInfoActions}
+              TabHeaderComponent={UhmChannelInfoTabHeader}
+              MessageSearchPanelComponent={UhmMessageSearchPanel}
+              ChannelSettingsPanelComponent={UhmChannelSettingsPanel}
+              AddMemberButtonComponent={UhmAddMemberButton}
+              AddMemberModalComponent={UhmAddMemberModal}
+              addMemberButtonLabel={t('actions.add_member')}
+              MemberItemComponent={UhmMemberItem}
+              // MediaItemComponent={UhmMediaItem}
+              // LinkItemComponent={UhmLinkItem}
+              // FileItemComponent={UhmFileItem}
+              EditChannelModalComponent={UhmEditChannelModal}
+              EditTopicModalComponent={UhmTopicModal}
+              actionsSearchLabel={t('actions.search')}
+              actionsSettingsLabel={t('actions.settings')}
+              actionsPinLabel={t('actions.pin_channel')}
+              actionsUnpinLabel={t('actions.unpin_channel')}
+              actionsPinTopicLabel={t('actions.pin_topic')}
+              actionsUnpinTopicLabel={t('actions.unpin_topic')}
+              actionsBlockLabel={t('actions.block_user')}
+              actionsUnblockLabel={t('actions.unblock_user')}
+              actionsDeleteLabel={t('actions.delete_channel')}
+              actionsLeaveLabel={t('actions.leave_channel')}
+              actionsCloseTopicLabel={t('actions.close_topic')}
+              actionsReopenTopicLabel={t('actions.reopen_topic')}
+              actionsDeleteTopicLabel={t('actions.delete_topic')}
+              actionsCreateTopicLabel={t('actions.create_topic')}
+              onCreateTopic={openCreateTopicModal}
+              roleLabels={roleLabels}
+            />
+          )}
         </div>
       </div>
 
@@ -372,13 +460,14 @@ export function ChatPage() {
         />
       )}
       {topicAction.type === 'create' && topicAction.channel && (
-        <UhmEditTopicModal
+        <UhmTopicModal
           isOpen={true}
           onClose={closeTopicModal}
+          parentChannel={topicAction.channel}
         />
       )}
       {topicAction.type === 'edit' && topicAction.channel && (
-        <UhmEditTopicModal
+        <UhmTopicModal
           isOpen={true}
           onClose={closeTopicModal}
           topic={topicAction.channel}

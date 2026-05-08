@@ -3,6 +3,7 @@ import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
 import { isDirectChannel } from '../channelTypeUtils';
 import { getLastMessagePreview } from '../utils';
+import { SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk';
 
 /** Preview data for the most recent message across the topic group */
 export type LatestMessagePreview = {
@@ -11,6 +12,17 @@ export type LatestMessagePreview = {
   timestamp?: string | Date;
   /** Topic name if the message came from a sub-topic, null if from general/parent */
   sourceName: string | null;
+};
+
+export type TopicGroupUpdatesOptions = {
+  deletedMessageLabel?: string;
+  stickerMessageLabel?: string;
+  photoMessageLabel?: string;
+  videoMessageLabel?: string;
+  voiceRecordingMessageLabel?: string;
+  fileMessageLabel?: string;
+  systemMessageTranslations?: SystemMessageTranslations;
+  signalMessageTranslations?: SignalMessageTranslations;
 };
 
 /**
@@ -26,6 +38,7 @@ export type LatestMessagePreview = {
 export function useTopicGroupUpdates(
   channel: Channel,
   currentUserId?: string,
+  options?: TopicGroupUpdatesOptions
 ): {
   topics: Channel[];
   aggregatedUnreadCount: number;
@@ -45,6 +58,7 @@ export function useTopicGroupUpdates(
     subs.push(channel.on('message.read', bump));
     subs.push(channel.on('message.deleted', bump));
     subs.push(channel.on('channel.updated', bump));
+    subs.push(channel.on('channel.topic.created', bump));
     subs.push(channel.on('channel.pinned', bump));
     subs.push(channel.on('channel.unpinned', bump));
 
@@ -54,6 +68,8 @@ export function useTopicGroupUpdates(
       subs.push(t.on('message.new', bump));
       subs.push(t.on('message.read', bump));
       subs.push(t.on('message.deleted', bump));
+      subs.push(t.on('channel.updated', bump));
+      subs.push(t.on('channel.deleted', bump));
       subs.push(t.on('channel.pinned', bump));
       subs.push(t.on('channel.unpinned', bump));
     });
@@ -61,7 +77,7 @@ export function useTopicGroupUpdates(
     return () => {
       subs.forEach((s) => s.unsubscribe());
     };
-  }, [channel, channel.state?.topics, bump]);
+  }, [channel, channel.state?.topics, channel.state?.topics?.length, bump]);
 
   // Helper: get sort timestamp for a channel/topic
   const getTopicTime = (t: Channel): number => {
@@ -76,7 +92,14 @@ export function useTopicGroupUpdates(
   const isExcludedUser = (ch: Channel): boolean => {
     const ms = ch.state?.membership as Record<string, unknown> | undefined;
     if (!ms) return false;
-    const isBanned = Boolean(ms.banned);
+    const isBannedSelf = Boolean(ms.banned);
+    
+    // Topic support: check parent channel's ban status
+    const parentCid = ch.data?.parent_cid as string | undefined;
+    const parentChannel = parentCid ? ch.getClient().activeChannels[parentCid] : undefined;
+    const isBannedParent = Boolean(parentChannel?.state?.membership?.banned);
+    
+    const isBanned = isBannedSelf || isBannedParent;
     const isBlocked = isDirectChannel(ch) && Boolean(ms.blocked);
     const isPending = isPendingMember(ms.channel_role as string);
     const isSkipped = isSkippedMember(ms.channel_role as string);
@@ -122,6 +145,9 @@ export function useTopicGroupUpdates(
 
   // Latest message preview across parent + all topics (Option B: prefix topic name)
   const latestMessagePreview = useMemo((): LatestMessagePreview | null => {
+    // If banned from the main group, hide previews for all sub-items
+    if (isExcludedUser(channel)) return null;
+
     const allChannels = [channel, ...(channel.state?.topics || [])];
 
     let bestTime = 0;
@@ -137,7 +163,7 @@ export function useTopicGroupUpdates(
 
     if (!bestChannel) return null;
 
-    const preview = getLastMessagePreview(bestChannel, currentUserId);
+    const preview = getLastMessagePreview(bestChannel, currentUserId, options);
     if (!preview.text && !preview.user) return null;
 
     // sourceName is non-null only when the message comes from a sub-topic (not the parent/general)
@@ -151,7 +177,20 @@ export function useTopicGroupUpdates(
       sourceName,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel, channel.state?.topics, currentUserId, updateCount]);
+  }, [
+    channel,
+    channel.state?.topics,
+    currentUserId,
+    updateCount,
+    options?.deletedMessageLabel,
+    options?.stickerMessageLabel,
+    options?.photoMessageLabel,
+    options?.videoMessageLabel,
+    options?.voiceRecordingMessageLabel,
+    options?.fileMessageLabel,
+    options?.systemMessageTranslations,
+    options?.signalMessageTranslations,
+  ]);
 
   return { topics, aggregatedUnreadCount, hasUnread, updateCount, latestMessagePreview };
 }

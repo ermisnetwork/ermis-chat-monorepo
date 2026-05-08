@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, sta
 import { VList as _VList } from 'virtua';
 const VList = _VList as any;
 import { useTranslation } from 'react-i18next';
-import { 
+import {
   MediaLightbox,
   isDirectChannel,
   CHANNEL_ROLES,
@@ -11,11 +11,11 @@ import {
   canPromoteTargetMember,
   canDemoteTargetMember
 } from '@ermis-network/ermis-chat-react';
-import type { 
-  ChannelInfoTabsProps, 
-  MediaTab, 
-  AttachmentItem, 
-  MediaLightboxItem 
+import type {
+  ChannelInfoTabsProps,
+  MediaTab,
+  AttachmentItem,
+  MediaLightboxItem
 } from '@ermis-network/ermis-chat-react';
 import { Users, Image, Link as LinkIcon, FileText } from 'lucide-react';
 
@@ -52,7 +52,7 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
   const { t } = useTranslation();
   const isMessaging = isDirectChannel(channel);
   const isTopic = Boolean(channel?.data?.parent_cid);
-  
+
   const availableTabs: MediaTab[] = useMemo(() => {
     let tabs = isMessaging ? MESSAGING_TABS : ALL_TABS;
     if (isTopic) {
@@ -225,15 +225,15 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
   return (
     <div className="flex flex-col bg-white dark:bg-[#1a1828]">
       {/* Custom Tab Bar - Sticky - Compact Sliding Style */}
-      <div 
+      <div
         ref={tabsContainerRef}
         className="sticky top-0 z-20 bg-white/80 dark:bg-[#1a1828]/80 backdrop-blur-md px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-800/50 flex gap-0.5 overflow-x-auto no-scrollbar relative"
       >
         {/* Sliding Indicator Background */}
-        <div 
+        <div
           className="absolute h-[28px] bg-zinc-100 dark:bg-zinc-800 rounded-lg shadow-sm transition-all duration-300 ease-out pointer-events-none"
-          style={{ 
-            left: indicatorStyle.left, 
+          style={{
+            left: indicatorStyle.left,
             width: indicatorStyle.width,
             top: '50%',
             transform: 'translateY(-50%)',
@@ -248,8 +248,8 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
             data-active={activeTab === tab}
             className={`
               relative z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors duration-200 shrink-0
-              ${activeTab === tab 
-                ? 'text-zinc-900 dark:text-zinc-100' 
+              ${activeTab === tab
+                ? 'text-zinc-900 dark:text-zinc-100'
                 : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
               }
             `}
@@ -259,8 +259,8 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
             {tabCounts[tab] > 0 && (
               <span className={`
                 ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold transition-colors duration-200
-                ${activeTab === tab 
-                  ? 'bg-white dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400' 
+                ${activeTab === tab
+                  ? 'bg-white dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'
                   : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'
                 }
               `}>
@@ -283,7 +283,7 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
               {contentTab === 'members' && (
                 <div className="flex flex-col gap-1">
                   {onAddMemberClick && (
-                    <button 
+                    <button
                       onClick={onAddMemberClick}
                       className="flex items-center gap-3 px-3 py-2.5 w-full rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-sm text-zinc-600 dark:text-zinc-400 transition-colors"
                     >
@@ -315,10 +315,10 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
               {contentTab === 'media' && (
                 <div className="grid grid-cols-3 gap-1 px-1">
                   {mediaItems.map((item, idx) => (
-                    <MediaItemComponent 
-                      key={item.id || idx} 
-                      item={item} 
-                      onClick={handleMediaClick} 
+                    <MediaItemComponent
+                      key={item.id || idx}
+                      item={item}
+                      onClick={handleMediaClick}
                     />
                   ))}
                 </div>
@@ -333,10 +333,10 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
               {contentTab === 'files' && (
                 <div className="flex flex-col gap-1">
                   {fileItems.map((item, idx) => (
-                    <FileItemComponent 
-                      key={item.id || idx} 
-                      item={item} 
-                      onClick={(url) => window.open(url, '_blank')} 
+                    <FileItemComponent
+                      key={item.id || idx}
+                      item={item}
+                      onClick={(url) => window.open(url, '_blank')}
                     />
                   ))}
                 </div>
@@ -348,11 +348,11 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
                 (contentTab === 'links' && linkItems.length === 0) ||
                 (contentTab === 'files' && fileItems.length === 0)
               ) && (
-                <div className="py-20 flex flex-col items-center justify-center text-zinc-400 dark:text-zinc-600 gap-3">
-                  <TabIcon type={contentTab} />
-                  <span className="text-xs">{t('chat.empty_tab', 'Không có nội dung')}</span>
-                </div>
-              )}
+                  <div className="py-20 flex flex-col items-center justify-center text-zinc-400 dark:text-zinc-600 gap-3">
+                    <TabIcon type={contentTab} />
+                    <span className="text-xs">{t('chat.empty_tab', 'Không có nội dung')}</span>
+                  </div>
+                )}
             </div>
           )}
         </div>

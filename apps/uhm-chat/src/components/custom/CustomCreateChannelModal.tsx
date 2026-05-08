@@ -203,14 +203,14 @@ export function CustomCreateChannelModal({ isOpen, onClose }: { isOpen: boolean,
       groupDescriptionLabel={t('chat.create_channel_group_desc', 'Description')}
       groupDescriptionPlaceholder={t('chat.create_channel_group_desc_placeholder', 'Optional description')}
       groupPublicLabel={t('chat.create_channel_group_public', 'Public Channel')}
-      userSearchPlaceholder={t('chat.create_channel_search', 'Search users...')}
+      userSearchPlaceholder={t('chat.create_channel_search_friends', 'Search friends...')}
       cancelButtonLabel={t('chat.create_channel_cancel', 'Cancel')}
       createButtonLabel={t('chat.create_channel_create', 'Create')}
       creatingButtonLabel={t('chat.create_channel_creating', 'Creating...')}
       messageButtonLabel={t('chat.create_channel_message', 'Message')}
       nextButtonLabel={t('chat.create_channel_next', 'Next')}
       backButtonLabel={t('chat.create_channel_back', 'Back')}
-      emptyStateLabel={t('chat.create_channel_empty', 'No users found')}
+      emptyStateLabel={t('chat.create_channel_empty_friends', 'No friends found')}
       TabsComponent={CustomTabsComponent}
       FooterComponent={CustomFooterComponent}
       GroupFieldsComponent={CustomGroupFieldsComponent}

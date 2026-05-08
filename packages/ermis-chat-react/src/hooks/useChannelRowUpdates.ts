@@ -18,7 +18,16 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
   const [updateCount, setUpdateCount] = useState(0);
 
   useEffect(() => {
-    setIsBannedInChannel(Boolean(channel.state?.membership?.banned));
+    const parentCid = channel.data?.parent_cid as string | undefined;
+    const parentChannel = parentCid ? channel.getClient().activeChannels[parentCid] : undefined;
+
+    const computeIsBanned = () => {
+      const selfBanned = Boolean(channel.state?.membership?.banned);
+      const parentBanned = Boolean(parentChannel?.state?.membership?.banned);
+      return selfBanned || parentBanned;
+    };
+
+    setIsBannedInChannel(computeIsBanned());
     setIsBlockedInChannel(isDirectChannel(channel) ? Boolean(channel.state?.membership?.blocked) : false);
 
     const handleBanned = (event: any) => {
@@ -28,7 +37,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
     };
     const handleUnbanned = (event: any) => {
       if (event.member?.user_id === currentUserId) {
-        setIsBannedInChannel(false);
+        setIsBannedInChannel(computeIsBanned());
       }
     };
 
@@ -62,6 +71,14 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
     const sub13 = channel.on('channel.pinned', handleUpdate);
     const sub14 = channel.on('channel.unpinned', handleUpdate);
 
+    // Topic support: listen for ban events on parent channel too
+    let sub15: { unsubscribe: () => void } | undefined;
+    let sub16: { unsubscribe: () => void } | undefined;
+    if (parentChannel) {
+      sub15 = parentChannel.on('member.banned', handleBanned);
+      sub16 = parentChannel.on('member.unbanned', handleUnbanned);
+    }
+
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
@@ -78,6 +95,8 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub12.unsubscribe();
       sub13.unsubscribe();
       sub14.unsubscribe();
+      if (sub15) sub15.unsubscribe();
+      if (sub16) sub16.unsubscribe();
     };
   }, [channel, currentUserId]);
 
