@@ -414,5 +414,14 @@
     "save": "Lưu thay đổi",
     "saving": "Đang lưu...",
     "failed": "Cập nhật thất bại"
+  },
+  "mobile_guard": {
+    "title": "Chỉ hỗ trợ máy tính",
+    "description": "Uhm Chat được tối ưu cho trình duyệt trên máy tính. Vui lòng mở trang này trên máy tính để có trải nghiệm tốt nhất.",
+    "hint": "chat.sub2s.live"
+  },
+  "safari_call": {
+    "incoming_rejected": "{{name}} đang gọi cho bạn. Tính năng gọi âm thanh/video không hỗ trợ trên Safari. Vui lòng sử dụng Chrome hoặc Firefox.",
+    "tooltip": "Tính năng gọi không hỗ trợ trên Safari. Vui lòng dùng Chrome hoặc Firefox."
   }
 }

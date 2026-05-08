@@ -414,5 +414,14 @@
     "save": "Save Updates",
     "saving": "Saving...",
     "failed": "Failed to update settings"
+  },
+  "mobile_guard": {
+    "title": "Desktop Only",
+    "description": "Uhm Chat is optimized for desktop browsers. Please open this page on your computer for the best experience.",
+    "hint": "chat.sub2s.live"
+  },
+  "safari_call": {
+    "incoming_rejected": "{{name}} is calling you. Audio/Video calls are not supported on Safari. Please use Chrome or Firefox.",
+    "tooltip": "Calls are not supported on Safari. Please use Chrome or Firefox."
   }
 }

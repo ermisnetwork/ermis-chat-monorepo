@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
 import { Info, Phone, Video } from 'lucide-react'
+import * as Tooltip from '@radix-ui/react-tooltip'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
 import { InvitesPanel } from '@/features/chat/InvitesPanel'
@@ -32,6 +33,7 @@ import { UhmChannelSettingsPanel } from '@/features/chat/UhmChannelSettingsPanel
 import { UhmMemberItem } from '@/features/chat/UhmMemberItem'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
+import { isSafari } from '@/utils/browser'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
@@ -159,34 +161,61 @@ export function ChatPage() {
     [toggleChannelInfo],
   )
 
+  const safariCallTooltip = t('safari_call.tooltip', 'Calls are not supported on Safari. Please use Chrome or Firefox.')
+
+  /** Wrap a button with Radix Tooltip (Safari only) */
+  const withSafariTooltip = (btn: React.ReactNode) => (
+    <Tooltip.Provider delayDuration={200}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>{btn}</Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            side="bottom"
+            sideOffset={6}
+            className="z-[99999] max-w-[240px] rounded-lg bg-zinc-900 dark:bg-zinc-100 px-3 py-2 text-xs leading-relaxed text-zinc-100 dark:text-zinc-900 shadow-xl animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+          >
+            {safariCallTooltip}
+            <Tooltip.Arrow className="fill-zinc-900 dark:fill-zinc-100" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  )
+
   /** Audio call button injected into ChannelHeader */
   const renderAudioCallButton = useCallback(
-    (onClick: () => void, disabled?: boolean) => (
-      <button
-        className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-        onClick={onClick}
-        title={t('actions.audio_call', 'Audio Call')}
-        disabled={disabled}
-      >
-        <Phone className="w-[18px] h-[18px]" />
-      </button>
-    ),
-    [t],
+    (onClick: () => void, disabled?: boolean) => {
+      const btn = (
+        <button
+          className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+          onClick={isSafari ? undefined : onClick}
+          disabled={isSafari || disabled}
+          title={isSafari ? undefined : t('actions.audio_call', 'Audio Call')}
+        >
+          <Phone className="w-[18px] h-[18px]" />
+        </button>
+      )
+      return isSafari ? withSafariTooltip(btn) : btn
+    },
+    [t, safariCallTooltip],
   )
 
   /** Video call button injected into ChannelHeader */
   const renderVideoCallButton = useCallback(
-    (onClick: () => void, disabled?: boolean) => (
-      <button
-        className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-        onClick={onClick}
-        title={t('actions.video_call', 'Video Call')}
-        disabled={disabled}
-      >
-        <Video className="w-[18px] h-[18px]" />
-      </button>
-    ),
-    [t],
+    (onClick: () => void, disabled?: boolean) => {
+      const btn = (
+        <button
+          className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+          onClick={isSafari ? undefined : onClick}
+          disabled={isSafari || disabled}
+          title={isSafari ? undefined : t('actions.video_call', 'Video Call')}
+        >
+          <Video className="w-[18px] h-[18px]" />
+        </button>
+      )
+      return isSafari ? withSafariTooltip(btn) : btn
+    },
+    [t, safariCallTooltip],
   )
 
   // Reset UI state when leaving a channel or channel is deleted

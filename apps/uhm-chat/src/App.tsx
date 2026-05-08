@@ -10,6 +10,7 @@ import { UhmModal } from '@/components/custom/UhmModal'
 import { UhmForwardMessageModal } from '@/features/chat/UhmForwardMessageModal'
 import { UhmCallUI } from '@/features/chat/UhmCallUI'
 import { UhmChannelListError } from '@/components/custom/UhmChannelListError'
+import { SafariCallGuard } from '@/components/custom/SafariCallGuard'
 import i18n from './i18n'
 import { toast, Toaster } from 'sonner'
 
@@ -17,6 +18,8 @@ import { toast, Toaster } from 'sonner'
 const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || ''
 
 const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_DEFAULTS.BASE_URL)
+
+import { isSafari } from '@/utils/browser'
 
 // Global API Error Handling
 let lastToastTime = 0
@@ -140,10 +143,10 @@ function AppContent() {
       initialTheme={savedTheme} 
       components={chatComponents}
       enableCall={true}
-      CallUIComponent={UhmCallUI}
+      CallUIComponent={isSafari ? SafariCallGuard : UhmCallUI}
       callSessionId={callSessionId}
-      incomingCallAudioPath="/call_incoming.mp3"
-      outgoingCallAudioPath="/call_outgoing.mp3"
+      incomingCallAudioPath={isSafari ? undefined : "/call_incoming.mp3"}
+      outgoingCallAudioPath={isSafari ? undefined : "/call_outgoing.mp3"}
     >
       <Routes>
         <Route
@@ -177,12 +180,15 @@ function AppContent() {
     </ChatProvider>
   )
 }
+import { MobileGuard } from '@/components/MobileGuard'
 
 function App() {
   return (
-    <BrowserRouter>
-      <AppContent />
-    </BrowserRouter>
+    <MobileGuard>
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
+    </MobileGuard>
   )
 }
 

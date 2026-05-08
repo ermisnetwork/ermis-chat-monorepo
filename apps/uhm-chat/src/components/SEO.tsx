@@ -10,8 +10,8 @@ interface SEOProps {
 export function SEO({ title, description, image, url }: SEOProps) {
   const defaultTitle = 'Uhm Chat'
   const defaultDescription = 'Uhm Chat - Ứng dụng nhắn tin nhanh chóng, bảo mật và hiện đại. Kết nối với bạn bè và đồng nghiệp mọi lúc, mọi nơi.'
-  const defaultImage = '/uhm-preview.png'
-  const defaultUrl = 'https://uhm.chat/'
+  const defaultImage = 'https://chat.sub2s.live/uhm-preview.png'
+  const defaultUrl = 'https://chat.sub2s.live/'
 
   const seoTitle = title ? `${title}` : defaultTitle
   const seoDescription = description || defaultDescription
