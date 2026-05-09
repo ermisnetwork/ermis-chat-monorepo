@@ -152,6 +152,12 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     if (!callNode) return;
     setCallType(type);
     setIsIncoming(false);
+    
+    // Tận dụng Local Cache: Phân giải thông tin đồng bộ ngay trước khi bật modal
+    callNode.prefillUserInfo(cid);
+    setCallerInfo(callNode.callerInfo);
+    setReceiverInfo(callNode.receiverInfo);
+
     setCallStatus(CallStatus.RINGING);
     await callNode.createCall(type, cid);
     // C1: Lifecycle callback — call started

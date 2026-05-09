@@ -451,7 +451,6 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
           this.callType = is_video ? 'video' : 'audio';
 
           this.setUserInfo(cid, eventUserId);
-          this.setCallStatus(CallStatus.RINGING);
           this.cid = cid || '';
           this.metadata = metadata || {};
 
@@ -465,6 +464,8 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
               metadata: this.metadata,
             });
           }
+
+          this.setCallStatus(CallStatus.RINGING);
 
           await this.startLocalStream();
           if (this.callStatus === CallStatus.ENDED) return;
@@ -668,9 +669,15 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     };
   }
 
+  public prefillUserInfo(cid: string) {
+    this.setUserInfo(cid, this.userID);
+  }
+
   public async createCall(callType: string, cid: string) {
     try {
       this.cid = cid;
+      this.callType = callType;
+      this.prefillUserInfo(cid);
 
       const address = await this.getLocalEndpointAddr();
 
