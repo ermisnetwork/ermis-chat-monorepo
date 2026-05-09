@@ -31,8 +31,10 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   /** Type of call: 'audio' or 'video' */
   callType?: string;
 
-  /** ID of the current user */
-  userID?: string | undefined;
+  /** ID of the current user — always reads live value from client */
+  get userID(): string | undefined {
+    return this._client?.userID;
+  }
 
   /** Current status of the call */
   callStatus? = '';
@@ -136,7 +138,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     this.cid = '';
     this.callType = '';
     this.sessionID = sessionID;
-    this.userID = client.userID;
+    // userID is now a getter — reads from this._client.userID directly
     this.metadata = {};
     this.wasmPath = wasmPath;
     this.relayUrl = relayUrl;
@@ -391,27 +393,43 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   private setUserInfo(cid: string | undefined, eventUserId: string | undefined) {
     if (!cid || !eventUserId) return;
 
-    // Get caller and receiver userId from activeChannels
     const channel = cid ? this.getClient().activeChannels[cid] : undefined;
-    const members = channel?.state?.members || {};
-    const memberIds = Object.keys(members);
+    const stateMembers = channel?.state?.members || {};
+    const memberIds = Object.keys(stateMembers);
 
-    // callerId is eventUserId, receiverId is the other user in the channel
     const callerId = eventUserId || '';
     const receiverId = memberIds.find((id) => id !== callerId) || '';
 
-    // Get user info from client.state.users
-    const callerUser = this.getClient().state.users[callerId];
-    const receiverUser = this.getClient().state.users[receiverId];
+    // Try multiple sources for user info (in order of reliability):
+    // 1. channel.data.members (enriched array from watch/query — most reliable)
+    // 2. channel.state.members[id].user (may be overwritten by async event handlers)
+    // 3. client.state.users (may not be populated due to disabled updateUser in updateUserReference)
+    const dataMembers: any[] = (channel?.data as any)?.members || [];
+
+    const findUserFromDataMembers = (userId: string) => {
+      const member = dataMembers.find(
+        (m: any) => m.user_id === userId || m.user?.id === userId,
+      );
+      return member?.user;
+    };
+
+    const callerUser =
+      findUserFromDataMembers(callerId) ||
+      (stateMembers[callerId] as any)?.user ||
+      this.getClient().state.users[callerId];
+    const receiverUser =
+      findUserFromDataMembers(receiverId) ||
+      (stateMembers[receiverId] as any)?.user ||
+      this.getClient().state.users[receiverId];
 
     this.callerInfo = {
       id: callerId,
-      name: callerUser?.name,
+      name: callerUser?.name || callerId,
       avatar: callerUser?.avatar || '',
     };
     this.receiverInfo = {
       id: receiverId,
-      name: receiverUser?.name,
+      name: receiverUser?.name || receiverId,
       avatar: receiverUser?.avatar || '',
     };
   }

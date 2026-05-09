@@ -162,7 +162,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
-  const { isPending } = usePendingState(activeChannel, client.userID);
+  const { isPending, inviteUpdateCount } = usePendingState(activeChannel, client.userID);
 
   const isSkipped = client.userID
     ? isSkippedMember(activeChannel?.state?.members?.[client.userID]?.channel_role as string) ||
@@ -193,7 +193,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       }
     }
     return null;
-  }, [activeChannel, currentUserId, isPending]);
+  }, [activeChannel, currentUserId, isPending, inviteUpdateCount]);
 
   // Ref to scope DOM queries (safe for multiple instances)
   const containerRef = useRef<HTMLDivElement>(null);

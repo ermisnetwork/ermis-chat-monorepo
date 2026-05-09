@@ -10,6 +10,7 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
     const membership = channel?.state?.membership || channel?.state?.members?.[currentUserId || ''];
     return isPendingMember(membership?.channel_role as string);
   });
+  const [inviteUpdateCount, setInviteUpdateCount] = useState(0);
 
   useEffect(() => {
     if (!channel || !currentUserId) {
@@ -44,16 +45,25 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
       const eventMember = event.member as Record<string, unknown>;
       const eventUser = event.user as Record<string, unknown>;
       const eventUserId = eventMember?.user_id || (eventMember?.user as Record<string, unknown>)?.id || eventUser?.id;
-      if (eventUserId !== currentUserId) return; // Only react to own invite events
 
       const eventCid =
         event.cid ||
         (event.channel as Record<string, unknown>)?.cid ||
         (event.channel_id ? `${event.channel_type}:${event.channel_id}` : undefined);
-      if (eventCid === channel.cid) {
+
+      if (eventCid !== channel.cid) return; // Only react to events on this channel
+
+      // If this event is for the current user, update their membership state
+      if (eventUserId === currentUserId) {
         defensiveUpdateState(event);
-        setIsPending(checkPending());
       }
+
+      // Re-check pending state regardless of which user triggered the event.
+      // This handles both cases:
+      // - Current user accepts/rejects their own invite
+      // - Another user accepts an invite (hide pending-invitee box on inviter's side)
+      setIsPending(checkPending());
+      setInviteUpdateCount(c => c + 1);
     };
 
     const client = channel.getClient();
@@ -71,5 +81,5 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
     };
   }, [channel, currentUserId]);
 
-  return { isPending };
+  return { isPending, inviteUpdateCount };
 }
