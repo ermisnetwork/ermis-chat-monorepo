@@ -255,12 +255,14 @@ export const UhmCallUI: React.FC = () => {
               playsInline
               className="w-full h-full object-cover"
             />
-            {/* Remote Mic Muted Indicator */}
-            {isRemoteMicMuted && (
-              <div className="absolute top-6 left-6 bg-red-500/80 backdrop-blur-md rounded-full px-3 py-1 flex items-center gap-2 shadow-lg ring-1 ring-white/10 z-20">
-                <MicOff className="w-4 h-4 text-white" />
-              </div>
-            )}
+            {/* Call Status Bar: mic-muted indicator + duration timer */}
+            <div className="absolute top-6 left-6 flex items-center gap-2 text-white/80 font-mono text-sm bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full ring-1 ring-white/10 z-20">
+              {isRemoteMicMuted && (
+                <MicOff className="w-4 h-4 text-red-400" />
+              )}
+              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+              {formatDuration(callDuration)}
+            </div>
             <div className="absolute top-6 right-6 w-32 md:w-48 aspect-video bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10 z-20">
               <video
                 ref={localVideoRef}

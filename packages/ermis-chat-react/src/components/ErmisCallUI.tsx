@@ -498,12 +498,14 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
                 className="ermis-call-ui__video-local-stream"
               />
             </div>
-            {/* Remote mic muted indicator */}
-            {isRemoteMicMuted && (
-              <div className="ermis-call-ui__remote-muted-badge">
-                <FinalMicOffIcon />
-              </div>
-            )}
+            {/* Call status bar: mic-muted indicator + duration timer */}
+            <div className="ermis-call-ui__video-timer">
+              {isRemoteMicMuted && (
+                <span className="ermis-call-ui__video-timer-mic"><FinalMicOffIcon /></span>
+              )}
+              <span className="ermis-call-ui__active-status-dot" />
+              <span>{formatDuration(callDuration)}</span>
+            </div>
             {/* Glassmorphism controls overlay */}
             <div className="ermis-call-ui__video-controls-overlay">
               {renderControls()}

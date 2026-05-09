@@ -325,6 +325,39 @@
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
 }
 
+/* Video call status bar: mic-muted icon + duration timer in one row */
+.ermis-call-ui__video-timer {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--ermis-radius-full);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: var(--ermis-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  user-select: none;
+}
+
+.ermis-call-ui__video-timer-mic {
+  display: flex;
+  align-items: center;
+  color: #f87171; /* red-400 */
+}
+
+.ermis-call-ui__video-timer-mic svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* -- Audio Layout -- */
 .ermis-call-ui__audio-container {
   text-align: center;
