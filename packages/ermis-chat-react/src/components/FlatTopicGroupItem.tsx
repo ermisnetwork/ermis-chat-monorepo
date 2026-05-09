@@ -45,6 +45,7 @@ type FlatTopicGroupItemProps = {
   PinnedIconComponent?: React.ComponentType;
   ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
   onAddTopic?: (channel: Channel) => void;
+  onTruncateChannel?: (channel: Channel) => void;
   hiddenActions?: string[];
   actionLabels?: ChannelActionLabels;
   actionIcons?: ChannelActionIcons;

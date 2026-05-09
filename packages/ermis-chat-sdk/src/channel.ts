@@ -1413,9 +1413,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           channelState.addMessageSorted(event.message, false, false);
         }
         break;
-      case 'channel.truncate':
-        if (event.channel?.created_at) {
-          const truncatedAt = +new Date(event.channel.created_at);
+      case 'channel.truncate': {
+        const truncateDate = event.channel?.created_at || event.created_at;
+        if (truncateDate) {
+          const truncatedAt = +new Date(truncateDate);
 
           channelState.messageSets.forEach((messageSet, messageSetIndex) => {
             messageSet.messages.forEach(({ created_at: createdAt, id }) => {
@@ -1431,6 +1432,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           channelState.clearMessages();
         }
 
+
         channelState.unreadCount = 0;
         // system messages don't increment unread counts
         if (event.message) {
@@ -1440,6 +1442,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           }
         }
         break;
+      }
       case 'member.added':
         if (event.member?.user_id) {
           const user = getUserInfo(event.member.user_id, users);

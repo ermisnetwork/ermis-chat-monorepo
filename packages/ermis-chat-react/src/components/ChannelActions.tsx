@@ -33,6 +33,7 @@ export function computeDefaultActions(
     onEditTopic?: (channel: Channel) => void;
     onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
     onDeleteTopic?: (channel: Channel) => void;
+    onTruncateChannel?: (channel: Channel) => void;
     isBlocked?: boolean;
     actionLabels?: ChannelActionLabels;
     actionIcons?: ChannelActionIcons;
@@ -100,6 +101,25 @@ export function computeDefaultActions(
         }
       },
     });
+
+    // Direct channel: Truncate / Clear history
+    actions.push({
+      id: 'truncate',
+      label: actionLabels?.truncateChannel || 'Clear history',
+      icon: actionIcons?.TruncateChannelIcon || <TrashIcon />,
+      isDanger: true,
+      onClick: async (ch) => {
+        if (options?.onTruncateChannel) {
+          await options.onTruncateChannel(ch);
+        } else {
+          try {
+            await ch.truncate();
+          } catch (e) {
+            console.error('Error clearing channel history', e);
+          }
+        }
+      },
+    });
   } else if (isTopic) {
     // Topic: Edit topic (owner & moder only)
     if (canManageChannel(role)) {
@@ -121,7 +141,7 @@ export function computeDefaultActions(
         isDanger: !isClosed,
         onClick: async (ch) => {
           if (options?.onToggleCloseTopic) {
-            options.onToggleCloseTopic(ch, isClosed);
+            await options.onToggleCloseTopic(ch, isClosed);
             return;
           }
           // Default behavior: call SDK API directly
@@ -151,7 +171,7 @@ export function computeDefaultActions(
         isDanger: true,
         onClick: async (ch) => {
           if (options?.onDeleteTopic) {
-            options.onDeleteTopic(ch);
+            await options.onDeleteTopic(ch);
             return;
           }
           try {

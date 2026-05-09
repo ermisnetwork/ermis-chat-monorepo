@@ -37,6 +37,7 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
   create_topic: Plus,
   delete: Trash2,
   delete_topic: Trash2,
+  truncate: Trash2,
   leave: LogOut,
 }
 
@@ -72,7 +73,7 @@ export function UhmChannelActions({ channel, actions, onClose }: UhmChannelActio
       // Check if this action needs confirmation
       if (needsConfirmation(action.id)) {
         requestConfirm(action.id, channel, () => {
-          action.onClick(channel, new MouseEvent('click') as unknown as React.MouseEvent)
+          return action.onClick(channel, new MouseEvent('click') as unknown as React.MouseEvent)
         })
         return
       }

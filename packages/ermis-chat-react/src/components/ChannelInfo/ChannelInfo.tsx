@@ -115,10 +115,10 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
 DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
-  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, onDeleteTopic,
+  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, onDeleteTopic, onTruncateChannel,
   onBlockUser, onUnblockUser, onPin, onUnpin, onCloseTopic, onReopenTopic,
   isTeamChannel, isTopic, isClosedTopic, isBlocked, isPinned, currentUserRole,
-  searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', leaveLabel = 'Leave',
+  searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', truncateLabel = 'Clear history', leaveLabel = 'Leave',
   blockLabel = 'Block', unblockLabel = 'Unblock', pinLabel = 'Pin', unpinLabel = 'Unpin',
   closeTopicLabel = 'Close Topic', reopenTopicLabel = 'Reopen Topic', deleteTopicLabel = 'Delete Topic'
 }) => {
@@ -188,9 +188,18 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
           <span>{deleteTopicLabel}</span>
         </button>
       )}
-      {/* Block/Unblock — messaging (1-1) channels only */}
+      {/* Block/Unblock & Truncate — messaging (1-1) channels only */}
       {!isTeamChannel && !isTopic && (
-        isBlocked ? (
+        <>
+          {onTruncateChannel && (
+            <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannel}>
+              <div className="ermis-channel-info__action-icon">
+                <DeleteIcon />
+              </div>
+              <span>{truncateLabel}</span>
+            </button>
+          )}
+          {isBlocked ? (
           <button className="ermis-channel-info__action-btn" onClick={onUnblockUser}>
             <div className="ermis-channel-info__action-icon">
               <BlockIcon />
@@ -204,7 +213,8 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
             </div>
             <span>{blockLabel}</span>
           </button>
-        )
+          )}
+        </>
       )}
     </div>
   );
@@ -229,6 +239,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     actionsSearchLabel,
     actionsSettingsLabel,
     actionsDeleteLabel,
+    actionsTruncateLabel,
     actionsLeaveLabel,
     actionsCreateTopicLabel,
     MemberItemComponent,
@@ -240,6 +251,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     onSearchClick,
     onLeaveChannel: onLeaveChannelProp,
     onDeleteChannel: onDeleteChannelProp,
+    onTruncateChannel: onTruncateChannelProp,
     onDeleteTopic: onDeleteTopicProp,
     onCreateTopic: onCreateTopicProp,
     onAddMemberClick,
@@ -532,6 +544,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 onSettingsClick={() => setShowSettingsPanel(true)}
                 onLeaveChannel={handleLeaveChannel}
                 onDeleteChannel={handleDeleteChannel}
+                onTruncateChannel={onTruncateChannelProp ? () => onTruncateChannelProp(channel) : undefined}
                 onBlockUser={handleBlockUser}
                 onUnblockUser={handleUnblockUser}
                 onPin={handlePinChannel}
@@ -550,6 +563,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 searchLabel={actionsSearchLabel}
                 settingsLabel={actionsSettingsLabel}
                 deleteLabel={actionsDeleteLabel}
+                truncateLabel={actionsTruncateLabel}
                 leaveLabel={actionsLeaveLabel}
                 blockLabel={actionsBlockLabel}
                 unblockLabel={actionsUnblockLabel}

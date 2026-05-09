@@ -21,6 +21,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   onSettingsClick,
   onLeaveChannel,
   onDeleteChannel,
+  onTruncateChannel,
   onBlockUser,
   onUnblockUser,
   onPin,
@@ -39,6 +40,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   searchLabel,
   settingsLabel,
   deleteLabel,
+  truncateLabel,
   leaveLabel,
   blockLabel,
   unblockLabel,
@@ -149,22 +151,32 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
           </>
         )}
 
-        {/* Block/Unblock Actions (1-1 messaging only) */}
+        {/* Block/Unblock & Truncate Actions (1-1 messaging only) */}
         {!isTeamChannel && !isTopic && (
-          isBlocked ? (
-            <ActionItem
-              onClick={() => handleActionWithConfirm('unblock', onUnblockUser)}
-              icon={UserCheck}
-              label={unblockLabel}
-            />
-          ) : (
-            <ActionItem
-              onClick={() => handleActionWithConfirm('block', onBlockUser)}
-              icon={Ban}
-              label={blockLabel}
-              danger
-            />
-          )
+          <>
+            {onTruncateChannel && (
+              <ActionItem
+                onClick={() => handleActionWithConfirm('truncate', onTruncateChannel)}
+                icon={Trash2}
+                label={truncateLabel || t('actions.truncate_channel')}
+                danger
+              />
+            )}
+            {isBlocked ? (
+              <ActionItem
+                onClick={() => handleActionWithConfirm('unblock', onUnblockUser)}
+                icon={UserCheck}
+                label={unblockLabel}
+              />
+            ) : (
+              <ActionItem
+                onClick={() => handleActionWithConfirm('block', onBlockUser)}
+                icon={Ban}
+                label={blockLabel}
+                danger
+              />
+            )}
+          </>
         )}
 
         {/* Create Topic Action (Team Channels only) */}

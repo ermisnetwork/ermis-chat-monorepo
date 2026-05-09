@@ -74,6 +74,7 @@ export function ChatPage() {
     deleteTopic: t('actions.delete_topic'),
     deleteChannel: t('actions.delete_channel'),
     leaveChannel: t('actions.leave_channel'),
+    truncateChannel: t('actions.truncate_channel'),
   }), [t])
 
   const systemMessageTranslations = useMemo(() => ({
@@ -140,6 +141,14 @@ export function ChatPage() {
   const handleBackFromTopics = useCallback(() => {
     setActivePanel('channels')
     setDrillDownChannel(null)
+  }, [])
+
+  const handleTruncateChannel = useCallback(async (channel: ChannelType) => {
+    try {
+      await channel.truncate()
+    } catch (err) {
+      console.error('Failed to truncate channel', err)
+    }
   }, [])
 
   const toggleChannelInfo = useCallback(() => {
@@ -318,6 +327,7 @@ export function ChatPage() {
               LoadingIndicator={ChannelListSkeleton}
               EmptyStateIndicator={ChannelListEmpty}
               ChannelActionsComponent={UhmChannelActions}
+              onTruncateChannel={handleTruncateChannel}
               actionLabels={actionLabels}
               deletedMessageLabel={t('chat.deleted_message')}
               stickerMessageLabel={t('chat.preview_sticker')}
@@ -474,11 +484,13 @@ export function ChatPage() {
               actionsBlockLabel={t('actions.block_user')}
               actionsUnblockLabel={t('actions.unblock_user')}
               actionsDeleteLabel={t('actions.delete_channel')}
+              actionsTruncateLabel={t('actions.truncate_channel')}
               actionsLeaveLabel={t('actions.leave_channel')}
               actionsCloseTopicLabel={t('actions.close_topic')}
               actionsReopenTopicLabel={t('actions.reopen_topic')}
               actionsDeleteTopicLabel={t('actions.delete_topic')}
               actionsCreateTopicLabel={t('actions.create_topic')}
+              onTruncateChannel={handleTruncateChannel}
               onCreateTopic={openCreateTopicModal}
               roleLabels={roleLabels}
             />

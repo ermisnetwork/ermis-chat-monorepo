@@ -346,6 +346,7 @@ export type ChannelActionLabels = {
   deleteTopic?: string;
   deleteChannel?: string;
   leaveChannel?: string;
+  truncateChannel?: string;
 };
 
 export type ChannelActionIcons = {
@@ -360,6 +361,7 @@ export type ChannelActionIcons = {
   DeleteTopicIcon?: React.ReactNode;
   DeleteChannelIcon?: React.ReactNode;
   LeaveChannelIcon?: React.ReactNode;
+  TruncateChannelIcon?: React.ReactNode;
 };
 
 export type ChannelActionsProps = {
@@ -398,6 +400,8 @@ export type ChannelItemProps = {
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
   /** Handler when Delete Topic action is triggered */
   onDeleteTopic?: (channel: Channel) => void;
+  /** Handler when Truncate Channel action is triggered */
+  onTruncateChannel?: (channel: Channel) => void;
   /** Array of action IDs to hide from the actions dropdown */
   hiddenActions?: string[];
   /** Custom labels for default channel actions */
@@ -532,6 +536,8 @@ export type ChannelListProps = {
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
   /** Handler when Delete Topic action is triggered */
   onDeleteTopic?: (channel: Channel) => void;
+  /** Handler when Truncate action is triggered */
+  onTruncateChannel?: (channel: Channel) => void;
   /** Custom labels for default channel actions */
   actionLabels?: ChannelActionLabels;
   /** Custom icons for default channel actions */
@@ -1251,6 +1257,7 @@ export type ChannelInfoActionsProps = {
   onSettingsClick?: () => void;
   onLeaveChannel?: () => void;
   onDeleteChannel?: () => void;
+  onTruncateChannel?: () => void;
   onBlockUser?: () => void;
   onUnblockUser?: () => void;
   onPin?: () => void;
@@ -1264,6 +1271,7 @@ export type ChannelInfoActionsProps = {
   searchLabel?: string;
   settingsLabel?: string;
   deleteLabel?: string;
+  truncateLabel?: string;
   leaveLabel?: string;
   blockLabel?: string;
   unblockLabel?: string;
@@ -1496,6 +1504,7 @@ export type ChannelInfoProps = {
   actionsSearchLabel?: string;
   actionsSettingsLabel?: string;
   actionsDeleteLabel?: string;
+  actionsTruncateLabel?: string;
   actionsLeaveLabel?: string;
   actionsPinLabel?: string;
   actionsUnpinLabel?: string;
@@ -1506,6 +1515,7 @@ export type ChannelInfoProps = {
   onSearchClick?: () => void;
   onLeaveChannel?: () => void;
   onDeleteChannel?: () => void;
+  onTruncateChannel?: (channel: Channel) => void;
   onPinChannel?: () => void;
   onUnpinChannel?: () => void;
   onAddMemberClick?: () => void;

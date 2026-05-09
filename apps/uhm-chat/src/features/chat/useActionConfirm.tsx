@@ -31,6 +31,10 @@ const CONFIRM_ACTIONS: Record<string, { titleKey: string; messageKey: string }> 
     titleKey: 'actions.confirm_close_topic_title',
     messageKey: 'actions.confirm_close_topic_message',
   },
+  truncate: {
+    titleKey: 'actions.confirm_truncate_title',
+    messageKey: 'actions.confirm_truncate_message',
+  },
 }
 
 /* ----------------------------------------------------------
@@ -58,12 +62,14 @@ export function useActionConfirm() {
   const [pendingAction, setPendingAction] = useState<{
     actionId: string
     channel: Channel
-    onExecute: () => void
+    onExecute: () => void | Promise<void>
   } | null>(null)
+
+  const [isExecuting, setIsExecuting] = useState(false)
 
   /** Request confirmation before executing an action */
   const requestConfirm = useCallback(
-    (actionId: string, channel: Channel, onExecute: () => void) => {
+    (actionId: string, channel: Channel, onExecute: () => void | Promise<void>) => {
       setPendingAction({ actionId, channel, onExecute })
     },
     [],
@@ -74,11 +80,15 @@ export function useActionConfirm() {
     setPendingAction(null)
   }, [])
 
-  /** Execute the pending action and close dialog */
-  const executeConfirm = useCallback(() => {
+  const executeConfirm = useCallback(async () => {
     if (pendingAction) {
-      pendingAction.onExecute()
-      setPendingAction(null)
+      setIsExecuting(true)
+      try {
+        await pendingAction.onExecute()
+      } finally {
+        setIsExecuting(false)
+        setPendingAction(null)
+      }
     }
   }, [pendingAction])
 
@@ -95,6 +105,7 @@ export function useActionConfirm() {
     return (
       <UhmConfirmDialog
         isOpen={true}
+        isLoading={isExecuting}
         onConfirm={executeConfirm}
         onCancel={cancelConfirm}
         title={t(config.titleKey)}

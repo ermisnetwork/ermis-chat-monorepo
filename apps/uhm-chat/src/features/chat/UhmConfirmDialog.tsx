@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,6 +20,7 @@ interface UhmConfirmDialogProps {
   confirmLabel: string
   cancelLabel: string
   isDanger?: boolean
+  isLoading?: boolean
 }
 
 export function UhmConfirmDialog({
@@ -31,6 +32,7 @@ export function UhmConfirmDialog({
   confirmLabel,
   cancelLabel,
   isDanger = true,
+  isLoading = false,
 }: UhmConfirmDialogProps) {
   const handleConfirm = useCallback(() => {
     onConfirm()
@@ -77,6 +79,7 @@ export function UhmConfirmDialog({
             variant="ghost"
             size="sm"
             onClick={onCancel}
+            disabled={isLoading}
             className="h-8 px-4 text-[13px] font-medium rounded-md"
           >
             {cancelLabel}
@@ -85,12 +88,14 @@ export function UhmConfirmDialog({
             variant={isDanger ? 'destructive' : 'default'}
             size="sm"
             onClick={handleConfirm}
+            disabled={isLoading}
             className={`h-8 px-4 text-[13px] font-medium rounded-md ${
               isDanger
                 ? 'bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700 text-white'
                 : ''
             }`}
           >
+            {isLoading && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
             {confirmLabel}
           </Button>
         </DialogFooter>
