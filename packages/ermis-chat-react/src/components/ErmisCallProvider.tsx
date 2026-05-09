@@ -92,12 +92,25 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     node.onDeviceChange = (audio, video) => {
       setAudioDevices(audio);
       setVideoDevices(video);
+      const selected = node.getSelectedDevices();
+      if (selected.audioDevice) setSelectedAudioDeviceId(selected.audioDevice.deviceId);
+      else if (audio.length > 0) setSelectedAudioDeviceId(audio[0].deviceId);
+      
+      if (selected.videoDevice) setSelectedVideoDeviceId(selected.videoDevice.deviceId);
+      else if (video.length > 0) setSelectedVideoDeviceId(video[0].deviceId);
     };
+
     node.onScreenShareChange = (isSharing: boolean) => setIsScreenSharing(isSharing);
 
     node.getDevices().then(({ audioDevices: a, videoDevices: v }) => {
       setAudioDevices(a);
       setVideoDevices(v);
+      const selected = node.getSelectedDevices();
+      if (selected.audioDevice) setSelectedAudioDeviceId(selected.audioDevice.deviceId);
+      else if (a.length > 0) setSelectedAudioDeviceId(a[0].deviceId);
+      
+      if (selected.videoDevice) setSelectedVideoDeviceId(selected.videoDevice.deviceId);
+      else if (v.length > 0) setSelectedVideoDeviceId(v[0].deviceId);
     });
 
     node.onCallStatus = (status: string | null) => {

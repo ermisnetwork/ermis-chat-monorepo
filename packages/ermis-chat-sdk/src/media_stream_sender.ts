@@ -142,9 +142,11 @@ export class MediaStreamSender {
 
     audioEncoder.configure({
       codec: 'mp4a.40.2',
+      // codec: 'opus',
       sampleRate: 48000,
       numberOfChannels: 1,
       bitrate: 128000,
+      // bitrate: 64000,
     });
 
     this.audioEncoder = audioEncoder;

@@ -333,7 +333,7 @@ export const UhmCallUI: React.FC = () => {
                       <DropdownMenuRadioItem
                         key={device.deviceId}
                         value={device.deviceId}
-                        className="focus:bg-indigo-500 focus:text-white cursor-pointer py-2.5 px-3 rounded-lg mx-1"
+                        className="focus:bg-indigo-500 focus:text-white cursor-pointer py-2.5 px-3 !pl-3 rounded-lg mx-1 data-[state=checked]:bg-indigo-500/15 data-[state=checked]:text-indigo-400 [&>span:first-child]:hidden"
                       >
                         {device.label || `Microphone ${device.deviceId.slice(0, 5)}`}
                       </DropdownMenuRadioItem>
@@ -370,7 +370,7 @@ export const UhmCallUI: React.FC = () => {
                         <DropdownMenuRadioItem
                           key={device.deviceId}
                           value={device.deviceId}
-                          className="focus:bg-indigo-500 focus:text-white cursor-pointer py-2.5 px-3 rounded-lg mx-1"
+                          className="focus:bg-indigo-500 focus:text-white cursor-pointer py-2.5 px-3 !pl-3 rounded-lg mx-1 data-[state=checked]:bg-indigo-500/15 data-[state=checked]:text-indigo-400 [&>span:first-child]:hidden"
                         >
                           {device.label || `Camera ${device.deviceId.slice(0, 5)}`}
                         </DropdownMenuRadioItem>

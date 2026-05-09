@@ -2,9 +2,8 @@ import { replaceCodecNumber } from './utils';
 import { FRAME_TYPE, IMediaReceiverEvents, INodeCall, VideoConfig } from './types';
 import { HEVCDecoderConfigurationRecord } from './hevc_decoder_config';
 
-// Các biến cấu hình Audio Sync
-const MAX_AUDIO_LATENCY = 0.1; // 100ms
-const MIN_BUFFER_AHEAD = 0.02; // 20ms
+const MAX_AUDIO_LATENCY = 0.5; // 500ms
+const MIN_BUFFER_AHEAD = 0.05; // 50ms
 
 export class MediaStreamReceiver {
   private videoDecoder: VideoDecoder | null = null;
@@ -166,9 +165,9 @@ export class MediaStreamReceiver {
 
       // --- XỬ LÝ LATENCY & SYNC ---
       if (this.nextStartTime < currentTime) {
-        this.nextStartTime = currentTime;
+        this.nextStartTime = currentTime + MIN_BUFFER_AHEAD;
       } else if (this.nextStartTime > currentTime + MAX_AUDIO_LATENCY) {
-        // Nếu buffer quá lớn (latency cao), reset về thời điểm hiện tại
+        // Nếu buffer quá lớn (latency cao), reset về thời điểm hiện tại cộng khoảng đệm
         this.nextStartTime = currentTime + MIN_BUFFER_AHEAD;
 
         // Dọn dẹp các audio node cũ đang được lên lịch để tránh phát đè (overlap) gây nổ/méo tiếng

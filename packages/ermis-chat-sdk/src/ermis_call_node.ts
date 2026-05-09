@@ -902,22 +902,22 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
       if (!this.localStream) return false;
 
+      // Lấy lại cấu hình chuẩn để không mất khử ồn, channelCount, v.v.
+      const mediaConstraints = await this.getMediaConstraints();
+
       // Get new audio stream with selected device
       const newStream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: { exact: deviceId } },
+        audio: mediaConstraints.audio,
         video: false,
       });
 
       const newAudioTrack = newStream.getAudioTracks()[0];
       const oldAudioTrack = this.localStream.getAudioTracks()[0];
 
-      // Replace audio track in peer connection
-      // if (this.peer && oldAudioTrack) {
-      //   const sender = this.peer.getSenders().find((s) => s.track === oldAudioTrack);
-      //   if (sender) {
-      //     await sender.replaceTrack(newAudioTrack);
-      //   }
-      // }
+      // Replace audio track in custom encoder pipeline
+      if (this.mediaSender && newAudioTrack) {
+        await this.mediaSender.replaceAudioTrack(newAudioTrack);
+      }
 
       // Replace audio track in local stream
       if (oldAudioTrack) {
@@ -958,14 +958,22 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
       if (!this.localStream) return false;
 
+      // Lấy lại cấu hình chuẩn để không mất độ phân giải
+      const mediaConstraints = await this.getMediaConstraints();
+
       // Get new video stream with selected device
       const newStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        video: { deviceId: { exact: deviceId } },
+        video: mediaConstraints.video,
       });
 
       const newVideoTrack = newStream.getVideoTracks()[0];
       const oldVideoTrack = this.localStream.getVideoTracks()[0];
+
+      // Replace video track in custom encoder pipeline
+      if (this.mediaSender && newVideoTrack) {
+        await this.mediaSender.replaceVideoTrack(newVideoTrack);
+      }
 
       // Replace video track in local stream
       if (oldVideoTrack) {
