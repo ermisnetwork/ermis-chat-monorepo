@@ -97,6 +97,8 @@ export function useChannelMessages({
         .then(() => {
           fullyQueriedChannels.add(cid);
           syncMessages();
+          // Sync initial read state from SDK so read receipts show immediately
+          setReadState({ ...activeChannel.state.read });
           scheduleScrollToBottom(false);
           fadeListIn(); // Fade in AFTER query finishes and sync is called
         })
@@ -107,6 +109,8 @@ export function useChannelMessages({
     } else {
       // Already queried or disabled: sync cache, scroll and fade in quickly
       syncMessages();
+      // Sync initial read state from SDK so read receipts show immediately
+      setReadState({ ...activeChannel.state.read });
       setTimeout(() => {
         scheduleScrollToBottom(false);
         fadeListIn();
