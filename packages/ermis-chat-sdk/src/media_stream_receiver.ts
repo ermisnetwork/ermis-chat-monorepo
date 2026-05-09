@@ -15,6 +15,7 @@ export class MediaStreamReceiver {
 
   private audioContext: AudioContext | null = null;
   private mediaDestination: MediaStreamAudioDestinationNode | null = null;
+  private scheduledAudioNodes: AudioBufferSourceNode[] = [];
 
   private isWaitingForKeyFrame: boolean = true;
   private nextStartTime: number = 0;
@@ -169,22 +170,35 @@ export class MediaStreamReceiver {
       } else if (this.nextStartTime > currentTime + MAX_AUDIO_LATENCY) {
         // Nếu buffer quá lớn (latency cao), reset về thời điểm hiện tại
         this.nextStartTime = currentTime + MIN_BUFFER_AHEAD;
+
+        // Dọn dẹp các audio node cũ đang được lên lịch để tránh phát đè (overlap) gây nổ/méo tiếng
+        this.scheduledAudioNodes.forEach((node) => {
+          try {
+            node.stop();
+          } catch (e) {
+            /* ignore */
+          }
+        });
+        this.scheduledAudioNodes = [];
       }
 
       const audioBuffer = this.audioContext.createBuffer(numberOfChannels, numberOfFrames, sampleRate);
-      const size = numberOfChannels * numberOfFrames;
-      const tempBuffer = new Float32Array(size);
 
-      audioData.copyTo(tempBuffer, { planeIndex: 0, format: 'f32-planar' });
-
+      // Lấy data đúng cho từng channel đối với âm thanh stereo/đa kênh
       for (let ch = 0; ch < numberOfChannels; ch++) {
-        const channelData = tempBuffer.subarray(ch * numberOfFrames, (ch + 1) * numberOfFrames);
+        const channelData = new Float32Array(numberOfFrames);
+        audioData.copyTo(channelData, { planeIndex: ch, format: 'f32-planar' });
         audioBuffer.copyToChannel(channelData, ch);
       }
 
       const source = this.audioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(this.mediaDestination);
+
+      this.scheduledAudioNodes.push(source);
+      source.onended = () => {
+        this.scheduledAudioNodes = this.scheduledAudioNodes.filter((n) => n !== source);
+      };
 
       source.start(this.nextStartTime);
       this.nextStartTime += duration;
@@ -510,6 +524,13 @@ export class MediaStreamReceiver {
       }
       this.audioContext = null;
     }
+
+    this.scheduledAudioNodes.forEach((node) => {
+      try {
+        node.stop();
+      } catch (e) {}
+    });
+    this.scheduledAudioNodes = [];
 
     // Reset các biến
     this.isWaitingForKeyFrame = true;

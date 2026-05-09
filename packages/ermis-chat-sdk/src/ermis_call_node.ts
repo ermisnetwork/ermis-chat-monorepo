@@ -407,9 +407,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     const dataMembers: any[] = (channel?.data as any)?.members || [];
 
     const findUserFromDataMembers = (userId: string) => {
-      const member = dataMembers.find(
-        (m: any) => m.user_id === userId || m.user?.id === userId,
-      );
+      const member = dataMembers.find((m: any) => m.user_id === userId || m.user?.id === userId);
       return member?.user;
     };
 
@@ -834,7 +832,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
           track.stop();
           this.localStream?.removeTrack(track);
         });
-        
+
         // Add new camera track
         this.localStream.addTrack(cameraTrack);
       } else {

@@ -5,6 +5,7 @@ export class MediaStreamSender {
   private videoEncoder: VideoEncoder | null = null;
   private audioEncoder: AudioEncoder | null = null;
   private videoReader: ReadableStreamDefaultReader<VideoFrame> | null = null;
+  private audioReader: ReadableStreamDefaultReader<AudioData> | null = null;
 
   private localStream: MediaStream | null = null;
 
@@ -73,7 +74,6 @@ export class MediaStreamSender {
       this.videoEncoder = null;
     }
 
-    // Reset and close audio encoder
     if (this.audioEncoder) {
       try {
         if (this.audioEncoder.state !== 'closed') {
@@ -82,6 +82,13 @@ export class MediaStreamSender {
         }
       } catch (e) {}
       this.audioEncoder = null;
+    }
+
+    if (this.audioReader) {
+      try {
+        this.audioReader.cancel('Stream stopped').catch(() => {});
+      } catch (e) {}
+      this.audioReader = null;
     }
 
     // Reset configs and flags
@@ -244,6 +251,13 @@ export class MediaStreamSender {
   }
 
   public async replaceAudioTrack(track: MediaStreamTrack): Promise<void> {
+    if (this.audioReader) {
+      try {
+        await this.audioReader.cancel('Replacing audio track');
+      } catch (e) {}
+      this.audioReader = null;
+    }
+
     if (track) {
       this.processAudioFrames(track);
     }
@@ -308,11 +322,13 @@ export class MediaStreamSender {
   private processAudioFrames = async (audioTrack: MediaStreamTrack) => {
     // @ts-ignore
     const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack });
-    const audioReader = audioProcessor.readable.getReader();
+    this.audioReader = audioProcessor.readable.getReader();
 
     try {
       while (true) {
-        const { done, value: frame } = await audioReader.read();
+        if (!this.audioReader) break;
+
+        const { done, value: frame } = await this.audioReader.read();
         if (done) break;
 
         if (!this.audioEncoder) {
@@ -332,6 +348,12 @@ export class MediaStreamSender {
       }
     } catch (error: any) {
       console.error(`Error processing audio frames: ${error.message}`);
+    } finally {
+      if (this.audioReader) {
+        try {
+          this.audioReader.releaseLock();
+        } catch (e) {}
+      }
     }
   };
 
