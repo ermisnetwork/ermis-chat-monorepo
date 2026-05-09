@@ -204,13 +204,51 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   const handleAcceptInvite = useCallback(async () => {
     if (!activeChannel) return;
     try {
-      const isPublicTeamOrMeeting = isPublicGroupChannel(activeChannel);
-      const action = isPublicTeamOrMeeting ? 'join' : 'accept';
+      let action: 'join' | 'accept' = 'accept';
+      if (isPublicGroupChannel(activeChannel)) {
+        const isMember = !!(currentUserId && activeChannel.state?.members?.[currentUserId]);
+        action = isMember ? 'accept' : 'join';
+      }
       await activeChannel.acceptInvite(action);
+
+      // Optimistically update local membership so React picks up the change immediately.
+      // The async _handleChannelEvent in the SDK races with client listeners,
+      // so the WS event alone is not reliable for updating React state in time.
+      if (activeChannel.state && currentUserId) {
+        const updatedMembership = {
+          ...activeChannel.state.membership,
+          channel_role: 'member',
+          user_id: currentUserId,
+        } as Record<string, unknown>;
+        activeChannel.state.membership = updatedMembership;
+
+        if (activeChannel.state.members?.[currentUserId]) {
+          activeChannel.state.members[currentUserId] = {
+            ...activeChannel.state.members[currentUserId],
+            channel_role: 'member',
+          };
+        }
+
+        // Dispatch synthetic event so all React listeners update
+        const clientObj = activeChannel.getClient();
+        const eventType = action === 'join' ? 'member.joined' : 'notification.invite_accepted';
+        clientObj.dispatchEvent({
+          type: eventType,
+          cid: activeChannel.cid,
+          channel_type: activeChannel.type,
+          channel_id: activeChannel.id,
+          channel: activeChannel.data,
+          member: updatedMembership,
+          user: clientObj.user,
+        } as any);
+      }
+
+      // Re-watch to get full fresh state from server
+      activeChannel.watch().catch(() => {});
     } catch (e: any) {
       console.error('Error accepting invite', e);
     }
-  }, [activeChannel]);
+  }, [activeChannel, currentUserId]);
 
   const handleRejectInvite = useCallback(async () => {
     if (!activeChannel) return;

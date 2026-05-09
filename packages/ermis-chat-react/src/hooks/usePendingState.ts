@@ -60,11 +60,14 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
     const sub1 = client.on('notification.invite_accepted', handleInviteAction);
     const sub2 = client.on('notification.invite_rejected', handleInviteAction);
     const sub3 = client.on('notification.invite_messaging_skipped', handleInviteAction);
+    // Public channel join sends 'member.joined' instead of 'notification.invite_accepted'
+    const sub4 = client.on('member.joined', handleInviteAction);
 
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
       sub3.unsubscribe();
+      sub4.unsubscribe();
     };
   }, [channel, currentUserId]);
 

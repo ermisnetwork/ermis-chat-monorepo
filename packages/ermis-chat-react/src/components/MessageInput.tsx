@@ -459,8 +459,40 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       <PreviewOverlayComponent
         title={previewOverlayTitle}
         buttonLabel={joinChannelLabel}
-        onJoin={() => {
-          activeChannel?.acceptInvite('join').catch(e => console.error('Failed to join public channel', e));
+        onJoin={async () => {
+          if (!activeChannel) return;
+          try {
+            await activeChannel.acceptInvite('join');
+            // Optimistically update local membership
+            if (activeChannel.state && client.userID) {
+              const updatedMembership = {
+                ...activeChannel.state.membership,
+                channel_role: 'member',
+                user_id: client.userID,
+              } as Record<string, unknown>;
+              activeChannel.state.membership = updatedMembership;
+              if (activeChannel.state.members?.[client.userID]) {
+                activeChannel.state.members[client.userID] = {
+                  ...activeChannel.state.members[client.userID],
+                  channel_role: 'member',
+                };
+              }
+              // Dispatch synthetic event so channel list and other hooks update
+              client.dispatchEvent({
+                type: 'member.joined',
+                cid: activeChannel.cid,
+                channel_type: activeChannel.type,
+                channel_id: activeChannel.id,
+                channel: activeChannel.data,
+                member: updatedMembership,
+                user: client.user,
+              } as any);
+            }
+            // Re-watch to get full state from server
+            activeChannel.watch().catch(() => {});
+          } catch (e) {
+            console.error('Failed to join public channel', e);
+          }
         }}
         className={className}
       />

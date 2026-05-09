@@ -202,32 +202,53 @@ export function useChannelListUpdates(
       }
     };
 
-    // --- notification.invite_accepted: force re-grouping ---
-    const handleMemberUpdated = (event: Event) => {
+    // --- notification.invite_accepted / member.joined: force re-grouping or add to list ---
+    const handleMemberUpdated = async (event: Event) => {
       const updatedUserId = event.member?.user_id || event.member?.user?.id || event.user?.id;
       if (updatedUserId === client.userID) {
-        setChannels((prev) => {
-          // Defensively mutate the channel's membership before grouping logic runs
-          const eventCid =
-            event.cid ||
-            event.channel?.cid ||
-            ((event as Record<string, unknown>).channel_id
-              ? `${(event as Record<string, unknown>).channel_type}:${(event as Record<string, unknown>).channel_id}`
-              : undefined);
+        const eventCid =
+          event.cid ||
+          event.channel?.cid ||
+          ((event as Record<string, unknown>).channel_id
+            ? `${(event as Record<string, unknown>).channel_type}:${(event as Record<string, unknown>).channel_id}`
+            : undefined);
 
+        setChannels((prev) => {
           if (eventCid && event.member) {
             const targetChannel = prev.find((c) => c.cid === eventCid);
-            // We forcefully map the updated incoming member data into the static channel representation
             if (targetChannel && targetChannel.state) {
+              // Channel already in list — just update membership for re-grouping
               targetChannel.state.membership = {
                 ...targetChannel.state.membership,
                 ...event.member,
               } as unknown as Record<string, unknown>;
             }
           }
-
-          return [...prev]; // Force react map to regenerate
+          return [...prev];
         });
+
+        // If the channel is NOT in the list yet (e.g. user just joined a public channel
+        // from search), add it — same logic as handleChannelCreated
+        if (eventCid) {
+          setChannels((prev) => {
+            if (prev.some((c) => c.cid === eventCid)) return prev; // already in list
+            const type = event.channel?.type || (event as Record<string, unknown>).channel_type;
+            const id = event.channel?.id || (event as Record<string, unknown>).channel_id;
+            if (!type || !id) return prev;
+            const channelInstance = client.channel(type as string, id as string);
+            if (channelInstance.state) {
+              channelInstance.state.membership = {
+                ...channelInstance.state.membership,
+                ...event.member,
+              } as unknown as Record<string, unknown>;
+            }
+            // Watch if not initialized so we get full state
+            if (!channelInstance.initialized) {
+              channelInstance.watch().catch(() => {});
+            }
+            return [channelInstance, ...prev];
+          });
+        }
       }
     };
 
@@ -250,6 +271,9 @@ export function useChannelListUpdates(
     const sub12 = client.on('channel.pinned', handleGenericUpdate);
     const sub13 = client.on('channel.unpinned', handleGenericUpdate);
     const sub14 = client.on('notification.invite_messaging_skipped', handleMemberUpdated);
+    // When a user joins a public channel (action='join'), the server sends member.joined
+    // instead of notification.invite_accepted — handle it to re-group the channel list
+    const sub15 = client.on('member.joined', handleMemberUpdated);
 
     return () => {
       sub1.unsubscribe();
@@ -266,6 +290,7 @@ export function useChannelListUpdates(
       sub12.unsubscribe();
       sub13.unsubscribe();
       sub14.unsubscribe();
+      sub15.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }
