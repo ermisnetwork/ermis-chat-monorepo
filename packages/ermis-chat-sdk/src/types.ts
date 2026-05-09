@@ -589,4 +589,5 @@ export enum FRAME_TYPE {
   REQUEST_CONFIG = 8,
   REQUEST_KEY_FRAME = 9,
   END_CALL = 10,
+  HEALTH_CALL = 11,
 }

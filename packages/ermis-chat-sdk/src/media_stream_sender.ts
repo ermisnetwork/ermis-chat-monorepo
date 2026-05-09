@@ -22,6 +22,8 @@ export class MediaStreamSender {
 
   private nodeCall: INodeCall;
 
+  private healthCallInterval: ReturnType<typeof setInterval> | null = null;
+
   constructor(nodeCall: INodeCall) {
     this.nodeCall = nodeCall;
   }
@@ -34,6 +36,9 @@ export class MediaStreamSender {
       await this.nodeCall.connect(address);
       await this.sendConnected();
       await this.sendConfigs();
+
+      // Start health call keep-alive (every 5s, matching native SDK)
+      this.startHealthCallInterval();
     } catch (error) {
       console.error('Error starting MediaStreamSender:', error);
     }
@@ -57,6 +62,12 @@ export class MediaStreamSender {
    * Dừng và reset encoders
    */
   public stop = (): void => {
+    // Stop health call keep-alive
+    if (this.healthCallInterval) {
+      clearInterval(this.healthCallInterval);
+      this.healthCallInterval = null;
+    }
+
     if (this.videoReader) {
       try {
         this.videoReader.cancel('Stream stopped').catch(() => {});
@@ -400,6 +411,24 @@ export class MediaStreamSender {
   public sendConnected = async () => {
     const configPacket = createPacketWithHeader(null, null, 'connected', null);
     await this.nodeCall.sendControlFrame(configPacket);
+  };
+
+  private startHealthCallInterval = (): void => {
+    if (this.healthCallInterval) {
+      clearInterval(this.healthCallInterval);
+    }
+    this.healthCallInterval = setInterval(() => {
+      this.sendHealthCall().catch(() => {});
+    }, 5000);
+  };
+
+  private sendHealthCall = async (): Promise<void> => {
+    try {
+      const packet = createPacketWithHeader(null, null, 'healthCall', null);
+      await this.nodeCall.sendControlFrame(packet);
+    } catch (e) {
+      // Silently ignore — connection may have closed
+    }
   };
 
   private sendPacketOrQueue = async (

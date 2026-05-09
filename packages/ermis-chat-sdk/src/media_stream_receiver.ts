@@ -262,6 +262,7 @@ export class MediaStreamReceiver {
             FRAME_TYPE.REQUEST_CONFIG,
             FRAME_TYPE.REQUEST_KEY_FRAME,
             FRAME_TYPE.END_CALL,
+            FRAME_TYPE.HEALTH_CALL,
           ] as number[]
         ).includes(frameType)
           ? 1
@@ -469,6 +470,10 @@ export class MediaStreamReceiver {
             if (this.events.onEndCall) {
               this.events.onEndCall();
             }
+            break;
+
+          case FRAME_TYPE.HEALTH_CALL:
+            // Keep-alive ping from peer — silently acknowledge
             break;
 
           default:

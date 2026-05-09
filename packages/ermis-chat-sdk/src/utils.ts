@@ -421,7 +421,7 @@ export const createPacketWithHeader = (
     const jsonString = JSON.stringify(configMsg);
     const encoder = new TextEncoder();
     payload = encoder.encode(jsonString);
-  } else if (type === 'connected') {
+  } else if (type === 'connected' || type === 'healthCall') {
     HEADER_SIZE = 1;
     payload = new Uint8Array(0);
   } else {
@@ -455,6 +455,9 @@ export const createPacketWithHeader = (
       break;
     case 'transciverState':
       typeCode = 7;
+      break;
+    case 'healthCall':
+      typeCode = 11;
       break;
   }
 
