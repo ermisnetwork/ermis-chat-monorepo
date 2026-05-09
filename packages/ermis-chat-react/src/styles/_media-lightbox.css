@@ -120,6 +120,13 @@
 /* ----------------------------------------------------------
    Video
    ---------------------------------------------------------- */
+.ermis-lightbox__video-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .ermis-lightbox__video {
   max-width: 90vw;
   max-height: 80vh;
@@ -127,6 +134,31 @@
   background: #000;
   outline: none;
   animation: ermis-lightbox-zoom-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Retry overlay + spinner shown when video fails to load (CDN not ready) */
+.ermis-lightbox__video-retry {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.ermis-lightbox__video-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ermis-lightbox-spin 0.8s linear infinite;
+}
+
+@keyframes ermis-lightbox-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ----------------------------------------------------------

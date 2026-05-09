@@ -16,6 +16,11 @@ const getFilename = (src: string, alt?: string): string => {
   }
 };
 
+/** Max retry attempts for video loading (CDN may not be ready for large uploads) */
+const VIDEO_MAX_RETRIES = 3;
+/** Base delay in ms for exponential backoff: 1s, 2s, 4s */
+const VIDEO_RETRY_BASE_DELAY = 1000;
+
 /**
  * MediaLightbox – full-screen overlay for viewing images & videos.
  * Supports prev/next navigation, keyboard controls, and image zoom.
@@ -36,13 +41,23 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Video retry state — handles CDN not-ready for large recently-uploaded files
+  const [videoRetryCount, setVideoRetryCount] = useState(0);
+  const [videoLoading, setVideoLoading] = useState(false);
+  const videoRetryTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
   // Reset state when opening or when items change
   useEffect(() => {
     if (isOpen) {
       setCurrentIndex(initialIndex);
       setZoom(1);
       setPan({ x: 0, y: 0 });
+      setVideoRetryCount(0);
+      setVideoLoading(false);
     }
+    return () => {
+      if (videoRetryTimerRef.current) clearTimeout(videoRetryTimerRef.current);
+    };
   }, [isOpen, initialIndex]);
 
   // Preload adjacent images
@@ -76,9 +91,12 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(({
 
   const goTo = useCallback((idx: number) => {
     if (videoRef.current) videoRef.current.pause();
+    if (videoRetryTimerRef.current) clearTimeout(videoRetryTimerRef.current);
     setCurrentIndex(idx);
     setZoom(1);
     setPan({ x: 0, y: 0 });
+    setVideoRetryCount(0);
+    setVideoLoading(false);
   }, []);
 
   const goPrev = useCallback(() => {
@@ -187,21 +205,51 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(({
     }
   }, [client, currentItem]);
 
+  // Video error handler — retries loading with exponential backoff
+  // Handles CDN not-ready scenario for large recently-uploaded files
+  const handleVideoError = useCallback(() => {
+    setVideoRetryCount((prev) => {
+      if (prev >= VIDEO_MAX_RETRIES) return prev;
+      const nextAttempt = prev + 1;
+      const delay = VIDEO_RETRY_BASE_DELAY * Math.pow(2, prev); // 1s, 2s, 4s
+      setVideoLoading(true);
+      videoRetryTimerRef.current = setTimeout(() => {
+        // Force the video element to re-attempt loading by resetting src
+        if (videoRef.current) {
+          const src = videoRef.current.src;
+          videoRef.current.src = '';
+          videoRef.current.src = src;
+          videoRef.current.load();
+        }
+        setVideoLoading(false);
+      }, delay);
+      return nextAttempt;
+    });
+  }, []);
+
   const content = useMemo(() => {
     if (!currentItem) return null;
 
     if (currentItem.type === 'video') {
       return (
-        <video
-          ref={videoRef}
-          className="ermis-lightbox__video"
-          src={currentItem.src}
-          poster={currentItem.posterSrc}
-          controls
-          autoPlay
-          preload="metadata"
-          onClick={(e) => e.stopPropagation()}
-        />
+        <div className="ermis-lightbox__video-wrapper">
+          <video
+            ref={videoRef}
+            className="ermis-lightbox__video"
+            src={currentItem.src}
+            poster={currentItem.posterSrc}
+            controls
+            autoPlay
+            preload="metadata"
+            onClick={(e) => e.stopPropagation()}
+            onError={handleVideoError}
+          />
+          {videoLoading && (
+            <div className="ermis-lightbox__video-retry">
+              <div className="ermis-lightbox__video-spinner" />
+            </div>
+          )}
+        </div>
       );
     }
 
@@ -225,7 +273,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(({
         onClick={(e) => e.stopPropagation()}
       />
     );
-  }, [currentItem, zoom, pan, isDragging, handleDoubleClick, handleMouseDown, handleMouseMove, handleMouseUp]);
+  }, [currentItem, zoom, pan, isDragging, videoLoading, handleDoubleClick, handleVideoError, handleMouseDown, handleMouseMove, handleMouseUp]);
 
   if (!isOpen || !currentItem) return null;
 
