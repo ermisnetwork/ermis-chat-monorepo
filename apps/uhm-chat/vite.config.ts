@@ -12,6 +12,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // Tăng giới hạn lên 5MB
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/bucket\.ermis\.network\/.*$/,
