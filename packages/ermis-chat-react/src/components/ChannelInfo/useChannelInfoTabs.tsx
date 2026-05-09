@@ -123,6 +123,12 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
 
   const [allAttachments, setAllAttachments] = useState<AttachmentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshAttachmentsCount, setRefreshAttachmentsCount] = useState(0);
+
+  const forceRefreshAttachments = useCallback(() => {
+    lastFetchedCidRef.current = null;
+    setRefreshAttachmentsCount(c => c + 1);
+  }, []);
 
   const sortedMembers = useMemo(() => {
     return [...members].sort((a, b) => {
@@ -185,7 +191,28 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
 
     fetchMedia();
     return () => { active = false; };
-  }, [channel, isBanned, isBlocked, isPreviewMode, attachmentsFetchedForCid, isVisible]);
+  }, [channel, isBanned, isBlocked, isPreviewMode, attachmentsFetchedForCid, isVisible, refreshAttachmentsCount]);
+
+  // Listen to realtime events to automatically refresh attachments
+  useEffect(() => {
+    if (!channel || !isVisible) return;
+
+    const handleEvent = (event: any) => {
+      if (event.message?.attachments && event.message.attachments.length > 0) {
+        forceRefreshAttachments();
+      }
+    };
+
+    channel.on('message.new', handleEvent);
+    channel.on('message.deleted', handleEvent);
+    channel.on('message.updated', handleEvent);
+
+    return () => {
+      channel.off('message.new', handleEvent);
+      channel.off('message.deleted', handleEvent);
+      channel.off('message.updated', handleEvent);
+    };
+  }, [channel, isVisible, forceRefreshAttachments]);
 
   const handleOpenUrl = useCallback((url: string) => {
     window.open(url, '_blank', 'noopener,noreferrer');

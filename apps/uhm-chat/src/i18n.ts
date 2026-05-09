@@ -5,7 +5,7 @@ import { STORAGE_KEYS } from '@/utils/constants'
 import viTranslations from './locales/vi.json'
 import enTranslations from './locales/en.json'
 
-const savedLocale = localStorage.getItem(STORAGE_KEYS.LOCALE) || 'vi'
+const savedLocale = localStorage.getItem(STORAGE_KEYS.LOCALE) || 'en'
 
 i18n
   .use(initReactI18next)
