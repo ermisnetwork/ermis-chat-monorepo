@@ -3,7 +3,10 @@ import { GoogleOAuthProvider } from '@react-oauth/google'
 import '@ermis-network/ermis-chat-react/dist/index.css'
 import './index.scss'
 import './i18n'
+import { registerSW } from 'virtual:pwa-register'
 import App from './App.tsx'
+
+registerSW({ immediate: true })
 
 import { HelmetProvider } from 'react-helmet-async'
 

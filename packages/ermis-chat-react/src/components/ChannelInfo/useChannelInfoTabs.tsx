@@ -69,22 +69,26 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
 
     // 1. Instant UI update for the tab button
     setActiveTab(tab);
-    setIsPending(true);
 
-    // Cancel any pending transitions
     if (transitionRafRef.current) clearTimeout(transitionRafRef.current);
 
-    // 2. Yield to browser paint using setTimeout (350ms)
-    // The delay must match the 300ms CSS sliding animation in UhmChannelInfoTabHeader
-    // to ensure the heavy DOM mount doesn't cause the sliding animation to stutter!
-    transitionRafRef.current = setTimeout(() => {
+    // Check if data is already available for this channel
+    const hasData = tab === 'members' || attachmentsFetchedForCid === channel?.cid;
+
+    if (hasData) {
+      // If data exists, switch content immediately without loading state
       setContentTab(tab);
       setIsPending(false);
-      if (tab !== 'members') {
+    } else {
+      // If no data, use isPending to show Skeleton while waiting for API
+      setIsPending(true);
+      transitionRafRef.current = setTimeout(() => {
+        setContentTab(tab);
+        setIsPending(false);
         setAttachmentsFetchedForCid((prev) => prev || channel?.cid || null);
-      }
-    }, 50);
-  }, [activeTab, channel?.cid]);
+      }, 350);
+    }
+  }, [activeTab, channel?.cid, attachmentsFetchedForCid]);
 
   // Reset tab when user switches channels
   useEffect(() => {

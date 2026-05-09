@@ -40,6 +40,7 @@ export const MediaGridItem: React.FC<{
               src={item.thumb_url}
               alt={item.file_name || 'video'}
               loading="lazy"
+              decoding="async"
               onLoad={() => setLoaded(true)}
               style={{ opacity: loaded ? 1 : 0, transition: 'opacity 0.3s ease-in-out' }}
             />
@@ -63,6 +64,7 @@ export const MediaGridItem: React.FC<{
           src={src}
           alt={item.file_name || 'media'}
           loading="lazy"
+          decoding="async"
           onLoad={() => setLoaded(true)}
           style={{ opacity: loaded ? 1 : 0, transition: 'opacity 0.3s ease-in-out' }}
         />
@@ -72,12 +74,12 @@ export const MediaGridItem: React.FC<{
 }, (prev, next) => prev.item.id === next.item.id);
 (MediaGridItem as any).displayName = 'MediaGridItem';
 
-export const MediaRow = React.memo(({ 
-  row, 
+export const MediaRow = React.memo(({
+  row,
   onClick,
   MediaItemComponent = MediaGridItem
-}: { 
-  row: AttachmentItem[], 
+}: {
+  row: AttachmentItem[],
   onClick: (url: string) => void,
   MediaItemComponent?: React.ComponentType<{ item: AttachmentItem, onClick: (url: string) => void }>
 }) => {

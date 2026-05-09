@@ -25,8 +25,8 @@ import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData
 import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
 import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
 
-const MemoizedVirtualizer = React.memo(({ scrollRef, startMargin, data, renderItem }: any) => (
-  <Virtualizer scrollRef={scrollRef} startMargin={startMargin} data={data}>
+const MemoizedVirtualizer = React.memo(({ scrollRef, startMargin, data, renderItem, overscan = 10 }: any) => (
+  <Virtualizer scrollRef={scrollRef} startMargin={startMargin} data={data} overscan={overscan}>
     {renderItem}
   </Virtualizer>
 ));
