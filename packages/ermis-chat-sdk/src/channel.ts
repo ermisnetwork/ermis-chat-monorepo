@@ -839,9 +839,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     // update the channel id if it was missing
 
-    if (!this.id) {
+    // update the channel id if it was missing or temporary
+    const oldCid = this.cid;
+    if (oldCid !== state.channel.cid) {
       this.id = state.channel.id;
       this.cid = state.channel.cid;
+
+      if (oldCid in this.getClient().activeChannels) {
+        delete this.getClient().activeChannels[oldCid];
+      }
 
       // set the channel as active...
       const membersStr = state.channel.members
@@ -859,6 +865,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       if (!(this.cid in this.getClient().activeChannels)) {
         this.getClient().activeChannels[this.cid] = this;
       }
+    } else if (!(this.cid in this.getClient().activeChannels)) {
+      this.getClient().activeChannels[this.cid] = this;
     }
 
     // add any messages to our channel state

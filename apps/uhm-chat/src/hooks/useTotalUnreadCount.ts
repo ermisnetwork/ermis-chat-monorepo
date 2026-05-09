@@ -14,10 +14,22 @@ export function useTotalUnreadCount(): number {
         const channel = client.activeChannels[cid];
         const membership = channel.state?.membership;
         
-        const isBanned = Boolean(membership?.banned);
-        const isBlocked = Boolean(membership?.blocked);
-        const isPending = isPendingMember(membership?.channel_role);
-        const isSkipped = isSkippedMember(membership?.channel_role);
+        let isBanned = Boolean(membership?.banned);
+        let isBlocked = Boolean(membership?.blocked);
+        let isPending = isPendingMember(membership?.channel_role);
+        let isSkipped = isSkippedMember(membership?.channel_role);
+
+        // For topic channels, inherit the restricted states from their parent channel
+        if (isTopicChannel(channel) && channel.data?.parent_cid) {
+          const parentChannel = client.activeChannels[channel.data.parent_cid as string];
+          if (parentChannel) {
+            const pm = parentChannel.state?.membership;
+            isBanned = isBanned || Boolean(pm?.banned);
+            isBlocked = isBlocked || Boolean(pm?.blocked);
+            isPending = isPending || isPendingMember(pm?.channel_role);
+            isSkipped = isSkipped || isSkippedMember(pm?.channel_role);
+          }
+        }
 
         // Skip channels that are invites, banned, blocked, or skipped
         if (isBanned || isBlocked || isPending || isSkipped) {

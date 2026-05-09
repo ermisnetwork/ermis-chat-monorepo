@@ -178,8 +178,10 @@ export type { UseScrollToMessageOptions, UseScrollToMessageReturn } from './hook
 export { useLoadMessages, dedupMessages } from './hooks/useLoadMessages';
 export type { UseLoadMessagesOptions, UseLoadMessagesReturn } from './hooks/useLoadMessages';
 
-export { useChannelMessages } from './hooks/useChannelMessages';
+export { useChannelMessages, markChannelAsFullyQueried } from './hooks/useChannelMessages';
 export type { UseChannelMessagesOptions } from './hooks/useChannelMessages';
+
+export { useForwardMessage } from './hooks/useForwardMessage';
 
 export { QuotedMessagePreview } from './components/QuotedMessagePreview';
 export type { QuotedMessagePreviewProps } from './components/QuotedMessagePreview';

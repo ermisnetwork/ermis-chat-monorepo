@@ -260,7 +260,10 @@ export function useChannelListUpdates(
     const sub1 = client.on('message.new', handleNewMessage);
     const sub2 = client.on('channel.deleted', handleChannelDeleted);
     const sub3 = client.on('member.removed', handleMemberRemoved);
-    const sub4 = client.on('channel.created', (event) => handleChannelCreated(event, true));
+    const sub4 = client.on('channel.created', (event) => {
+      const isCreator = event.user?.id === client.userID || event.user_id === client.userID;
+      handleChannelCreated(event, !isCreator);
+    });
     const sub5 = client.on('member.added', handleMemberAdded);
     const sub6 = client.on('notification.added_to_channel', handleMemberAdded);
     const sub7 = client.on('notification.invite_rejected', handleMemberRemoved);

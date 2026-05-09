@@ -1,4 +1,3 @@
-import { useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, Send, Hash, Check, FileText } from 'lucide-react'
 import {
@@ -10,17 +9,15 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  useChatClient,
   Avatar,
-  removeAccents,
   isTopicChannel,
   isGroupChannel,
   isStickerMessage,
   isImage,
   isVideo,
+  useForwardMessage,
+  useChatClient,
 } from '@ermis-network/ermis-chat-react'
-import type { Channel } from '@ermis-network/ermis-chat-sdk'
-import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk'
 import type { ForwardMessageModalProps } from '@ermis-network/ermis-chat-react'
 
 /* ----------------------------------------------------------
@@ -32,79 +29,16 @@ export function UhmForwardMessageModal({
   onDismiss,
 }: ForwardMessageModalProps) {
   const { t } = useTranslation()
-  const { client, activeChannel } = useChatClient()
-  const [search, setSearch] = useState('')
-  const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set())
-  const [sending, setSending] = useState(false)
-
-  /* --- Get all channels --- */
-  const channels = useMemo(() => {
-    return Object.values(client.activeChannels) as Channel[]
-  }, [client.activeChannels])
-
-  /* --- Smart Search logic --- */
-  const filteredChannels = useMemo(() => {
-    if (!search.trim()) return channels
-    const q = search.toLowerCase()
-    const cleanQ = removeAccents(q)
-    const isStrict = q !== cleanQ
-
-    return channels.filter((ch) => {
-      const name = (ch.data?.name || ch.cid) as string
-      const tName = name.toLowerCase()
-      const cleanT = removeAccents(tName)
-
-      const parentCid = ch.data?.parent_cid as string | undefined
-      const parent = parentCid ? client.activeChannels[parentCid] : null
-      const parentName = (parent?.data?.name || '') as string
-      const ptName = parentName.toLowerCase()
-      const cleanPT = removeAccents(ptName)
-
-      if (isStrict) {
-        return tName.includes(q) || ptName.includes(q)
-      }
-      return cleanT.includes(cleanQ) || cleanPT.includes(cleanQ)
-    })
-  }, [channels, search, client.activeChannels])
-
-  /* --- Toggle selection --- */
-  const toggleChannel = useCallback((cid: string) => {
-    setSelectedChannels((prev) => {
-      const next = new Set(prev)
-      if (next.has(cid)) next.delete(cid)
-      else next.add(cid)
-      return next
-    })
-  }, [])
-
-  /* --- Send logic --- */
-  const handleSend = useCallback(async () => {
-    if (!activeChannel || selectedChannels.size === 0 || sending) return
-    setSending(true)
-
-    try {
-      for (const cid of selectedChannels) {
-        const targetChannel = channels.find((c) => c.cid === cid)
-        if (!targetChannel) continue
-
-        const forwardPayload = createForwardMessagePayload(
-          message,
-          targetChannel.cid as string,
-          activeChannel.cid as string,
-        )
-
-        await activeChannel.forwardMessage(forwardPayload, {
-          type: targetChannel.type,
-          channelID: targetChannel.id!,
-        })
-      }
-      onDismiss()
-    } catch (err) {
-      console.error('Failed to forward messages', err)
-    } finally {
-      setSending(false)
-    }
-  }, [activeChannel, selectedChannels, channels, message, sending, onDismiss])
+  const { client } = useChatClient()
+  const {
+    search,
+    setSearch,
+    selectedChannels,
+    toggleChannel,
+    sending,
+    filteredChannels,
+    handleSend,
+  } = useForwardMessage(message, onDismiss)
 
   /* --- Message preview details --- */
   const previewText = message.text || ''
@@ -215,7 +149,7 @@ export function UhmForwardMessageModal({
               return (
                 <button
                   key={ch.cid}
-                  onClick={() => toggleChannel(ch.cid)}
+                  onClick={() => toggleChannel(ch as any)}
                   className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 group active:scale-[0.98] ${isSelected
                     ? 'bg-primary/10 dark:bg-primary/20'
                     : 'hover:bg-zinc-100 dark:hover:bg-white/5'

@@ -4,6 +4,7 @@ import { UserPicker } from './UserPicker';
 import { Avatar } from './Avatar';
 import { useChatClient } from '../hooks/useChatClient';
 import { useChatComponents } from '../context/ChatComponentsContext';
+import { markChannelAsFullyQueried } from '../hooks/useChannelMessages';
 import type { CreateChannelModalProps, UserPickerUser } from '../types';
 import { isDirectChannel } from '../channelTypeUtils';
 
@@ -125,7 +126,8 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         const response = (await createdChannel.create()) as any;
         if (response?.channel?.id) {
           createdChannel = client.channel('messaging', response.channel.id);
-          await createdChannel.watch();
+          await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
+          markChannelAsFullyQueried(createdChannel.cid);
         }
       } else {
         // Group Channel
@@ -149,7 +151,8 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         const response = (await createdChannel.create()) as any;
         if (response?.channel?.id) {
           createdChannel = client.channel('team', response.channel.id);
-          await createdChannel.watch();
+          await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
+          markChannelAsFullyQueried(createdChannel.cid);
         }
       }
 

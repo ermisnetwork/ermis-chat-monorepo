@@ -18,6 +18,7 @@ export type UseChannelMessagesOptions = {
 
 // Track channels that have already been queried with include_hidden_messages globally for the session
 const fullyQueriedChannels = new Set<string>();
+export const markChannelAsFullyQueried = (cid: string) => fullyQueriedChannels.add(cid);
 
 /**
  * Schedule multiple scroll-to-bottom attempts with increasing delays.
