@@ -99,7 +99,7 @@ export function useChannelMessages({
           scheduleScrollToBottom(false);
           fadeListIn(); // Fade in AFTER query finishes and sync is called
         })
-        .catch((err) => {
+        .catch((err: any) => {
           console.error('Failed to query channel on select', err);
           fadeListIn(); // Fade in anyway on error
         });
@@ -154,7 +154,7 @@ export function useChannelMessages({
               activeChannel.markRead().catch(() => {});
             }
           })
-          .catch((e) => console.error('Failed to sync messages after unblock', e));
+          .catch((e: any) => console.error('Failed to sync messages after unblock', e));
       }
     };
 
@@ -172,8 +172,13 @@ export function useChannelMessages({
             scheduleScrollToBottom(false);
             activeChannel.markRead().catch(() => {});
           })
-          .catch((e) => console.error('Failed to sync messages after accepting invite', e));
+          .catch((e: any) => console.error('Failed to sync messages after accepting invite', e));
       }
+    };
+
+    const handleRecovery = () => {
+      syncMessages();
+      scheduleScrollToBottom(false);
     };
 
     const client = activeChannel.getClient();
@@ -188,6 +193,8 @@ export function useChannelMessages({
     const sub9 = activeChannel.on('reaction.deleted', handleMessageChange);
     const sub10 = activeChannel.on('member.unblocked', handleUnblocked);
     const sub11 = client.on('notification.invite_accepted', handleInviteAccepted);
+    const sub12 = client.on('connection.recovered', handleRecovery);
+    const sub13 = client.on('channels.queried', handleRecovery);
 
     return () => {
       sub1.unsubscribe();
@@ -201,6 +208,8 @@ export function useChannelMessages({
       sub9.unsubscribe();
       sub10.unsubscribe();
       sub11.unsubscribe();
+      sub12.unsubscribe();
+      sub13.unsubscribe();
     };
   }, [activeChannel, scrollToBottom, scheduleScrollToBottom, syncMessages, onChannelSwitch, setReadState]);
 }

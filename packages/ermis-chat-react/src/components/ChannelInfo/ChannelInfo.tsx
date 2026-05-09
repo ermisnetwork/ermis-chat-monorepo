@@ -575,7 +575,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
               style={tabs.isPending ? PENDING_STYLE : READY_STYLE}
             >
               {tabs.isPending || (tabs.loading && tabs.contentTab !== 'members') ? (
-                <tabs.Loading />
+                <tabs.Loading tab={tabs.activeTab} />
               ) : tabs.isTabEmpty ? (
                 <tabs.EmptyState label={tabs.emptyLabel} />
               ) : (

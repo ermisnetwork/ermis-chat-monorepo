@@ -66,7 +66,7 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
 
   const handleTabChange = useCallback((tab: MediaTab) => {
     if (tab === activeTab) return;
-    
+
     // 1. Instant UI update for the tab button
     setActiveTab(tab);
     setIsPending(true);
@@ -83,7 +83,7 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
       if (tab !== 'members') {
         setAttachmentsFetchedForCid((prev) => prev || channel?.cid || null);
       }
-    }, 350);
+    }, 50);
   }, [activeTab, channel?.cid]);
 
   // Reset tab when user switches channels
@@ -299,9 +299,9 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
       }
       case 'media-row':
         return (
-          <MediaRow 
-            key={item.data[0]?.id || index} 
-            row={item.data} 
+          <MediaRow
+            key={item.data[0]?.id || index}
+            row={item.data}
             onClick={handleMediaClick}
             MediaItemComponent={MediaItem}
           />

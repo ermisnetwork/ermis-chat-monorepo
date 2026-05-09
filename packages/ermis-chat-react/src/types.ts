@@ -1412,7 +1412,7 @@ export type ChannelInfoTabsProps = {
   LinkItemComponent?: React.ComponentType<ChannelInfoLinkItemProps>;
   FileItemComponent?: React.ComponentType<ChannelInfoFileItemProps>;
   EmptyStateComponent?: React.ComponentType<ChannelInfoEmptyStateProps>;
-  LoadingComponent?: React.ComponentType;
+  LoadingComponent?: React.ComponentType<{ tab?: string }>;
   /** Custom component for the tab header buttons */
   TabHeaderComponent?: React.ComponentType<ChannelInfoTabHeaderProps>;
   /** Whether the tabs panel is currently visible — controls data fetching (default: true) */
@@ -1454,7 +1454,7 @@ export type ChannelInfoProps = {
   LinkItemComponent?: React.ComponentType<ChannelInfoLinkItemProps>;
   FileItemComponent?: React.ComponentType<ChannelInfoFileItemProps>;
   EmptyStateComponent?: React.ComponentType<ChannelInfoEmptyStateProps>;
-  LoadingComponent?: React.ComponentType;
+  LoadingComponent?: React.ComponentType<{ tab?: string }>;
   /** Custom component for the tab header buttons (passed through to TabsComponent) */
   TabHeaderComponent?: React.ComponentType<ChannelInfoTabHeaderProps>;
 

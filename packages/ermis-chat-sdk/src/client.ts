@@ -1053,14 +1053,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         tags: ['connection', 'client'],
       });
 
-      const filter: ChannelFilters = {
-        type: ['messaging', 'team'],
-      };
-      const sort: [] = [];
-      const options = {
-        message_limit: 25,
-      };
-
+      const {
+        filter = { type: ['messaging', 'team', 'meeting'] } as ChannelFilters,
+        sort = [],
+        options = { message_limit: 1 },
+      } = this.options.recoveryConfig || {};
       await this.queryChannels(filter, sort, options);
 
       this.logger('info', 'client:recoverState() - Querying channels finished', { tags: ['connection', 'client'] });

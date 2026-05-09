@@ -17,7 +17,16 @@ import { toast, Toaster } from 'sonner'
 // Initialize client with env variables
 const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || ''
 
-const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_DEFAULTS.BASE_URL)
+const chatClient = ErmisChat.getInstance(
+  API_DEFAULTS.API_KEY, PROJECT_ID,
+  API_DEFAULTS.BASE_URL,
+  {
+    recoverStateOnReconnect: true,
+    recoveryConfig: {
+      filter: { type: ['messaging', 'team'] },
+      options: { message_limit: 1 }
+    }
+  })
 
 import { isSafari } from '@/utils/browser'
 
@@ -30,9 +39,9 @@ chatClient.axiosInstance.interceptors.response.use(
   (error) => {
     const now = Date.now()
     const shouldToast = now - lastToastTime > TOAST_THROTTLE_MS
-    
+
     console.error('[API Error]', error.message, error.code, error.response?.status)
-    
+
     if (shouldToast) {
       if (!error.response) {
         // Network Error or Blocked Request
@@ -44,7 +53,7 @@ chatClient.axiosInstance.interceptors.response.use(
         lastToastTime = now
       }
     }
-    
+
     return Promise.reject(error)
   }
 )
@@ -138,9 +147,9 @@ function AppContent() {
   }
 
   return (
-    <ChatProvider 
-      client={chatClient} 
-      initialTheme={savedTheme} 
+    <ChatProvider
+      client={chatClient}
+      initialTheme={savedTheme}
       components={chatComponents}
       enableCall={true}
       CallUIComponent={isSafari ? SafariCallGuard : UhmCallUI}
@@ -156,9 +165,9 @@ function AppContent() {
           }
         />
 
-        <Route 
-          path="/" 
-          element={<Navigate to="/chat" replace />} 
+        <Route
+          path="/"
+          element={<Navigate to="/chat" replace />}
         />
 
         <Route
@@ -172,9 +181,9 @@ function AppContent() {
 
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-      <Toaster 
-        richColors 
-        position="top-right" 
+      <Toaster
+        richColors
+        position="top-right"
         duration={3000}
       />
     </ChatProvider>

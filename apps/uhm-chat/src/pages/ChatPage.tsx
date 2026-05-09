@@ -31,6 +31,8 @@ import { UhmAddMemberModal } from '@/features/chat/UhmAddMemberModal'
 import { UhmMessageSearchPanel } from '@/features/chat/UhmMessageSearchPanel'
 import { UhmChannelSettingsPanel } from '@/features/chat/UhmChannelSettingsPanel'
 import { UhmMemberItem } from '@/features/chat/UhmMemberItem'
+import { UhmTabEmptyState } from '@/features/chat/UhmTabEmptyState'
+import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
@@ -456,6 +458,8 @@ export function ChatPage() {
               AddMemberModalComponent={UhmAddMemberModal}
               addMemberButtonLabel={t('actions.add_member')}
               MemberItemComponent={UhmMemberItem}
+              EmptyStateComponent={UhmTabEmptyState}
+              LoadingComponent={UhmTabLoadingState}
               // MediaItemComponent={UhmMediaItem}
               // LinkItemComponent={UhmLinkItem}
               // FileItemComponent={UhmFileItem}

@@ -28,7 +28,7 @@ export const TabEmptyState: React.FC<{ label: string }> = React.memo(({ label })
 ));
 (TabEmptyState as any).displayName = 'TabEmptyState';
 
-export const TabLoadingState: React.FC = React.memo(() => (
+export const TabLoadingState: React.FC<{ tab?: string }> = React.memo(() => (
   <div className="ermis-channel-info__media-loading">
     <div className="ermis-channel-info__media-spinner" />
   </div>

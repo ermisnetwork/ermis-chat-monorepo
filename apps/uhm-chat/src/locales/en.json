@@ -118,6 +118,11 @@
     "channel_list_error_hint": "A server issue occurred while fetching your data. Let's try to refresh.",
     "info_title_channel": "Channel Info",
     "info_title_topic": "Topic Info",
+    "info_empty_media": "No media shared yet",
+    "info_empty_links": "No links shared yet",
+    "info_empty_files": "No files shared yet",
+    "info_empty_members": "No members yet",
+    "info_loading": "Loading data...",
     "tabs": {
       "members": "Members",
       "media": "Media",

@@ -118,6 +118,11 @@
     "channel_list_error_hint": "Đã có lỗi xảy ra từ phía máy chủ. Hãy thử làm mới lại.",
     "info_title_channel": "Thông tin kênh",
     "info_title_topic": "Thông tin chủ đề",
+    "info_empty_media": "Chưa có ảnh hoặc video nào được chia sẻ",
+    "info_empty_links": "Chưa có liên kết nào được chia sẻ",
+    "info_empty_files": "Chưa có tệp tin nào được chia sẻ",
+    "info_empty_members": "Chưa có thành viên nào",
+    "info_loading": "Đang tải dữ liệu...",
     "tabs": {
       "members": "Thành viên",
       "media": "Ảnh & Video",
