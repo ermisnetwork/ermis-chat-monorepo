@@ -64,4 +64,16 @@ export default defineConfig([
       return { js: '.browser.full-bundle.min.js' };
     },
   },
+  // 4. WASM Worker bundle (ESM — loaded by new Worker())
+  {
+    entry: ['src/wasm_worker.ts'],
+    format: ['esm'],
+    outDir: 'dist',
+    sourcemap: true,
+    splitting: false,
+    noExternal: [/(.*)/], // Bundle everything into the worker
+    outExtension() {
+      return { js: '.worker.mjs' };
+    },
+  },
 ]);

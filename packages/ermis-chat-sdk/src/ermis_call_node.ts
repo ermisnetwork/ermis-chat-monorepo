@@ -1,5 +1,5 @@
 import { ErmisChat } from './client';
-import init, { ErmisCall } from './wasm/ermis_call_node_wasm';
+import { WasmWorkerProxy } from './wasm_worker_proxy';
 import {
   CallAction,
   CallEventData,
@@ -16,6 +16,7 @@ import { MediaStreamReceiver } from './media_stream_receiver';
 
 export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   wasmPath: string;
+  workerPath: string;
 
   relayUrl = 'https://test-iroh.ermis.network.:8443';
 
@@ -41,7 +42,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
   metadata?: Metadata;
 
-  callNode: ErmisCall | null = null;
+  callNode: WasmWorkerProxy | null = null;
 
   /** Local media stream from user's camera/microphone */
   localStream?: MediaStream | null = null;
@@ -133,7 +134,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   public mediaSender: MediaStreamSender | null = null;
   public mediaReceiver: MediaStreamReceiver | null = null;
 
-  constructor(client: ErmisChat<ErmisChatGenerics>, sessionID: string, wasmPath: string, relayUrl: string) {
+  constructor(client: ErmisChat<ErmisChatGenerics>, sessionID: string, wasmPath: string, relayUrl: string, workerPath?: string) {
     this._client = client;
     this.cid = '';
     this.callType = '';
@@ -142,6 +143,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     this.metadata = {};
     this.wasmPath = wasmPath;
     this.relayUrl = relayUrl;
+    this.workerPath = workerPath || '/wasm_worker.worker.mjs';
 
     this.listenSocketEvents();
     this.setupDeviceChangeListener();
@@ -150,24 +152,33 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
   private async loadWasm(): Promise<void> {
     try {
-      await init(this.wasmPath);
+      // Tạo Worker proxy — WASM chạy hoàn toàn trên Worker thread
+      this.callNode = new WasmWorkerProxy(
+        new URL(this.workerPath, window.location.origin),
+      );
+      await this.callNode.init(this.wasmPath);
     } catch (error) {
-      console.error('Failed to load ErmisCall WASM module:', error);
+      console.error('Failed to load ErmisCall WASM Worker:', error);
       throw error;
     }
   }
 
-  private async initialize(): Promise<ErmisCall> {
+  private async initialize(): Promise<WasmWorkerProxy> {
     try {
-      const node = new ErmisCall();
-      await node.spawn([this.relayUrl]);
-      this.callNode = node;
+      // Re-create Worker nếu đã bị destroy bởi call trước
+      if (!this.callNode) {
+        await this.loadWasm();
+      }
 
-      // 1. Init Sender
-      this.mediaSender = new MediaStreamSender(node as any);
+      const proxy = this.callNode!;
 
-      // 2. Init Receiver
-      this.mediaReceiver = new MediaStreamReceiver(node as any, {
+      await proxy.spawn([this.relayUrl]);
+
+      // 1. Init Sender — proxy implements INodeCall
+      this.mediaSender = new MediaStreamSender(proxy as any);
+
+      // 2. Init Receiver — proxy implements INodeCall
+      this.mediaReceiver = new MediaStreamReceiver(proxy as any, {
         onConnected: () => {
           this.setCallStatus(CallStatus.CONNECTED);
           this.connectCall();
@@ -209,7 +220,10 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
         },
       });
 
-      return node;
+      // Bắt đầu recv loop trong Worker
+      await proxy.startRecvLoop();
+
+      return proxy;
     } catch (error) {
       console.error('Failed to initialize Ermis SDK:', error);
       throw error;
@@ -565,7 +579,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     this._client.on('message.updated', this.messageUpdatedHandler);
   }
 
-  private cleanupCall() {
+  private async cleanupCall() {
     if (this.mediaSender) {
       this.mediaSender?.stop();
       this.mediaSender = null;
@@ -576,12 +590,11 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     }
 
     if (this.callNode) {
-      this.callNode?.closeEndpoint();
-
-      if (this.callStatus === CallStatus.CONNECTED) {
-        this.callNode?.closeConnection();
+      try {
+        await this.callNode.terminate();
+      } catch {
+        /* ignore — Worker may already be dead */
       }
-
       this.callNode = null;
     }
 
