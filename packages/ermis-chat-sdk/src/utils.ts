@@ -265,12 +265,28 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
   // message already exists and not filtered due to timestampChanged, update and return
   if (!timestampChanged && message.id) {
     if (messageArr[left] && message.id === messageArr[left].id) {
-      messageArr[left] = message;
+      // Merge properties safely: do not overwrite existing data with undefined
+      const existingMessage = messageArr[left];
+      const mergedMessage = { ...existingMessage };
+      (Object.keys(message) as Array<keyof typeof message>).forEach((key) => {
+        if (message[key] !== undefined) {
+          (mergedMessage as any)[key] = message[key];
+        }
+      });
+      messageArr[left] = mergedMessage;
       return [...messageArr];
     }
 
     if (messageArr[left - 1] && message.id === messageArr[left - 1].id) {
-      messageArr[left - 1] = message;
+      // Merge properties safely: do not overwrite existing data with undefined
+      const existingMessage = messageArr[left - 1];
+      const mergedMessage = { ...existingMessage };
+      (Object.keys(message) as Array<keyof typeof message>).forEach((key) => {
+        if (message[key] !== undefined) {
+          (mergedMessage as any)[key] = message[key];
+        }
+      });
+      messageArr[left - 1] = mergedMessage;
       return [...messageArr];
     }
   }

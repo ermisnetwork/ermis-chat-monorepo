@@ -1309,7 +1309,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         break;
       case 'message.deleted_for_me':
         if (event.message) {
+          // Xoá thông tin user trong event này vì nó là thông tin người thực hiện xoá (chính mình),
+          // tránh việc ghi đè lên tác giả gốc của tin nhắn dẫn đến sai lệch layout.
+          delete event.message.user;
+          delete (event.message as any).user_id;
+
           event.message.display_type = 'deleted';
+          event.message.pinned_at = null;
+          (event.message as any).updated_at = null;
+          event.message.status = 'received';
           channelState.addMessageSorted(event.message);
           channelState.removeQuotedMessageReferences(event.message);
 
