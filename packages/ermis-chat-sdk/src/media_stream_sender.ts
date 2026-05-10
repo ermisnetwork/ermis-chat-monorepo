@@ -19,6 +19,8 @@ export class MediaStreamSender {
   private hasAudio: boolean = false;
 
   private forceKeyFrame: boolean = false;
+  private isSendingVideo: boolean = false;
+  private isSendingAudio: boolean = false;
 
   private nodeCall: INodeCall;
 
@@ -139,13 +141,17 @@ export class MediaStreamSender {
         }
 
         if (chunk && this.isReadyToSendData('audio')) {
+          if (this.isSendingAudio) return; // Backpressure: drop if network is congested
+
+          this.isSendingAudio = true;
           const data = new ArrayBuffer(chunk.byteLength);
           chunk.copyTo(data);
-          // const timestamp = Math.floor(chunk.timestamp / 1000);
           const timestamp = chunk.timestamp;
 
           const packet = createPacketWithHeader(data, timestamp, 'audio', null);
-          this.sendPacketOrQueue(packet, 'audio', null);
+          this.sendPacketOrQueue(packet, 'audio', null).finally(() => {
+            this.isSendingAudio = false;
+          });
         }
       },
       error: (e) => console.error('AudioEncoder error:', e),
@@ -197,14 +203,18 @@ export class MediaStreamSender {
         }
 
         if (chunk && this.isReadyToSendData('video')) {
+          if (this.isSendingVideo) return; // Backpressure: drop if network is congested
+
+          this.isSendingVideo = true;
           const data = new ArrayBuffer(chunk.byteLength);
           chunk.copyTo(data);
           const frameType = chunk.type === 'key' ? 'video-key' : 'video-delta';
-          // const timestamp = Math.floor(chunk.timestamp / 1000);
           const timestamp = chunk.timestamp;
 
           const packet = createPacketWithHeader(data, timestamp, frameType, null);
-          this.sendPacketOrQueue(packet, 'video', frameType);
+          this.sendPacketOrQueue(packet, 'video', frameType).finally(() => {
+            this.isSendingVideo = false;
+          });
         }
       },
       error: (e) => console.error('VideoEncoder error:', e),

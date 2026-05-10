@@ -19,6 +19,8 @@ export class MediaStreamReceiver {
   private isWaitingForKeyFrame: boolean = true;
   private nextStartTime: number = 0;
   private lastVideoConfig: VideoConfig | null = null;
+  private lastVideoConfigStr: string = '';
+  private lastAudioConfigStr: string = '';
 
   private nodeCall: INodeCall;
   private events: IMediaReceiverEvents;
@@ -137,14 +139,17 @@ export class MediaStreamReceiver {
         this.isWaitingForKeyFrame = true;
 
         if (this.videoWriter) {
-          // Chỉ hồi sinh nếu Writer vẫn còn sống
-          console.log('♻️ Attempting to respawn VideoDecoder...');
-          this.setupVideoDecoder();
-          if (this.lastVideoConfig && this.videoDecoder) {
-            try {
-              this.videoDecoder.configure(this.lastVideoConfig);
-            } catch (configErr) {}
-          }
+          // Tránh hồi sinh ngay lập tức gây vòng lặp vô hạn (Infinite Loop) nếu stream bị hỏng nặng
+          console.log('♻️ Scheduled VideoDecoder respawn in 1000ms...');
+          setTimeout(() => {
+            if (!this.videoWriter) return;
+            this.setupVideoDecoder();
+            if (this.lastVideoConfig && this.videoDecoder) {
+              try {
+                this.videoDecoder.configure(this.lastVideoConfig);
+              } catch (configErr) { }
+            }
+          }, 1000);
         }
       },
     });
@@ -195,6 +200,18 @@ export class MediaStreamReceiver {
       source.connect(this.mediaDestination);
 
       this.scheduledAudioNodes.push(source);
+
+      // Quick Fix: Cap the buffer size to prevent memory/CPU accumulation on jittery networks (e.g. 3G)
+      // If we have too many scheduled nodes, it means the network is jittery or the clock is drifting.
+      // Dropping oldest nodes prevents a total UI freeze after ~1 minute of instability.
+      if (this.scheduledAudioNodes.length > 100) {
+        const oldestNode = this.scheduledAudioNodes.shift();
+        try {
+          oldestNode?.stop();
+          oldestNode?.disconnect();
+        } catch (e) { /* ignore */ }
+      }
+
       source.onended = () => {
         this.scheduledAudioNodes = this.scheduledAudioNodes.filter((n) => n !== source);
       };
@@ -224,8 +241,17 @@ export class MediaStreamReceiver {
   // Vòng lặp chính xử lý dữ liệu
   public receiveLoop = async (): Promise<void> => {
     const textDecoder = new TextDecoder();
+    let lastYieldTime = Date.now();
 
     while (true) {
+      // Force a macro-task yield every 16ms (roughly every frame) to prevent Main Thread starvation.
+      // This is crucial because if nodeCall.asyncRecv() returns data from a local buffer, 
+      // the 'await' might resolve as a micro-task, which blocks UI painting/interaction.
+      if (Date.now() - lastYieldTime > 16) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        lastYieldTime = Date.now();
+      }
+
       try {
         if (!this.nodeCall) break;
 
@@ -275,8 +301,15 @@ export class MediaStreamReceiver {
           case FRAME_TYPE.VIDEO_CONFIG: {
             try {
               const videoConfigStr = textDecoder.decode(payload);
+
+              // Deduplicate: Don't re-configure if config hasn't changed (saves CPU on unstable networks)
+              if (this.lastVideoConfigStr === videoConfigStr && this.videoDecoder?.state === 'configured') {
+                break;
+              }
+              this.lastVideoConfigStr = videoConfigStr;
               const videoConfig = JSON.parse(videoConfigStr);
-              console.log('--videoConfig--', videoConfig);
+
+              console.log('videoConfig', videoConfig);
 
               // Setup Video Track Writer & Combine Streams
               if (!this.videoWriter) {
@@ -345,15 +378,27 @@ export class MediaStreamReceiver {
 
           // --- AUDIO CONFIG ---
           case FRAME_TYPE.AUDIO_CONFIG: {
-            const audioConfig = JSON.parse(textDecoder.decode(payload));
-            console.log('--audioConfig--', audioConfig);
+            try {
+              const audioConfigStr = textDecoder.decode(payload);
 
-            if (this.audioDecoder?.state !== 'closed') {
-              this.audioDecoder?.configure({
-                codec: audioConfig.codec,
-                sampleRate: audioConfig.sampleRate,
-                numberOfChannels: audioConfig.numberOfChannels,
-              });
+              // Deduplicate audio config
+              if (this.lastAudioConfigStr === audioConfigStr && this.audioDecoder?.state === 'configured') {
+                break;
+              }
+              this.lastAudioConfigStr = audioConfigStr;
+              const audioConfig = JSON.parse(audioConfigStr);
+
+              console.log('audioConfig', audioConfig);
+
+              if (this.audioDecoder?.state !== 'closed') {
+                this.audioDecoder?.configure({
+                  codec: audioConfig.codec,
+                  sampleRate: audioConfig.sampleRate,
+                  numberOfChannels: audioConfig.numberOfChannels,
+                });
+              }
+            } catch (e) {
+              console.error('❌ Error processing AUDIO_CONFIG:', e);
             }
             break;
           }
@@ -366,13 +411,12 @@ export class MediaStreamReceiver {
 
             if (this.isWaitingForKeyFrame) {
               if (!isKeyFrame) break;
-              console.log('✅ Resumed decoding at KeyFrame');
+              // console.log('✅ Resumed decoding at KeyFrame');
               this.isWaitingForKeyFrame = false;
             }
 
-            if (!isKeyFrame && this.videoDecoder.decodeQueueSize > 15) {
-              console.warn('⚠️ Queue > 15. Dropping & Waiting for KeyFrame...');
-              // Nếu drop bất kỳ frame nào, ta phải chờ Key Frame tiếp theo mới decode được
+            // Stricter Backpressure: Nếu queue > 5, drop ngay lập tức các frame không quan trọng
+            if (!isKeyFrame && this.videoDecoder.decodeQueueSize > 5) {
               this.isWaitingForKeyFrame = true;
               break;
             }
@@ -477,12 +521,11 @@ export class MediaStreamReceiver {
             break;
 
           default:
-            console.warn('❓ Unknown frame type received:', frameType);
+            // Mute unknown frame logs to save CPU and RAM
             break;
         }
       } catch (error) {
-        console.error('Stream loop error', error);
-        // Có thể thêm delay nhỏ ở đây để tránh spam error nếu loop lỗi liên tục
+        // console.error('Stream loop error', error);
         await new Promise((r) => setTimeout(r, 200));
       }
     }
