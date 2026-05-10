@@ -1,20 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { preloadImage } from '../utils';
-import { useChatClient } from '../hooks/useChatClient';
+import { useDownloadHandler } from '../hooks/useDownloadHandler';
 import type { MediaLightboxProps } from '../types';
-
-/** Extract a reasonable filename from a URL or alt text */
-const getFilename = (src: string, alt?: string): string => {
-  if (alt) return alt;
-  try {
-    const pathname = new URL(src).pathname;
-    const segments = pathname.split('/');
-    return segments[segments.length - 1] || 'download';
-  } catch {
-    return 'download';
-  }
-};
 
 /** Max retry attempts for video loading (CDN may not be ready for large uploads) */
 const VIDEO_MAX_RETRIES = 3;
@@ -181,29 +169,15 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(({
     }
   }, [onClose]);
 
-  const { client } = useChatClient();
+  const { downloadFile } = useDownloadHandler();
 
   const currentItem = items[currentIndex];
   const hasMultiple = items.length > 1;
 
   const handleDownload = useCallback(async () => {
     if (!currentItem) return;
-    const filename = getFilename(currentItem.src, currentItem.alt);
-
-    try {
-      const blob = await client.downloadMedia(currentItem.src);
-      const urlBlob = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = urlBlob;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(urlBlob);
-    } catch {
-      window.open(currentItem.src, '_blank', 'noopener,noreferrer');
-    }
-  }, [client, currentItem]);
+    await downloadFile(currentItem.src, currentItem.alt || 'media');
+  }, [currentItem, downloadFile]);
 
   // Video error handler — retries loading with exponential backoff
   // Handles CDN not-ready scenario for large recently-uploaded files

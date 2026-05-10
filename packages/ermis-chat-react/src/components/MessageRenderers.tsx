@@ -3,6 +3,7 @@ import { preloadImage, isImagePreloaded, formatTime } from '../utils';
 import type { FormatMessageResponse, Attachment, MessageLabel } from '@ermis-network/ermis-chat-sdk';
 import { parseSystemMessage, parseSignalMessage, CallType } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from '../hooks/useChatClient';
+import { useDownloadHandler } from '../hooks/useDownloadHandler';
 import { buildUserMap } from '../utils';
 import { MediaLightbox } from './MediaLightbox';
 import { getFileIcon } from './ChannelInfo/utils';
@@ -198,27 +199,14 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =>
   const size = attachment.file_size;
   const mimeType = attachment.mime_type || attachment.type || '';
   const ext = name.split('.').pop()?.toUpperCase() || 'FILE';
-  const { client } = useChatClient();
+
+  const { downloadFile } = useDownloadHandler();
 
   const handleDownload = useCallback(async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!url) return;
-
-    try {
-      const blob = await client.downloadMedia(url);
-      const urlBlob = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = urlBlob;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(urlBlob);
-    } catch {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    }
-  }, [client, url, name]);
+    await downloadFile(url, name);
+  }, [downloadFile, url, name]);
 
   return (
     <div className="ermis-attachment ermis-attachment--file">

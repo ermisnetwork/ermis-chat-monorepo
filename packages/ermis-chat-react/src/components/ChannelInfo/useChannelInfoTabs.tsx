@@ -7,6 +7,7 @@ import { LinkListItem } from './LinkListItem';
 import { FileListItem } from './FileListItem';
 import { MemberListItem } from './MemberListItem';
 import { TabEmptyState, TabLoadingState } from './States';
+import { useDownloadHandler } from '../../hooks/useDownloadHandler';
 import type { ChannelInfoTabsProps, MediaTab, AttachmentItem, MediaLightboxItem } from '../../types';
 import { isDirectChannel } from '../../channelTypeUtils';
 import {
@@ -214,9 +215,11 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
     };
   }, [channel, isVisible, forceRefreshAttachments]);
 
-  const handleOpenUrl = useCallback((url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }, []);
+  const { downloadFile } = useDownloadHandler();
+
+  const handleDownloadFile = useCallback(async (url: string, filename?: string) => {
+    await downloadFile(url, filename);
+  }, [downloadFile]);
 
   // Lightbox state for media tab
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -340,14 +343,21 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
       case 'link':
         return <LinkItem key={item.data.id || index} item={item.data} />;
       case 'file':
-        return <FileItem key={item.data.id || index} item={item.data} onClick={handleOpenUrl} />;
+        const fileItem = item.data as AttachmentItem;
+        return (
+          <FileItem
+            key={fileItem.id || index}
+            item={fileItem}
+            onClick={(url: string) => handleDownloadFile(url, fileItem.file_name)}
+          />
+        );
       default:
         return null;
     }
   }, [
     onAddMemberClick, AddMemberButtonComponent, addMemberButtonLabel,
     currentUserRole, currentUserId, AvatarComponent, onRemoveMember, onBanMember, onUnbanMember, onPromoteMember, onDemoteMember,
-    handleMediaClick, MediaItem, handleOpenUrl,
+    handleMediaClick, MediaItem, handleDownloadFile,
     MemberItem, LinkItem, FileItem
   ]);
 
