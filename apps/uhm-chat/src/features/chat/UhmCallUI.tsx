@@ -270,7 +270,7 @@ export const UhmCallUI: React.FC = () => {
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
             />
             {/* Call Status Bar: mic-muted indicator + duration timer */}
             <div className="absolute top-6 left-6 flex items-center gap-2 text-white/80 font-mono text-sm bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full ring-1 ring-white/10 z-20">
@@ -286,7 +286,7 @@ export const UhmCallUI: React.FC = () => {
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover mirror"
+                className="w-full h-full object-contain mirror"
               />
             </div>
           </>

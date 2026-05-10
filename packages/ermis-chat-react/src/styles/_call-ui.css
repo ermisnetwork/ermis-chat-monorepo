@@ -248,7 +248,7 @@
 .ermis-call-ui__video-remote {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .ermis-call-ui__video-local {
@@ -274,7 +274,7 @@
 .ermis-call-ui__video-local-stream {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   transform: scaleX(-1);
 }
 
