@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { Camera, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useChatClient } from '@ermis-network/ermis-chat-react';
@@ -43,7 +43,26 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
   const [isPublic, setIsPublic] = useState(channel?.type === 'public');
   const [image, setImage] = useState((channel?.data?.image as string) || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const hasChanges = useMemo(() => {
+    const currentName = name.trim();
+    const originalName = ((channel?.data?.name as string) || '').trim();
+    if (currentName !== originalName) return true;
+
+    const currentDesc = description.trim();
+    const originalDesc = ((channel?.data?.description as string) || '').trim();
+    if (currentDesc !== originalDesc) return true;
+
+    const originalIsPublic = channel?.type === 'public';
+    if (isPublic !== originalIsPublic) return true;
+
+    const originalImage = (channel?.data?.image as string) || '';
+    if (image !== originalImage) return true;
+
+    return false;
+  }, [name, description, isPublic, image, channel]);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -52,29 +71,37 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
     if (!file) return;
 
     try {
-      setIsSaving(true);
+      setIsUploading(true);
       setError(null);
       const { file: url } = await channel.sendFile(file, file.name, file.type);
       setImage(url);
     } catch (err: any) {
       setError(err?.message || 'Failed to upload image');
     } finally {
-      setIsSaving(false);
+      setIsUploading(false);
     }
-  }, [client]);
+  }, [channel]);
 
   const handleSaveInternal = useCallback(async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || !hasChanges) return;
 
     setIsSaving(true);
     setError(null);
 
-    const data: EditChannelData = {
-      name: name.trim(),
-      description: description.trim(),
-      public: isPublic,
-      image: image,
-    };
+    const data: EditChannelData = {};
+    const currentName = name.trim();
+    const originalName = ((channel?.data?.name as string) || '').trim();
+    if (currentName !== originalName) data.name = currentName;
+
+    const currentDesc = description.trim();
+    const originalDesc = ((channel?.data?.description as string) || '').trim();
+    if (currentDesc !== originalDesc) data.description = currentDesc;
+
+    const originalIsPublic = channel?.type === 'public';
+    if (isPublic !== originalIsPublic) data.public = isPublic;
+
+    const originalImage = (channel?.data?.image as string) || '';
+    if (image !== originalImage) data.image = image;
 
     try {
       if (onSave) {
@@ -88,7 +115,7 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
     } finally {
       setIsSaving(false);
     }
-  }, [channel, name, description, isPublic, image, onSave, onClose]);
+  }, [channel, name, description, isPublic, image, hasChanges, onSave, onClose]);
 
   return (
     <Dialog open onOpenChange={(open) => !open && !isSaving && onClose()}>
@@ -154,10 +181,10 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
                 role="switch"
                 aria-checked={isPublic}
                 onClick={() => setIsPublic(!isPublic)}
-                className={`relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isPublic ? 'bg-primary' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isPublic ? 'bg-primary' : 'bg-zinc-300 dark:bg-zinc-700'}`}
                 disabled={isSaving}
               >
-                <span className={`pointer-events-none block h-3.5 w-3.5 rounded-full bg-white shadow-lg ring-0 transition-transform ${isPublic ? 'translate-x-3.5' : 'translate-x-0'}`} />
+                <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${isPublic ? 'translate-x-4' : 'translate-x-0'}`} />
               </button>
             </div>
 
@@ -166,14 +193,18 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
         </div>
 
         <DialogFooter className="p-5 pt-0 gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={isSaving} className="flex-1 h-10 text-xs font-bold">
+          <Button variant="ghost" onClick={onClose} disabled={isSaving || isUploading} className="flex-1 h-10 text-xs font-bold">
             {cancelLabel}
           </Button>
-          <Button onClick={handleSaveInternal} disabled={isSaving || !name.trim()} className="flex-1 h-10 bg-primary hover:bg-primary/90 text-white font-bold text-xs">
-            {isSaving ? (
+          <Button
+            onClick={handleSaveInternal}
+            disabled={isSaving || isUploading || !name.trim() || !hasChanges}
+            className="flex-1 h-10 bg-primary hover:bg-primary/90 text-white font-bold text-xs"
+          >
+            {isSaving || isUploading ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
-                {savingLabel}
+                {isUploading ? t('edit.uploading') : savingLabel}
               </>
             ) : (
               saveLabel

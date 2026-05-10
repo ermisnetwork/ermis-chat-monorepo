@@ -120,11 +120,11 @@ export const UhmChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = ({
                     aria-checked={value}
                     onClick={() => toggleCapability(key)}
                     disabled={isSaving}
-                    className={`relative inline-flex h-[20px] w-[36px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${value ? 'bg-primary' : 'bg-zinc-200 dark:bg-zinc-600'}`}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${value ? 'bg-primary' : 'bg-zinc-200 dark:bg-zinc-600'}`}
                   >
                     <span
                       aria-hidden="true"
-                      className={`pointer-events-none inline-block h-[16px] w-[16px] transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${value ? 'translate-x-[16px]' : 'translate-x-0'}`}
+                      className={`pointer-events-none block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${value ? 'translate-x-4' : 'translate-x-0'}`}
                     />
                   </button>
                 </div>
@@ -220,11 +220,11 @@ export const UhmChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = ({
                 aria-checked={topicsEnabled}
                 onClick={() => isOwner && setTopicsEnabled(!topicsEnabled)}
                 disabled={isSaving || !isOwner}
-                className={`relative inline-flex h-[20px] w-[36px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${topicsEnabled ? 'bg-primary' : 'bg-zinc-200 dark:bg-zinc-600'}`}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${topicsEnabled ? 'bg-primary' : 'bg-zinc-200 dark:bg-zinc-600'}`}
               >
                 <span
                   aria-hidden="true"
-                  className={`pointer-events-none inline-block h-[16px] w-[16px] transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${topicsEnabled ? 'translate-x-[16px]' : 'translate-x-0'}`}
+                  className={`pointer-events-none block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${topicsEnabled ? 'translate-x-4' : 'translate-x-0'}`}
                 />
               </button>
             </div>
