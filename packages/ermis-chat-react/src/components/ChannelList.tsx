@@ -592,7 +592,12 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
 
   if (loading) return <LoadingIndicator text={loadingLabel} />;
   if (error) return <ActualErrorIndicator text={errorLabel} onRetry={loadChannels} />;
-  if (channels.length === 0) return <EmptyStateIndicator text={emptyStateLabel} />;
+
+  const isEmpty = showPendingInvites
+    ? (pendingChannels.length === 0 && regularChannels.length === 0)
+    : (regularChannels.length === 0);
+
+  if (isEmpty) return <EmptyStateIndicator text={emptyStateLabel} />;
 
   return (
     <div className={`ermis-channel-list${className ? ` ${className}` : ''}`}>
