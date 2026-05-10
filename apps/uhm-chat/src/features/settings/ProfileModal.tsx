@@ -7,6 +7,7 @@ import { UhmModal } from '@/components/custom/UhmModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { processAvatarFile } from '@/utils/image';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
   const [error, setError] = useState<string | null>(null);
   const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -41,19 +43,29 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setSelectedFile(file);
-    setError(null);
+    try {
+      setIsProcessingImage(true);
+      setError(null);
+      
+      const processedFile = await processAvatarFile(file);
+      setSelectedFile(processedFile);
 
-    // Show preview
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setPreviewAvatar(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+      // Show preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreviewAvatar(reader.result as string);
+      };
+      reader.readAsDataURL(processedFile);
+    } catch (err: any) {
+      console.error('Lỗi khi xử lý ảnh:', err);
+      setError(t('edit.error_processing_image', 'Lỗi khi xử lý ảnh'));
+    } finally {
+      setIsProcessingImage(false);
+    }
   };
 
   const handleSave = async () => {
@@ -125,7 +137,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
         className="flex flex-col items-center gap-6 py-2"
       >
         {/* Avatar Section */}
-        <div className="relative group cursor-pointer" onClick={handleAvatarClick}>
+        <div 
+          className={`relative group ${isSaving || isProcessingImage ? 'cursor-wait' : 'cursor-pointer'}`} 
+          onClick={() => !isSaving && !isProcessingImage && handleAvatarClick()}
+        >
           <div className="relative">
             <Avatar
               image={previewAvatar || user?.avatar}
@@ -136,7 +151,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
               <Camera className="w-8 h-8 text-white" />
             </div>
-            {(isSaving) && (
+            {(isSaving || isProcessingImage) && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full">
                 <Loader2 className="w-8 h-8 text-white animate-spin" />
               </div>
@@ -151,7 +166,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             disabled={isSaving}
           />
           <p className="text-xs text-zinc-500 mt-2 text-center group-hover:text-primary transition-colors">
-            {t('profile.edit_avatar')}
+            {isProcessingImage ? t('edit.processing_image') : t('profile.edit_avatar')}
           </p>
         </div>
 
@@ -199,10 +214,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             className="flex-1 rounded-full h-11 bg-primary hover:bg-primary/90 text-white"
             disabled={isSaving || !name.trim() || (name.trim() === user?.name && !selectedFile)}
           >
-            {isSaving ? (
+            {isSaving || isProcessingImage ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {t('profile.saving')}
+                {isProcessingImage ? t('edit.processing_image') : t('profile.saving')}
               </>
             ) : (
               t('profile.save')

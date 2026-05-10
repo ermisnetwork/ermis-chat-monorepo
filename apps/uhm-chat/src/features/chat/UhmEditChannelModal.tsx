@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { processAvatarFile } from '@/utils/image';
 
 export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
   channel,
@@ -44,6 +45,7 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
   const [image, setImage] = useState((channel?.data?.image as string) || '');
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const hasChanges = useMemo(() => {
@@ -71,13 +73,19 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
     if (!file) return;
 
     try {
-      setIsUploading(true);
+      setIsProcessingImage(true);
       setError(null);
-      const { file: url } = await channel.sendFile(file, file.name, file.type);
+      
+      const processedFile = await processAvatarFile(file);
+      setIsProcessingImage(false);
+      
+      setIsUploading(true);
+      const { file: url } = await channel.sendFile(processedFile, processedFile.name, processedFile.type);
       setImage(url);
     } catch (err: any) {
-      setError(err?.message || 'Failed to upload image');
+      setError(err?.message || 'Failed to process or upload image');
     } finally {
+      setIsProcessingImage(false);
       setIsUploading(false);
     }
   }, [channel]);
@@ -132,11 +140,20 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
                 <AvatarComponent image={image} name={name} size={80} className="rounded-lg !w-20 !h-20 object-cover" />
               </div>
               <button
-                onClick={() => imageInputRef.current?.click()}
-                className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center rounded-lg text-white gap-1"
+                onClick={() => !isProcessingImage && !isUploading && imageInputRef.current?.click()}
+                className={`absolute inset-0 bg-black/40 transition-opacity flex flex-col items-center justify-center rounded-lg text-white gap-1 ${
+                  isProcessingImage || isUploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                }`}
+                disabled={isProcessingImage || isUploading}
               >
-                <Camera className="w-5 h-5" />
-                <span className="text-[9px] font-bold uppercase">{t('edit.change_avatar')}</span>
+                {isProcessingImage || isUploading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Camera className="w-5 h-5" />
+                )}
+                <span className="text-[9px] font-bold uppercase px-2 text-center">
+                  {isProcessingImage ? t('edit.processing_image') : isUploading ? t('edit.uploading') : t('edit.change_avatar')}
+                </span>
               </button>
               <input type="file" ref={imageInputRef} className="hidden" accept={imageAccept} onChange={handleFileChange} />
             </div>
@@ -201,10 +218,10 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
             disabled={isSaving || isUploading || !name.trim() || !hasChanges}
             className="flex-1 h-10 bg-primary hover:bg-primary/90 text-white font-bold text-xs"
           >
-            {isSaving || isUploading ? (
+            {isSaving || isUploading || isProcessingImage ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
-                {isUploading ? t('edit.uploading') : savingLabel}
+                {isProcessingImage ? t('edit.processing_image') : isUploading ? t('edit.uploading') : savingLabel}
               </>
             ) : (
               saveLabel
