@@ -59,9 +59,23 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
 
   useEffect(() => {
     if (!activeChannel) return;
-    const sub = activeChannel.on('channel.updated', () => setChannelUpdateCount(c => c + 1));
-    return () => sub.unsubscribe();
-  }, [activeChannel]);
+    const handleUpdate = () => setChannelUpdateCount((c) => c + 1);
+
+    const sub1 = activeChannel.on('channel.updated', handleUpdate);
+
+    // Also listen for client-level notifications that might affect this channel's roles/members
+    // We only care about this for messaging (direct) channels to update online status
+    const sub2 = client.on('notification.invite_accepted', (event) => {
+      if (event.cid === activeChannel.cid && isDirectChannel(activeChannel)) {
+        handleUpdate();
+      }
+    });
+
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+    };
+  }, [activeChannel, client]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const channelName = useMemo(() =>
@@ -108,13 +122,13 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
       if (memberId !== currentUserId) return memberId;
     }
     return undefined;
-  }, [activeChannel, currentUserId]);
+  }, [activeChannel, currentUserId, channelUpdateCount]);
 
   // Check if this is a friend channel (both members are owner).
   const isFriend = useMemo(() => {
     if (!otherUserId || !currentUserId || !activeChannel) return false;
     return isFriendChannel(activeChannel, otherUserId, currentUserId);
-  }, [activeChannel, otherUserId, currentUserId]);
+  }, [activeChannel, otherUserId, currentUserId, channelUpdateCount]);
 
   // Derive online status from watchers + subscribe to realtime events.
   const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>('unknown');
