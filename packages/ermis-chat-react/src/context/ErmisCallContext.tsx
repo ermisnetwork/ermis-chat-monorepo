@@ -32,6 +32,9 @@ export type CallContextValue = {
   isRemoteVideoMuted: boolean;
   upgradeCall: () => Promise<void>;
   callDuration: number;
+  isAccepting: boolean;
+  isRejecting: boolean;
+  isEnding: boolean;
 };
 
 export const ErmisCallContext = React.createContext<CallContextValue | undefined>(undefined);

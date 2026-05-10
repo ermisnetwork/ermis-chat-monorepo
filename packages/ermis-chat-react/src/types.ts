@@ -199,6 +199,9 @@ export type ErmisCallRingingProps = {
   endCallLabel: string;
   audioCallBadgeLabel: string;
   videoCallBadgeLabel: string;
+  isAccepting?: boolean;
+  isRejecting?: boolean;
+  isEnding?: boolean;
 };
 
 /** Props for the Connected Audio state view */
@@ -246,6 +249,7 @@ export type ErmisCallControlsBarProps = {
   selectedVideoDeviceId: string;
   switchAudioDevice: (id: string) => Promise<void>;
   switchVideoDevice: (id: string) => Promise<void>;
+  isEnding?: boolean;
 };
 
 /* ----------------------------------------------------------

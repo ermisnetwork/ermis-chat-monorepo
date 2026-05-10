@@ -36,6 +36,9 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRemoteMicMuted, setIsRemoteMicMuted] = useState(false);
   const [isRemoteVideoMuted, setIsRemoteVideoMuted] = useState(false);
+  const [isAccepting, setIsAccepting] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
 
   // Call duration timer (C7 — exposed via context)
   const [callDuration, setCallDuration] = useState(0);
@@ -59,8 +62,14 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
   useEffect(() => {
     if (callStatus === CallStatus.CONNECTED) {
       startTimer();
+      setIsAccepting(false);
     } else {
       stopTimer();
+    }
+    if (!callStatus) {
+      setIsAccepting(false);
+      setIsRejecting(false);
+      setIsEnding(false);
     }
     return () => stopTimer();
   }, [callStatus, startTimer, stopTimer]);
@@ -178,28 +187,43 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
   }, [callNode, onCallStart]);
 
   const acceptCall = useCallback(async () => {
-    if (callNode) await callNode.acceptCall();
-    // C1: Lifecycle callback — call accepted
-    onCallAccepted?.();
+    if (!callNode) return;
+    setIsAccepting(true);
+    try {
+      await callNode.acceptCall();
+      onCallAccepted?.();
+    } catch (e) {
+      setIsAccepting(false);
+    }
   }, [callNode, onCallAccepted]);
 
   const rejectCall = useCallback(async () => {
-    if (callNode) await callNode.rejectCall();
-    setCallStatus('');
-    setIsIncoming(false);
-    // C1: Lifecycle callback — call rejected
-    onCallRejected?.();
+    if (!callNode) return;
+    setIsRejecting(true);
+    try {
+      await callNode.rejectCall();
+      setCallStatus('');
+      setIsIncoming(false);
+      onCallRejected?.();
+    } finally {
+      setIsRejecting(false);
+    }
   }, [callNode, onCallRejected]);
 
   const endCall = useCallback(async () => {
-    if (callNode) await callNode.endCall();
-    // C1: Lifecycle callback — call ended (capture duration before reset)
-    const duration = callDuration;
-    setCallStatus('');
-    setIsIncoming(false);
-    setLocalStream(null);
-    setRemoteStream(null);
-    onCallEnd?.(duration);
+    if (!callNode) return;
+    setIsEnding(true);
+    try {
+      await callNode.endCall();
+      const duration = callDuration;
+      setCallStatus('');
+      setIsIncoming(false);
+      setLocalStream(null);
+      setRemoteStream(null);
+      onCallEnd?.(duration);
+    } finally {
+      setIsEnding(false);
+    }
   }, [callNode, callDuration, onCallEnd]);
 
   const toggleScreenShare = useCallback(async () => {
@@ -286,6 +310,9 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     isRemoteVideoMuted,
     upgradeCall,
     callDuration,
+    isAccepting,
+    isRejecting,
+    isEnding,
   };
 
   return (

@@ -83,6 +83,9 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
     isRemoteMicMuted,
     upgradeCall,
     callDuration,
+    isAccepting,
+    isRejecting,
+    isEnding,
   } = useCallContext();
 
   const { ModalComponent } = useChatComponents();
@@ -263,6 +266,7 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
           isVideoMuted={isVideoMuted}
           isScreenSharing={isScreenSharing}
           isFullscreen={isFullscreen}
+          isEnding={isEnding}
           audioDevices={audioDevices}
           videoDevices={videoDevices}
           selectedAudioDeviceId={selectedAudioDeviceId}
@@ -363,10 +367,11 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
         {/* End Call */}
         <button
           onClick={endCall}
+          disabled={isEnding}
           className="ermis-call-ui__control-btn ermis-call-ui__control-btn--danger"
           data-tooltip={endCallLabel}
         >
-          <FinalPhoneIcon />
+          {isEnding ? <div className="ermis-call-ui__spinner" /> : <FinalPhoneIcon />}
         </button>
       </div>
     );
@@ -394,6 +399,9 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
           endCallLabel={endCallLabel}
           audioCallBadgeLabel={audioCallBadgeLabel}
           videoCallBadgeLabel={videoCallBadgeLabel}
+          isAccepting={isAccepting}
+          isRejecting={isRejecting}
+          isEnding={isEnding}
         />
       );
     }
@@ -431,18 +439,24 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
               <div className="ermis-call-ui__ringing-action">
                 <button
                   onClick={rejectCall}
+                  disabled={isRejecting}
                   className="ermis-call-ui__action-circle ermis-call-ui__action-circle--reject"
                 >
-                  <FinalPhoneIcon />
+                  {isRejecting ? <div className="ermis-call-ui__spinner" /> : <FinalPhoneIcon />}
                 </button>
                 <span className="ermis-call-ui__action-label">{rejectCallLabel}</span>
               </div>
               <div className="ermis-call-ui__ringing-action">
                 <button
                   onClick={acceptCall}
+                  disabled={isAccepting}
                   className="ermis-call-ui__action-circle ermis-call-ui__action-circle--accept"
                 >
-                  {callType === 'video' ? <FinalVideoIcon /> : <FinalPhoneIcon />}
+                  {isAccepting ? (
+                    <div className="ermis-call-ui__spinner" />
+                  ) : (
+                    callType === 'video' ? <FinalVideoIcon /> : <FinalPhoneIcon />
+                  )}
                 </button>
                 <span className="ermis-call-ui__action-label">{acceptCallLabel}</span>
               </div>
@@ -451,9 +465,10 @@ export const ErmisCallUI: React.FC<ErmisCallUIProps> = React.memo(({
             <div className="ermis-call-ui__ringing-action">
               <button
                 onClick={endCall}
+                disabled={isEnding}
                 className="ermis-call-ui__action-circle ermis-call-ui__action-circle--reject"
               >
-                <FinalPhoneIcon />
+                {isEnding ? <div className="ermis-call-ui__spinner" /> : <FinalPhoneIcon />}
               </button>
               <span className="ermis-call-ui__action-label">{endCallLabel}</span>
             </div>

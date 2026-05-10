@@ -13,7 +13,8 @@ import {
   Maximize,
   Minimize,
   AlertCircle,
-  ChevronDown
+  ChevronDown,
+  Loader2
 } from 'lucide-react'
 import { Avatar } from '@ermis-network/ermis-chat-react'
 import {
@@ -63,6 +64,9 @@ export const UhmCallUI: React.FC = () => {
     isRemoteMicMuted,
     upgradeCall,
     callDuration,
+    isAccepting,
+    isRejecting,
+    isEnding,
   } = useCallContext()
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -73,7 +77,6 @@ export const UhmCallUI: React.FC = () => {
 
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showControls, setShowControls] = useState(true)
-  const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toggleFullscreen = useCallback(() => {
     if (!callContainerRef.current) return
@@ -120,19 +123,23 @@ export const UhmCallUI: React.FC = () => {
     }
   }, [remoteStream, callType, callStatus])
 
-  // Auto-hide controls for video calls
-  const handleMouseMove = useCallback(() => {
-    if (callType !== 'video' || callStatus !== CallStatus.CONNECTED) return
-    setShowControls(true)
-    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current)
-    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000)
+  // Controls visibility logic: show on hover for video calls
+  const handleMouseEnter = useCallback(() => {
+    if (callType === 'video' && callStatus === CallStatus.CONNECTED) {
+      setShowControls(true)
+    }
+  }, [callType, callStatus])
+
+  const handleMouseLeave = useCallback(() => {
+    if (callType === 'video' && callStatus === CallStatus.CONNECTED) {
+      setShowControls(false)
+    }
   }, [callType, callStatus])
 
   useEffect(() => {
-    return () => {
-      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current)
-    }
-  }, [])
+    // Ensure controls are visible when call starts or changes type
+    setShowControls(true)
+  }, [callStatus, callType])
 
   if (!callStatus && !errorMessage) return null
 
@@ -201,18 +208,26 @@ export const UhmCallUI: React.FC = () => {
                   <div className="flex flex-col items-center gap-2">
                     <button
                       onClick={rejectCall}
-                      className="w-14 h-14 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg shadow-red-500/40 transition-all hover:scale-110 active:scale-90"
+                      disabled={isRejecting}
+                      className="w-14 h-14 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg shadow-red-500/40 transition-all hover:scale-110 active:scale-90 disabled:opacity-70 disabled:cursor-not-allowed"
                     >
-                      <PhoneOff className="w-6 h-6 text-white" />
+                      {isRejecting ? <Loader2 className="w-6 h-6 text-white animate-spin" /> : <PhoneOff className="w-6 h-6 text-white" />}
                     </button>
                     <span className="text-xs font-medium text-zinc-400">{t('actions.call.decline')}</span>
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <button
                       onClick={acceptCall}
-                      className="w-14 h-14 bg-emerald-500 hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40 transition-all hover:scale-110 active:scale-90"
+                      disabled={isAccepting}
+                      className="w-14 h-14 bg-emerald-500 hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40 transition-all hover:scale-110 active:scale-90 disabled:opacity-70 disabled:cursor-not-allowed"
                     >
-                      {isVideo ? <VideoIcon className="w-6 h-6 text-white" /> : <Phone className="w-6 h-6 text-white" />}
+                      {isAccepting ? (
+                        <Loader2 className="w-6 h-6 text-white animate-spin" />
+                      ) : isVideo ? (
+                        <VideoIcon className="w-6 h-6 text-white" />
+                      ) : (
+                        <Phone className="w-6 h-6 text-white" />
+                      )}
                     </button>
                     <span className="text-xs font-medium text-zinc-400">{t('actions.call.accept')}</span>
                   </div>
@@ -221,9 +236,10 @@ export const UhmCallUI: React.FC = () => {
                 <div className="flex flex-col items-center gap-2">
                   <button
                     onClick={endCall}
-                    className="w-14 h-14 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg shadow-red-500/40 transition-all hover:scale-110 active:scale-90"
+                    disabled={isEnding}
+                    className="w-14 h-14 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg shadow-red-500/40 transition-all hover:scale-110 active:scale-90 disabled:opacity-70 disabled:cursor-not-allowed"
                   >
-                    <PhoneOff className="w-6 h-6 text-white" />
+                    {isEnding ? <Loader2 className="w-6 h-6 text-white animate-spin" /> : <PhoneOff className="w-6 h-6 text-white" />}
                   </button>
                   <span className="text-xs font-medium text-zinc-400">{t('actions.call.end')}</span>
                 </div>
@@ -244,7 +260,8 @@ export const UhmCallUI: React.FC = () => {
           ? (isFullscreen ? 'fixed inset-0' : 'max-w-5xl aspect-video rounded-[2rem] border border-white/5')
           : 'max-w-md aspect-[4/5] rounded-[2.5rem] border border-white/5'
           }`}
-        onMouseMove={handleMouseMove}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
       >
         {/* ── Video Layers ── */}
         {isVideo && (
@@ -413,10 +430,11 @@ export const UhmCallUI: React.FC = () => {
 
             <button
               onClick={endCall}
-              className="w-11 h-11 md:w-12 md:h-12 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 active:scale-90"
+              disabled={isEnding}
+              className="w-11 h-11 md:w-12 md:h-12 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105 active:scale-90 disabled:opacity-70 disabled:cursor-not-allowed"
               title={t('actions.call.end')}
             >
-              <PhoneOff className="w-5 h-5 text-white" />
+              {isEnding ? <Loader2 className="w-5 h-5 text-white animate-spin" /> : <PhoneOff className="w-5 h-5 text-white" />}
             </button>
           </div>
         </div>
