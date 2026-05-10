@@ -16,7 +16,7 @@ import { ReplyPreview } from './ReplyPreview';
 import { EditPreview } from './EditPreview';
 import { PreviewOverlay } from './PreviewOverlay';
 import { usePreviewState } from '../hooks/usePreviewState';
-import { buildUserMap, replaceMentionsForPreview, moveCaretToEnd } from '../utils';
+import { buildUserMap, replaceMentionsForPreview, moveCaretToEnd, countWords } from '../utils';
 import { getMentionHtml } from '../hooks/useMentions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { CHANNEL_ROLES } from '../channelRoleUtils';
@@ -61,6 +61,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   editingMessageLabel,
   dragAndDropLabel = 'Drop files here to upload',
   DragAndDropOverlayComponent = DefaultDragAndDropOverlay,
+  maxCharsLabel = 'Tin nhắn không được vượt quá 5000 ký tự.',
 }) => {
   const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -174,6 +175,12 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
         setKeywordError(linksDisabledLabel);
         return false;
       }
+    }
+
+    // Max Characters validation (5000 chars)
+    if (text && text.length > 5000) {
+      setKeywordError(maxCharsLabel);
+      return false;
     }
 
     // Custom Keyword validation
@@ -381,7 +388,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        if (!isSlowModeBlocked) {
+        if (!isSlowModeBlocked && !keywordError) {
           handleSend();
         }
       }
@@ -606,7 +613,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
           )}
         </div>
 
-        <SendButton disabled={!hasContent || sending || !!editingMessage || isSlowModeBlocked || !canSendMessage || isStillUploading} onClick={handleSend} />
+        <SendButton disabled={!hasContent || sending || !!editingMessage || isSlowModeBlocked || !canSendMessage || isStillUploading || !!keywordError} onClick={handleSend} />
       </div>
 
       {/* Emoji Picker Dropdown */}

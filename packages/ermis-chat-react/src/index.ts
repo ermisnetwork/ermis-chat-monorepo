@@ -92,6 +92,7 @@ export {
   buildUserMap,
   removeAccents,
   formatRelativeDate,
+  countWords,
 } from './utils';
 export { getAvatarGradient } from './utils/avatarColors';
 export {

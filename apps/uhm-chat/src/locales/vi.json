@@ -95,6 +95,7 @@
     "previewTitle": "Bạn đang xem một kênh công khai.",
     "joinChannel": "Tham gia kênh",
     "linksDisabled": "Tin nhắn bị chặn: Chức năng gửi link bị vô hiệu hóa cho thành viên.",
+    "maxCharsExceeded": "Tin nhắn bị chặn: Không được vượt quá 5000 ký tự.",
     "deleted_message": "Tin nhắn đã bị xoá",
     "dragAndDrop": "Thả file vào đây để gửi",
     "preview_photo": "📷 Ảnh",

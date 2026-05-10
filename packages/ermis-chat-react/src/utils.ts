@@ -408,3 +408,12 @@ export function getLastMessagePreview(
     timestamp,
   };
 }
+
+/**
+ * Count the number of words in a string.
+ * A word is defined as a non-empty sequence of characters separated by whitespace.
+ */
+export function countWords(str: string): number {
+  if (!str) return 0;
+  return str.trim().split(/\s+/).filter(Boolean).length;
+}

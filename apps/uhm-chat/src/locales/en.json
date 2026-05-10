@@ -95,6 +95,7 @@
     "previewTitle": "You are viewing a public channel.",
     "joinChannel": "Join Channel",
     "linksDisabled": "Message blocked: Sending links is disabled for members.",
+    "maxCharsExceeded": "Message blocked: Maximum 5000 characters allowed.",
     "deleted_message": "This message was deleted",
     "dragAndDrop": "Drop files here to upload",
     "preview_photo": "📷 Photo",

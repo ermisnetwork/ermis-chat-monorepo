@@ -925,6 +925,8 @@ export type MessageInputProps = {
   StickerPickerComponent?: React.ComponentType<{ stickerIframeUrl: string; onClose: () => void }>;
   /** Custom sticker button component */
   StickerButtonComponent?: React.ComponentType<{ active: boolean; onClick: () => void }>;
+  /** I18n Label for maximum characters exceeded error */
+  maxCharsLabel?: string;
 };
 
 /* ----------------------------------------------------------

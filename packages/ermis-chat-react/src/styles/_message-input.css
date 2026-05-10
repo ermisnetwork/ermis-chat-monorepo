@@ -10,6 +10,7 @@
   background-color: var(--ermis-bg-secondary);
   font-family: var(--ermis-font-family);
   position: relative;
+  overflow: hidden;
 }
 
 .ermis-message-input__row {

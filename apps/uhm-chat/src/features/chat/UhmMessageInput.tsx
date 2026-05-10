@@ -54,6 +54,18 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   const canSendLinks = hasCapability('send-links');
 
   const [keywordError, setKeywordError] = useState<string | null>(null);
+  const [errorType, setErrorType] = useState<'maxChars' | 'links' | null>(null);
+
+  // Refresh error message when language changes
+  useEffect(() => {
+    if (errorType === 'maxChars') {
+      setKeywordError(t('chat.maxCharsExceeded', 'Message blocked: Maximum 5000 characters allowed.'));
+    } else if (errorType === 'links') {
+      setKeywordError(t('chat.linksDisabled', 'Message blocked: Sending links is disabled for members.'));
+    } else {
+      setKeywordError(null);
+    }
+  }, [t, errorType]);
 
   // File Upload Hook
   const {
@@ -112,10 +124,18 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       if (!canSendLinks && text) {
         const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/[^\s]*)?)/i;
         if (urlRegex.test(text)) {
-          setKeywordError(t('chat.linksDisabled', 'Message blocked: Sending links is disabled for members.'));
-          return false;
+          setErrorType('links');
+          return false; 
         }
       }
+
+      // Max Characters validation (5000 chars)
+      const charCount = text.length;
+      if (text && charCount > 5000) {
+        setErrorType('maxChars');
+        return false;
+      }
+
       return true;
     },
     quotedMessage,
@@ -123,17 +143,30 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     editingMessage,
     clearEditingMessage: () => setEditingMessage(null),
   });
-
   const handleInput = useCallback(() => {
     const el = editableRef.current;
-    const content = el?.textContent?.trim() ?? '';
+    if (!el) return;
+
+    // Normalize empty state for placeholder to work (fix browser leaving <br> or whitespace)
+    if (el.textContent === '' && el.innerHTML !== '') {
+      el.innerHTML = '';
+    }
+
+    const content = el.textContent?.trim() ?? '';
     setHasContent(content.length > 0 || files.length > 0);
-    setKeywordError(null);
+    
+    // Real-time character count check
+    if (content.length > 5000) {
+      setErrorType('maxChars');
+    } else if (errorType === 'maxChars') {
+      setErrorType(null);
+    }
+
     if ((isTeamChannel || isTopic)) {
       mentionHandleInput();
     }
     activeChannel?.keystroke();
-  }, [isTeamChannel, isTopic, mentionHandleInput, files.length, activeChannel]);
+  }, [isTeamChannel, isTopic, mentionHandleInput, files.length, activeChannel, t, errorType]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
@@ -159,7 +192,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (!keywordError) {
+        handleSend();
+      }
     }
   }, [isTeamChannel, isTopic, mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, resetMentions, cleanupFiles, setFiles, setHasContent]);
 
@@ -277,7 +312,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   return (
     <div className="p-4 relative">
-      <div className="relative flex flex-col bg-white dark:bg-[#1a1828] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50">
+      <div className="relative flex flex-col bg-white dark:bg-[#1a1828] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 overflow-hidden">
 
         {quotedMessage && !editingMessage && (
           <div className="border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-black/20 p-2">
@@ -312,7 +347,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         )}
 
         {keywordError && (
-          <div className="px-3 py-2 text-sm text-red-600 bg-red-50 dark:bg-red-950/30 border-b border-red-100 dark:border-red-900/30">
+          <div className="px-4 py-2 text-xs font-medium text-red-600 bg-red-50/80 dark:bg-red-950/40 border-b border-red-100 dark:border-red-900/30 backdrop-blur-sm animate-in slide-in-from-top-1 duration-200">
             {keywordError}
           </div>
         )}
@@ -410,9 +445,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
           <button
             type="button"
-            disabled={!hasContent || disabledInput}
+            disabled={!hasContent || disabledInput || !!keywordError}
             onClick={handleSend}
-            className="inline-flex items-center justify-center w-9 h-9 rounded-full text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 transition-colors shadow-sm active:scale-95"
+            className="inline-flex items-center justify-center w-9 h-9 rounded-full text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 transition-all shadow-sm active:scale-95 disabled:scale-100"
             title={t('chat.send', 'Send')}
           >
             <SendHorizonal className="w-[18px] h-[18px] ml-0.5" />
