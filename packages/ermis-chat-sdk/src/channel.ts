@@ -1045,62 +1045,99 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
   async getThumbBlobVideo(file: File): Promise<Blob | null> {
     return new Promise((resolve) => {
-      const seekTo = 0.1;
       const videoPlayer = document.createElement('video');
       videoPlayer.src = URL.createObjectURL(file);
-      videoPlayer.crossOrigin = 'anonymous'; // Tránh lỗi CORS nếu cần
+      videoPlayer.crossOrigin = 'anonymous';
+      videoPlayer.muted = true; // Đảm bảo không phát tiếng nếu browser tự phát
       videoPlayer.load();
+
+      let attempts = 0;
+      const maxAttempts = 5;
+      const seekInterval = 1.0; // Nhảy mỗi lần 1 giây nếu gặp ảnh đen
+
+      const cleanup = () => {
+        URL.revokeObjectURL(videoPlayer.src);
+        videoPlayer.remove();
+      };
 
       videoPlayer.addEventListener('error', () => {
         console.error('Error when loading video file.');
+        cleanup();
         resolve(null);
       });
 
-      videoPlayer.addEventListener('loadedmetadata', () => {
-        if (videoPlayer.duration < seekTo) {
-          console.error('Video is too short.');
-          resolve(null);
-          return;
-        }
-
-        setTimeout(() => {
-          videoPlayer.currentTime = seekTo;
-        }, 200);
-      });
-
-      videoPlayer.addEventListener('seeked', () => {
+      const captureFrame = () => {
         try {
           const canvas = document.createElement('canvas');
           canvas.width = videoPlayer.videoWidth;
           canvas.height = videoPlayer.videoHeight;
-          const ctx = canvas.getContext('2d');
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
           if (!ctx) {
             console.error('Failed to create canvas context.');
+            cleanup();
             resolve(null);
             return;
           }
 
           ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
 
-          ctx.canvas.toBlob(
+          // Kiểm tra xem có phải khung hình đen không
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          let totalLuminance = 0;
+          const sampleStep = 40; // Lấy mẫu để tối ưu hiệu năng
+          let samples = 0;
+
+          for (let i = 0; i < data.length; i += sampleStep * 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            // Công thức tính độ sáng tiêu chuẩn (ITU-R BT.709)
+            totalLuminance += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            samples++;
+          }
+
+          const avgLuminance = totalLuminance / samples;
+
+          // Nếu ảnh quá tối (đen) và vẫn còn lượt thử, nhảy tiếp
+          if (
+            avgLuminance < 15 &&
+            attempts < maxAttempts &&
+            videoPlayer.currentTime + seekInterval < videoPlayer.duration
+          ) {
+            attempts++;
+            videoPlayer.currentTime += seekInterval;
+            return; // Đợi sự kiện 'seeked' tiếp theo
+          }
+
+          // Xuất kết quả nếu ảnh ok hoặc đã hết lượt thử
+          canvas.toBlob(
             (blob) => {
+              cleanup();
               if (!blob) {
                 console.error('Failed to generate thumbnail.');
                 resolve(null);
                 return;
               }
               resolve(blob);
-              URL.revokeObjectURL(videoPlayer.src); // Giải phóng bộ nhớ
             },
             'image/jpeg',
             0.75,
           );
         } catch (error) {
           console.error('Error while extracting thumbnail:', error);
+          cleanup();
           resolve(null);
         }
+      };
+
+      videoPlayer.addEventListener('loadedmetadata', () => {
+        // Bắt đầu từ giây thứ 0.5 để tránh đoạn khởi đầu thường bị lỗi encoder
+        videoPlayer.currentTime = Math.min(0.5, videoPlayer.duration);
       });
+
+      videoPlayer.addEventListener('seeked', captureFrame);
     });
   }
 
