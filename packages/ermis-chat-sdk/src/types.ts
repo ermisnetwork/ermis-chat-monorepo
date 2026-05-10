@@ -510,6 +510,7 @@ export enum CallAction {
 }
 
 export enum CallStatus {
+  PREPARING = 'preparing',
   RINGING = 'ringing',
   ENDED = 'ended',
   CONNECTED = 'connected',

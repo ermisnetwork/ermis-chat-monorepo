@@ -260,13 +260,13 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
       if (typeof this.onError === 'function') {
         if (error.code === 'ERR_NETWORK') {
           if (action === CallAction.CREATE_CALL) {
-            this.onError('Unable to make the call. Please check your network connection');
+            this.onError('call_network_error');
           }
         } else {
           if (error.response.data.ermis_code === 20) {
-            this.onError('Recipient was busy');
+            this.onError('call_recipient_busy');
           } else {
-            const errMsg = error.response.data?.message ? error.response.data?.message : 'Call failed';
+            const errMsg = error.response.data?.message ? error.response.data?.message : 'call_failed';
             this.onError(errMsg);
           }
         }
@@ -358,7 +358,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
       // No device found at all — report error
       if (typeof this.onError === 'function') {
-        this.onError('No microphone or camera found. Please check your device.');
+        this.onError('call_no_devices');
       }
       return null;
     }
@@ -630,7 +630,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     this.setCallStatus(CallStatus.ENDED);
   }
 
-  private destroy() {
+  public destroy() {
     // if (this.signalHandler) this._client.off('signal', this.signalHandler);
     // if (this.connectionChangedHandler) this._client.off('connection.changed', this.connectionChangedHandler);
     // if (this.messageUpdatedHandler) this._client.off('message.updated', this.messageUpdatedHandler);

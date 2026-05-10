@@ -107,13 +107,20 @@
       "incoming": "Cuộc gọi {{type}} đến",
       "outgoing": "Cuộc gọi {{type}} đi",
       "ringing": "Đang đổ chuông...",
+      "connecting": "Đang kết nối...",
       "connected": "Đã kết nối",
       "ended": "Cuộc gọi kết thúc",
       "duration": "Thời lượng: {{duration}}",
       "calling_you": "đang gọi cho bạn...",
       "audio": "âm thanh",
       "video": "video",
-      "error": "Lỗi cuộc gọi"
+      "error": "Lỗi cuộc gọi",
+      "errors": {
+        "call_network_error": "Không thể thực hiện cuộc gọi. Vui lòng kiểm tra kết nối mạng của bạn.",
+        "call_recipient_busy": "Người dùng này đang trong một cuộc gọi khác. Vui lòng thử lại sau.",
+        "call_no_devices": "Không tìm thấy micro hoặc camera. Vui lòng kiểm tra thiết bị của bạn.",
+        "call_failed": "Cuộc gọi thất bại"
+      }
     },
     "channel_list_error": "Không thể tải danh sách",
     "channel_list_error_hint": "Đã có lỗi xảy ra từ phía máy chủ. Hãy thử làm mới lại.",
@@ -316,8 +323,8 @@
   },
   "signal_messages": {
     "calling": "Đang gọi...",
-    "incomingAudioCall": "Cuộc gọi thoại đến...",
-    "incomingVideoCall": "Cuộc gọi video đến...",
+    "incomingAudioCall": "Cuộc gọi thoại đến",
+    "incomingVideoCall": "Cuộc gọi video đến",
     "outgoingAudioCall": "Cuộc gọi thoại đi",
     "outgoingVideoCall": "Cuộc gọi video đi",
     "missedAudioCall": "Bạn đã bỏ lỡ cuộc gọi thoại",

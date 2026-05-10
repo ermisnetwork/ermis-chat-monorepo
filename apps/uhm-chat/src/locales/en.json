@@ -107,13 +107,20 @@
       "incoming": "Incoming {{type}} call",
       "outgoing": "Outgoing {{type}} call",
       "ringing": "Ringing...",
+      "connecting": "Connecting...",
       "connected": "Connected",
       "ended": "Call ended",
       "duration": "Duration: {{duration}}",
       "calling_you": "is calling you...",
       "audio": "Audio",
       "video": "Video",
-      "error": "Call Error"
+      "error": "Call Error",
+      "errors": {
+        "call_network_error": "Unable to make the call. Please check your network connection.",
+        "call_recipient_busy": "This user is in another call. Please try again later.",
+        "call_no_devices": "No microphone or camera found. Please check your device.",
+        "call_failed": "Call failed"
+      }
     },
     "channel_list_error": "Unable to load channels",
     "channel_list_error_hint": "A server issue occurred while fetching your data. Let's try to refresh.",
@@ -316,8 +323,8 @@
   },
   "signal_messages": {
     "calling": "Calling...",
-    "incomingAudioCall": "Incoming audio call...",
-    "incomingVideoCall": "Incoming video call...",
+    "incomingAudioCall": "Incoming audio call",
+    "incomingVideoCall": "Incoming video call",
     "outgoingAudioCall": "Outgoing audio call",
     "outgoingVideoCall": "Outgoing video call",
     "missedAudioCall": "You missed audio call",

@@ -35,6 +35,7 @@ export type CallContextValue = {
   isAccepting: boolean;
   isRejecting: boolean;
   isEnding: boolean;
+  resetCall: () => void;
 };
 
 export const ErmisCallContext = React.createContext<CallContextValue | undefined>(undefined);

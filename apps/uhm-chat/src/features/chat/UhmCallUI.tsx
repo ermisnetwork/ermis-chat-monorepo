@@ -67,6 +67,7 @@ export const UhmCallUI: React.FC = () => {
     isAccepting,
     isRejecting,
     isEnding,
+    resetCall,
   } = useCallContext()
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -146,28 +147,29 @@ export const UhmCallUI: React.FC = () => {
   const peerInfo = isIncoming ? callerInfo : receiverInfo
   const isVideo = callType === 'video'
   // const isConnected = callStatus === CallStatus.CONNECTED
-  const isRinging = callStatus === CallStatus.RINGING
+  const isRinging = callStatus === CallStatus.RINGING || callStatus === CallStatus.PREPARING
 
   // 1. Error View
   if (errorMessage) {
     return (
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-        <div className="bg-white dark:bg-[#1a1828] rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
-          <div className="p-8 text-center">
-            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertCircle className="w-8 h-8 text-red-500" />
+        <div className="bg-[#1a1828] text-white w-full max-w-sm rounded-[2.5rem] shadow-2xl overflow-hidden relative border border-white/5 animate-in zoom-in-95 duration-300">
+          <div className="p-10 text-center">
+            <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 ring-1 ring-red-500/20 relative">
+              <div className="absolute inset-0 bg-red-500/5 rounded-full animate-pulse" />
+              <AlertCircle className="w-10 h-10 text-red-500 relative z-10" />
             </div>
-            <h3 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
+            <h3 className="text-2xl font-bold mb-3 tracking-tight">
               {t('chat.call.error')}
             </h3>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-8">
-              {errorMessage}
+            <p className="text-zinc-400 mb-10 leading-relaxed">
+              {t(`chat.call.errors.${errorMessage}`, { defaultValue: errorMessage })}
             </p>
             <button
-              onClick={clearError}
-              className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold rounded-2xl transition-colors active:scale-95"
+              onClick={resetCall}
+              className="w-full py-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-red-500/25"
             >
-              {t('actions.confirm_cancel')}
+              {t('actions.close')}
             </button>
           </div>
         </div>
@@ -199,7 +201,7 @@ export const UhmCallUI: React.FC = () => {
               {peerInfo?.name || t('chat.menu_profile_anonymous')}
             </h2>
             <p className="text-indigo-300 font-medium animate-pulse mb-12">
-              {isIncoming ? t('chat.call.calling_you') : t('chat.call.ringing')}
+              {isIncoming ? t('chat.call.calling_you') : (callStatus === CallStatus.PREPARING ? t('chat.call.connecting') : t('chat.call.ringing'))}
             </p>
 
             <div className="flex gap-10">

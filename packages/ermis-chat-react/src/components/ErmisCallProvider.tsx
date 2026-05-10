@@ -180,7 +180,7 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     setCallerInfo(callNode.callerInfo);
     setReceiverInfo(callNode.receiverInfo);
 
-    setCallStatus(CallStatus.RINGING);
+    setCallStatus(CallStatus.PREPARING);
     await callNode.createCall(type, cid);
     // C1: Lifecycle callback — call started
     onCallStart?.(type, cid);
@@ -248,6 +248,14 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
   }, [callNode]);
 
   const clearError = useCallback(() => setErrorMessage(null), []);
+  const resetCall = useCallback(() => {
+    if (callNode) callNode.destroy();
+    setCallStatus('');
+    setErrorMessage(null);
+    setIsIncoming(false);
+    setCallDuration(0);
+    setCallType('audio');
+  }, [callNode]);
 
   const upgradeCall = useCallback(async () => {
     if (!callNode) return;
@@ -313,6 +321,7 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     isAccepting,
     isRejecting,
     isEnding,
+    resetCall,
   };
 
   return (
