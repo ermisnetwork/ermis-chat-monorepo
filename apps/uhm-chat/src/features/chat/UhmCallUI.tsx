@@ -60,7 +60,6 @@ export const UhmCallUI: React.FC = () => {
     toggleScreenShare,
     switchAudioDevice,
     switchVideoDevice,
-    clearError,
     isRemoteMicMuted,
     isRemoteVideoMuted,
     upgradeCall,

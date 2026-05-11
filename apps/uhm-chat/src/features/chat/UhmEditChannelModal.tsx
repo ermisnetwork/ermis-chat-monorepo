@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { Camera, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useChatClient } from '@ermis-network/ermis-chat-react';
+
 import type { EditChannelModalProps, EditChannelData } from '@ermis-network/ermis-chat-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +26,7 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
   imageAccept = 'image/*',
 }) => {
   const { t } = useTranslation();
-  const { client } = useChatClient();
+
 
   // Use props if provided, otherwise use localized strings
   const title = propTitle || t('edit.edit_channel_title');
