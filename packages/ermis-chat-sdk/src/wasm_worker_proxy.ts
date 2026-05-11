@@ -26,8 +26,26 @@ export class WasmWorkerProxy implements INodeCall {
   private recvDataQueue: Uint8Array[] = [];
   private recvErrorQueue: Array<(error: Error) => void> = [];
 
+  private blobUrl: string | null = null;
+
   constructor(workerUrl: string | URL) {
-    this.worker = new Worker(workerUrl, { type: 'module' });
+    // Fetch worker script and create Blob URL to bypass server MIME type issues.
+    // Some servers (e.g. nginx) serve .mjs files as application/octet-stream,
+    // which causes "non-JavaScript MIME type" errors for module workers.
+    const url = workerUrl.toString();
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, false); // synchronous
+    xhr.send();
+
+    if (xhr.status === 200) {
+      const blob = new Blob([xhr.responseText], { type: 'application/javascript' });
+      this.blobUrl = URL.createObjectURL(blob);
+      this.worker = new Worker(this.blobUrl, { type: 'module' });
+    } else {
+      // Fallback: try direct URL (works when server has correct MIME config)
+      this.worker = new Worker(workerUrl, { type: 'module' });
+    }
+
     this.worker.onmessage = (e: MessageEvent<WorkerResponse>) => this.handleMessage(e.data);
     this.worker.onerror = (e) => {
       console.error('🔴 WASM Worker error:', e.message);
@@ -141,6 +159,12 @@ export class WasmWorkerProxy implements INodeCall {
       /* ignore — worker may already be dead */
     }
     this.worker.terminate();
+
+    // Cleanup Blob URL to prevent memory leak
+    if (this.blobUrl) {
+      URL.revokeObjectURL(this.blobUrl);
+      this.blobUrl = null;
+    }
 
     // Reject remaining recv waiters
     this.recvResolveQueue = [];
