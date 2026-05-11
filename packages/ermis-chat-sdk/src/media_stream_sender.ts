@@ -138,6 +138,8 @@ export class MediaStreamSender {
             numberOfChannels: metadata.decoderConfig.numberOfChannels ?? 1,
             ...(description && { description }),
           };
+
+          this.sendAudioConfig();
         }
 
         if (chunk && this.isReadyToSendData('audio')) {

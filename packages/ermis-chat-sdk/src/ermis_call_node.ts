@@ -134,7 +134,13 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   public mediaSender: MediaStreamSender | null = null;
   public mediaReceiver: MediaStreamReceiver | null = null;
 
-  constructor(client: ErmisChat<ErmisChatGenerics>, sessionID: string, wasmPath: string, relayUrl: string, workerPath?: string) {
+  constructor(
+    client: ErmisChat<ErmisChatGenerics>,
+    sessionID: string,
+    wasmPath: string,
+    relayUrl: string,
+    workerPath?: string,
+  ) {
     this._client = client;
     this.cid = '';
     this.callType = '';
@@ -153,9 +159,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   private async loadWasm(): Promise<void> {
     try {
       // Tạo Worker proxy — WASM chạy hoàn toàn trên Worker thread
-      this.callNode = new WasmWorkerProxy(
-        new URL(this.workerPath, window.location.origin),
-      );
+      this.callNode = new WasmWorkerProxy(new URL(this.workerPath, window.location.origin));
       await this.callNode.init(this.wasmPath);
     } catch (error) {
       console.error('Failed to load ErmisCall WASM Worker:', error);
@@ -488,11 +492,6 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
             await this.initialize();
           }
 
-          if (this.localStream && this.mediaSender && this.mediaReceiver) {
-            this.mediaSender?.initEncoders(this.localStream);
-            this.mediaReceiver?.initDecoders(this.callType);
-          }
-
           if (eventUserId === this.userID) {
             // Set missCall timeout if no connection after 60s
             if (this.missCallTimeout) clearTimeout(this.missCallTimeout);
@@ -510,9 +509,20 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
           }
 
           if (eventUserId !== this.userID && !this.isDestroyed) {
+            // Caller side: establish peer connection FIRST
             if (this.mediaReceiver && this.mediaSender) {
               await this.mediaReceiver.acceptConnection();
               await this.mediaSender.sendConnected();
+            }
+
+            // Then init encoders/decoders (safe to sendControlFrame now)
+            if (this.localStream && this.mediaSender && this.mediaReceiver && this.callType) {
+              this.mediaSender?.initEncoders(this.localStream);
+              this.mediaReceiver?.initDecoders(this.callType);
+            }
+
+            // Re-send configs after encoders have populated them
+            if (this.mediaSender) {
               await this.mediaSender.sendConfigs();
             }
           }
@@ -710,9 +720,21 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     try {
       await this._sendSignal({ action: CallAction.ACCEPT_CALL });
 
+      // Receiver side: establish peer connection FIRST
       if (this.mediaSender) {
         const address = this.metadata?.address || '';
         await this.mediaSender.connect(address);
+      }
+
+      // Then init encoders/decoders (safe to sendControlFrame now)
+      if (this.localStream && this.mediaSender && this.mediaReceiver) {
+        this.mediaSender?.initEncoders(this.localStream);
+        this.mediaReceiver?.initDecoders(this.callType || 'audio');
+      }
+
+      // Re-send configs after encoders have populated them
+      if (this.mediaSender) {
+        await this.mediaSender.sendConfigs();
       }
     } catch (error) {
       console.error('Failed to accept call:', error);

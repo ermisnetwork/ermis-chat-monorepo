@@ -62,6 +62,7 @@ export const UhmCallUI: React.FC = () => {
     switchVideoDevice,
     clearError,
     isRemoteMicMuted,
+    isRemoteVideoMuted,
     upgradeCall,
     callDuration,
     isAccepting,
@@ -268,12 +269,33 @@ export const UhmCallUI: React.FC = () => {
         {/* ── Video Layers ── */}
         {isVideo && (
           <>
+            {/* Remote Video */}
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              className="w-full h-full object-contain"
+              className={`w-full h-full object-contain transition-opacity duration-300 ${isRemoteVideoMuted ? 'opacity-0' : 'opacity-100'}`}
             />
+
+            {/* Remote Camera Off Overlay */}
+            {isRemoteVideoMuted && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-gradient-to-b from-[#1a1828] to-[#0d0c15] animate-in fade-in duration-500">
+                <div className="relative mb-6">
+                  <div className="absolute inset-0 rounded-full border-2 border-indigo-500/20 scale-125 animate-[ping_2s_infinite]" />
+                  <Avatar
+                    image={peerInfo?.avatar}
+                    name={peerInfo?.name}
+                    size={120}
+                    className="ring-4 ring-indigo-500/30 shadow-[0_0_40px_rgba(99,102,241,0.2)]"
+                  />
+                  <div className="absolute bottom-1 right-1 bg-zinc-700 rounded-full p-2 shadow-xl ring-4 ring-[#0d0c15] animate-in zoom-in-50 duration-300">
+                    <VideoOff className="w-5 h-5 text-zinc-300" />
+                  </div>
+                </div>
+                <h3 className="text-xl font-bold tracking-tight text-white/90">{peerInfo?.name}</h3>
+              </div>
+            )}
+
             {/* Call Status Bar: mic-muted indicator + duration timer */}
             <div className="absolute top-6 left-6 flex items-center gap-2 text-white/80 font-mono text-sm bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full ring-1 ring-white/10 z-20">
               {isRemoteMicMuted && (
@@ -282,6 +304,8 @@ export const UhmCallUI: React.FC = () => {
               <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
               {formatDuration(callDuration)}
             </div>
+
+            {/* Local Video PiP */}
             <div className="absolute top-6 right-6 w-32 md:w-48 aspect-video bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10 z-20">
               <video
                 ref={localVideoRef}
