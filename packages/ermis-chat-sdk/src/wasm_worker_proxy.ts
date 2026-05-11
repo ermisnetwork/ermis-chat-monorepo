@@ -59,7 +59,12 @@ export class WasmWorkerProxy implements INodeCall {
 
   /** Initialize WASM trong Worker */
   async init(wasmPath?: string): Promise<void> {
-    await this.call('init', { wasmPath: wasmPath || '/ermis_call_node_wasm_bg.wasm' });
+    // Convert to absolute URL — Blob URL workers can't resolve relative paths
+    const absoluteWasmPath = new URL(
+      wasmPath || '/ermis_call_node_wasm_bg.wasm',
+      window.location.origin,
+    ).href;
+    await this.call('init', { wasmPath: absoluteWasmPath });
   }
 
   /** Spawn WASM node */
