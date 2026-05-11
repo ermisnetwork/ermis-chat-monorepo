@@ -26,21 +26,26 @@ export class WasmWorkerProxy implements INodeCall {
   private recvDataQueue: Uint8Array[] = [];
   private recvErrorQueue: Array<(error: Error) => void> = [];
 
-  private blobUrl: string | null = null;
+  /** Static cache — persist across Worker instances */
+  private static cachedBlobUrl: string | null = null;
+  private static cachedWasmBytes: ArrayBuffer | null = null;
 
   constructor(workerUrl: string | URL) {
-    // Fetch worker script and create Blob URL to bypass server MIME type issues.
-    // Some servers (e.g. nginx) serve .mjs files as application/octet-stream,
-    // which causes "non-JavaScript MIME type" errors for module workers.
-    const url = workerUrl.toString();
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', url, false); // synchronous
-    xhr.send();
+    // Cache Blob URL — chỉ fetch worker script 1 lần
+    if (!WasmWorkerProxy.cachedBlobUrl) {
+      const url = workerUrl.toString();
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', url, false); // synchronous
+      xhr.send();
 
-    if (xhr.status === 200) {
-      const blob = new Blob([xhr.responseText], { type: 'application/javascript' });
-      this.blobUrl = URL.createObjectURL(blob);
-      this.worker = new Worker(this.blobUrl, { type: 'module' });
+      if (xhr.status === 200) {
+        const blob = new Blob([xhr.responseText], { type: 'application/javascript' });
+        WasmWorkerProxy.cachedBlobUrl = URL.createObjectURL(blob);
+      }
+    }
+
+    if (WasmWorkerProxy.cachedBlobUrl) {
+      this.worker = new Worker(WasmWorkerProxy.cachedBlobUrl, { type: 'module' });
     } else {
       // Fallback: try direct URL (works when server has correct MIME config)
       this.worker = new Worker(workerUrl, { type: 'module' });
@@ -57,14 +62,20 @@ export class WasmWorkerProxy implements INodeCall {
 
   // === LIFECYCLE ===
 
-  /** Initialize WASM trong Worker */
+  /** Initialize WASM trong Worker — fetch bytes 1 lần, gửi cached bytes cho Worker */
   async init(wasmPath?: string): Promise<void> {
-    // Convert to absolute URL — Blob URL workers can't resolve relative paths
-    const absoluteWasmPath = new URL(
-      wasmPath || '/ermis_call_node_wasm_bg.wasm',
-      window.location.origin,
-    ).href;
-    await this.call('init', { wasmPath: absoluteWasmPath });
+    // Fetch WASM bytes 1 lần duy nhất trên Main Thread
+    if (!WasmWorkerProxy.cachedWasmBytes) {
+      const absoluteWasmPath = new URL(
+        wasmPath || '/ermis_call_node_wasm_bg.wasm',
+        window.location.origin,
+      ).href;
+      const response = await fetch(absoluteWasmPath);
+      WasmWorkerProxy.cachedWasmBytes = await response.arrayBuffer();
+    }
+    // Gửi copy bytes cho Worker (transfer → zero-copy, original stays cached)
+    const bytesCopy = WasmWorkerProxy.cachedWasmBytes.slice(0);
+    await this.call('init', { wasmBytes: bytesCopy }, [bytesCopy]);
   }
 
   /** Spawn WASM node */
@@ -165,11 +176,8 @@ export class WasmWorkerProxy implements INodeCall {
     }
     this.worker.terminate();
 
-    // Cleanup Blob URL to prevent memory leak
-    if (this.blobUrl) {
-      URL.revokeObjectURL(this.blobUrl);
-      this.blobUrl = null;
-    }
+    // KHÔNG revoke Blob URL và KHÔNG clear cached Module
+    // — chúng được reuse cho call tiếp theo
 
     // Reject remaining recv waiters
     this.recvResolveQueue = [];

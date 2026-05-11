@@ -169,7 +169,8 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
   private async initialize(): Promise<WasmWorkerProxy> {
     try {
-      // Re-create Worker nếu đã bị destroy bởi call trước
+      // Re-create Worker nếu đã bị terminate bởi call trước
+      // (Worker mới nhưng dùng cached Blob URL + compiled WASM Module → rất nhanh)
       if (!this.callNode) {
         await this.loadWasm();
       }
@@ -532,7 +533,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
         case CallAction.REJECT_CALL:
         case CallAction.MISS_CALL:
           // this.setCallStatus(CallStatus.ENDED);
-          this.destroy();
+          await this.destroy();
           break;
       }
     };
@@ -601,7 +602,8 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
     if (this.callNode) {
       try {
-        await this.callNode.terminate();
+        // Timeout protection: don't let terminate() hang forever
+        await Promise.race([this.callNode.terminate(), new Promise((resolve) => setTimeout(resolve, 1000))]);
       } catch {
         /* ignore — Worker may already be dead */
       }
@@ -653,11 +655,11 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     this.setCallStatus(CallStatus.ENDED);
   }
 
-  public destroy() {
+  public async destroy() {
     // if (this.signalHandler) this._client.off('signal', this.signalHandler);
     // if (this.connectionChangedHandler) this._client.off('connection.changed', this.connectionChangedHandler);
     // if (this.messageUpdatedHandler) this._client.off('message.updated', this.messageUpdatedHandler);
-    this.cleanupCall();
+    await this.cleanupCall();
   }
 
   public async getDevices(): Promise<{ audioDevices: MediaDeviceInfo[]; videoDevices: MediaDeviceInfo[] }> {

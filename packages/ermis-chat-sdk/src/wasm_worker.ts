@@ -9,14 +9,14 @@
  */
 
 // @ts-ignore — WASM module import sẽ được resolve bởi bundler
-import init, { ErmisCall } from './wasm/ermis_call_node_wasm';
+import { initSync, ErmisCall } from './wasm/ermis_call_node_wasm';
 
 let ermisCall: ErmisCall | null = null;
 let isRecvActive = false;
 
 /** Request types từ Main Thread */
 type WorkerRequest =
-  | { id: number; type: 'init'; wasmPath: string }
+  | { id: number; type: 'init'; wasmBytes: ArrayBuffer }
   | { id: number; type: 'spawn'; relayUrls: string[] }
   | { id: number; type: 'getLocalEndpointAddr' }
   | { id: number; type: 'connect'; address: string }
@@ -81,7 +81,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     switch (msg.type) {
       // === LIFECYCLE ===
       case 'init': {
-        await init(msg.wasmPath);
+        // Nhận WASM bytes từ Main Thread → compile thành Module → initSync
+        const wasmModule = new WebAssembly.Module(msg.wasmBytes);
+        initSync(wasmModule);
         ermisCall = new ErmisCall();
         sendResult(msg.id);
         break;
