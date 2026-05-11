@@ -1406,6 +1406,22 @@ function __wbg_finalize_init(instance, module2) {
   cachedUint8ArrayMemory0 = null;
   return wasm;
 }
+function initSync(module2) {
+  if (wasm !== void 0) return wasm;
+  if (typeof module2 !== "undefined") {
+    if (Object.getPrototypeOf(module2) === Object.prototype) {
+      ({ module: module2 } = module2);
+    } else {
+      console.warn("using deprecated parameters for `initSync()`; pass a single object instead");
+    }
+  }
+  const imports = __wbg_get_imports();
+  if (!(module2 instanceof WebAssembly.Module)) {
+    module2 = new WebAssembly.Module(module2);
+  }
+  const instance = new WebAssembly.Instance(module2, imports);
+  return __wbg_finalize_init(instance, module2);
+}
 async function __wbg_init(module_or_path) {
   if (wasm !== void 0) return wasm;
   if (typeof module_or_path !== "undefined") {
@@ -1425,7 +1441,6 @@ async function __wbg_init(module_or_path) {
   const { instance, module: module2 } = await __wbg_load(await module_or_path, imports);
   return __wbg_finalize_init(instance, module2);
 }
-var ermis_call_node_wasm_default = __wbg_init;
 
 // src/wasm_worker.ts
 var ermisCall = null;
@@ -1463,7 +1478,8 @@ self.onmessage = async (e) => {
     switch (msg.type) {
       // === LIFECYCLE ===
       case "init": {
-        await ermis_call_node_wasm_default(msg.wasmPath);
+        const wasmModule = new WebAssembly.Module(msg.wasmBytes);
+        initSync(wasmModule);
         ermisCall = new ErmisCall();
         sendResult(msg.id);
         break;

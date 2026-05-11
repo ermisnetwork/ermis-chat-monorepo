@@ -6,12 +6,14 @@ const path = require('path');
 const sourceWasm = path.join(__dirname, '../public/ermis_call_node_wasm_bg.wasm');
 const sourceIncomingMp3 = path.join(__dirname, '../public/call_incoming.mp3');
 const sourceOutgoingMp3 = path.join(__dirname, '../public/call_outgoing.mp3');
+const sourceWorker = path.join(__dirname, '../dist/wasm_worker.worker.mjs');
 
 // Execution directory (always the root of the consumer's project)
 const targetDir = path.join(process.cwd(), 'public');
 const targetWasm = path.join(targetDir, 'ermis_call_node_wasm_bg.wasm');
 const targetIncomingMp3 = path.join(targetDir, 'call_incoming.mp3');
 const targetOutgoingMp3 = path.join(targetDir, 'call_outgoing.mp3');
+const targetWorker = path.join(targetDir, 'wasm_worker.worker.mjs');
 
 console.log('🔄 Configuring WebAssembly & Audio files for Ermis Direct Call feature...');
 
@@ -43,6 +45,13 @@ try {
     console.log('✅ Successfully copied call_outgoing.mp3 to your public/ directory!');
   } else {
     console.warn('⚠️ Warning: call_outgoing.mp3 not found in SDK, skipping copy.');
+  }
+
+  if (fs.existsSync(sourceWorker)) {
+    fs.copyFileSync(sourceWorker, targetWorker);
+    console.log('✅ Successfully copied wasm_worker.worker.mjs to your public/ directory!');
+  } else {
+    console.warn('⚠️ Warning: wasm_worker.worker.mjs not found in SDK dist/, skipping copy.');
   }
 
   console.log('You can now enable the Direct Call feature in your application.');

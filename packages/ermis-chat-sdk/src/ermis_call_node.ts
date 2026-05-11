@@ -169,7 +169,8 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
   private async initialize(): Promise<WasmWorkerProxy> {
     try {
-      // Re-create Worker nếu đã bị destroy bởi call trước
+      // Re-create Worker nếu đã bị terminate bởi call trước
+      // (Worker mới nhưng dùng cached Blob URL + compiled WASM Module → rất nhanh)
       if (!this.callNode) {
         await this.loadWasm();
       }
@@ -602,7 +603,6 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     if (this.callNode) {
       try {
         // Timeout protection: don't let terminate() hang forever
-        // (e.g. when peer switched network and Worker is stuck)
         await Promise.race([this.callNode.terminate(), new Promise((resolve) => setTimeout(resolve, 1000))]);
       } catch {
         /* ignore — Worker may already be dead */
