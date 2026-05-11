@@ -418,12 +418,16 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
       // Message grouping
       const prevType = (prevMsg?.type || 'regular') as MessageLabel;
+      const prevValidReaders = prevMsg?.id && readByMap[prevMsg.id] ? readByMap[prevMsg.id].filter(r => r.id !== getMessageUserId(prevMsg)) : [];
+      const prevHasReaders = showReadReceipts && prevValidReaders.length > 0;
+      
       const isFirstInGroup =
         showDateSeparator ||
         !prevMsg ||
         prevType === 'system' ||
         prevType === 'signal' ||
-        getMessageUserId(prevMsg) !== getMessageUserId(message);
+        getMessageUserId(prevMsg) !== getMessageUserId(message) ||
+        prevHasReaders;
 
       const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
       const nextType = (nextMsg?.type || 'regular') as MessageLabel;
@@ -431,12 +435,16 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         ? getDateKey(nextMsg.created_at) !== getDateKey(message.created_at)
         : false;
 
+      const validReaders = message.id && readByMap[message.id] ? readByMap[message.id].filter(r => r.id !== getMessageUserId(message)) : [];
+      const hasReaders = showReadReceipts && validReaders.length > 0;
+
       const isLastInGroup =
         !nextMsg ||
         nextShowDateSeparator ||
         nextType === 'system' ||
         nextType === 'signal' ||
-        getMessageUserId(nextMsg) !== getMessageUserId(message);
+        getMessageUserId(nextMsg) !== getMessageUserId(message) ||
+        hasReaders;
 
       const MessageRenderer = renderers[messageType] || renderers.regular;
 
@@ -461,9 +469,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             signalMessageTranslations={signalMessageTranslations}
           />
           {/* Read receipts — full width, right-aligned */}
-          {showReadReceipts && (
+          {showReadReceipts && validReaders.length > 0 && (
             <ReadReceiptsComponent
-              readers={readByMap[message.id!] || []}
+              readers={validReaders}
               maxAvatars={readReceiptsMaxAvatars}
               AvatarComponent={AvatarComponent}
               TooltipComponent={ReadReceiptsTooltipComponent}

@@ -7,7 +7,7 @@ export const UhmChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.memo
   const { t } = useTranslation();
 
   return (
-    <div className="flex items-center justify-between h-[60px] px-4 border-b border-zinc-200/50 dark:border-zinc-800/50 bg-white dark:bg-[#1a1828]">
+    <div className="flex items-center justify-between h-[62px] px-4 border-b border-zinc-200/50 dark:border-zinc-800/50 bg-white dark:bg-[#1a1828]">
       <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100 truncate pr-4">
         {title}
       </h3>

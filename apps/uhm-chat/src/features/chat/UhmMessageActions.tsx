@@ -198,7 +198,7 @@ export function UhmMessageActions({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 hover:shadow-sm dark:hover:text-purple-400 dark:hover:bg-purple-500/15 transition-all duration-200 ease-out active:scale-90"
+                className="inline-flex !bg-none items-center justify-center w-7 h-7 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 hover:shadow-sm dark:hover:text-purple-400 dark:hover:bg-purple-500/15 transition-all duration-200 ease-out active:scale-90"
                 title={t('message_actions.more', 'More')}
                 onClick={(e) => e.stopPropagation()}
               >

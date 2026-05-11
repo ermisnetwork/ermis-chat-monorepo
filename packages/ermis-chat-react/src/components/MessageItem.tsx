@@ -127,7 +127,10 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   const itemClass = [
     'ermis-message-list__item',
     isOwnMessage ? 'ermis-message-list__item--own' : 'ermis-message-list__item--other',
-    isFirstInGroup ? 'ermis-message-list__item--group-start' : 'ermis-message-list__item--group-cont',
+    isFirstInGroup && isLastInGroup ? 'ermis-message-list__item--group-single' : '',
+    isFirstInGroup && !isLastInGroup ? 'ermis-message-list__item--group-top' : '',
+    !isFirstInGroup && !isLastInGroup ? 'ermis-message-list__item--group-middle' : '',
+    !isFirstInGroup && isLastInGroup ? 'ermis-message-list__item--group-bottom' : '',
     isHighlighted ? 'ermis-message-list__item--highlighted' : '',
     isNewMessage ? 'ermis-message-list__item--new' : '',
     isDeletedDisplay ? 'ermis-message-list__item--deleted-display' : '',
@@ -211,7 +214,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
             />
-            {!isSignalMessage(message) && (
+            {!isSignalMessage(message) && (isLastInGroup || isEdited || message.status === 'error' || message.status === 'failed_offline') && (
               <span className="ermis-message-list__item-time">
                 {isEdited && (
                   <span
@@ -221,7 +224,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
                     {editedLabel}
                   </span>
                 )}
-                {formatTime(message.created_at)}
+                {isLastInGroup && formatTime(message.created_at)}
                 <InlineStatusIcon status={message.status} isOwnMessage={isOwnMessage} isLastInGroup={isLastInGroup} />
               </span>
             )}

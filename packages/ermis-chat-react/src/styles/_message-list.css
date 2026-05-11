@@ -29,20 +29,19 @@
   font-family: var(--ermis-font-family);
   gap: var(--ermis-spacing-xs);
   position: relative;
-  padding-bottom: 1rem;
 }
 
 .ermis-message-list__vlist {
   display: flex !important;
   flex-direction: column !important;
-  padding-left: 3rem;
-  padding-right: 3rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
   padding-top: var(--ermis-spacing-lg);
   padding-bottom: var(--ermis-spacing-lg);
 }
 
 /* Push content to bottom when few messages, margin collapses when content overflows */
-.ermis-message-list__vlist > div {
+.ermis-message-list__vlist>div {
   margin-top: auto;
 }
 
@@ -94,21 +93,22 @@
 .ermis-message-list__date-separator {
   display: flex;
   align-items: center;
-  gap: var(--ermis-spacing-md);
+  justify-content: center;
   padding: var(--ermis-spacing-md) 0;
   margin: var(--ermis-spacing-xs) 0;
   align-self: stretch;
 }
 
 .ermis-message-list__date-separator-line {
-  flex: 1;
-  height: 1px;
-  background-color: var(--ermis-border);
+  display: none;
 }
 
 .ermis-message-list__date-separator-label {
-  font-size: var(--ermis-font-size-xs);
-  color: var(--ermis-text-muted);
+  font-size: 11px;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 4px 12px;
+  border-radius: 12px;
   white-space: nowrap;
   font-weight: 500;
 }
@@ -151,13 +151,15 @@
   width: 100%;
 }
 
-/* First message in a group: normal top margin */
-.ermis-message-list__item--group-start {
-  padding-top: var(--ermis-spacing-md);
+/* First message in a group (or standalone): normal top margin */
+.ermis-message-list__item--group-single,
+.ermis-message-list__item--group-top {
+  padding-top: var(--ermis-spacing-sm);
 }
 
-/* Continuation messages in a group: tight spacing */
-.ermis-message-list__item--group-cont {
+/* Continuation messages in a group: tight spacing (increased slightly per request) */
+.ermis-message-list__item--group-middle,
+.ermis-message-list__item--group-bottom {
   padding-top: 2px;
 }
 
@@ -175,6 +177,7 @@
   0% {
     background-color: rgba(99, 102, 241, 0.15);
   }
+
   100% {
     background-color: transparent;
   }
@@ -187,6 +190,7 @@
   0% {
     opacity: 0;
   }
+
   100% {
     opacity: 1;
   }
@@ -467,6 +471,7 @@
   transform: translateY(-2px);
   box-shadow: 0 6px 14px rgba(239, 68, 68, 0.3);
 }
+
 .ermis-message-list__reject-btn:active {
   transform: translateY(0);
 }

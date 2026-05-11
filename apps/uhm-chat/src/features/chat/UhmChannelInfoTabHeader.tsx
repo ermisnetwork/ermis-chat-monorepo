@@ -52,7 +52,7 @@ export const UhmChannelInfoTabHeader: React.FC<ChannelInfoTabHeaderProps> = ({
   return (
     <div 
       ref={tabsContainerRef}
-      className="sticky top-0 z-20 bg-white/80 dark:bg-[#1a1828]/80 backdrop-blur-md px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-800/50 flex gap-0.5 overflow-x-auto no-scrollbar relative"
+      className="sticky top-0 z-20 bg-white/80 dark:bg-[#1a1828]/80 backdrop-blur-md px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-800/50 flex w-full gap-0.5 overflow-x-auto no-scrollbar relative"
     >
       {/* Sliding Indicator Background */}
       <div 
@@ -72,7 +72,7 @@ export const UhmChannelInfoTabHeader: React.FC<ChannelInfoTabHeaderProps> = ({
           onClick={() => onTabChange(tab)}
           data-active={activeTab === tab}
           className={`
-            relative z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors duration-200 shrink-0
+            relative z-10 flex flex-1 justify-center items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors duration-200 shrink-0
             ${activeTab === tab 
               ? 'text-zinc-900 dark:text-zinc-100' 
               : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'

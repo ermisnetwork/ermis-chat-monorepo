@@ -125,7 +125,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/[^\s]*)?)/i;
         if (urlRegex.test(text)) {
           setErrorType('links');
-          return false; 
+          return false;
         }
       }
 
@@ -154,7 +154,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
     const content = el.textContent?.trim() ?? '';
     setHasContent(content.length > 0 || files.length > 0);
-    
+
     // Real-time character count check
     if (content.length > 5000) {
       setErrorType('maxChars');
@@ -311,7 +311,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   const disabledInput = !canSendMessage || sending || isStillUploading;
 
   return (
-    <div className="p-4 relative">
+    <div className="p-4 pt-0 relative z-50 bg-[#f8f9fa] dark:bg-[#0f0e1a] shrink-0">
       <div className="relative flex flex-col bg-white dark:bg-[#1a1828] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 overflow-hidden">
 
         {quotedMessage && !editingMessage && (
@@ -403,11 +403,10 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
             <button
               type="button"
               disabled={disabledInput || !!editingMessage}
-              className={`picker-trigger inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                pickerAction.type === 'emoji' 
-                  ? 'text-primary bg-primary/10' 
-                  : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
-              }`}
+              className={`picker-trigger inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${pickerAction.type === 'emoji'
+                ? 'text-primary bg-primary/10'
+                : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
+                }`}
               onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 openEmojiPicker(rect, handleEmojiSelect);
@@ -420,11 +419,10 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
             <button
               type="button"
               disabled={disabledInput || !!editingMessage || !!quotedMessage}
-              className={`picker-trigger inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                pickerAction.type === 'sticker' 
-                  ? 'text-primary bg-primary/10' 
-                  : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
-              }`}
+              className={`picker-trigger inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${pickerAction.type === 'sticker'
+                ? 'text-primary bg-primary/10'
+                : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
+                }`}
               onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 openStickerPicker(rect, (url) => {
@@ -458,8 +456,8 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
       {/* Drag & Drop Overlay */}
       {isDragging && (
-        <DragAndDropOverlayComponent 
-          dragAndDropLabel={dragAndDropLabel || t('chat.dragAndDrop', 'Thả file vào đây để gửi')} 
+        <DragAndDropOverlayComponent
+          dragAndDropLabel={dragAndDropLabel || t('chat.dragAndDrop', 'Thả file vào đây để gửi')}
         />
       )}
     </div>

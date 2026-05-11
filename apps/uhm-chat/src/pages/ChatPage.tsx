@@ -33,6 +33,7 @@ import { UhmChannelSettingsPanel } from '@/features/chat/UhmChannelSettingsPanel
 import { UhmMemberItem } from '@/features/chat/UhmMemberItem'
 import { UhmTabEmptyState } from '@/features/chat/UhmTabEmptyState'
 import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState'
+import { UhmSignalMessage } from '@/features/chat/UhmSignalMessage'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
@@ -400,6 +401,7 @@ export function ChatPage() {
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
+            messageRenderers={{ signal: UhmSignalMessage }}
             dateLocale={i18n.language}
             bannedOverlayTitle={t('overlays.bannedTitle', 'You are banned')}
             bannedOverlaySubtitle={t('overlays.bannedSubtitle', 'You have been banned from this channel and cannot send or receive messages.')}

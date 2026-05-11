@@ -74,17 +74,15 @@
 .ermis-message-list__item-time {
   font-size: 0.625rem;
   color: var(--ermis-text-muted);
-  margin-left: auto;
-  padding-left: var(--ermis-spacing-md);
+  margin-left: 0;
+  padding-top: 4px;
   white-space: nowrap;
   line-height: 1;
-  align-self: flex-end;
-  padding-top: 4px;
-  width: 100%;
-  text-align: right;
+  align-self: flex-start;
+  text-align: left;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 3px;
 }
 
@@ -125,7 +123,8 @@
 }
 
 .ermis-message-bubble--own .ermis-message-list__item-time {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--ermis-bubble-own-text);
+  opacity: 0.6;
 }
 
 .ermis-message-list__item-text {
@@ -162,53 +161,82 @@
 }
 
 .ermis-message-bubble--own .ermis-text-link {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--ermis-bubble-own-text);
+  text-decoration: underline;
 }
 
 .ermis-message-bubble--own .ermis-attachment__link-title {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--ermis-bubble-own-text);
 }
 
 /* --- Message Bubble --- */
 .ermis-message-bubble {
   position: relative;
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: flex-start;
   padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
   border-radius: var(--ermis-radius-lg);
   /* width: 100%; */
   word-break: break-word;
+  border: 1px solid var(--ermis-border);
 }
 
 .ermis-message-bubble--own {
   background-color: var(--ermis-bubble-own-bg);
   color: var(--ermis-bubble-own-text);
-  border-bottom-right-radius: var(--ermis-radius-sm);
+  border-color: var(--ermis-bubble-own-bg);
 }
 
-/* --- Override muted text inside own bubble (unreadable on accent bg in dark mode) --- */
+/* --- Override muted text inside own bubble --- */
 .ermis-message-bubble--own .ermis-attachment__file-size,
 .ermis-message-bubble--own .ermis-attachment__link-url,
 .ermis-message-bubble--own .ermis-attachment__link-description,
 .ermis-message-bubble--own .ermis-attachment__voice-duration,
 .ermis-message-bubble--own .ermis-message-list__forwarded-indicator,
 .ermis-message-bubble--own .ermis-attachment--file {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--ermis-bubble-own-text);
+  opacity: 0.8;
 }
 
 .ermis-message-bubble--own .ermis-attachment--link-preview {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--ermis-bubble-own-text);
+  opacity: 0.3;
 }
 
 .ermis-message-bubble--own .ermis-attachment--file {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--ermis-bubble-own-text);
+  opacity: 0.1;
 }
 
 .ermis-message-bubble--other {
   background-color: var(--ermis-bubble-other-bg);
   color: var(--ermis-bubble-other-text);
-  border-bottom-left-radius: var(--ermis-radius-sm);
+}
+
+/* --- Dynamic Border Radius based on grouping --- */
+/* Own messages (right side flat) */
+.ermis-message-list__item--own.ermis-message-list__item--group-top .ermis-message-bubble {
+  border-bottom-right-radius: 4px;
+}
+.ermis-message-list__item--own.ermis-message-list__item--group-middle .ermis-message-bubble {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+.ermis-message-list__item--own.ermis-message-list__item--group-bottom .ermis-message-bubble {
+  border-top-right-radius: 4px;
+}
+
+/* Other messages (left side flat) */
+.ermis-message-list__item--other.ermis-message-list__item--group-top .ermis-message-bubble {
+  border-bottom-left-radius: 4px;
+}
+.ermis-message-list__item--other.ermis-message-list__item--group-middle .ermis-message-bubble {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+.ermis-message-list__item--other.ermis-message-list__item--group-bottom .ermis-message-bubble {
+  border-top-left-radius: 4px;
 }
 
 /* --- System messages --- */
@@ -577,25 +605,29 @@
 }
 
 .ermis-message-bubble--own .ermis-attachment__file-name {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--ermis-bubble-own-text);
 }
 
 .ermis-message-bubble--own .ermis-attachment__file-icon {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: var(--ermis-bubble-own-text);
+  opacity: 0.2;
+  color: inherit;
 }
 
 .ermis-message-bubble--own .ermis-attachment__file-ext {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--ermis-bubble-own-text);
+  opacity: 0.8;
 }
 
 .ermis-message-bubble--own .ermis-attachment__file-download {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--ermis-bubble-own-text);
+  opacity: 0.8;
 }
 
 .ermis-message-bubble--own .ermis-attachment__file-download:hover {
-  background-color: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  background-color: var(--ermis-bubble-own-text);
+  opacity: 0.15;
+  color: inherit;
 }
 
 /* --- Voice recording --- */
