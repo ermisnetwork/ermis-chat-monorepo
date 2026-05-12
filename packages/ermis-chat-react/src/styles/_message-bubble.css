@@ -77,8 +77,6 @@
 
 .ermis-message-list__item-user--clickable:hover {
   opacity: 0.7;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 /* Timestamp inside bubble — bottom right */

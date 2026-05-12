@@ -22,7 +22,8 @@
   "dependencies": {
     "@ermis-network/ermis-chat-sdk": "1.0.9",
     "react-ts-audio-recorder": "^1.1.4",
-    "virtua": "^0.48.8"
+    "virtua": "^0.48.8",
+    "frimousse": "^0.3.0"
   },
   "peerDependencies": {
     "react": ">=18.0.0",
@@ -31,8 +32,11 @@
   "devDependencies": {
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "lucide-react": "^0.474.0",
+    "motion": "^12.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-virtuoso": "^4.12.5",
     "tsup": "^8.0.0",
     "typescript": "^5.9.3"
   },

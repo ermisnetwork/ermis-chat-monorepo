@@ -18,9 +18,10 @@ interface UIState {
     type: 'emoji' | 'sticker' | null; 
     anchorRect: DOMRect | null;
     onSelect?: (data: any) => void;
+    layoutId?: string;
   };
-  openEmojiPicker: (anchorRect: DOMRect, onSelect: (emoji: any) => void) => void;
-  openStickerPicker: (anchorRect: DOMRect, onSelect: (sticker: any) => void) => void;
+  openEmojiPicker: (anchorRect: DOMRect, onSelect: (emoji: any) => void, layoutId?: string) => void;
+  openStickerPicker: (anchorRect: DOMRect, onSelect: (sticker: any) => void, layoutId?: string) => void;
   closePickers: () => void;
 }
 
@@ -36,7 +37,7 @@ export const useUIStore = create<UIState>((set) => ({
   closeTopicModal: () => set({ topicAction: { type: null, channel: null } }),
 
   pickerAction: { type: null, anchorRect: null },
-  openEmojiPicker: (anchorRect, onSelect) => set({ pickerAction: { type: 'emoji', anchorRect, onSelect } }),
-  openStickerPicker: (anchorRect, onSelect) => set({ pickerAction: { type: 'sticker', anchorRect, onSelect } }),
+  openEmojiPicker: (anchorRect, onSelect, layoutId) => set({ pickerAction: { type: 'emoji', anchorRect, onSelect, layoutId } }),
+  openStickerPicker: (anchorRect, onSelect, layoutId) => set({ pickerAction: { type: 'sticker', anchorRect, onSelect, layoutId } }),
   closePickers: () => set({ pickerAction: { type: null, anchorRect: null } }),
 }));

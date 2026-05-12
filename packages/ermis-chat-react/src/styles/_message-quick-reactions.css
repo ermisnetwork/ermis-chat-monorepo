@@ -4,7 +4,7 @@
 
 .ermis-message-quick-reactions {
   position: absolute;
-  bottom: calc(100% + 4px); /* hover right above the bubble */
+  bottom: calc(100% + 4px); /* Hover completely above the bubble */
   display: flex;
   align-items: center;
   gap: 2px;
@@ -15,10 +15,20 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   opacity: 0;
   visibility: hidden;
-  pointer-events: none;
   transform: translateY(8px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  /* 150ms delay allows the mouse to cross the 4px gap into the ::after bridge before it hides */
+  transition: opacity 0.15s ease 0.15s, transform 0.15s ease 0.15s, visibility 0.15s ease 0.15s;
   z-index: 20;
+}
+
+/* Invisible bridge to prevent hover gap from hiding the menu */
+.ermis-message-quick-reactions::after {
+  content: '';
+  position: absolute;
+  top: 100%; /* attach to the bottom */
+  left: 0;
+  width: 100%;
+  height: 16px; /* Cover the gap and overlap the bubble slightly */
 }
 
 /* Align based on ownership */
@@ -30,11 +40,24 @@
   right: 0;
 }
 
-.ermis-message-list__bubble-wrapper:hover .ermis-message-quick-reactions {
+.ermis-message-list__bubble-wrapper:hover {
+  z-index: 100; /* Ensure the hovered wrapper is above adjacent messages */
+}
+
+.ermis-message-list__bubble-wrapper:hover .ermis-message-quick-reactions,
+.ermis-message-quick-reactions:hover {
   opacity: 1;
   visibility: visible;
-  pointer-events: auto;
   transform: translateY(0);
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0.1s ease;
+}
+
+.ermis-message-quick-reactions--expanded {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: none !important; /* Let framer-motion handle transitions */
+  will-change: width, height, transform;
 }
 
 .ermis-message-list__bubble-wrapper:hover .ermis-message-quick-reactions--disabled {

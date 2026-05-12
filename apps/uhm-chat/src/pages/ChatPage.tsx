@@ -59,7 +59,8 @@ export function ChatPage() {
     topicAction,
     openCreateTopicModal,
     openEditTopicModal,
-    closeTopicModal
+    closeTopicModal,
+    openEmojiPicker
   } = useUIStore()
 
   // Localized action labels passed to SDK ChannelList/TopicList
@@ -185,6 +186,19 @@ export function ChatPage() {
   const handleMentionClick = useCallback((userId: string) => {
     setProfileUserId(userId);
   }, []);
+
+  const handleAddReactionClick = useCallback((e: React.MouseEvent, messageId: string) => {
+    if (!activeChannel) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const layoutId = `emoji-picker-trigger-${messageId}`;
+    openEmojiPicker(rect, async (emoji) => {
+      try {
+        await activeChannel.sendReaction(messageId, emoji);
+      } catch (err) {
+        console.error('Failed to send reaction from global picker', err);
+      }
+    }, layoutId);
+  }, [activeChannel, openEmojiPicker]);
 
   const handleSendMessageFromProfile = useCallback(async (userId: string) => {
     if (!client || !client.userID) return;
@@ -490,6 +504,7 @@ export function ChatPage() {
             signalMessageTranslations={signalMessageTranslations}
             onMentionClick={handleMentionClick}
             onUserNameClick={handleMentionClick}
+            onAddReactionClick={handleAddReactionClick}
           />
 
           {/* Message Input Floating Card */}

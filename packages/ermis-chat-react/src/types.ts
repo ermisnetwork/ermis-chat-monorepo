@@ -622,6 +622,8 @@ export type MessageListProps = {
   onMentionClick?: (userId: string) => void;
   /** Handler when a sender's username is clicked in the message list */
   onUserNameClick?: (userId: string) => void;
+  /** Handler when clicking to add a custom reaction */
+  onAddReactionClick?: (e: React.MouseEvent, messageId: string) => void;
   /** Additional CSS class name */
   className?: string;
   /** Custom empty state component */
@@ -821,6 +823,8 @@ export type MessageItemProps = {
   onMentionClick?: (userId: string) => void;
   /** Handler when a sender's username is clicked in the message list */
   onUserNameClick?: (userId: string) => void;
+  /** Handler when clicking to add a custom reaction */
+  onAddReactionClick?: (e: React.MouseEvent, messageId: string) => void;
 };
 
 export type SystemMessageItemProps = {

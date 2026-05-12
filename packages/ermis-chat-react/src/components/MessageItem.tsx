@@ -78,6 +78,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   signalMessageTranslations,
   onMentionClick,
   onUserNameClick,
+  onAddReactionClick,
 }) => {
   const { activeChannel, client } = useChatClient();
   const { hasCapability } = useChannelCapabilities();
@@ -208,7 +209,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
           />
         )}
         <div className="ermis-message-list__bubble-wrapper">
-          {!isSignalMessage(message) && <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!canReact} />}
+          {!isSignalMessage(message) && <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!canReact} onAddReactionClick={onAddReactionClick} />}
           <MessageBubble message={message} isOwnMessage={isOwnMessage}>
             {isForwarded && (
               <span className="ermis-message-list__forwarded-indicator">{forwardedLabel}</span>
