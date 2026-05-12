@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video } from 'lucide-react'
+import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
@@ -332,10 +332,10 @@ export function ChatPage() {
               actionLabels={actionLabels}
               deletedMessageLabel={t('chat.deleted_message')}
               stickerMessageLabel={t('chat.preview_sticker')}
-              photoMessageLabel={t('chat.preview_photo')}
-              videoMessageLabel={t('chat.preview_video')}
-              voiceRecordingMessageLabel={t('chat.preview_voice')}
-              fileMessageLabel={t('chat.preview_file')}
+              photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
+              videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
+              voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
+              fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
             />
@@ -366,10 +366,10 @@ export function ChatPage() {
               onShowChannelInfo={() => { setHasOpenedInfo(true); setInfoChannel(drillDownChannel); setShowChannelInfo(true) }}
               deletedMessageLabel={t('chat.deleted_message')}
               stickerMessageLabel={t('chat.preview_sticker')}
-              photoMessageLabel={t('chat.preview_photo')}
-              videoMessageLabel={t('chat.preview_video')}
-              voiceRecordingMessageLabel={t('chat.preview_voice')}
-              fileMessageLabel={t('chat.preview_file')}
+              photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
+              videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
+              voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
+              fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
             />

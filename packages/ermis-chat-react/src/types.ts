@@ -379,7 +379,7 @@ export type ChannelItemProps = {
   isActive: boolean;
   hasUnread: boolean;
   unreadCount: number;
-  lastMessageText: string;
+  lastMessageText: React.ReactNode;
   lastMessageUser: string;
   lastMessageTimestamp?: Date | string | null;
   onSelect: (channel: Channel) => void;
@@ -468,12 +468,12 @@ export type TopicListProps = {
   blockedBadgeLabel?: string;
   /** Auto-scroll the topic list to the top when the current user sends a message (default: true) */
   scrollToTopOnOwnMessage?: boolean;
-  deletedMessageLabel?: string;
-  stickerMessageLabel?: string;
-  photoMessageLabel?: string;
-  videoMessageLabel?: string;
-  voiceRecordingMessageLabel?: string;
-  fileMessageLabel?: string;
+  deletedMessageLabel?: React.ReactNode;
+  stickerMessageLabel?: React.ReactNode;
+  photoMessageLabel?: React.ReactNode;
+  videoMessageLabel?: React.ReactNode;
+  voiceRecordingMessageLabel?: React.ReactNode;
+  fileMessageLabel?: React.ReactNode;
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
 };
@@ -511,17 +511,17 @@ export type ChannelListProps = {
   /** Label for the blocked channel badge hover */
   blockedBadgeLabel?: string;
   /** Label for deleted messages in the preview strip (default: 'This message was deleted') */
-  deletedMessageLabel?: string;
+  deletedMessageLabel?: React.ReactNode;
   /** Label for sticker messages in the preview strip (default: 'Sticker') */
-  stickerMessageLabel?: string;
+  stickerMessageLabel?: React.ReactNode;
   /** Label for photo messages in the preview strip (default: '📷 Photo') */
-  photoMessageLabel?: string;
+  photoMessageLabel?: React.ReactNode;
   /** Label for video messages in the preview strip (default: '🎬 Video') */
-  videoMessageLabel?: string;
+  videoMessageLabel?: React.ReactNode;
   /** Label for voice message in the preview strip (default: '🎤 Voice message') */
-  voiceRecordingMessageLabel?: string;
+  voiceRecordingMessageLabel?: React.ReactNode;
   /** Label for file messages in the preview strip (default: '📎 File') */
-  fileMessageLabel?: string;
+  fileMessageLabel?: React.ReactNode;
   /** Custom translation templates for system messages in the preview strip */
   systemMessageTranslations?: SystemMessageTranslations;
   /** Custom translation templates for signal (call) messages in the preview strip */
@@ -807,7 +807,7 @@ export type MessageItemProps = {
   /** I18n Label for edited state */
   editedLabel?: string;
   /** I18n Label for deleted display messages (display_type === 'deleted') */
-  deletedMessageLabel?: string;
+  deletedMessageLabel?: React.ReactNode;
   /** Custom translation templates for system messages */
   systemMessageTranslations?: SystemMessageTranslations;
   /** Custom translation templates for signal (call) messages */

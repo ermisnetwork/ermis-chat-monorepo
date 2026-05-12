@@ -242,6 +242,87 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =>
 });
 (FileAttachment as any).displayName = 'FileAttachment';
 
+const PlayIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M8 5v14l11-7z" />
+  </svg>
+);
+
+const PauseIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+  </svg>
+);
+
+const MicIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+    <line x1="12" x2="12" y1="19" y2="22" />
+  </svg>
+);
+
+const CustomAudioPlayer: React.FC<{ src: string; durationLabel: string }> = ({ src, durationLabel }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const audioRef = React.useRef<HTMLAudioElement>(null);
+
+  React.useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const updateProgress = () => {
+      setProgress((audio.currentTime / audio.duration) * 100 || 0);
+    };
+    const onEnded = () => {
+      setIsPlaying(false);
+      setProgress(0);
+    };
+    audio.addEventListener('timeupdate', updateProgress);
+    audio.addEventListener('ended', onEnded);
+    return () => {
+      audio.removeEventListener('timeupdate', updateProgress);
+      audio.removeEventListener('ended', onEnded);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play().catch(e => console.error(e));
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    if (audioRef.current && audioRef.current.duration) {
+      audioRef.current.currentTime = percentage * audioRef.current.duration;
+      setProgress(percentage * 100);
+    }
+  };
+
+  return (
+    <div className="ermis-custom-audio-player">
+      <button className="ermis-custom-audio-play-btn" onClick={togglePlay} aria-label={isPlaying ? "Pause" : "Play"}>
+        {isPlaying ? <PauseIcon /> : <PlayIcon />}
+      </button>
+      <div className="ermis-custom-audio-progress-container">
+        <div className="ermis-custom-audio-progress-bg" onClick={handleSeek}>
+          <div className="ermis-custom-audio-progress-fill" style={{ width: `${progress}%` }} />
+          <div className="ermis-custom-audio-progress-thumb" style={{ left: `${progress}%` }} />
+        </div>
+      </div>
+      <span className="ermis-custom-audio-duration">{durationLabel}</span>
+      <audio ref={audioRef} src={src} preload="metadata" className="ermis-custom-audio-hidden" />
+    </div>
+  );
+};
+
 const VoiceRecordingAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) => {
   const src = attachment.asset_url || attachment.url;
   if (!src) return null;
@@ -251,13 +332,7 @@ const VoiceRecordingAttachment: React.FC<AttachmentProps> = React.memo(({ attach
   const secs = Math.round(durationSec % 60);
   const durationLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
 
-  return (
-    <div className="ermis-attachment ermis-attachment--voice">
-      <span className="ermis-attachment__voice-icon">🎙️</span>
-      <audio src={src} controls preload="metadata" className="ermis-attachment__voice-player" />
-      <span className="ermis-attachment__voice-duration">{durationLabel}</span>
-    </div>
-  );
+  return <CustomAudioPlayer src={src} durationLabel={durationLabel} />;
 }, (prev, next) => {
   return (prev.attachment.asset_url || prev.attachment.url) ===
     (next.attachment.asset_url || next.attachment.url);

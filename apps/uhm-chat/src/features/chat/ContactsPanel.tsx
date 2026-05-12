@@ -86,7 +86,7 @@ export function ContactsPanel({ onBack }: ContactsPanelProps) {
   return (
     <div className="flex flex-col h-full bg-white/60 dark:bg-[#1a1828]/60 backdrop-blur-xl">
       {/* Header */}
-      <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/50 dark:bg-[#1a1828]/50 backdrop-blur-md z-10">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/50 dark:bg-[#1a1828]/50 backdrop-blur-md z-10">
         <Button
           variant="ghost"
           size="icon"

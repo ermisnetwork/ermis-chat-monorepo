@@ -1,3 +1,4 @@
+import React from 'react';
 import type { MentionMember } from './types';
 import type { Attachment, FormatMessageResponse, Channel } from '@ermis-network/ermis-chat-sdk';
 import {
@@ -325,16 +326,16 @@ export function getLastMessagePreview(
   channel: Channel,
   myUserId?: string,
   options?: {
-    deletedMessageLabel?: string;
-    stickerMessageLabel?: string;
-    photoMessageLabel?: string;
-    videoMessageLabel?: string;
-    voiceRecordingMessageLabel?: string;
-    fileMessageLabel?: string;
+    deletedMessageLabel?: React.ReactNode;
+    stickerMessageLabel?: React.ReactNode;
+    photoMessageLabel?: React.ReactNode;
+    videoMessageLabel?: React.ReactNode;
+    voiceRecordingMessageLabel?: React.ReactNode;
+    fileMessageLabel?: React.ReactNode;
     systemMessageTranslations?: SystemMessageTranslations;
     signalMessageTranslations?: SignalMessageTranslations;
   },
-): { text: string; user: string; timestamp?: string | Date } {
+): { text: React.ReactNode; user: string; timestamp?: string | Date } {
   const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
   if (!lastMsg) return { text: '', user: '' };
 
@@ -370,7 +371,7 @@ export function getLastMessagePreview(
   }
 
   // Regular / other
-  let displayText = rawText;
+  let displayText: React.ReactNode = rawText;
   if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
     const att = lastMsg.attachments[0];
     const type = att.type || '';
@@ -389,7 +390,12 @@ export function getLastMessagePreview(
         break;
     }
     if (lastMsg.attachments.length > 1) {
-      displayText += ` +${lastMsg.attachments.length - 1}`;
+      if (typeof displayText === 'string') {
+        displayText += ` +${lastMsg.attachments.length - 1}`;
+      } else {
+        const extraText = ` +${lastMsg.attachments.length - 1}`;
+        displayText = React.createElement(React.Fragment, null, displayText, extraText);
+      }
     }
   }
 
@@ -398,7 +404,7 @@ export function getLastMessagePreview(
   const mentionedUsers = lastMsgRecord.mentioned_users as string[] | undefined;
   const mentionedAll = lastMsgRecord.mentioned_all as boolean | undefined;
 
-  if (displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
+  if (typeof displayText === 'string' && displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
     displayText = replaceMentionsForPreview(displayText, lastMsg as any, userMap);
   }
 

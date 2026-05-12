@@ -4,7 +4,7 @@
 
 .ermis-message-quick-reactions {
   position: absolute;
-  bottom: calc(100% - 10px); /* hover right above the bubble */
+  bottom: calc(100% + 4px); /* hover right above the bubble */
   display: flex;
   align-items: center;
   gap: 2px;

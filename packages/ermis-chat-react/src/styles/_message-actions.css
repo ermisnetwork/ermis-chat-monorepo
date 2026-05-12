@@ -27,12 +27,12 @@
 
 /* Position container for other (left) vs own (right) */
 .ermis-message-list__item--own .ermis-message-list__actions {
-  right: 110%;
+  right: calc(100% + 12px);
   flex-direction: row-reverse;
 }
 
 .ermis-message-list__item--other .ermis-message-list__actions {
-  left: 105%;
+  left: calc(100% + 12px);
 }
 
 /* Individual action buttons */
