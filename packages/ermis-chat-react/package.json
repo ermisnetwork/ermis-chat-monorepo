@@ -20,7 +20,7 @@
     "/src"
   ],
   "dependencies": {
-    "@ermis-network/ermis-chat-sdk": "1.0.10",
+    "@ermis-network/ermis-chat-sdk": "*",
     "react-ts-audio-recorder": "^1.1.4",
     "virtua": "^0.48.8",
     "frimousse": "^0.3.0"
