@@ -34,6 +34,7 @@ import { UhmMemberItem } from '@/features/chat/UhmMemberItem'
 import { UhmTabEmptyState } from '@/features/chat/UhmTabEmptyState'
 import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState'
 import { UhmSignalMessage } from '@/features/chat/UhmSignalMessage'
+import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
@@ -51,6 +52,7 @@ export function ChatPage() {
   const [showChannelInfo, setShowChannelInfo] = useState(false)
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
+  const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const {
     isCreateChannelModalOpen,
     closeCreateChannelModal,
@@ -137,7 +139,29 @@ export function ChatPage() {
   const handleTopicDrillDown = useCallback((channel: ChannelType) => {
     setDrillDownChannel(channel)
     setActivePanel('topics')
-  }, [])
+    
+    const topics = channel.state?.topics || [];
+    if (topics.length > 0) {
+      const sortedTopics = [...topics].sort((a: any, b: any) => {
+        const aPinned = a.data?.is_pinned === true;
+        const bPinned = b.data?.is_pinned === true;
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+        
+        const getTopicTime = (t: any): number => {
+          const lastMsg = t.state?.latestMessages?.slice(-1)[0];
+          if (lastMsg?.created_at) return new Date(lastMsg.created_at).getTime();
+          if (t.data?.last_message_at) return new Date(t.data.last_message_at as string | Date).getTime();
+          if (t.data?.created_at) return new Date(t.data.created_at as string | Date).getTime();
+          return 0;
+        };
+        return getTopicTime(b) - getTopicTime(a);
+      });
+      setActiveChannel(sortedTopics[0]);
+    } else {
+      setActiveChannel(channel)
+    }
+  }, [setActiveChannel])
 
   const handleBackFromTopics = useCallback(() => {
     setActivePanel('channels')
@@ -157,6 +181,26 @@ export function ChatPage() {
     setInfoChannel(null) // use activeChannel from context
     setShowChannelInfo((prev) => !prev)
   }, [])
+
+  const handleMentionClick = useCallback((userId: string) => {
+    setProfileUserId(userId);
+  }, []);
+
+  const handleSendMessageFromProfile = useCallback(async (userId: string) => {
+    if (!client || !client.userID) return;
+    try {
+      const dmChannel = client.channel('messaging', {
+        members: [client.userID, userId]
+      });
+      await dmChannel.watch();
+      setActiveChannel(dmChannel);
+      // Reset panels to channels view
+      setActivePanel('channels');
+      setDrillDownChannel(null);
+    } catch (e) {
+      console.error('Error navigating to DM', e);
+    }
+  }, [client, setActiveChannel]);
 
   /** Info button injected into ChannelHeader's right side */
   const renderHeaderRight = useCallback(
@@ -444,6 +488,8 @@ export function ChatPage() {
             deletedMessageLabel={t('chat.deleted_message', 'This message was deleted')}
             systemMessageTranslations={systemMessageTranslations}
             signalMessageTranslations={signalMessageTranslations}
+            onMentionClick={handleMentionClick}
+            onUserNameClick={handleMentionClick}
           />
 
           {/* Message Input Floating Card */}
@@ -520,6 +566,12 @@ export function ChatPage() {
           topic={topicAction.channel}
         />
       )}
+      <UserProfileModal
+        isOpen={!!profileUserId}
+        onClose={() => setProfileUserId(null)}
+        userId={profileUserId}
+        onSendMessage={handleSendMessageFromProfile}
+      />
       <GlobalPickers />
     </div>
   )

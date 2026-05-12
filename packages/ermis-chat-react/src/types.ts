@@ -578,6 +578,7 @@ export type MessageRendererProps = {
   isOwnMessage: boolean;
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
+  onMentionClick?: (userId: string) => void;
 };
 
 export type MessageBubbleProps = {
@@ -617,6 +618,10 @@ export type MediaLightboxProps = {
 export type MessageListProps = {
   /** Fully custom render for each message */
   renderMessage?: (message: FormatMessageResponse, isOwnMessage: boolean) => React.ReactNode;
+  /** Handler when a mention is clicked */
+  onMentionClick?: (userId: string) => void;
+  /** Handler when a sender's username is clicked in the message list */
+  onUserNameClick?: (userId: string) => void;
   /** Additional CSS class name */
   className?: string;
   /** Custom empty state component */
@@ -812,6 +817,10 @@ export type MessageItemProps = {
   systemMessageTranslations?: SystemMessageTranslations;
   /** Custom translation templates for signal (call) messages */
   signalMessageTranslations?: SignalMessageTranslations;
+  /** Handler when a mention is clicked */
+  onMentionClick?: (userId: string) => void;
+  /** Handler when a sender's username is clicked in the message list */
+  onUserNameClick?: (userId: string) => void;
 };
 
 export type SystemMessageItemProps = {

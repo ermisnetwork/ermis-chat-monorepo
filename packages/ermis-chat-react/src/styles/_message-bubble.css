@@ -70,6 +70,17 @@
   margin-bottom: 1px;
 }
 
+.ermis-message-list__item-user--clickable {
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.ermis-message-list__item-user--clickable:hover {
+  opacity: 0.7;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Timestamp inside bubble — bottom right */
 .ermis-message-list__item-time {
   font-size: 0.625rem;
@@ -138,13 +149,26 @@
 .ermis-mention {
   color: var(--ermis-accent);
   font-weight: 600;
+  cursor: default;
+  background-color: rgba(0, 122, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin: 0 1px;
+}
+
+.ermis-mention--clickable {
   cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.ermis-mention--clickable:hover {
+  opacity: 0.8;
 }
 
 .ermis-message-bubble--own .ermis-mention {
   color: rgba(255, 255, 255, 0.9);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  background-color: rgba(255, 255, 255, 0.2);
+  text-decoration: none;
 }
 
 /* Auto-detected URLs/emails in message text */
@@ -895,9 +919,17 @@
 /* --- Read receipts --- */
 .ermis-read-receipts {
   display: flex;
-  justify-content: flex-end;
   width: 100%;
   padding-top: 2px;
+}
+
+.ermis-read-receipts--own {
+  justify-content: flex-end;
+}
+
+.ermis-read-receipts--other {
+  justify-content: flex-start;
+  padding-left: 36px; /* align with message content (avatar width 28px + gap 8px) */
 }
 
 @keyframes ermis-receipt-pop {

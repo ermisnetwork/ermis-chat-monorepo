@@ -158,6 +158,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   systemMessageTranslations,
   signalMessageTranslations,
   includeHiddenMessages = true,
+  onMentionClick,
+  onUserNameClick,
 }) => {
   const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -467,6 +469,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             deletedMessageLabel={deletedMessageLabel}
             systemMessageTranslations={systemMessageTranslations}
             signalMessageTranslations={signalMessageTranslations}
+            onMentionClick={onMentionClick}
+            onUserNameClick={onUserNameClick}
           />
           {/* Read receipts — full width, right-aligned */}
           {showReadReceipts && validReaders.length > 0 && (
@@ -504,6 +508,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     ReadReceiptsTooltipComponent,
     readReceiptsMaxAvatars,
     dateLocale,
+    onMentionClick,
+    onUserNameClick,
   ]);
 
   if (isBanned || isBlocked) {

@@ -14,7 +14,6 @@ import {
   ReplyPreview,
   EditPreview,
   PreviewOverlay,
-  isTopicChannel,
   buildUserMap,
   replaceMentionsForPreview,
   getMentionHtml,
@@ -47,8 +46,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   const editableRef = useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
 
-  const { isGroupChannel: isTeamChannel, hasCapability } = useChannelCapabilities();
-  const isTopic = isTopicChannel(activeChannel);
+  const { hasCapability } = useChannelCapabilities();
   const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
 
   // Permissions
@@ -178,7 +176,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   // Mentions
   const members = useMemo(() => {
-    if (!(isTeamChannel || isTopic)) return [];
+    if (!activeChannel) return [];
     const list = [];
     const stateMembers = activeChannel?.state?.members as Record<string, { user?: { name?: string, avatar?: string }, user_id?: string }> | undefined;
     if (stateMembers && typeof stateMembers === 'object') {
@@ -191,7 +189,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       }
     }
     return list;
-  }, [activeChannel, isTeamChannel, isTopic]);
+  }, [activeChannel, activeChannel?.state?.members]);
 
   const {
     showSuggestions, filteredMembers, highlightIndex,
@@ -212,7 +210,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     setFiles,
     hasContent,
     setHasContent,
-    isTeamChannel: isTeamChannel || isTopic,
+    isTeamChannel: true,
     buildPayload,
     reset: resetMentions,
     syncMessages,
@@ -260,11 +258,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       setErrorType(null);
     }
 
-    if ((isTeamChannel || isTopic)) {
-      mentionHandleInput();
-    }
+    mentionHandleInput();
     activeChannel?.keystroke();
-  }, [isTeamChannel, isTopic, mentionHandleInput, files.length, activeChannel, t, errorType]);
+  }, [mentionHandleInput, files.length, activeChannel, t, errorType]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
@@ -284,17 +280,16 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         return;
       }
     }
-    if ((isTeamChannel || isTopic)) {
-      const consumed = mentionHandleKeyDown(e);
-      if (consumed) return;
-    }
+    const consumed = mentionHandleKeyDown(e);
+    if (consumed) return;
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!keywordError) {
         handleSend();
       }
     }
-  }, [isTeamChannel, isTopic, mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, resetMentions, cleanupFiles, setFiles, setHasContent]);
+  }, [mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, resetMentions, cleanupFiles, setFiles, setHasContent]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
@@ -409,8 +404,8 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   const disabledInput = !canSendMessage || sending || isStillUploading || isUploadingVoice;
 
   return (
-    <div className="relative z-50  shrink-0">
-      <div className="relative flex flex-col bg-white dark:bg-[#1a1828] transition-shadow border-t dark:border-zinc-800/50 overflow-hidden">
+    <div className="relative z-50 shrink-0">
+      <div className="relative flex flex-col bg-white dark:bg-[#1a1828] transition-shadow border-t dark:border-zinc-800/50">
 
         {quotedMessage && !editingMessage && (
           <div className="border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-black/20 p-2">

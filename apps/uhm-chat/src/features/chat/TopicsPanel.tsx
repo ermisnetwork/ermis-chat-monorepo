@@ -18,12 +18,12 @@ interface TopicsPanelProps {
   onCreateTopic?: (channel: Channel) => void
   onEditTopic?: (topic: Channel) => void
   onShowChannelInfo?: (channel: Channel) => void
-  deletedMessageLabel?: string
-  stickerMessageLabel?: string
-  photoMessageLabel?: string
-  videoMessageLabel?: string
-  voiceRecordingMessageLabel?: string
-  fileMessageLabel?: string
+  deletedMessageLabel?: React.ReactNode
+  stickerMessageLabel?: React.ReactNode
+  photoMessageLabel?: React.ReactNode
+  videoMessageLabel?: React.ReactNode
+  voiceRecordingMessageLabel?: React.ReactNode
+  fileMessageLabel?: React.ReactNode
   systemMessageTranslations?: SystemMessageTranslations
   signalMessageTranslations?: SignalMessageTranslations
 }

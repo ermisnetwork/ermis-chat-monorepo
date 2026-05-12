@@ -151,7 +151,6 @@ export function useMentions({
 
     for (const m of members) {
       if (m.id === currentUserId) continue; // skip self
-      if (activeMentionIds.has(m.id)) continue; // skip already mentioned
       if (q && !m.name.toLowerCase().includes(q)) continue; // filter by query
       result.push(m);
     }

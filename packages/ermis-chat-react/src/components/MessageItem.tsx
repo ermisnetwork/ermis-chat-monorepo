@@ -76,6 +76,8 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   deletedMessageLabel = 'This message was deleted',
   systemMessageTranslations,
   signalMessageTranslations,
+  onMentionClick,
+  onUserNameClick,
 }) => {
   const { activeChannel, client } = useChatClient();
   const { hasCapability } = useChannelCapabilities();
@@ -192,7 +194,10 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
       )}
       <div className={contentClass}>
         {!isOwnMessage && isFirstInGroup && (
-          <span className="ermis-message-list__item-user">{userName}</span>
+          <span 
+            className={`ermis-message-list__item-user${onUserNameClick ? ' ermis-message-list__item-user--clickable' : ''}`}
+            onClick={onUserNameClick ? (e) => { e.stopPropagation(); const uid = message.user?.id || message.user_id; if (uid) onUserNameClick(uid); } : undefined}
+          >{userName}</span>
         )}
         {/* Quoted message preview */}
         {quotedMessage && onClickQuote && (
@@ -213,6 +218,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
               isOwnMessage={isOwnMessage}
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
+              onMentionClick={onMentionClick}
             />
             {!isSignalMessage(message) && (isLastInGroup || isEdited || message.status === 'error' || message.status === 'failed_offline') && (
               <span className="ermis-message-list__item-time">

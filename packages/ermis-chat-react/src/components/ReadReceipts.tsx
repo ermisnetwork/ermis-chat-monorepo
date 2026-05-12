@@ -41,6 +41,7 @@ export const ReadReceipts: React.FC<ReadReceiptsProps> = React.memo(({
   AvatarComponent = Avatar,
   TooltipComponent = DefaultReadReceiptsTooltip,
   showTooltip = true,
+  isOwnMessage,
 }) => {
   // Only render when there are actual readers (avatar-based display)
   // Sent/Sending/Error status icons are now rendered inline inside the message bubble
@@ -52,7 +53,7 @@ export const ReadReceipts: React.FC<ReadReceiptsProps> = React.memo(({
   const overflow = readers.length - maxAvatars;
 
   return (
-    <div className="ermis-read-receipts">
+    <div className={`ermis-read-receipts${isOwnMessage ? ' ermis-read-receipts--own' : ' ermis-read-receipts--other'}`}>
       <div className="ermis-read-receipts__avatars">
         {visible.map((reader) => (
           <AvatarComponent

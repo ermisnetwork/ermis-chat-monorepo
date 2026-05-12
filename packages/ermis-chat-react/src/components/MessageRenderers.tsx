@@ -542,6 +542,7 @@ function renderTextWithMentions(
   text: string,
   message: FormatMessageResponse,
   userMap: Record<string, string>,
+  onMentionClick?: (userId: string) => void,
 ): React.ReactNode {
   const mentionedUsers: string[] = (message as any).mentioned_users ?? [];
   const mentionedAll: boolean = (message as any).mentioned_all ?? false;
@@ -552,17 +553,18 @@ function renderTextWithMentions(
   }
 
   // Build a list of patterns to replace: @userId → @userName
-  const replacements: { pattern: string; label: string }[] = [];
+  const replacements: { pattern: string; label: string; id: string }[] = [];
 
   for (const userId of mentionedUsers) {
     replacements.push({
       pattern: `@${userId}`,
       label: `@${userMap[userId] ?? userId}`,
+      id: userId,
     });
   }
 
   if (mentionedAll) {
-    replacements.push({ pattern: '@all', label: '@all' });
+    replacements.push({ pattern: '@all', label: '@all', id: 'all' });
   }
 
   // Build a regex that matches any of the mention patterns
@@ -574,15 +576,19 @@ function renderTextWithMentions(
   const parts = text.split(regex);
 
   // Map from pattern → label for quick lookup
-  const patternToLabel = new Map(replacements.map((r) => [r.pattern, r.label]));
+  const patternToLabel = new Map(replacements.map((r) => [r.pattern, r]));
 
   return parts.flatMap((part, i) => {
-    const label = patternToLabel.get(part);
-    if (label) {
+    const info = patternToLabel.get(part);
+    if (info) {
       // Mention — render as span, do NOT linkify
       return (
-        <span key={`mention-${i}`} className="ermis-mention">
-          {label}
+        <span 
+          key={`mention-${i}`} 
+          className={`ermis-mention${onMentionClick && info.id !== 'all' ? ' ermis-mention--clickable' : ''}`}
+          onClick={onMentionClick && info.id !== 'all' ? (e) => { e.stopPropagation(); onMentionClick(info.id); } : undefined}
+        >
+          {info.label}
         </span>
       );
     }
@@ -592,7 +598,7 @@ function renderTextWithMentions(
 }
 
 /** Regular message: text with @mentions + attachments */
-export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ message }) => {
+export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ message, onMentionClick }) => {
   const { activeChannel } = useChatClient();
 
   const userMap = useMemo<Record<string, string>>(() => {
@@ -600,7 +606,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
   }, [activeChannel?.state]);
 
   const textContent = message.text
-    ? renderTextWithMentions(message.text, message, userMap)
+    ? renderTextWithMentions(message.text, message, userMap, onMentionClick)
     : null;
 
   const attachmentsToRender = useMemo(() => {
