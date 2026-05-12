@@ -1,5 +1,6 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
 import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip } from 'lucide-react'
@@ -38,9 +39,11 @@ import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
+import { GlobalNotificationListener } from '@/features/chat/GlobalNotificationListener'
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { client, activeChannel, setActiveChannel } = useChatClient()
   const { status, retryConnection } = useConnectionStatus(client)
   const totalUnreadCount = useTotalUnreadCount()
@@ -62,6 +65,63 @@ export function ChatPage() {
     closeTopicModal,
     openEmojiPicker
   } = useUIStore()
+
+  // Track if we are currently restoring from URL
+  const isRestoringRef = useRef(false)
+  const [hasAttemptedRestore, setHasAttemptedRestore] = useState(false)
+
+  // 1. Restore active channel from URL on mount
+  useEffect(() => {
+    if (!client?.userID) return;
+
+    const restoreChannel = async () => {
+      const channelId = searchParams.get('channel')
+      const channelType = searchParams.get('type') || 'messaging'
+
+      if (channelId && !activeChannel && !isRestoringRef.current && !hasAttemptedRestore) {
+        isRestoringRef.current = true
+        try {
+          const ch = client.channel(channelType, channelId)
+          await ch.watch()
+          setActiveChannel(ch)
+          // If it's a topic, we might need to drill down
+          if (isTopicChannel(ch) && ch.data?.parent_id) {
+            const parentType = typeof ch.data.parent_cid === 'string' ? ch.data.parent_cid.split(':')[0] : 'messaging'
+            const parent = client.channel(parentType, ch.data.parent_id as string)
+            await parent.watch()
+            setDrillDownChannel(parent)
+            setActivePanel('topics')
+          }
+        } catch (e) {
+          console.error("Failed to restore channel from URL:", e)
+        } finally {
+          isRestoringRef.current = false
+          setHasAttemptedRestore(true)
+        }
+      } else if (!channelId) {
+        setHasAttemptedRestore(true)
+      }
+    }
+    restoreChannel()
+  }, [client?.userID, searchParams, activeChannel, hasAttemptedRestore, setActiveChannel])
+
+  // 2. Sync active channel to URL when it changes
+  useEffect(() => {
+    if (isRestoringRef.current || !hasAttemptedRestore) return;
+
+    if (activeChannel?.id) {
+      const currentId = searchParams.get('channel')
+      const currentType = searchParams.get('type')
+      if (currentId !== activeChannel.id || currentType !== activeChannel.type) {
+        setSearchParams({ channel: activeChannel.id, type: activeChannel.type }, { replace: true })
+      }
+    } else {
+      const currentId = searchParams.get('channel')
+      if (currentId) {
+        setSearchParams({}, { replace: true })
+      }
+    }
+  }, [activeChannel?.id, activeChannel?.type, setSearchParams, searchParams, hasAttemptedRestore])
 
   // Localized action labels passed to SDK ChannelList/TopicList
   const actionLabels = useMemo(() => ({
@@ -140,7 +200,7 @@ export function ChatPage() {
   const handleTopicDrillDown = useCallback((channel: ChannelType) => {
     setDrillDownChannel(channel)
     setActivePanel('topics')
-    
+
     const topics = channel.state?.topics || [];
     if (topics.length > 0) {
       const sortedTopics = [...topics].sort((a: any, b: any) => {
@@ -148,7 +208,7 @@ export function ChatPage() {
         const bPinned = b.data?.is_pinned === true;
         if (aPinned && !bPinned) return -1;
         if (!aPinned && bPinned) return 1;
-        
+
         const getTopicTime = (t: any): number => {
           const lastMsg = t.state?.latestMessages?.slice(-1)[0];
           if (lastMsg?.created_at) return new Date(lastMsg.created_at).getTime();
@@ -588,6 +648,7 @@ export function ChatPage() {
         onSendMessage={handleSendMessageFromProfile}
       />
       <GlobalPickers />
+      <GlobalNotificationListener />
     </div>
   )
 }

@@ -442,5 +442,18 @@
   "safari_call": {
     "incoming_rejected": "{{name}} is calling you. Audio/Video calls are not supported on Safari. Please use Chrome or Firefox.",
     "tooltip": "Calls are not supported on Safari. Please use Chrome or Firefox."
+  },
+  "notifications": {
+    "channel_deleted": "Channel {{name}} was deleted.",
+    "invite_accepted": "{{name}} accepted your invite to {{channel}}.",
+    "invite_rejected": "{{name}} declined your invite to {{channel}}.",
+    "invite_skipped": "{{name}} skipped the invite to {{channel}}.",
+    "message_new_direct": "New message from {{name}}",
+    "message_new_group": "New message from {{name}} in {{channel}}",
+    "member_added": "You were added to {{channel}}.",
+    "member_promoted": "You were promoted to moderator in {{channel}}.",
+    "member_demoted": "You are no longer a moderator in {{channel}}.",
+    "member_banned": "You have been banned from {{channel}}.",
+    "member_unbanned": "You have been unbanned from {{channel}}."
   }
 }

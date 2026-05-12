@@ -442,5 +442,18 @@
   "safari_call": {
     "incoming_rejected": "{{name}} đang gọi cho bạn. Tính năng gọi âm thanh/video không hỗ trợ trên Safari. Vui lòng sử dụng Chrome hoặc Firefox.",
     "tooltip": "Tính năng gọi không hỗ trợ trên Safari. Vui lòng dùng Chrome hoặc Firefox."
+  },
+  "notifications": {
+    "channel_deleted": "Kênh {{name}} đã bị xóa.",
+    "invite_accepted": "{{name}} đã chấp nhận lời mời tham gia {{channel}}.",
+    "invite_rejected": "{{name}} đã từ chối lời mời tham gia {{channel}}.",
+    "invite_skipped": "{{name}} đã bỏ qua lời mời tham gia {{channel}}.",
+    "message_new_direct": "Tin nhắn mới từ {{name}}",
+    "message_new_group": "Tin nhắn mới từ {{name}} trong {{channel}}",
+    "member_added": "Bạn đã được thêm vào {{channel}}.",
+    "member_promoted": "Bạn đã được thăng quyền quản trị viên trong {{channel}}.",
+    "member_demoted": "Bạn đã bị gỡ quyền quản trị viên trong {{channel}}.",
+    "member_banned": "Bạn đã bị cấm khỏi {{channel}}.",
+    "member_unbanned": "Bạn đã được gỡ cấm khỏi {{channel}}."
   }
 }
