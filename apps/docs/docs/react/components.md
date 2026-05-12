@@ -104,7 +104,9 @@ Renders a list of available channels to select. Connects to socket events for re
 | `options` | `ChannelQueryOptions` | Additional query options. |
 | `className` | `string` | Custom CSS wrapper class name. |
 | `showOnlineStatus`| `boolean` | Show online/offline indicator dots on channel item avatars for friend channels. |
+| `showPendingInvites` | `boolean` | Show pending invites in the channel list (default: `true`). |
 | `onChannelSelect` | `(channel: Channel) => void` | Event when user clicks a row. |
+| `scrollToTopOnOwnMessage` | `boolean` | Auto-scroll the channel list to top when the current user sends a message (default: `true`). |
 
 ### Component Overrides
 
@@ -115,6 +117,32 @@ Renders a list of available channels to select. Connects to socket events for re
 | `AvatarComponent` | `React.ComponentType<AvatarProps>` | Overrides the default avatar element. |
 | `LoadingIndicator` | `React.ComponentType<{ text?: string }>` | Custom loading spinner element. |
 | `EmptyStateIndicator` | `React.ComponentType<{ text?: string }>` | Shown when network returns zero channels. |
+| `ErrorIndicator` | `React.ComponentType<{ text?: string; onRetry?: () => void }>` | Shown when channel loading fails. |
+| `ChannelActionsComponent` | `React.ComponentType<ChannelActionsProps>` | Custom channel actions dropdown component. |
+| `PinnedIconComponent` | `React.ComponentType` | Custom icon for pinned channels. |
+
+### Topic Channels
+
+These props control behavior when channels have Topics enabled (team channels):
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `onTopicDrillDown` | `(channel: Channel) => void` | Handler when a topic-enabled channel is clicked — enables drill-down mode. |
+| `onAddTopic` | `(channel: Channel) => void` | Handler when Add Topic button is clicked. |
+| `onEditTopic` | `(channel: Channel) => void` | Handler when Edit Topic action is triggered. |
+| `onToggleCloseTopic` | `(channel: Channel, isClosed: boolean) => void` | Handler when Close/Reopen Topic action is triggered. |
+| `onDeleteTopic` | `(channel: Channel) => void` | Handler when Delete Topic action is triggered. |
+| `onTruncateChannel` | `(channel: Channel) => void` | Handler when Truncate action is triggered. |
+| `TopicPillComponent` | `React.ComponentType<TopicPillProps>` | Custom component for rendering each topic pill in the preview strip. |
+| `FlatTopicGroupItemComponent` | `React.ComponentType<any>` | Replace the entire flat topic group item. |
+| `TopicEmojiPickerComponent` | `React.ComponentType<any>` | Custom emoji picker for TopicModal. |
+| `maxVisibleTopics` | `number` | Max topic pills shown in the preview strip (default: `3`). |
+| `moreTopicsLabel` | `string` | Overflow indicator when topics exceed max (default: `'...'`). |
+| `generalTopicLabel` | `string` | Label for the general topic pill (default: `'general'`). |
+| `closedTopicIcon` | `React.ReactNode` | Custom icon for closed topics. |
+| `hiddenActions` | `string[]` | Array of action IDs to hide from the dropdown. |
+| `actionLabels` | `ChannelActionLabels` | Custom labels for default channel actions. |
+| `actionIcons` | `ChannelActionIcons` | Custom icons for default channel actions. |
 
 ### Localization (I18n)
 
@@ -126,6 +154,22 @@ Renders a list of available channels to select. Connects to socket events for re
 | `blockedBadgeLabel` | `string` | Hover text for blocked channel indicator. |
 | `loadingLabel` | `string` | Text string during network sync. |
 | `emptyStateLabel` | `string` | Text string for empty channel results. |
+| `errorLabel` | `string` | Text displayed in the error indicator. |
+
+### Preview Strip Labels
+
+Customize the message preview text shown under each channel row:
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `deletedMessageLabel` | `React.ReactNode` | Preview for deleted messages (default: `'This message was deleted'`). |
+| `stickerMessageLabel` | `React.ReactNode` | Preview for sticker messages (default: `'Sticker'`). |
+| `photoMessageLabel` | `React.ReactNode` | Preview for photo messages (default: `'📷 Photo'`). |
+| `videoMessageLabel` | `React.ReactNode` | Preview for video messages (default: `'🎬 Video'`). |
+| `voiceRecordingMessageLabel` | `React.ReactNode` | Preview for voice messages (default: `'🎤 Voice message'`). |
+| `fileMessageLabel` | `React.ReactNode` | Preview for file messages (default: `'📎 File'`). |
+| `systemMessageTranslations` | `SystemMessageTranslations` | Custom translation templates for system messages. |
+| `signalMessageTranslations` | `SignalMessageTranslations` | Custom translation templates for signal (call) messages. |
 
 ### Example
 
@@ -179,6 +223,217 @@ export const ChatArea = () => (
 
 ---
 
+## `<ChannelHeader />`
+
+Displays the active channel's avatar, name, online status, and call buttons. Exported from the package for standalone use or full replacement.
+
+### Core Configs
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `title` | `string` | Override the channel name display. |
+| `image` | `string` | Override the channel avatar image URL. |
+| `subtitle` | `React.ReactNode` | Subtitle line (e.g. member count). Shown only when online status is hidden. |
+| `className` | `string` | Custom CSS wrapper class name. |
+| `showOnlineStatus` | `boolean` | Show online/offline dot for friend direct channels (default: `true`). |
+
+### Component Overrides
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Replace the default avatar. |
+| `OnlineIndicatorComponent` | `React.ComponentType<{ isOnline: boolean }>` | Replace the default online dot indicator. |
+| `CallBadgeComponent` | `React.ComponentType<{ callType: string }>` | Badge shown during active calls. |
+| `renderTitle` | `(channel: Channel) => React.ReactNode` | Fully custom title rendering. |
+| `renderRight` | `(channel: Channel, actionDisabled: boolean) => React.ReactNode` | Right-side actions area. |
+| `renderAudioCallButton` | `(onClick: () => void, disabled: boolean) => React.ReactNode` | Custom audio call button. |
+| `renderVideoCallButton` | `(onClick: () => void, disabled: boolean) => React.ReactNode` | Custom video call button. |
+
+### Localization
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `audioCallTitle` | `string` | Tooltip for audio call button (default: `'Audio Call'`). |
+| `videoCallTitle` | `string` | Tooltip for video call button (default: `'Video Call'`). |
+| `onlineLabel` | `string` | Text for online status (default: `'Online'`). |
+| `offlineLabel` | `string` | Text for offline status (default: `'Offline'`). |
+
+### Example
+
+```tsx
+import { ChannelHeader } from '@ermis-network/ermis-chat-react';
+
+export const CustomHeader = () => (
+  <ChannelHeader
+    showOnlineStatus={true}
+    renderRight={(channel, disabled) => (
+      <button disabled={disabled} onClick={() => alert('Info')}>ℹ️</button>
+    )}
+  />
+);
+```
+
+---
+
+## `<ChannelActions />`
+
+Context-aware dropdown menu that auto-generates actions based on channel type and user role.
+
+### `computeDefaultActions`
+
+A helper function that returns a `ChannelAction[]` array based on the channel type and user permissions:
+
+- **Direct channels**: Pin/Unpin, Block/Unblock, Clear history
+- **Team channels**: Pin/Unpin, Create topic (if enabled), Delete channel (owner), Leave channel (member/moder)
+- **Topic channels**: Pin/Unpin, Edit topic, Close/Reopen topic, Delete topic
+
+```typescript
+import { computeDefaultActions } from '@ermis-network/ermis-chat-react';
+
+const actions = computeDefaultActions(channel, client.userID, {
+  onAddTopic: (ch) => openTopicModal(ch),
+  actionLabels: {
+    pinChannel: 'Pin this channel',
+    deleteChannel: 'Remove channel permanently',
+  },
+});
+```
+
+### `DefaultChannelActions`
+
+The default UI renders a "more" button with a dropdown. Override via `ChannelActionsComponent` prop on `ChannelList`.
+
+```tsx
+<DefaultChannelActions channel={channel} actions={actions} onClose={() => {}} />
+```
+
+---
+
+## `<PinnedMessages />`
+
+Collapsible banner displaying pinned messages at the top of a message list.
+
+### Props
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `className` | `string` | Custom CSS class. |
+| `maxCollapsed` | `number` | Messages visible when collapsed (default: `1`). |
+| `onClickMessage` | `(messageId: string) => void` | Scroll to a pinned message on click. |
+
+### Component Overrides
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `PinnedMessageItemComponent` | `React.ComponentType<PinnedMessageItemProps>` | Replace individual pinned message row. |
+| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Override avatar in pinned items. |
+
+### Localization
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `pinnedMessagesLabel` | `string \| ((count: number) => string)` | Header label. |
+| `seeAllLabel` | `string` | Expand button text (default: `'See all'`). |
+| `collapseLabel` | `string` | Collapse button text (default: `'Collapse'`). |
+| `unpinLabel` | `string` | Unpin button tooltip (default: `'Unpin message'`). |
+
+---
+
+## `<MediaLightbox />`
+
+Full-screen overlay for viewing images and videos. Supports zoom, pan, keyboard navigation, and exponential backoff retry for large video uploads.
+
+### Props
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `items` | `MediaLightboxItem[]` | Array of media items to display. |
+| `initialIndex` | `number` | Starting index in the items array (default: `0`). |
+| `isOpen` | `boolean` | Controls lightbox visibility. |
+| `onClose` | `() => void` | Called when the lightbox is closed. |
+
+### `MediaLightboxItem`
+
+```typescript
+interface MediaLightboxItem {
+  src: string;       // Media URL
+  type: 'image' | 'video';
+  alt?: string;      // Filename / caption
+  posterSrc?: string; // Video thumbnail
+}
+```
+
+### Features
+
+- **Image zoom**: Mouse wheel or double-click (1x ↔ 2x toggle, max 3x)
+- **Pan**: Click-drag when zoomed
+- **Keyboard**: `Escape` to close, `←` / `→` to navigate
+- **Download**: Built-in download button using `client.downloadMedia`
+- **Video retry**: Automatic exponential backoff (1s → 2s → 4s) for CDN loading
+
+---
+
+## `<UserPicker />`
+
+A reusable user selection component with search, infinite scroll, and radio/checkbox modes.
+
+### Core Configs
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `mode` | `'radio' \| 'checkbox'` | Single or multi-selection mode. |
+| `onSelectionChange` | `(users: UserPickerUser[]) => void` | Callback with selected users. |
+| `excludeUserIds` | `string[]` | User IDs to exclude from the list. |
+| `initialSelectedUsers` | `UserPickerUser[]` | Pre-selected users on mount. |
+| `pageSize` | `number` | Users per page (default: `30`). |
+| `friendsOnly` | `boolean` | Show only friend contacts instead of all project users. |
+
+### Component Overrides
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `AvatarComponent` | `React.ComponentType<AvatarProps>` | Override user avatar. |
+| `UserItemComponent` | `React.ComponentType<UserPickerItemProps>` | Override individual user row. |
+| `SelectedBoxComponent` | `React.ComponentType<UserPickerSelectedBoxProps>` | Override selected users chip box (checkbox mode). |
+| `SearchInputComponent` | `React.ComponentType` | Override search input. |
+
+### Localization
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `searchPlaceholder` | `string` | Search input placeholder text. |
+| `loadingText` | `string` | Loading state text. |
+| `emptyText` | `string` | Empty results text. |
+| `loadingMoreText` | `string` | Infinite scroll loading text. |
+| `selectedEmptyLabel` | `string` | Label when no users are selected. |
+
+---
+
+## `<TypingIndicator />`
+
+Displays animated dots when other users are typing in the active channel.
+
+### Props
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `className` | `string` | Custom CSS class name. |
+| `text` | `string \| ((users: TypingUser[]) => string)` | Label format (default: renders user names). |
+
+---
+
+## Building Blocks
+
+These primitive UI components are exported for use in custom layouts:
+
+| Component | Description |
+| --------- | ----------- |
+| `<Modal />` | Accessible overlay dialog (portal to `document.body`). Props: `isOpen`, `onClose`, `title`, `className`. |
+| `<Panel />` | Sliding side panel container. Props: `isOpen`, `onClose`, `className`, `children`. |
+| `<Dropdown />` | Positioned dropdown menu anchored to a trigger element. Props: `isOpen`, `anchorRect`, `onClose`, `align`. |
+
+---
+
 ## `<VirtualMessageList />`
 
 Advanced engine for rendering real-time message feeds via infinite cursor virtualization. 
@@ -193,6 +448,16 @@ Advanced engine for rendering real-time message feeds via infinite cursor virtua
 | `showReadReceipts` | `boolean` | Enables rendering receipts under sent logs. |
 | `readReceiptsMaxAvatars` | `number` | Truncation limit before displaying a number. |
 | `showTypingIndicator` | `boolean` | Allows rendering animated typing nodes. |
+| `dateLocale` | `string` | Locale string for date separator labels (e.g. `'vi'`, `'en-US'`). Falls back to browser default. |
+| `includeHiddenMessages` | `boolean` | Whether to include hidden (deleted) messages in the initial channel query (default: `true`). |
+
+### Event Handlers
+
+| Prop | Type | Description |
+| ---- | ---- | ----------- |
+| `onMentionClick` | `(userId: string) => void` | Called when a `@mention` is clicked in a message. |
+| `onUserNameClick` | `(userId: string) => void` | Called when a sender's username is clicked. |
+| `onAddReactionClick` | `(e: React.MouseEvent, messageId: string) => void` | Called when clicking to add a custom reaction. |
 
 ### Component Overrides
 
@@ -237,7 +502,19 @@ Advanced engine for rendering real-time message feeds via infinite cursor virtua
 | `skippedOverlayTitle` | `string` | Header for skipped channel overlay. |
 | `skippedOverlaySubtitle` | `string` | Helper text for skipped channel overlay. |
 | `skippedAcceptLabel` | `string` | Re-accept label on skipped overlay. |
+| `closedTopicOverlayTitle` | `string` | Header for closed topic overlay. |
+| `closedTopicOverlaySubtitle` | `string` | Helper text for closed topic overlay. |
+| `closedTopicReopenLabel` | `string` | Button label to reopen a closed topic. |
 | `pendingInviteeLabel` | `string \| ((inviteeName?: string) => string)` | Text shown to the inviter while waiting for the invitee. |
+| `pinnedMessagesLabel` | `string \| ((count: number) => string)` | Header label for pinned messages bar. |
+| `seeAllLabel` | `string` | Expand button text for pinned messages (default: `'See all'`). |
+| `collapseLabel` | `string` | Collapse button text for pinned messages (default: `'Collapse'`). |
+| `unpinLabel` | `string` | Unpin button tooltip (default: `'Unpin message'`). |
+| `stickerLabel` | `string` | Preview text for sticker messages. |
+| `typingIndicatorLabel` | `(users: Array<{ id: string; name?: string }>) => string` | Custom typing indicator text formatter. |
+| `deletedMessageLabel` | `string` | Label for deleted display messages. |
+| `systemMessageTranslations` | `SystemMessageTranslations` | Custom translation templates for system messages. |
+| `signalMessageTranslations` | `SignalMessageTranslations` | Custom translation templates for signal (call) messages. |
 
 ### Example
 

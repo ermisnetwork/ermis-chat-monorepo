@@ -31,6 +31,7 @@ export { useEmojiPicker } from './hooks/useEmojiPicker';
 export { useStickerPicker } from './hooks/useStickerPicker';
 export type { UseStickerPickerOptions } from './hooks/useStickerPicker';
 export { useChannelCapabilities } from './hooks/useChannelCapabilities';
+export { useChannelMembers, useChannelProfile } from './hooks/useChannelData';
 
 // Components
 export { Avatar } from './components/Avatar';

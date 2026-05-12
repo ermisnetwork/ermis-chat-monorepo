@@ -316,3 +316,37 @@ console.log(channel.state.messages); // Array of messages
 console.log(channel.state.members); // Record of members keyed by UserID
 console.log(channel.state.read); // Read status (watermarks access timestamps)
 ```
+
+## Searching Public Channels
+
+Discover public channels (team or meeting) across the project by search term.
+
+```typescript
+const result = await chatClient.searchPublicChannel('gaming', 0, 25);
+// result contains matching public channels
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `search_term` | `string` | — | Text to match against channel names. |
+| `offset` | `number` | `0` | Pagination offset. |
+| `limit` | `number` | `25` | Maximum results per page. |
+
+## Searching Messages in a Channel
+
+Search within a specific channel's message history.
+
+```typescript
+const result = await channel.searchMessage('hello', 0);
+// result.messages — array of matching messages enriched with user info
+// result.total — total match count for pagination
+```
+
+## Querying Attachment Messages
+
+Retrieve all attachments (images, videos, files, voice recordings, link previews) shared in a channel, sorted newest first.
+
+```typescript
+const response = await channel.queryAttachmentMessages();
+console.log(response.attachments); // sorted by created_at desc
+```

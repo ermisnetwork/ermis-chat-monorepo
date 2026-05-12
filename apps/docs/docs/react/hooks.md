@@ -4,7 +4,7 @@ sidebar_position: 5
 
 # Hooks
 
-Ermis Chat React provides 22 powerful React hooks that allow you to build completely custom UI interfaces. These hooks directly tap into the core SDK state and real-time events.
+Ermis Chat React provides 35+ powerful React hooks that allow you to build completely custom UI interfaces. These hooks directly tap into the core SDK state and real-time events.
 
 ---
 
@@ -204,7 +204,7 @@ Extracts member properties safely tracked against real-time member added/removed
 | --------- | ---- | ----------- |
 | `channel` | `Channel \| null \| undefined` | Target channel instance. |
 
-**Returns:** `{ members: ChannelMember[] }`
+**Returns:** `{ members: ChannelMember[], memberUpdateCount: number }`
 
 **Example:**
 ```tsx
@@ -226,7 +226,7 @@ Listens uniquely to `channel.updated` events to sync title, name, and image meta
 | --------- | ---- | ----------- |
 | `channel` | `Channel \| null \| undefined` | Target channel instance. |
 
-**Returns:** `{ name: string, image: string, description: string, public: boolean }`
+**Returns:** `{ channelName: string, channelImage: string | undefined, channelDescription: string | undefined, isPinned: boolean }`
 
 **Example:**
 ```tsx
@@ -234,7 +234,7 @@ import { useChannelProfile, useChannel } from '@ermis-network/ermis-chat-react';
 
 export const ChannelBanner = () => {
   const { channel } = useChannel();
-  const { name, image, description } = useChannelProfile(channel);
+  const { channelName, channelImage, channelDescription, isPinned } = useChannelProfile(channel);
 
   return (
     <div className="banner flex space-x-2">
@@ -794,5 +794,137 @@ export const FloatingTypingStatus = () => {
   }
 
   return <span className="italic">Multiple people are typing...</span>;
+};
+```
+
+---
+
+## 8. Channel Filtering Hooks
+
+Specialized hooks for filtering channel lists by membership status.
+
+### `useInviteChannels`
+
+Filters and returns only channels where the current user has a `pending` role (received an invite but hasn't accepted yet).
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| None | `N/A` | Reads from `ChatProvider` context. |
+
+**Returns:** `Channel[]` — Array of pending invite channels.
+
+**Example:**
+```tsx
+import { useInviteChannels } from '@ermis-network/ermis-chat-react';
+
+export const InvitesList = () => {
+  const inviteChannels = useInviteChannels();
+  return (
+    <div>
+      <h3>Pending Invites ({inviteChannels.length})</h3>
+      {inviteChannels.map(ch => (
+        <div key={ch.cid}>{ch.data?.name || ch.cid}</div>
+      ))}
+    </div>
+  );
+};
+```
+
+### `useContactChannels`
+
+Filters and returns only accepted direct messaging channels (friend channels).
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| None | `N/A` | Reads from `ChatProvider` context. |
+
+**Returns:** `Channel[]` — Array of accepted direct message channels.
+
+---
+
+### `usePreviewState`
+
+Detects whether the current user is viewing a public channel in "preview mode" (not yet a member).
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `channel` | `Channel \| null \| undefined` | Target channel. |
+| `currentUserId` | `string \| undefined` | Current user's ID. |
+
+**Returns:** `{ isPreviewMode: boolean }`
+
+**Example:**
+```tsx
+import { usePreviewState, useChatClient, useChannel } from '@ermis-network/ermis-chat-react';
+
+export const ChannelPreviewBanner = () => {
+  const { client } = useChatClient();
+  const { channel } = useChannel();
+  const { isPreviewMode } = usePreviewState(channel, client.userID);
+
+  if (!isPreviewMode) return null;
+  return <button onClick={() => channel?.acceptInvite('join')}>Join this channel</button>;
+};
+```
+
+---
+
+### `useTopicGroupUpdates`
+
+Real-time hook that aggregates topic metadata and unread counts across all topics of a parent channel.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `channel` | `Channel \| null \| undefined` | Parent team channel. |
+
+**Returns:** Topic list state with unread counts, sorted by latest activity.
+
+---
+
+### `useForwardMessage`
+
+Orchestrates the message forwarding flow — channel selection, payload building, and dispatch.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| None | `N/A` | Uses internal ChatProvider context. |
+
+**Returns:** `{ forwardMessage, isForwarding, forwardTarget, setForwardTarget }`
+
+---
+
+### `useStickerPicker`
+
+Manages sticker picker UI state and sticker insertion into the message input.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `options` | `UseStickerPickerOptions` | Configuration for sticker categories and rendering. |
+
+**Returns:** `{ isOpen, toggle, close, selectedCategory, setCategory, sendSticker }`
+
+---
+
+### `useDragAndDrop`
+
+Handles drag-and-drop file interactions for the message composer area.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `onFilesDropped` | `(files: File[]) => void` | Callback when files are dropped. |
+
+**Returns:** `{ isDragOver, dragHandlers }` — Drag state and event handler props to spread on a container.
+
+**Example:**
+```tsx
+import { useDragAndDrop } from '@ermis-network/ermis-chat-react';
+
+export const DropZone = ({ onFiles }) => {
+  const { isDragOver, dragHandlers } = useDragAndDrop(onFiles);
+  return (
+    <div {...dragHandlers} className={isDragOver ? 'highlight' : ''}>
+      Drop files here
+    </div>
+  );
 };
 ```

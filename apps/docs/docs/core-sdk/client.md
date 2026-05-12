@@ -28,6 +28,24 @@ const chatClient = ErmisChat.getInstance(
 );
 ```
 
+### `ErmisChatOptions` Reference
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `recoverStateOnReconnect` | `boolean` | `true` | Re-fetch channel state after a WebSocket reconnection. |
+| `logger` | `(level, msg, data) => void` | no-op | Custom logging callback. `level` is `'info'` or `'error'`. |
+| `userBaseURL` | `string` | same as base URL | Separate auth server URL (for split API/auth deployments). |
+| `browser` | `boolean` | auto-detected | Force browser mode (enables EventSource, disables Node features). |
+| `warmUp` | `boolean` | `false` | Immediately open health-check connection on init. |
+| `withCredentials` | `boolean` | `false` | Set `withCredentials` on HTTP requests (for cookie-based auth). |
+| `httpsAgent` | `https.Agent` | — | Custom HTTPS agent (Node.js server-side only). |
+| `allowServerSideConnect` | `boolean` | `false` | Allow `connectUser` in a server (non-browser) environment. |
+| `wsConnection` | `StableWSConnection` | — | Inject a custom WebSocket connection instance. |
+
+:::tip
+Most applications only need `recoverStateOnReconnect` and `logger`. The other options are for advanced deployment scenarios like server-side rendering or split infrastructure.
+:::
+
 ## Connection
 
 Before creating channels or sending messages, you need to connect the user to establishing a WebSocket tunnel.
@@ -89,4 +107,57 @@ chatClient.on('all', (event) => {
 listener.unsubscribe();
 // Alternatively:
 chatClient.off('connection.recovered', listenerFunction);
+```
+
+## Downloading Media
+
+The client exposes `downloadMedia` for fetching uploaded files as a `Blob`. This bypasses CORS restrictions and browser caching issues.
+
+```typescript
+const blob = await chatClient.downloadMedia('https://cdn.ermis.network/attachments/image123.png');
+
+// Save the file in the browser
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = 'image123.png';
+a.click();
+URL.revokeObjectURL(url);
+```
+
+## User Management
+
+### `queryUsers`
+
+Fetches a paginated list of all users in the project.
+
+```typescript
+const response = await chatClient.queryUsers('25', 1); // page_size, page
+console.log(response.data); // UserResponse[]
+```
+
+### `searchUsers`
+
+Search users by name with pagination.
+
+```typescript
+const response = await chatClient.searchUsers(1, 25, 'Jane');
+console.log(response.data); // matching users
+```
+
+### `updateProfile`
+
+Update the authenticated user's profile (name, avatar, etc.).
+
+```typescript
+await chatClient.updateProfile({ name: 'New Name' });
+```
+
+### `uploadAvatar`
+
+Upload a new profile picture for the current user.
+
+```typescript
+const fileInput = document.querySelector('input[type="file"]');
+await chatClient.uploadAvatar(fileInput.files[0]);
 ```

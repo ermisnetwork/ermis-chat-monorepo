@@ -21,6 +21,7 @@ This CLI tool copies the following files from the SDK package into your project'
 | File | Required | Purpose |
 |------|----------|---------|
 | `ermis_call_node_wasm_bg.wasm` | ✅ Yes | Core WebRTC WASM engine — call will fail without this |
+| `wasm_worker.worker.mjs` | ✅ Yes | Web Worker script that runs the WASM runtime off the Main Thread |
 | `call_incoming.mp3` | Optional | Ringtone sound for incoming calls |
 | `call_outgoing.mp3` | Optional | Ringtone sound for outgoing calls |
 
@@ -34,11 +35,12 @@ For custom deployments (e.g., assets served from a CDN), you can place the WASM 
 
 ## Architecture Overview
 
-The call system consists of three main classes:
+The call system consists of four main classes:
 
 | Class | Responsibility |
 |-------|---------------|
 | `ErmisCallNode` | High-level orchestrator — manages the call lifecycle, signaling, local/remote streams, and device management |
+| `WasmWorkerProxy` | Main Thread proxy — forwards all WASM calls to a Web Worker via `postMessage` (zero-copy transfer) |
 | `MediaStreamSender` | Encodes and transmits local audio/video frames to the remote peer via the WASM data channel |
 | `MediaStreamReceiver` | Receives, decodes, and renders remote audio/video frames into a playable `MediaStream` |
 
@@ -53,12 +55,22 @@ The call system consists of three main classes:
 │  │  Audio: AAC      │    │  Audio: AudioContext   │   │
 │  │  Video: HEVC     │    │  Video: VideoDecoder   │   │
 │  └──────────────────┘    └───────────────────────┘   │
+│           │                         ▲                │
+│           ▼                         │                │
+│  ┌──────────────────────────────────────────────┐    │
+│  │         WasmWorkerProxy (Main Thread)        │    │
+│  │    postMessage(RPC) ←→ Worker(WASM runtime)  │    │
+│  └──────────────────────────────────────────────┘    │
 │           ▲                         │                │
 │     localStream               remoteStream           │
 └──────────────────────────────────────────────────────┘
               │                       │
          getUserMedia()        MediaStream (generated)
 ```
+
+:::note
+WASM **never** runs on the Main Thread. The `WasmWorkerProxy` uses a dedicated Web Worker with static caching — the Worker script Blob URL and compiled `WebAssembly.Module` are fetched only once and reused across all subsequent calls for near-instant re-initialization.
+:::
 
 ---
 
@@ -76,17 +88,22 @@ const callNode = new ErmisCallNode(chatClient, sessionID, wasmPath, relayUrl);
 
 ### Constructor Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `client` | `ErmisChat` | An initialized and connected `ErmisChat` client instance. |
-| `sessionID` | `string` | Unique identifier for this call session. Used to differentiate between multiple devices/tabs of the same user. |
-| `wasmPath` | `string` | Path to the `ermis_call_node_wasm_bg.wasm` file (usually in `public/`). |
-| `relayUrl` | `string` | Ermis relay server URL for NAT traversal. |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `client` | `ErmisChat` | ✅ | An initialized and connected `ErmisChat` client instance. |
+| `sessionID` | `string` | ✅ | Unique identifier for this call session. Used to differentiate between multiple devices/tabs of the same user. |
+| `wasmPath` | `string` | ✅ | Path to the `ermis_call_node_wasm_bg.wasm` file (usually in `public/`). |
+| `relayUrl` | `string` | ✅ | Ermis relay server URL for NAT traversal. |
+| `workerPath` | `string` | No | Path to the WASM Worker script. Default: `'/wasm_worker.worker.mjs'`. Override when the worker is served from a CDN or non-standard path. |
 
 On instantiation, the node:
-1. Loads the WASM module
+1. Creates a `WasmWorkerProxy` — fetches and compiles the WASM module inside a Web Worker
 2. Subscribes to WebSocket `signal`, `connection.changed`, and `message.updated` events
 3. Sets up a hardware device change listener
+
+:::tip
+You can call `callNode.prefillUserInfo(cid)` before initiating a call to pre-populate `callerInfo` and `receiverInfo` — useful if your UI needs to display user names and avatars before the signal event arrives.
+:::
 
 ---
 
@@ -188,17 +205,27 @@ callNode.onDataChannelMessage = (state: { audio_enable?: boolean; video_enable?:
 // Call errors (network issues, busy recipient, device errors)
 callNode.onError = (error: string) => {
   showToast(error);
-  // Possible messages:
-  // - "Unable to make the call. Please check your network connection"
-  // - "Recipient was busy"
-  // - "No microphone or camera found. Please check your device."
 };
 
 // Network connection changes during a call
 callNode.onConnectionMessageChange = (message: string | null) => {
   // message: "Your network connection is unstable" | null
+  // message: "Camera not available, using audio only" (video call fallback)
 };
 ```
+
+#### Error Messages Reference
+
+| Error String | Trigger Condition |
+|-------------|-------------------|
+| `'call_network_error'` | `createCall` failed due to network error (`ERR_NETWORK`). |
+| `'call_recipient_busy'` | Recipient is already in another call (API code `20`). |
+| `'call_failed'` | Any other API error (fallback message). |
+| `'call_no_devices'` | No microphone or camera found on the device. |
+| `'Selected microphone not found'` | `switchAudioDevice` called with an invalid device ID. |
+| `'Failed to switch microphone'` | Exception while switching audio device. |
+| `'Selected camera not found'` | `switchVideoDevice` called with an invalid device ID. |
+| `'Failed to switch camera'` | Exception while switching video device. |
 
 ### Call Upgrade & Screen Share
 
@@ -321,6 +348,70 @@ The switch methods:
 3. Replace the track in the local stream
 4. Fire `onLocalStream` so your UI updates
 5. Return `false` and fire `onError` if the device is not found
+
+---
+
+## Device Fallback Behavior
+
+The SDK gracefully handles missing hardware:
+
+- **Video call + no camera**: Automatically falls back to audio-only. The `onConnectionMessageChange` callback fires with `'Camera not available, using audio only'`. The call proceeds normally with audio.
+- **Audio call + no microphone**: Fires `onError('call_no_devices')`. The call is not established.
+- **Video call + no mic + no camera**: Fires `onError('call_no_devices')`. The call is not established.
+
+:::tip
+Always register `onError` and `onConnectionMessageChange` callbacks to surface hardware issues to your users.
+:::
+
+---
+
+## Connection Health & Keep-Alive
+
+Once a call is connected, the SDK maintains connection stability through two independent health check mechanisms:
+
+| Mechanism | Interval | Transport | Purpose |
+|-----------|----------|-----------|--------|
+| **Server health** | Every 10 seconds | REST API (`HEALTH_CALL` signal) | Tells the server the call is still active (prevents server-side cleanup). |
+| **Peer health** | Every 5 seconds | WebRTC data channel (`healthCall` frame) | Tells the remote peer the connection is alive (peer-to-peer keep-alive). |
+
+When the user goes **offline**:
+- All health intervals are cleared immediately
+- `onConnectionMessageChange('Your network connection is unstable')` fires
+
+When the user comes back **online**:
+- Server health interval restarts automatically
+- `onConnectionMessageChange(null)` fires (clears the warning)
+
+---
+
+## Codec & Media Pipeline
+
+The SDK uses the [WebCodecs API](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API) for encoding and decoding media streams.
+
+### Encoding (Sender)
+
+| Stream | Codec | Sample Rate | Bitrate | Notes |
+|--------|-------|-------------|---------|-------|
+| Audio | AAC (`mp4a.40.2`) | 48 kHz, mono | 128 kbps | Echo cancellation + noise suppression enabled |
+| Video | HEVC (`hev1.1.6.L93.B0`) | 30 fps | 500 kbps | 640×360 default, hardware-accelerated, realtime latency mode |
+
+### Decoding (Receiver)
+
+| Stream | Decoder | Output |
+|--------|---------|--------|
+| Audio | `AudioDecoder` → `AudioContext` → `AudioBufferSourceNode` | `MediaStreamAudioDestinationNode` |
+| Video | `VideoDecoder` → `MediaStreamTrackGenerator` | Video track added to `MediaStream` |
+
+### Latency Management
+
+- **Audio**: Max latency capped at 500ms. If buffer exceeds this, the scheduler resets to prevent audio drift.
+- **Video**: Backpressure — if `decodeQueueSize > 5`, delta frames are dropped and the decoder waits for the next key frame.
+- **Video Decoder Crash Recovery**: If `VideoDecoder` crashes, it auto-respawns after 1 second and waits for a key frame before resuming.
+- **Key frames**: Automatically generated every 60 frames (~2 seconds). Can be force-requested by the receiver.
+
+:::caution
+The WebCodecs API (specifically `MediaStreamTrackProcessor` and `MediaStreamTrackGenerator`) requires a Chromium-based browser (Chrome, Edge, Brave). Firefox and Safari do not yet support these APIs.
+:::
 
 ---
 

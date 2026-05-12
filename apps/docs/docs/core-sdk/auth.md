@@ -43,4 +43,37 @@ if (response.success) {
 }
 ```
 
+## Token Refresh
 
+When a user's JWT token expires, you can obtain a new one without requiring re-authentication using the refresh token returned from the initial login.
+
+```typescript
+// The refresh_token is provided alongside the JWT during login
+const newTokenResponse = await chatClient.refreshNewToken('REFRESH_TOKEN');
+```
+
+:::caution
+If you receive API error codes `40`–`43` (token expired / invalid), you **must** call `refreshNewToken` before retrying any failed requests. Simple retries will not resolve authentication errors. See [Error Handling](./error-handling.md) for the full error code reference.
+:::
+
+### Recommended Pattern
+
+```typescript
+let token = initialToken;
+let refreshToken = initialRefreshToken;
+
+async function ensureValidToken() {
+  try {
+    await chatClient.connectUser(user, token);
+  } catch (err) {
+    if (err.code >= 40 && err.code <= 43) {
+      const response = await chatClient.refreshNewToken(refreshToken);
+      token = response.token;
+      refreshToken = response.refresh_token;
+      await chatClient.connectUser(user, token);
+    } else {
+      throw err;
+    }
+  }
+}
+```

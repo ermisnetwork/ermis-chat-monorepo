@@ -22,6 +22,7 @@ This copies the following files from the SDK into your project's `public/` folde
 | File | Purpose |
 |------|---------|
 | `ermis_call_node_wasm_bg.wasm` | WebRTC WASM engine (required) |
+| `wasm_worker.worker.mjs` | Web Worker script for WASM runtime (required) |
 | `call_incoming.mp3` | Ringtone for incoming calls (optional) |
 | `call_outgoing.mp3` | Ringtone for outgoing calls (optional) |
 
@@ -238,7 +239,7 @@ import { useCallContext } from '@ermis-network/ermis-chat-react';
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `callStatus` | `CallStatus \| ''` | Current status: `'ringing'`, `'connected'`, or `''`. |
+| `callStatus` | `CallStatus \| ''` | Current status: `'preparing'`, `'ringing'`, `'connected'`, `'ended'`, or `''`. |
 | `callType` | `string` | Call type: `'audio'` or `'video'`. |
 | `callDuration` | `number` | Duration in seconds (ticks every second while connected). |
 | `callerInfo` | `UserCallInfo \| undefined` | Info about the caller (incoming calls). |
@@ -256,6 +257,10 @@ import { useCallContext } from '@ermis-network/ermis-chat-react';
 | `videoDevices` | `MediaDeviceInfo[]` | Available video input devices. |
 | `selectedAudioDeviceId` | `string` | Currently selected mic device ID. |
 | `selectedVideoDeviceId` | `string` | Currently selected camera device ID. |
+| `isAccepting` | `boolean` | `true` while the accept-call request is in flight (use for loading spinners). |
+| `isRejecting` | `boolean` | `true` while the reject-call request is in flight. |
+| `isEnding` | `boolean` | `true` while the end-call request is in flight. |
+| `callNode` | `ErmisCallNode \| null` | Direct reference to the underlying SDK call node (advanced use only). |
 
 ### Actions
 
@@ -272,6 +277,7 @@ import { useCallContext } from '@ermis-network/ermis-chat-react';
 | `switchAudioDevice` | `(deviceId: string) => Promise<void>` | Switch to a different microphone. |
 | `switchVideoDevice` | `(deviceId: string) => Promise<void>` | Switch to a different camera. |
 | `clearError` | `() => void` | Clear the current error message. |
+| `resetCall` | `() => void` | Force-destroy the call node and reset all state to initial values. |
 
 **Example: Custom Call Header Badge**
 

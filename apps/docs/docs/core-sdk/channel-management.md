@@ -139,6 +139,19 @@ await channel.updateCapabilities([
 ]);
 ```
 
+### Query Current Capabilities
+
+Retrieve the current list of `member`-level capabilities configured for this channel. Useful for conditionally rendering UI elements.
+
+```typescript
+const capabilities = channel.getCapabilitiesMember();
+// ['send-message', 'send-reaction', 'upload-file', ...]
+
+if (capabilities.includes('upload-file')) {
+  // Show attachment button
+}
+```
+
 ### Slow Mode (Message Cooldown)
 
 Only **`owner`** and **`moder`** can enable slow mode. When enabled, `member` users must wait for the cooldown period before sending another message, preventing spam.
