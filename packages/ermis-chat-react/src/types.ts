@@ -823,6 +823,7 @@ export type SystemMessageItemProps = {
 
 export type SendButtonProps = { disabled: boolean; onClick: () => void };
 export type AttachButtonProps = { disabled: boolean; onClick: () => void };
+export type VoiceRecordButtonProps = { disabled: boolean; onRecordComplete: (file: File) => void };
 
 /** Props passed to a consumer-provided emoji picker component */
 export type EmojiPickerProps = {
@@ -863,6 +864,8 @@ export type MessageInputProps = {
   SendButton?: React.ComponentType<SendButtonProps>;
   /** Custom attach button component */
   AttachButton?: React.ComponentType<AttachButtonProps>;
+  /** Custom voice record button component */
+  VoiceRecordButtonComponent?: React.ComponentType<VoiceRecordButtonProps>;
   /** Custom file preview component */
   FilesPreviewComponent?: React.ComponentType<FilesPreviewProps>;
   /** Custom mention suggestions component */

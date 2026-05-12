@@ -9,7 +9,7 @@ import { useEmojiPicker } from '../hooks/useEmojiPicker';
 import { useStickerPicker } from '../hooks/useStickerPicker';
 import { useMessageSend } from '../hooks/useMessageSend';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
-import { DefaultSendButton, DefaultAttachButton, DefaultEmojiButton, DefaultStickerButton, DefaultStickerPicker, DefaultDragAndDropOverlay } from './MessageInputDefaults';
+import { DefaultSendButton, DefaultAttachButton, DefaultEmojiButton, DefaultStickerButton, DefaultStickerPicker, DefaultDragAndDropOverlay, DefaultVoiceRecordButton } from './MessageInputDefaults';
 import { MentionSuggestions } from './MentionSuggestions';
 import { FilesPreview } from './FilesPreview';
 import { ReplyPreview } from './ReplyPreview';
@@ -41,6 +41,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   EmojiButtonComponent = DefaultEmojiButton,
   StickerPickerComponent = DefaultStickerPicker,
   StickerButtonComponent = DefaultStickerButton,
+  VoiceRecordButtonComponent = DefaultVoiceRecordButton,
   disableStickers = false,
   stickerIframeUrl = 'https://sticker.ermis.network',
   ReplyPreviewComponent = ReplyPreview,
@@ -601,6 +602,18 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
             onPaste={handlePaste}
             suppressContentEditableWarning
           />
+
+          {/* Voice record button */}
+          {VoiceRecordButtonComponent && (
+            <VoiceRecordButtonComponent
+              disabled={sending || !!editingMessage || isSlowModeBlocked || !canSendMessage}
+              onRecordComplete={(f) => {
+                const dt = new DataTransfer();
+                dt.items.add(f);
+                handleFilesSelected(dt.files);
+              }}
+            />
+          )}
 
           {/* Emoji button — shown only when EmojiPickerComponent is provided */}
           {EmojiPickerComponent && (

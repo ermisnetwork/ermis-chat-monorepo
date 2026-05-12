@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
 import { isDirectChannel } from '../channelTypeUtils';
@@ -7,7 +7,7 @@ import { SystemMessageTranslations, SignalMessageTranslations } from '@ermis-net
 
 /** Preview data for the most recent message across the topic group */
 export type LatestMessagePreview = {
-  text: string;
+  text: React.ReactNode;
   user: string;
   timestamp?: string | Date;
   /** Topic name if the message came from a sub-topic, null if from general/parent */
@@ -15,12 +15,12 @@ export type LatestMessagePreview = {
 };
 
 export type TopicGroupUpdatesOptions = {
-  deletedMessageLabel?: string;
-  stickerMessageLabel?: string;
-  photoMessageLabel?: string;
-  videoMessageLabel?: string;
-  voiceRecordingMessageLabel?: string;
-  fileMessageLabel?: string;
+  deletedMessageLabel?: React.ReactNode;
+  stickerMessageLabel?: React.ReactNode;
+  photoMessageLabel?: React.ReactNode;
+  videoMessageLabel?: React.ReactNode;
+  voiceRecordingMessageLabel?: React.ReactNode;
+  fileMessageLabel?: React.ReactNode;
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
 };

@@ -118,6 +118,56 @@
   color: var(--ermis-accent);
 }
 
+/* --- Voice record button --- */
+.ermis-message-input__voice-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  color: var(--ermis-text-secondary);
+  transition: color var(--ermis-transition);
+  flex-shrink: 0;
+}
+
+.ermis-message-input__voice-btn:hover {
+  color: var(--ermis-accent);
+}
+
+.ermis-message-input__voice-btn--recording {
+  color: var(--ermis-color-danger);
+}
+
+.ermis-message-input__voice-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ermis-message-input__voice-recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ermis-font-size-sm);
+  font-weight: 500;
+  color: var(--ermis-color-danger);
+}
+
+.ermis-message-input__voice-dot {
+  width: 8px;
+  height: 8px;
+  background-color: var(--ermis-color-danger);
+  border-radius: 50%;
+  animation: ermis-blink 1.5s ease-in-out infinite;
+}
+
+@keyframes ermis-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 /* --- Emoji picker container --- */
 .ermis-message-input__emoji-picker {
   position: absolute;
