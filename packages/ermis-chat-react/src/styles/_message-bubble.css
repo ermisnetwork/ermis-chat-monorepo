@@ -674,7 +674,7 @@
   color: white; /* solid white icon */
   flex-shrink: 0;
   transition: opacity 0.2s, transform 0.1s;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .ermis-custom-audio-play-btn:hover {
@@ -734,7 +734,7 @@
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .ermis-message-bubble--own .ermis-custom-audio-progress-thumb {
@@ -948,6 +948,7 @@
   cursor: default;
   position: relative;
   animation: ermis-receipt-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  z-index: 5;
 }
 
 .ermis-read-receipts__avatar {
