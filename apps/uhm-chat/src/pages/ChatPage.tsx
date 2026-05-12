@@ -39,8 +39,6 @@ import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
-import { GlobalNotificationListener } from '@/features/chat/GlobalNotificationListener'
-
 export function ChatPage() {
   const { t, i18n } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -648,7 +646,6 @@ export function ChatPage() {
         onSendMessage={handleSendMessageFromProfile}
       />
       <GlobalPickers />
-      <GlobalNotificationListener />
     </div>
   )
 }
