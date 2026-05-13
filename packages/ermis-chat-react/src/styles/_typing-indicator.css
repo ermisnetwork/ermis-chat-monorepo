@@ -2,13 +2,12 @@
    Typing Indicator
    ============================================================ */
 
-/* Container always rendered with fixed height to prevent layout shifts */
+/* Container floats over the bottom of the message list */
 .ermis-typing-indicator {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0 16px;
-  height: 24px;
   font-size: 12px;
   color: var(--ermis-text-secondary);
   overflow: hidden;
@@ -16,6 +15,7 @@
   bottom: 0;
   left: 0;
   right: 0;
+  background-color: var(--ermis-bg-primary);
 }
 
 .ermis-typing-indicator__dots {
@@ -30,6 +30,7 @@
     opacity: 0;
     transform: translateY(8px);
   }
+
   100% {
     opacity: 1;
     transform: translateY(0);
@@ -57,12 +58,14 @@
 }
 
 @keyframes ermis-typing-bounce {
+
   0%,
   80%,
   100% {
     transform: scale(0.6);
     opacity: 0.4;
   }
+
   40% {
     transform: scale(1);
     opacity: 1;

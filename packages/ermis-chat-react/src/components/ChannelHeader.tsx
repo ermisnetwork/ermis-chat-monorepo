@@ -95,7 +95,8 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
     // If it's a topic, derive from parent_cid
     const parentCid = activeChannel.data?.parent_cid as string | undefined;
     if (parentCid && client.activeChannels[parentCid]) {
-      return client.activeChannels[parentCid].data?.name || client.activeChannels[parentCid].cid;
+      const parentChannel = client.activeChannels[parentCid];
+      return parentChannel.data?.name || parentChannel.id || undefined;
     }
 
     // If it's a topics-enabled team channel (the general proxy), the proxy overrides data.name.

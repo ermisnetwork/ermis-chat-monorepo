@@ -81,20 +81,28 @@ export function ChatPage() {
         try {
           const ch = client.channel(channelType, channelId)
           await ch.watch()
-          setActiveChannel(ch)
-          // If it's a topic, we might need to drill down
-          if (isTopicChannel(ch) && ch.data?.parent_id) {
-            const parentType = typeof ch.data.parent_cid === 'string' ? ch.data.parent_cid.split(':')[0] : 'messaging'
-            const parent = client.channel(parentType, ch.data.parent_id as string)
+
+          if (isTopicChannel(ch) && ch.data?.parent_cid) {
+            const parentCid = ch.data.parent_cid as string
+            const [parentType, ...parentIdParts] = parentCid.split(':')
+            const parentId = parentIdParts.join(':')
+            const parent = client.channel(parentType || 'messaging', parentId)
             await parent.watch()
+            setActiveChannel(ch)
             setDrillDownChannel(parent)
             setActivePanel('topics')
+          } else if (isGroupChannel(ch) && ch.data?.topics_enabled) {
+            setActiveChannel(ch)
+            setDrillDownChannel(ch)
+            setActivePanel('topics')
+          } else {
+            setActiveChannel(ch)
           }
         } catch (e) {
           console.error("Failed to restore channel from URL:", e)
         } finally {
-          isRestoringRef.current = false
           setHasAttemptedRestore(true)
+          requestAnimationFrame(() => { isRestoringRef.current = false })
         }
       } else if (!channelId) {
         setHasAttemptedRestore(true)

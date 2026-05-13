@@ -660,7 +660,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
           </div>
         )} */}
         {regularChannels.map((channel: Channel) => {
-          const isActive = activeChannel?.cid === channel.cid;
+          const isActive = activeChannel?.cid === channel.cid ||
+            (activeChannel?.data?.parent_cid === channel.cid);
           const isTeamWithTopics = hasTopicsEnabled(channel);
 
           if (isTeamWithTopics) {

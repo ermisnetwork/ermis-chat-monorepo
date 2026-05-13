@@ -37,7 +37,7 @@
   padding-left: 1rem;
   padding-right: 1rem;
   padding-top: var(--ermis-spacing-lg);
-  padding-bottom: var(--ermis-spacing-lg);
+  padding-bottom: calc(var(--ermis-spacing-lg));
 }
 
 /* Push content to bottom when few messages, margin collapses when content overflows */
