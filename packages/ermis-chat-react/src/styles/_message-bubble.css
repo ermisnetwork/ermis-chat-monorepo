@@ -52,15 +52,14 @@
 
 .ermis-message-list__bubble-wrapper {
   display: flex;
-  flex-wrap: wrap;
-  flex-direction: row;
-  align-items: center; /* Center actions vertically with the bubble */
+  flex-direction: column;
+  align-items: flex-start;
   position: relative;
   width: 100%;
 }
 
 .ermis-message-list__item--own .ermis-message-list__bubble-wrapper {
-  flex-direction: row-reverse;
+  align-items: flex-end;
 }
 
 .ermis-message-list__item-user {
