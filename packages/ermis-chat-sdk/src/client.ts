@@ -111,7 +111,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   /**
    * Initializes a new Ermis Chat Client instance.
    *
-   * @param apiKey    - Your public Ermis Network API Key.
+   * @param apiKey    - Your public Sub2s API Key.
    * @param projectId - Your specific Project UUID pointing to the app config.
    * @param baseURL   - The API base endpoint assigned to your project.
    * @param options   - Additional connection rules and configuration options.
@@ -166,7 +166,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * Retrieves the globally registered Singleton instance of the ErmisChat client.
    * If the instance lacks existence, it initializes a new one.
    *
-   * @param key       - Your public Ermis Network API Key.
+   * @param key       - Your public Sub2s API Key.
    * @param projectId - Your specific Project UUID.
    * @param baseURL   - The API base endpoint.
    * @param options   - Connection options.
@@ -230,7 +230,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   }
 
   /**
-   * Connects a user to the Ermis network and establishes the WebSocket connection.
+   * Connects a user to the Sub2s and establishes the WebSocket connection.
    * This is the primary method to authenticate your client application.
    *
    * @param user                - The User object containing `id`, `name`, and optional `avatar`.

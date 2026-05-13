@@ -40,7 +40,7 @@ import {
   EditTopicData,
 } from './types';
 /**
- * Represents a Channel in the Ermis Network.
+ * Represents a Channel in the Sub2s.
  * Channels handle chat sessions, livestream messages, teams, or video calls.
  * This class abstracts and exposes all API operations you can perform on a specific channel instance.
  */

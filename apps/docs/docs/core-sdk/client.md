@@ -67,7 +67,7 @@ await chatClient.connectUser(user, 'USER_JWT_TOKEN');
 
 #### External Authentication
 
-If your application relies on an external authentication system, you can set the `external_auth` flag to `true`. This instructs the SDK to exchange your external token for an Ermis Network token by calling the `{userBaseURL}/get_token/external_auth` endpoint behind the scenes.
+If your application relies on an external authentication system, you can set the `external_auth` flag to `true`. This instructs the SDK to exchange your external token for an Sub2s token by calling the `{userBaseURL}/get_token/external_auth` endpoint behind the scenes.
 
 ```typescript
 // Connect with external authentication
