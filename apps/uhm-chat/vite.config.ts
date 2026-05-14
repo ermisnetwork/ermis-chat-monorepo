@@ -6,6 +6,7 @@ import path from 'path';
 
 // https://vite.dev/config/
 export default defineConfig({
+  clearScreen: false,
   define: {
     'process.env.PKG_VERSION': JSON.stringify('dev'),
   },
