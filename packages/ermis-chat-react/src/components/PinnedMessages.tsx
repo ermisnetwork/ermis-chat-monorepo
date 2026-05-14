@@ -61,7 +61,7 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
       role="button"
       tabIndex={0}
     >
-      <AvatarComponent image={userAvatar} name={userName} size={28} />
+      <AvatarComponent image={userAvatar} name={userName} size={38} />
       <div className="ermis-pinned-messages__item-content">
         <span className="ermis-pinned-messages__item-user">{userName}</span>
         <span className="ermis-pinned-messages__item-text">{attachIcon}{previewText || 'Attachment'}</span>
@@ -141,8 +141,8 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
           <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
         </svg>
         <span className="ermis-pinned-messages__label">
-          {typeof pinnedMessagesLabel === 'function' 
-            ? pinnedMessagesLabel(pinnedMessages.length) 
+          {typeof pinnedMessagesLabel === 'function'
+            ? pinnedMessagesLabel(pinnedMessages.length)
             : pinnedMessagesLabel || `${pinnedMessages.length} pinned message${pinnedMessages.length > 1 ? 's' : ''}`
           }
         </span>

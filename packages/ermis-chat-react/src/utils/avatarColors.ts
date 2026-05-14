@@ -22,7 +22,7 @@ const AVATAR_GRADIENTS: readonly [string, string][] = [
 ] as const;
 
 /** Neutral fallback when no name is available. */
-const FALLBACK_GRADIENT = 'linear-gradient(135deg, #6B7280 0%, #9CA3AF 100%)';
+const FALLBACK_GRADIENT = 'linear-gradient(135deg, #6B7280 0%, #545f71 100%)';
 
 /**
  * Simple djb2-variant string hash → non-negative integer.

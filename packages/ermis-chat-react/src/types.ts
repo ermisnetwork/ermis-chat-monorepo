@@ -562,6 +562,8 @@ export type ChannelListProps = {
   FlatTopicGroupItemComponent?: React.ComponentType<any>;
   /** Auto-scroll the channel list to the top when the current user sends a message (default: true) */
   scrollToTopOnOwnMessage?: boolean;
+  /** Whether to show topic pills on team channels (default: false) */
+  showTopicPills?: boolean;
 };
 
 /* ----------------------------------------------------------

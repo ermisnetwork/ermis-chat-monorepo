@@ -96,7 +96,7 @@ export function UhmChannelActions({ channel, actions, onClose }: UhmChannelActio
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="flex items-center justify-center w-6 h-6 rounded-md bg-white/80 dark:bg-[#211f30]/80 backdrop-blur-sm text-zinc-400 dark:text-zinc-500 border border-zinc-200/60 dark:border-zinc-700/60 cursor-pointer transition-all duration-150 hover:text-zinc-700 dark:hover:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-sm active:scale-95"
+            className="flex items-center justify-center w-7 h-7 rounded-md bg-white dark:bg-[#211f30] text-zinc-400 dark:text-zinc-500 border border-zinc-200/60 dark:border-zinc-700/60 cursor-pointer transition-all duration-150 hover:text-zinc-700 dark:hover:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-sm active:scale-95"
             title={t('actions.more_actions', 'More actions')}
             onClick={(e) => e.stopPropagation()}
           >

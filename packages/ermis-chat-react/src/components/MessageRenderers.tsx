@@ -243,13 +243,13 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(({ attachment }) =>
 (FileAttachment as any).displayName = 'FileAttachment';
 
 const PlayIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
     <path d="M8 5v14l11-7z" />
   </svg>
 );
 
 const PauseIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
   </svg>
 );
@@ -583,8 +583,8 @@ function renderTextWithMentions(
     if (info) {
       // Mention — render as span, do NOT linkify
       return (
-        <span 
-          key={`mention-${i}`} 
+        <span
+          key={`mention-${i}`}
           className={`ermis-mention${onMentionClick && info.id !== 'all' ? ' ermis-mention--clickable' : ''}`}
           onClick={onMentionClick && info.id !== 'all' ? (e) => { e.stopPropagation(); onMentionClick(info.id); } : undefined}
         >

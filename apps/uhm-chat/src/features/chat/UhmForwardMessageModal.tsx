@@ -168,7 +168,7 @@ export function UhmForwardMessageModal({
                       <Avatar
                         image={ch.data?.image as string}
                         name={name}
-                        size={40}
+                        size={45}
                         className={isGroupChannel(ch) ? 'ermis-avatar-wrapper--group' : undefined}
                       />
                     )}

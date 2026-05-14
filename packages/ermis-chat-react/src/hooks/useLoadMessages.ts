@@ -52,12 +52,10 @@ export function useLoadMessages({
   const [hasNewer, setHasNewer] = useState(false);
   const [shiftMode, setShiftMode] = useState(false);
 
-  // Auto-reset shiftMode after each prepend render
+  // Reset shiftMode on channel switch so initial load isn't treated as a prepend
   useEffect(() => {
-    if (shiftMode) {
-      requestAnimationFrame(() => setShiftMode(false));
-    }
-  }, [shiftMode]);
+    setShiftMode(false);
+  }, [activeChannel?.cid]);
 
   // Refs synced from state (avoid handleScroll recreation on state change)
   const hasMoreRef = useRef(true);

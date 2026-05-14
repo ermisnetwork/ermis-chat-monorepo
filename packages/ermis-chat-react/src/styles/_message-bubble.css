@@ -10,7 +10,6 @@
   cursor: pointer;
   max-width: 100%;
   transition: background-color 0.15s;
-  margin-top: var(--ermis-spacing-sm);
 }
 
 .ermis-quoted-message:hover {
@@ -63,7 +62,7 @@
 }
 
 .ermis-message-list__item-user {
-  font-size: var(--ermis-font-size-xs);
+  font-size: var(--ermis-font-size-sm);
   font-weight: 600;
   color: var(--ermis-accent);
   margin-bottom: 1px;
@@ -240,10 +239,12 @@
 .ermis-message-list__item--own.ermis-message-list__item--group-top .ermis-message-bubble {
   border-bottom-right-radius: 4px;
 }
+
 .ermis-message-list__item--own.ermis-message-list__item--group-middle .ermis-message-bubble {
   border-top-right-radius: 4px;
   border-bottom-right-radius: 4px;
 }
+
 .ermis-message-list__item--own.ermis-message-list__item--group-bottom .ermis-message-bubble {
   border-top-right-radius: 4px;
 }
@@ -252,10 +253,12 @@
 .ermis-message-list__item--other.ermis-message-list__item--group-top .ermis-message-bubble {
   border-bottom-left-radius: 4px;
 }
+
 .ermis-message-list__item--other.ermis-message-list__item--group-middle .ermis-message-bubble {
   border-top-left-radius: 4px;
   border-bottom-left-radius: 4px;
 }
+
 .ermis-message-list__item--other.ermis-message-list__item--group-bottom .ermis-message-bubble {
   border-top-left-radius: 4px;
 }
@@ -314,7 +317,8 @@
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-  padding-right: 40px; /* Space for timestamp */
+  padding-right: 40px;
+  /* Space for timestamp */
 }
 
 .ermis-signal-message__text {
@@ -430,7 +434,7 @@
 }
 
 /* If odd number of media in multi-grid, last item spans full width */
-.ermis-attachment-grid--multi > :last-child:nth-child(odd) {
+.ermis-attachment-grid--multi> :last-child:nth-child(odd) {
   grid-column: 1 / -1;
 }
 
@@ -458,7 +462,8 @@
   height: 100%;
   object-fit: cover;
   filter: blur(20px);
-  transform: scale(1.1); /* hide blur edges */
+  transform: scale(1.1);
+  /* hide blur edges */
   z-index: 1;
 }
 
@@ -479,6 +484,7 @@
   0% {
     background-position: 200% 0;
   }
+
   100% {
     background-position: -200% 0;
   }
@@ -656,8 +662,10 @@
   display: flex;
   align-items: center;
   gap: var(--ermis-spacing-sm);
-  min-width: 240px; /* base comfortable width */
-  width: 100%; /* stretch to fill bubble if text makes it wider */
+  min-width: 240px;
+  /* base comfortable width */
+  width: 100%;
+  /* stretch to fill bubble if text makes it wider */
 }
 
 .ermis-custom-audio-play-btn {
@@ -670,7 +678,8 @@
   background-color: var(--ermis-accent);
   border: none;
   cursor: pointer;
-  color: white; /* solid white icon */
+  color: white;
+  /* solid white icon */
   flex-shrink: 0;
   transition: opacity 0.2s, transform 0.1s;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -694,7 +703,8 @@
   display: flex;
   align-items: center;
   height: 24px;
-  padding: 0 6px; /* prevent thumb cutoff */
+  padding: 0 6px;
+  /* prevent thumb cutoff */
 }
 
 .ermis-custom-audio-progress-bg {
@@ -747,7 +757,6 @@
   flex-shrink: 0;
   min-width: 32px;
   text-align: right;
-  opacity: 0.7;
 }
 
 .ermis-message-bubble--own .ermis-custom-audio-duration {
@@ -878,7 +887,8 @@
   border: none !important;
   position: relative;
   border-radius: 0;
-  display: inline-block; /* Ensure bubble shrinks to fit sticker */
+  display: inline-block;
+  /* Ensure bubble shrinks to fit sticker */
 }
 
 /* Timestamp overlay for stickers */
@@ -926,7 +936,8 @@
 
 .ermis-read-receipts--other {
   justify-content: flex-start;
-  padding-left: 36px; /* align with message content (avatar width 28px + gap 8px) */
+  padding-left: 43px;
+  /* align with message content (avatar width 28px + gap 8px) */
 }
 
 @keyframes ermis-receipt-pop {
@@ -934,6 +945,7 @@
     opacity: 0;
     transform: scale(0.5) translateY(5px);
   }
+
   100% {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -958,7 +970,7 @@
 }
 
 /* Stack overlapping */
-.ermis-read-receipts__avatar + .ermis-read-receipts__avatar {
+.ermis-read-receipts__avatar+.ermis-read-receipts__avatar {
   margin-left: -4px;
 }
 
@@ -1012,6 +1024,7 @@
     opacity: 0;
     transform: translateY(6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1043,9 +1056,11 @@
 .ermis-read-receipts__tooltip::-webkit-scrollbar {
   width: 4px;
 }
+
 .ermis-read-receipts__tooltip::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .ermis-read-receipts__tooltip::-webkit-scrollbar-thumb {
   background: var(--ermis-border);
   border-radius: 4px;

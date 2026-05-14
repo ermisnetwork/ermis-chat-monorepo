@@ -47,9 +47,9 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   const { isPending } = usePendingState(activeChannel, client.userID);
   const callContext = useContext(ErmisCallContext);
 
-  const isSkipped = client.userID 
-    ? isSkippedMember(activeChannel?.state?.members?.[client.userID]?.channel_role as string) || 
-      isSkippedMember(activeChannel?.state?.membership?.channel_role as string)
+  const isSkipped = client.userID
+    ? isSkippedMember(activeChannel?.state?.members?.[client.userID]?.channel_role as string) ||
+    isSkippedMember(activeChannel?.state?.membership?.channel_role as string)
     : false;
 
   const actionDisabled = isPending || isSkipped;
@@ -89,27 +89,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
     [image, activeChannel?.data?.image, channelUpdateCount],
   );
 
-  const teamName = useMemo(() => {
-    if (!activeChannel) return undefined;
-    
-    // If it's a topic, derive from parent_cid
-    const parentCid = activeChannel.data?.parent_cid as string | undefined;
-    if (parentCid && client.activeChannels[parentCid]) {
-      const parentChannel = client.activeChannels[parentCid];
-      return parentChannel.data?.name || parentChannel.id || undefined;
-    }
-
-    // If it's a topics-enabled team channel (the general proxy), the proxy overrides data.name.
-    // We can pull the original name from the SDK cache.
-    if (hasTopicsEnabled(activeChannel)) {
-      const rawChannel = client.activeChannels[activeChannel.cid];
-      if (rawChannel && rawChannel.data?.name && rawChannel.data.name !== activeChannel.data?.name) {
-        return rawChannel.data.name;
-      }
-    }
-    
-    return undefined;
-  }, [activeChannel, client.activeChannels]);
+  const teamName = undefined;
 
   // ── Online Status (direct friend channels only) ──
   const currentUserId = client.userID;
@@ -173,12 +153,12 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
     <div className={`ermis-channel-header${className ? ` ${className}` : ''}`}>
       {activeChannel.data?.parent_cid ? (
         <div className="ermis-channel-header__topic-avatar">
-          {channelImage && typeof channelImage === 'string' && channelImage.startsWith('emoji://') 
-            ? channelImage.replace('emoji://', '') 
+          {channelImage && typeof channelImage === 'string' && channelImage.startsWith('emoji://')
+            ? channelImage.replace('emoji://', '')
             : '#'}
         </div>
       ) : (
-        <AvatarComponent image={channelImage} name={teamName || channelName} size={32} />
+        <AvatarComponent image={channelImage} name={teamName || channelName} size={44} />
       )}
 
       <div className="ermis-channel-header__info">
@@ -186,11 +166,6 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
           renderTitle(activeChannel)
         ) : (
           <div className="ermis-channel-header__title-container">
-            {teamName && (
-              <div className="ermis-channel-header__team-name">
-                {teamName}
-              </div>
-            )}
             <div className="ermis-channel-header__name">{channelName}</div>
           </div>
         )}
@@ -231,7 +206,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
                 </svg>
               </button>
             )}
-            
+
             {renderVideoCallButton ? (
               renderVideoCallButton(() => callContext.createCall('video', activeChannel.cid || ''), actionDisabled)
             ) : (

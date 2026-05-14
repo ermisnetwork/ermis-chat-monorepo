@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip } from 'lucide-react'
+import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, Hash } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
@@ -414,7 +414,7 @@ export function ChatPage() {
       {isRestoringFromUrl && (
         <div className="absolute inset-0 z-[100] flex bg-white dark:bg-[#13111c]">
           {/* Sidebar skeleton */}
-          <div className="w-[340px] border-r border-zinc-200/50 dark:border-zinc-800/50 shrink-0 flex flex-col">
+          <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 shrink-0 flex flex-col">
             {/* Header skeleton */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50">
               <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse" />
@@ -473,7 +473,7 @@ export function ChatPage() {
       )}
 
       {/* Sidebar */}
-      <div className="w-[340px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
+      <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
 
         {/* Channels Panel */}
         <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'channels' ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -563,6 +563,12 @@ export function ChatPage() {
 
         <Channel EmptyStateIndicator={ChannelEmptyState}>
           <ChannelHeader
+            title={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? t('chat.topics_general', 'general') : undefined}
+            AvatarComponent={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? () => (
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-[#2a2640]">
+                <Hash className="w-6 h-6" />
+              </div>
+            ) : undefined}
             renderRight={renderHeaderRight}
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}

@@ -119,7 +119,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   return (
     <div className={itemClass} onClick={handleClick}>
       <div className="ermis-channel-list__item-avatar-wrapper">
-        <AvatarComponent image={image} name={name} size={40} disableLightbox className={avatarClassName} />
+        <AvatarComponent image={image} name={name} size={45} disableLightbox className={avatarClassName} />
         {isOnline !== undefined && (
           <span className={`ermis-channel-list__online-dot ermis-channel-list__online-dot--${isOnline ? 'online' : 'offline'}`} />
         )}
@@ -435,6 +435,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   fileMessageLabel,
   systemMessageTranslations,
   signalMessageTranslations,
+  showTopicPills = false,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatClient();
   const { ChannelListErrorIndicator } = useChatComponents();
@@ -693,6 +694,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 fileMessageLabel={fileMessageLabel}
                 systemMessageTranslations={systemMessageTranslations}
                 signalMessageTranslations={signalMessageTranslations}
+                showTopicPills={showTopicPills}
               />
             );
           }

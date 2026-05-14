@@ -4,18 +4,21 @@
 
 /* Container floats over the bottom of the message list */
 .ermis-typing-indicator {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 16px;
+  padding: 6px 16px;
   font-size: 12px;
   color: var(--ermis-text-secondary);
   overflow: hidden;
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: 0px;
+  left: 16px;
   background-color: var(--ermis-bg-primary);
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--ermis-border);
+  z-index: 20;
 }
 
 .ermis-typing-indicator__dots {

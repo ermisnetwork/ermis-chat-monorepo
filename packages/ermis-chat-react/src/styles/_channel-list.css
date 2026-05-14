@@ -4,10 +4,10 @@
 .ermis-channel-header {
   display: flex;
   align-items: center;
-  gap: var(--ermis-spacing-md);
+  gap: var(--ermis-spacing-sm);
   padding: var(--ermis-spacing-md) var(--ermis-spacing-lg);
   border-bottom: 1px solid var(--ermis-border);
-  background-color: var(--ermis-bg-secondary);
+  background-color: var(--ermis-bg-primary);
   font-family: var(--ermis-font-family);
 }
 
@@ -37,15 +37,15 @@
 }
 
 .ermis-channel-header__topic-avatar {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
   border-radius: var(--ermis-radius-md);
   background-color: var(--ermis-bg-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 24px;
   color: var(--ermis-text-secondary);
 }
 
@@ -132,7 +132,7 @@
   display: flex;
   align-items: center;
   gap: var(--ermis-spacing-md);
-  padding: var(--ermis-spacing-md) var(--ermis-spacing-lg);
+  padding: calc(var(--ermis-spacing-md) - 0.05rem) var(--ermis-spacing-lg);
   cursor: pointer;
   border-left: 2px solid transparent;
   transition: background-color var(--ermis-transition), border-color var(--ermis-transition);
@@ -196,7 +196,7 @@
 }
 
 .ermis-channel-list__item-name {
-  font-size: var(--ermis-font-size-sm);
+  font-size: calc(var(--ermis-font-size-sm) + 1px);
   font-weight: 500;
   color: var(--ermis-text-primary);
   white-space: nowrap;
@@ -214,7 +214,7 @@
 }
 
 .ermis-channel-list__item-last-message {
-  font-size: var(--ermis-font-size-xs);
+  font-size: calc(var(--ermis-font-size-sm));
   color: var(--ermis-text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -266,8 +266,7 @@
 }
 
 .ermis-channel-list__item-last-message-source {
-  color: var(--ermis-accent);
-  font-weight: 500;
+  color: var(--ermis-text-secondary);
 }
 
 .ermis-channel-list__item-actions-wrapper,
@@ -312,13 +311,12 @@
 
 /* --- Unread channel indicator --- */
 .ermis-channel-list__item--unread .ermis-channel-list__item-name {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--ermis-text-primary);
 }
 
 .ermis-channel-list__item--unread .ermis-channel-list__item-last-message {
   color: var(--ermis-text-secondary);
-  font-weight: 600;
 }
 
 .ermis-channel-list__unread-badge {

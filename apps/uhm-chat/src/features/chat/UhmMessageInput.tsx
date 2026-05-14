@@ -1,29 +1,29 @@
-import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useUIStore } from '@/store/useUIStore';
 import {
-  useChatClient,
-  useMessageSend,
-  useFileUpload,
-  useChannelCapabilities,
-  useBannedState,
-  useBlockedState,
-  usePendingState,
-  usePreviewState,
+  EditPreview,
   FilesPreview,
   MentionSuggestions,
-  ReplyPreview,
-  EditPreview,
   PreviewOverlay,
+  ReplyPreview,
   buildUserMap,
-  replaceMentionsForPreview,
   getMentionHtml,
-  useMentions,
+  replaceMentionsForPreview,
+  useBannedState,
+  useBlockedState,
+  useChannelCapabilities,
+  useChatClient,
   useDragAndDrop,
+  useFileUpload,
+  useMentions,
+  useMessageSend,
+  usePendingState,
+  usePreviewState,
 } from '@ermis-network/ermis-chat-react';
-import { Paperclip, SendHorizonal, Smile, Cat, Mic, Trash2 } from 'lucide-react';
+import { Cat, Mic, Plus, SendHorizonal, Smile, Trash2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MultiRecorder } from 'react-ts-audio-recorder';
 import pcmWorkletUrl from 'react-ts-audio-recorder/assets/pcm-worklet.js?url';
-import { useUIStore } from '@/store/useUIStore';
 
 import { UhmDragAndDropOverlay } from './UhmDragAndDropOverlay';
 
@@ -94,7 +94,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   const sendVoiceMessage = async () => {
     if (!recordedBlob || !activeChannel) return;
-    
+
     setIsUploadingVoice(true);
     try {
       const file = new File([recordedBlob], `Voice_Message.wav`, { type: 'audio/wav' });
@@ -289,7 +289,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         handleSend();
       }
     }
-  }, [mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, resetMentions, cleanupFiles, setFiles, setHasContent]);
+  }, [mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, resetMentions, cleanupFiles, setFiles, setHasContent, keywordError]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
@@ -326,7 +326,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     }
   }, [handleInput]);
 
-  const { openEmojiPicker, openStickerPicker, pickerAction } = useUIStore();
+  const { openEmojiPicker, openStickerPicker, closePickers, pickerAction } = useUIStore();
 
   useEffect(() => {
     if (activeChannel && editableRef.current) {
@@ -405,7 +405,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   return (
     <div className="relative z-50 shrink-0">
-      <div className="relative flex flex-col bg-white dark:bg-[#1a1828] transition-shadow border-t dark:border-zinc-800/50">
+      <div className="relative flex flex-col background-transparent transition-shadow">
 
         {quotedMessage && !editingMessage && (
           <div className="border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-black/20 p-2">
@@ -445,201 +445,218 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
           </div>
         )}
 
-        {(isRecording || recordedBlob || isUploadingVoice) ? (
-          <div className="flex flex-col">
-            <style>{`
-              @keyframes audio-wave {
-                0% { height: 20%; opacity: 0.7; }
-                50% { height: 100%; opacity: 1; }
-                100% { height: 20%; opacity: 0.7; }
-              }
-              .animate-wave {
-                animation: audio-wave 1s ease-in-out infinite;
-                height: 20%;
-              }
-            `}</style>
-            <div className="flex items-center justify-between w-full px-4 min-h-[44px] py-3 bg-zinc-50/80 dark:bg-black/20 border-t border-zinc-100 dark:border-zinc-800/50">
-              
-              {isRecording ? (
-                <>
-                  {/* Left side: Pulsing Mic + Timer */}
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-500 dark:bg-red-500/20 shadow-sm">
-                      <Mic className="w-4 h-4 animate-pulse" />
+        <div className="px-4 pb-3 pt-1">
+          <div className="relative flex items-end w-full pl-2 pr-1.5 py-1.5 bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 rounded-3xl min-h-[44px]">
+            {(isRecording || recordedBlob || isUploadingVoice) ? (
+              <div className="flex flex-1 items-center justify-between w-full h-[32px] mb-[1px]">
+                <style>{`
+                  @keyframes audio-wave {
+                    0% { height: 20%; opacity: 0.7; }
+                    50% { height: 100%; opacity: 1; }
+                    100% { height: 20%; opacity: 0.7; }
+                  }
+                  .animate-wave {
+                    animation: audio-wave 1s ease-in-out infinite;
+                    height: 20%;
+                  }
+                `}</style>
+
+                {isRecording ? (
+                  <>
+                    {/* Left side: Pulsing Mic + Timer */}
+                    <div className="flex items-center gap-2 pl-2">
+                      <div className="flex items-center justify-center w-7 h-7 rounded-full bg-red-100 text-red-500 dark:bg-red-500/20 shadow-sm shrink-0">
+                        <Mic className="w-3.5 h-3.5 animate-pulse" />
+                      </div>
+                      <span className="font-mono text-[14px] font-medium text-red-600 dark:text-red-400">
+                        {formatTime(recordingTime)}
+                      </span>
                     </div>
-                    <span className="font-mono text-sm font-medium text-red-600 dark:text-red-400">
-                      {formatTime(recordingTime)}
-                    </span>
-                  </div>
-                  
-                  {/* Middle: Audio Wave */}
-                  <div className="flex-1 flex justify-center items-center px-4">
-                    <div className="flex items-center gap-[3px] h-6 w-full max-w-[150px] justify-center">
-                      {Array.from({ length: 24 }).map((_, i) => (
-                        <div 
-                          key={i} 
-                          className="w-1 bg-red-400 dark:bg-red-500 rounded-full animate-wave" 
-                          style={{ 
-                            animationDelay: `${Math.random() * 0.5}s`,
-                            animationDuration: `${0.8 + Math.random() * 0.4}s`
-                          }} 
-                        />
-                      ))}
+
+                    {/* Middle: Audio Wave */}
+                    <div className="flex-1 flex justify-center items-center px-4">
+                      <div className="flex items-center gap-[3px] h-5 w-full max-w-[150px] justify-center">
+                        {Array.from({ length: 24 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="w-[3px] bg-red-400 dark:bg-red-500 rounded-full animate-wave"
+                            style={{
+                              animationDelay: `${Math.random() * 0.5}s`,
+                              animationDuration: `${0.8 + Math.random() * 0.4}s`
+                            }}
+                          />
+                        ))}
+                      </div>
                     </div>
+                  </>
+                ) : recordedUrl ? (
+                  <div className="flex-1 flex items-center gap-3 pl-2 pr-4">
+                    <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary shadow-sm shrink-0">
+                      <Mic className="w-3.5 h-3.5" />
+                    </div>
+                    <audio src={recordedUrl} controls className="h-7 w-full outline-none" />
                   </div>
-                </>
-              ) : recordedUrl ? (
-                <div className="flex-1 flex items-center gap-3 pr-4">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary shadow-sm shrink-0">
-                    <Mic className="w-4 h-4" />
-                  </div>
-                  <audio src={recordedUrl} controls className="h-8 w-full outline-none" />
+                ) : null}
+
+                {/* Right side: Cancel & Send/Stop */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={cancelRecording}
+                    disabled={isUploadingVoice}
+                    className="inline-flex items-center justify-center w-8 h-8 text-zinc-500 hover:text-red-500 hover:bg-red-100 rounded-full dark:hover:bg-red-900/30 transition-colors disabled:opacity-50"
+                    title={t('chat.cancelRecording', 'Cancel')}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={isRecording ? toggleRecording : sendVoiceMessage}
+                    disabled={isUploadingVoice}
+                    className="inline-flex items-center justify-center w-8 h-8 text-white bg-primary rounded-full hover:bg-primary/90 transition-transform active:scale-95 disabled:opacity-50 shadow-sm"
+                    title={isRecording ? t('chat.stopRecording', 'Stop') : t('chat.sendVoice', 'Send')}
+                  >
+                    {isUploadingVoice ? (
+                      <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : isRecording ? (
+                      <span className="w-2.5 h-2.5 bg-white rounded-sm" />
+                    ) : (
+                      <SendHorizonal className="w-4 h-4 ml-0.5" />
+                    )}
+                  </button>
                 </div>
-              ) : null}
-
-              {/* Right side: Cancel & Send/Stop */}
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={cancelRecording}
-                  disabled={isUploadingVoice}
-                  className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-100 rounded-full dark:hover:bg-red-900/30 transition-colors disabled:opacity-50"
-                  title={t('chat.cancelRecording', 'Cancel')}
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
-                
-                <button
-                  type="button"
-                  onClick={isRecording ? toggleRecording : sendVoiceMessage}
-                  disabled={isUploadingVoice}
-                  className="flex items-center justify-center w-9 h-9 text-white bg-primary rounded-full hover:bg-primary/90 transition-transform active:scale-95 disabled:opacity-50 shadow-sm"
-                  title={isRecording ? t('chat.stopRecording', 'Stop') : t('chat.sendVoice', 'Send')}
-                >
-                  {isUploadingVoice ? (
-                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : isRecording ? (
-                     <span className="w-3 h-3 bg-white rounded-sm" /> /* Stop icon */
-                  ) : (
-                     <SendHorizonal className="w-[18px] h-[18px] ml-0.5" />
-                  )}
-                </button>
               </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Main input area */}
-            <div className="relative flex min-h-[44px]">
-              {showSuggestions && (
-                <MentionSuggestions
-                  members={filteredMembers}
-                  highlightIndex={highlightIndex}
-                  onSelect={selectMention}
-                />
-              )}
+            ) : (
+              <>
+                {showSuggestions && (
+                  <MentionSuggestions
+                    members={filteredMembers}
+                    highlightIndex={highlightIndex}
+                    onSelect={selectMention}
+                  />
+                )}
 
-              <div
-                ref={editableRef}
-                className="w-full flex-1 max-h-[150px] overflow-y-auto px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-zinc-400 dark:empty:before:text-zinc-500 cursor-text break-words leading-relaxed"
-                contentEditable={!disabledInput}
-                role="textbox"
-                data-placeholder={t('chat.placeholder', 'Type a message...')}
-                onInput={handleInput}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                suppressContentEditableWarning
-              />
-            </div>
+                {/* Left Actions */}
+                <div className="flex items-center shrink-0 mb-[2px] gap-1">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      handleFilesSelected(e.target.files);
+                      e.target.value = '';
+                    }}
+                    disabled={disabledInput || !!editingMessage}
+                  />
 
-            {/* Action Bar */}
-            <div className="flex items-center justify-between px-2 pb-2">
-              <div className="flex items-center gap-1">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    handleFilesSelected(e.target.files);
-                    e.target.value = '';
-                  }}
-                  disabled={disabledInput || !!editingMessage}
-                />
+                  <button
+                    type="button"
+                    disabled={disabledInput || !!editingMessage}
+                    onClick={handleAttachClick}
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={t('chat.attachFile', 'Attach file')}
+                  >
+                    <Plus className="w-5 h-5" />
+                  </button>
 
-                <button
-                  type="button"
-                  disabled={disabledInput || !!editingMessage}
-                  onClick={handleAttachClick}
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-full text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={t('chat.attachFile', 'Attach file')}
-                >
-                  <Paperclip className="w-[18px] h-[18px]" />
-                </button>
+                  <button
+                    type="button"
+                    disabled={disabledInput || !!editingMessage}
+                    className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${pickerAction.type === 'emoji'
+                      ? 'text-primary bg-primary/10'
+                      : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700'
+                      }`}
+                    onClick={(e) => {
+                      if (pickerAction.type === 'emoji') {
+                        closePickers();
+                      } else {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        openEmojiPicker(rect, handleEmojiSelect);
+                      }
+                    }}
+                    title={t('chat.addEmoji', 'Add Emoji')}
+                  >
+                    <Smile className="w-5 h-5" />
+                  </button>
 
-                <button
-                  type="button"
-                  disabled={disabledInput || !!editingMessage}
-                  className={`picker-trigger inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${pickerAction.type === 'emoji'
-                    ? 'text-primary bg-primary/10'
-                    : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
-                    }`}
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    openEmojiPicker(rect, handleEmojiSelect);
-                  }}
-                  title={t('chat.addEmoji', 'Add Emoji')}
-                >
-                  <Smile className="w-5 h-5" />
-                </button>
-
-                <button
-                  type="button"
-                  disabled={disabledInput || !!editingMessage || !!quotedMessage}
-                  className={`picker-trigger inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${pickerAction.type === 'sticker'
-                    ? 'text-primary bg-primary/10'
-                    : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
-                    }`}
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    openStickerPicker(rect, (url) => {
-                      if (activeChannel) {
-                        activeChannel.sendMessage({
-                          text: '',
-                          attachments: [],
-                          sticker_url: url,
+                  <button
+                    type="button"
+                    disabled={disabledInput || !!editingMessage || !!quotedMessage}
+                    className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${pickerAction.type === 'sticker'
+                      ? 'text-primary bg-primary/10'
+                      : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700'
+                      }`}
+                    onClick={(e) => {
+                      if (pickerAction.type === 'sticker') {
+                        closePickers();
+                      } else {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        openStickerPicker(rect, (url) => {
+                          if (activeChannel) {
+                            activeChannel.sendMessage({
+                              text: '',
+                              attachments: [],
+                              sticker_url: url,
+                            });
+                          }
                         });
                       }
-                    });
-                  }}
-                  title={t('chat.addSticker', 'Add Sticker')}
-                >
-                  <Cat className="w-[18px] h-[18px]" />
-                </button>
+                    }}
+                    title={t('chat.addSticker', 'Add Sticker')}
+                  >
+                    <Cat className="w-5 h-5" />
+                  </button>
+                </div>
 
-                <button
-                  type="button"
-                  disabled={isUploadingVoice || disabledInput || !!editingMessage || !!quotedMessage}
-                  className="inline-flex items-center justify-center h-9 px-2.5 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800"
-                  onClick={toggleRecording}
-                  title={t('chat.recordVoice', 'Record Voice')}
-                >
-                  <Mic className="w-[18px] h-[18px]" />
-                </button>
-              </div>
+                {/* Main input area */}
+                <div className="relative flex-1 flex flex-col justify-center">
+                  {!hasContent && (
+                    <div className="absolute left-2 text-[15px] text-zinc-500 dark:text-zinc-400 pointer-events-none select-none">
+                      {t('chat.placeholder', 'Type a message...')}
+                    </div>
+                  )}
+                  <div
+                    ref={editableRef}
+                    className="flex-1 w-full max-h-[150px] overflow-y-auto px-2 py-1.5 text-[15px] text-zinc-900 dark:text-zinc-100 outline-none cursor-text break-words whitespace-pre-wrap leading-relaxed"
+                    contentEditable={!disabledInput}
+                    role="textbox"
+                    onInput={handleInput}
+                    onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
+                    suppressContentEditableWarning
+                  />
+                </div>
 
-              <button
-                type="button"
-                disabled={!hasContent || disabledInput || !!keywordError}
-                onClick={handleSend}
-                className="inline-flex items-center justify-center w-9 h-9 rounded-full text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 transition-all shadow-sm active:scale-95 disabled:scale-100"
-                title={t('chat.send', 'Send')}
-              >
-                <SendHorizonal className="w-[18px] h-[18px] ml-0.5" />
-              </button>
-            </div>
-          </>
-        )}
+                {/* Right Actions */}
+                <div className="flex items-center shrink-0 mb-[2px] ml-1">
+                  {hasContent ? (
+                    <button
+                      type="button"
+                      disabled={!hasContent || disabledInput || !!keywordError}
+                      onClick={handleSend}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-full text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 transition-all shadow-sm active:scale-95 disabled:scale-100"
+                      title={t('chat.send', 'Send')}
+                    >
+                      <SendHorizonal className="w-[18px] h-[18px] ml-0.5" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isUploadingVoice || disabledInput || !!editingMessage || !!quotedMessage}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700"
+                      onClick={toggleRecording}
+                      title={t('chat.recordVoice', 'Record Voice')}
+                    >
+                      <Mic className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Drag & Drop Overlay */}

@@ -154,8 +154,8 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
         {!isOwnMessage && (
           <div className="ermis-message-list__item-avatar">
             {isFirstInGroup
-              ? <AvatarComponent image={userAvatar} name={userName} size={28} />
-              : <div style={{ width: 28 }} />
+              ? <AvatarComponent image={userAvatar} name={userName} size={36} />
+              : <div style={{ width: 36 }} />
             }
           </div>
         )}
@@ -188,14 +188,14 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
       {!isOwnMessage && (
         <div className="ermis-message-list__item-avatar">
           {isFirstInGroup
-            ? <AvatarComponent image={userAvatar} name={userName} size={28} />
-            : <div style={{ width: 28 }} />
+            ? <AvatarComponent image={userAvatar} name={userName} size={36} />
+            : <div style={{ width: 36 }} />
           }
         </div>
       )}
       <div className={contentClass}>
         {!isOwnMessage && isFirstInGroup && (
-          <span 
+          <span
             className={`ermis-message-list__item-user${onUserNameClick ? ' ermis-message-list__item-user--clickable' : ''}`}
             onClick={onUserNameClick ? (e) => { e.stopPropagation(); const uid = message.user?.id || message.user_id; if (uid) onUserNameClick(uid); } : undefined}
           >{userName}</span>

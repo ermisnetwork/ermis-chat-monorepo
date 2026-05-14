@@ -57,6 +57,7 @@ type FlatTopicGroupItemProps = {
   fileMessageLabel?: React.ReactNode;
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
+  showTopicPills?: boolean;
 };
 
 /* ----------------------------------------------------------
@@ -87,6 +88,7 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   fileMessageLabel,
   systemMessageTranslations,
   signalMessageTranslations,
+  showTopicPills = false,
 }) => {
   const { client } = useChatClient();
   const currentUserId = client.userID;
@@ -167,7 +169,7 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   return (
     <div className={itemClass} onClick={handleClick}>
       <div className="ermis-channel-list__item-avatar-wrapper">
-        <AvatarComponent image={image} name={name} size={40} disableLightbox className="ermis-avatar-wrapper--group" />
+        <AvatarComponent image={image} name={name} size={45} disableLightbox className="ermis-avatar-wrapper--group" />
       </div>
       <div className="ermis-channel-list__item-content">
         {/* Row 1: name + pinned + timestamp */}
@@ -207,20 +209,20 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
         </div>
         {/* Row 3: topic pills — always visible (at least general pill) */}
         <div className="ermis-channel-list__item-topics-row">
-          <div className="ermis-channel-list__topic-pills">
-            {/* General pill — always first */}
-            <span className="ermis-channel-list__topic-pill">
-              <span className="ermis-channel-list__topic-pill-avatar">#</span>
-              <span className="ermis-channel-list__topic-pill-name">{generalTopicLabel}</span>
-            </span>
-            {/* Sub-topic pills */}
-            {visibleTopics.map((topic: Channel) => (
-              <Pill key={topic.cid} topic={topic} />
-            ))}
-            {hasOverflow && (
-              <span className="ermis-channel-list__topic-overflow">{moreTopicsLabel}</span>
-            )}
-          </div>
+          {showTopicPills && (
+            <div className="ermis-channel-list__topic-pills">
+              <span className="ermis-channel-list__topic-pill">
+                <span className="ermis-channel-list__topic-pill-avatar">#</span>
+                <span className="ermis-channel-list__topic-pill-name">{generalTopicLabel}</span>
+              </span>
+              {visibleTopics.map((topic: Channel) => (
+                <Pill key={topic.cid} topic={topic} />
+              ))}
+              {hasOverflow && (
+                <span className="ermis-channel-list__topic-overflow">{moreTopicsLabel}</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="ermis-channel-list__item-actions-wrapper">

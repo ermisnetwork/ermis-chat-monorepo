@@ -45,8 +45,16 @@
   right: 0;
 }
 
-.ermis-message-list__bubble-wrapper:hover {
-  z-index: 100; /* Ensure the hovered wrapper is above adjacent messages */
+/* Elevate the bubble wrapper */
+.ermis-message-list__bubble-wrapper:hover,
+.ermis-message-list__bubble-wrapper:has(.ermis-message-quick-reactions--expanded) {
+  z-index: 100;
+}
+
+/* Also elevate ALL ancestors in the virtua list to defeat stacking contexts */
+.ermis-message-list__vlist *:has(.ermis-message-quick-reactions--expanded),
+.ermis-message-list__vlist *:has(.ermis-message-quick-reactions:hover) {
+  z-index: 100 !important;
 }
 
 .ermis-message-list__bubble-wrapper:hover .ermis-message-quick-reactions,
@@ -60,12 +68,10 @@
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
-  transition: none !important; /* Let framer-motion handle transitions */
-  will-change: width, height, transform;
 }
 
 .ermis-message-quick-reactions--expanded::before {
-  display: none; /* Hide custom background when expanded, framer-motion takes over */
+  /* Keep background visible when expanded */
 }
 
 .ermis-message-list__bubble-wrapper:hover .ermis-message-quick-reactions--disabled {

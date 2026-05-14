@@ -87,7 +87,7 @@ export function SidebarHeader({
   }
 
   return (
-    <div className="flex items-center gap-2 p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md sticky top-0 z-10 shrink-0">
+    <div className="flex items-center gap-2 p-4 border-b background-primary backdrop-blur-md sticky top-0 z-10 shrink-0">
 
       {/* Left button: Back (search mode) or Hamburger menu (normal) */}
       {isSearchMode ? (
@@ -116,7 +116,7 @@ export function SidebarHeader({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuItem 
+            <DropdownMenuItem
               className="flex items-center gap-3 cursor-pointer transition-colors"
               onClick={() => setIsProfileModalOpen(true)}
             >
@@ -129,7 +129,7 @@ export function SidebarHeader({
                 <span className="font-medium text-sm truncate">
                   {user?.name || user?.id || t('chat.menu_profile_anonymous', 'Anonymous')}
                 </span>
-                <span 
+                <span
                   className="text-[10px] text-zinc-500 truncate"
                   title={user?.id}
                 >
@@ -232,9 +232,9 @@ export function SidebarHeader({
       )}
 
       {/* Profile Modal */}
-      <ProfileModal 
-        isOpen={isProfileModalOpen} 
-        onClose={() => setIsProfileModalOpen(false)} 
+      <ProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
       />
     </div>
   )

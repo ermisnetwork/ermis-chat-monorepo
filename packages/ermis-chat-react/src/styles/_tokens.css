@@ -17,8 +17,8 @@
   --ermis-accent: #6366f1;
   --ermis-accent-hover: #818cf8;
   --ermis-text-primary: #e5e7eb;
-  --ermis-text-secondary: #9ca3af;
-  --ermis-text-muted: #6b7280;
+  --ermis-text-secondary: #abb4c6;
+  --ermis-text-muted: #abb4c6;
 
   /* Semantic Colors */
   --ermis-color-danger: #ef4444;
@@ -42,7 +42,7 @@
   --ermis-quote-own-text: rgba(255, 255, 255, 0.75);
 
   /* Typography */
-  --ermis-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
+  --ermis-font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
     'Helvetica Neue', sans-serif;
   --ermis-font-size-xs: 0.75rem;
   --ermis-font-size-sm: 0.875rem;
@@ -96,7 +96,7 @@
   --ermis-accent-hover: #0d00ff;
   --ermis-text-primary: #111827;
   --ermis-text-secondary: #6b7280;
-  --ermis-text-muted: #9ca3af;
+  --ermis-text-muted: #545f71;
 
   /* Semantic Colors */
   --ermis-color-danger: #ef4444;

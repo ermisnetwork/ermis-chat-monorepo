@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { EmojiPicker } from 'frimousse';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { useUIStore } from '@/store/useUIStore';
 
@@ -54,29 +54,49 @@ export const GlobalPickers: React.FC = () => {
     return () => window.removeEventListener('keydown', handleEsc);
   }, [closePickers]);
 
+  const [savedRect, setSavedRect] = React.useState<DOMRect | null>(null);
+  const lastType = useRef<'emoji' | 'sticker'>('emoji');
+
+  useEffect(() => {
+    if (pickerAction.anchorRect) {
+      setSavedRect(pickerAction.anchorRect);
+    }
+    if (pickerAction.type) {
+      lastType.current = pickerAction.type;
+    }
+  }, [pickerAction.anchorRect, pickerAction.type]);
+
+  const isOpen = !!pickerAction.type;
+  const activeRect = pickerAction.anchorRect || savedRect;
+  const currentType = pickerAction.type || lastType.current;
+  const pickerHeight = currentType === 'sticker' ? 400 : 368;
+
   const style: React.CSSProperties = {
     position: 'fixed',
     zIndex: 1000,
-    // Calculate position based on anchorRect
-    top: pickerAction.anchorRect ? Math.min(window.innerHeight - 450, Math.max(20, pickerAction.anchorRect.top - 420)) : 0,
-    left: pickerAction.anchorRect ? Math.min(window.innerWidth - 370, Math.max(20, pickerAction.anchorRect.left - 20)) : 0,
+    top: activeRect ? Math.max(20, activeRect.top - pickerHeight - 16) : -1000,
+    left: activeRect ? Math.min(window.innerWidth - 370, Math.max(20, activeRect.left - 20)) : -1000,
+    pointerEvents: isOpen ? 'auto' : 'none',
+    transformOrigin: 'bottom left',
+    willChange: 'transform, opacity'
   };
 
   return (
-    <AnimatePresence>
-      {pickerAction.type && (
+    <>
         <motion.div 
           ref={containerRef} 
           style={style} 
-          layoutId={pickerAction.layoutId}
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ type: "spring", stiffness: 350, damping: 25 }}
+          initial={{ opacity: 0, scale: 0.95, y: 10 }}
+          animate={{ 
+            opacity: isOpen ? 1 : 0, 
+            scale: isOpen ? 1 : 0.95,
+            y: isOpen ? 0 : 10
+          }}
+          transition={{ duration: 0.15, ease: "easeOut" }}
           className="shadow-2xl rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#1a1828]"
         >
           {/* Emoji Picker */}
-          <div style={{ display: pickerAction.type === 'emoji' ? 'block' : 'none' }}>
+          <div style={{ display: currentType === 'emoji' ? 'block' : 'none' }}>
             <EmojiPicker.Root 
               className="isolate flex h-[368px] w-[350px] flex-col bg-white dark:bg-[#1a1828]"
               locale={i18n.language === 'vi' ? 'vi' : 'en'}
@@ -84,7 +104,6 @@ export const GlobalPickers: React.FC = () => {
                 if (pickerAction.onSelect) {
                   pickerAction.onSelect(emoji.emoji);
                 }
-                closePickers();
               }}
             >
               <EmojiPicker.Search className="z-10 mx-3 mt-3 appearance-none rounded-xl bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-primary/50" />
@@ -126,7 +145,7 @@ export const GlobalPickers: React.FC = () => {
           </div>
 
           {/* Sticker Picker */}
-          <div style={{ display: pickerAction.type === 'sticker' ? 'block' : 'none', width: '350px', height: '400px' }}>
+          <div style={{ display: currentType === 'sticker' ? 'block' : 'none', width: '350px', height: '400px' }}>
             <iframe
               src={stickerIframeUrl}
               className="w-full h-full border-none bg-white dark:bg-[#1a1828]"
@@ -135,7 +154,6 @@ export const GlobalPickers: React.FC = () => {
             />
           </div>
         </motion.div>
-      )}
-    </AnimatePresence>
+    </>
   );
 };

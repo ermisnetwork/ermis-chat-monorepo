@@ -273,11 +273,13 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     }
   }, [activeChannel, setActiveChannel]);
 
+  const elementsCountRef = useRef(0);
+
   const scrollToBottom = useCallback((smooth = false, attempts = 0) => {
     const handle = vlistRef.current;
     if (!handle) return;
 
-    const count = messagesRef.current.length;
+    const count = elementsCountRef.current;
     if (count === 0) return;
 
     // Ensure virtua has measured the viewport via ResizeObserver.
@@ -383,7 +385,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
   /* ---------- Memoized message elements ---------- */
   const messageElements = useMemo(() => {
-    return messages.map((message, index) => {
+    const elements: React.ReactNode[] = [];
+
+    messages.forEach((message, index) => {
       const isOwnMessage =
         message.user_id === currentUserId || message.user?.id === currentUserId;
       const messageType = (message.type || 'regular') as MessageLabel;
@@ -392,23 +396,27 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       const prevMsg = index > 0 ? messages[index - 1] : null;
       const showDateSeparator =
         !prevMsg || getDateKey(message.created_at) !== getDateKey(prevMsg.created_at);
-      const dateSeparator = showDateSeparator ? (
-        <DateSeparatorComponent label={formatDateLabel(message.created_at, dateLocale)} />
-      ) : null;
-
-      if (renderMessage) {
-        return (
-          <div key={message.id || `msg-${index}`}>
-            {dateSeparator}
-            <div>{renderMessage(message, isOwnMessage)}</div>
+      
+      if (showDateSeparator) {
+        elements.push(
+          <div key={`date-${getDateKey(message.created_at)}`}>
+            <DateSeparatorComponent label={formatDateLabel(message.created_at, dateLocale)} />
           </div>
         );
       }
 
-      if (messageType === 'system') {
-        return (
+      if (renderMessage) {
+        elements.push(
           <div key={message.id || `msg-${index}`}>
-            {dateSeparator}
+            <div>{renderMessage(message, isOwnMessage)}</div>
+          </div>
+        );
+        return;
+      }
+
+      if (messageType === 'system') {
+        elements.push(
+          <div key={message.id || `msg-${index}`}>
             <SystemMessageItemComponent
               message={message}
               isOwnMessage={isOwnMessage}
@@ -417,6 +425,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             />
           </div>
         );
+        return;
       }
 
       // Message grouping
@@ -451,9 +460,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
       const MessageRenderer = renderers[messageType] || renderers.regular;
 
-      return (
+      elements.push(
         <div key={message.id || `msg-${index}`}>
-          {dateSeparator}
           <MessageItemComponent
             message={message}
             isOwnMessage={isOwnMessage}
@@ -489,6 +497,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         </div>
       );
     });
+
+    elementsCountRef.current = elements.length;
+    return elements;
   }, [
     messages,
     currentUserId,

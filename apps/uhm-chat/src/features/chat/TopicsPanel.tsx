@@ -30,8 +30,8 @@ interface TopicsPanelProps {
 
 /** Custom general avatar using lucide Hash icon + TailwindCSS */
 const GeneralAvatar = () => (
-  <div className="w-6 h-6 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-[#2a2640]">
-    <Hash className="w-3.5 h-3.5" />
+  <div className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-[#2a2640]">
+    <Hash className="w-6 h-6" />
   </div>
 )
 
@@ -42,7 +42,7 @@ const TopicEmojiAvatar = ({ image }: { image?: string | null }) => {
     emoji = image.replace('emoji://', '')
   }
   return (
-    <div className="w-6 h-6 rounded-full flex items-center justify-center text-sm bg-zinc-100 dark:bg-[#2a2640]">
+    <div className="w-8 h-8 text-[24px] rounded-full flex items-center justify-center">
       {emoji}
     </div>
   )
@@ -100,10 +100,10 @@ export function TopicsPanel({
 
         {/* Channel avatar + info */}
         <div className="flex items-center gap-2.5 flex-1 min-w-0">
-          <Avatar image={channelImage} name={channelName} size={32} disableLightbox />
+          <Avatar image={channelImage} name={channelName} size={44} disableLightbox />
           <div className="flex flex-col min-w-0">
-            <h2 className="font-semibold text-sm truncate leading-tight">{channelName}</h2>
-            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight">
+            <h2 className="font-semibold truncate leading-tight">{channelName}</h2>
+            <span className="text-[14px] text-zinc-500 dark:text-zinc-400 leading-tight">
               {t('chat.topics_count', '{{count}} topics', { count: topics.length + 1 })}
             </span>
           </div>

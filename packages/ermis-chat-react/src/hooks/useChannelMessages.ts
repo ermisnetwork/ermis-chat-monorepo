@@ -47,14 +47,20 @@ export function useChannelMessages({
       if (smooth) {
         // Trigger smooth scroll exactly once, otherwise browsers will
         // cancel the smooth animation if called multiple times in a row
-        setTimeout(() => scrollToBottom(true), 100);
+        setTimeout(() => {
+          if (!isAtBottomRef.current) return;
+          scrollToBottom(true);
+        }, 100);
       } else {
         SCROLL_DELAYS.forEach((delay) => {
-          setTimeout(() => scrollToBottom(false), delay);
+          setTimeout(() => {
+            if (!isAtBottomRef.current) return;
+            scrollToBottom(false);
+          }, delay);
         });
       }
     },
-    [scrollToBottom],
+    [scrollToBottom, isAtBottomRef],
   );
 
   useEffect(() => {
