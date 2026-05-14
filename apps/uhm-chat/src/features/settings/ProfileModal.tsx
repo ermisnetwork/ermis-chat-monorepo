@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Camera, Loader2 } from 'lucide-react';
+import { Camera, Loader2, Mail, Phone, Hash, Copy } from 'lucide-react';
 import { useChatClient, useChatUser, Avatar } from '@ermis-network/ermis-chat-react';
 import { toast } from 'sonner';
 import { UhmModal } from '@/components/custom/UhmModal';
@@ -25,6 +25,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCopy = (text: string) => {
+    if (text) {
+      navigator.clipboard.writeText(text);
+      toast.success(t('message_actions.copy_success', 'Copied to clipboard'));
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -197,6 +204,78 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             </p>
           )}
         </div>
+
+        {/* Contact Info Section — read-only email/phone/id */}
+        {(user?.email || user?.phone || user?.id) && (
+          <div className="w-full space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              {t('profile.contact_info_label')}
+            </span>
+            {user?.id && (
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-50 dark:bg-[#1a1828] border border-zinc-200/60 dark:border-zinc-800/60 group">
+                <Hash className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0" />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-tight">
+                    {t('profile.user_id_label', 'User ID')}
+                  </span>
+                  <span className="text-xs text-zinc-700 dark:text-zinc-200 break-all font-mono leading-relaxed mt-0.5">
+                    {user.id}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(user.id)}
+                  className="p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  title={t('message_actions.copy', 'Copy')}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            {user?.email && (
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-50 dark:bg-[#1a1828] border border-zinc-200/60 dark:border-zinc-800/60 group">
+                <Mail className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0" />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-tight">
+                    {t('profile.email_label')}
+                  </span>
+                  <span className="text-sm text-zinc-700 dark:text-zinc-200 truncate">
+                    {user.email}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(user.email!)}
+                  className="p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  title={t('message_actions.copy', 'Copy')}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            {user?.phone && (
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-50 dark:bg-[#1a1828] border border-zinc-200/60 dark:border-zinc-800/60 group">
+                <Phone className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0" />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-tight">
+                    {t('profile.phone_label')}
+                  </span>
+                  <span className="text-sm text-zinc-700 dark:text-zinc-200 truncate">
+                    {user.phone}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(user.phone!)}
+                  className="p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  title={t('message_actions.copy', 'Copy')}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex items-center gap-3 w-full pt-4">

@@ -131,9 +131,9 @@ export function SidebarHeader({
                 </span>
                 <span
                   className="text-[10px] text-zinc-500 truncate"
-                  title={user?.id}
+                  title={user?.email || user?.phone || user?.id}
                 >
-                  {user?.id}
+                  {user?.email || user?.phone || user?.id}
                 </span>
               </div>
             </DropdownMenuItem>

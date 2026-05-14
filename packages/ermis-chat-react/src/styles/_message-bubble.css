@@ -213,20 +213,18 @@
 .ermis-message-bubble--own .ermis-attachment__link-url,
 .ermis-message-bubble--own .ermis-attachment__link-description,
 .ermis-message-bubble--own .ermis-attachment__voice-duration,
-.ermis-message-bubble--own .ermis-message-list__forwarded-indicator,
-.ermis-message-bubble--own .ermis-attachment--file {
+.ermis-message-bubble--own .ermis-message-list__forwarded-indicator {
   color: var(--ermis-bubble-own-text);
   opacity: 0.8;
 }
 
 .ermis-message-bubble--own .ermis-attachment--link-preview {
-  border-color: var(--ermis-bubble-own-text);
-  opacity: 0.3;
+  border-color: color-mix(in srgb, var(--ermis-bubble-own-text) 30%, transparent);
 }
 
 .ermis-message-bubble--own .ermis-attachment--file {
-  background-color: var(--ermis-bubble-own-text);
-  opacity: 0.1;
+  background-color: color-mix(in srgb, var(--ermis-bubble-own-text) 10%, transparent);
+  color: var(--ermis-bubble-own-text);
 }
 
 .ermis-message-bubble--other {
@@ -636,9 +634,8 @@
 }
 
 .ermis-message-bubble--own .ermis-attachment__file-icon {
-  background: var(--ermis-bubble-own-text);
-  opacity: 0.2;
-  color: inherit;
+  background: color-mix(in srgb, var(--ermis-bubble-own-text) 20%, transparent);
+  color: var(--ermis-bubble-own-text);
 }
 
 .ermis-message-bubble--own .ermis-attachment__file-ext {
@@ -652,8 +649,7 @@
 }
 
 .ermis-message-bubble--own .ermis-attachment__file-download:hover {
-  background-color: var(--ermis-bubble-own-text);
-  opacity: 0.15;
+  background-color: color-mix(in srgb, var(--ermis-bubble-own-text) 15%, transparent);
   color: inherit;
 }
 

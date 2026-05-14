@@ -115,7 +115,11 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   const name = channel.data?.name || channel.cid;
   const image = channel.data?.image as string | undefined;
   const isPinned = channel.data?.is_pinned === true;
-  const showUnread = hasUnread && !isActive;
+  // For topic groups, always show the unread badge if there are unreads.
+  // Unlike normal channels, isActive only means the user is viewing ONE topic,
+  // not that they've read ALL topics. The aggregatedUnreadCount already correctly
+  // reflects only the truly unread topics.
+  const showUnread = hasUnread;
 
   // Latest message data from the aggregated preview
   const lastMessageText = latestMessagePreview?.text || '';
