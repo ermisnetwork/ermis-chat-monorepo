@@ -208,6 +208,15 @@ export function ChatPage() {
     setActivePanel('topics')
     // Always select the parent channel (general topic) when drilling down
     setActiveChannel(channel)
+    // Mark the parent channel as read since its messages are now visible (general topic)
+    const ms = channel.state?.membership
+    const chState = channel.state as unknown as Record<string, unknown> | undefined
+    const isBanned = Boolean(ms?.banned)
+    const isPending = isPendingMember(ms?.channel_role as string)
+    if (!isBanned && !isPending && (chState?.unreadCount as number) > 0) {
+      channel.markRead().catch(() => { })
+      if (chState) chState.unreadCount = 0
+    }
   }, [setActiveChannel])
 
   const handleBackFromTopics = useCallback(() => {
@@ -246,14 +255,18 @@ export function ChatPage() {
     }, layoutId);
   }, [activeChannel, openEmojiPicker]);
 
-  const handleSendMessageFromProfile = useCallback(async (userId: string) => {
+  const handleSendMessageFromProfile = useCallback(async (userId: string, existingChannel?: ChannelType) => {
     if (!client || !client.userID) return;
     try {
-      const dmChannel = client.channel('messaging', {
-        members: [client.userID, userId]
-      });
-      await dmChannel.watch();
-      setActiveChannel(dmChannel);
+      if (existingChannel) {
+        setActiveChannel(existingChannel);
+      } else {
+        const dmChannel = client.channel('messaging', {
+          members: [client.userID, userId]
+        });
+        await dmChannel.watch();
+        setActiveChannel(dmChannel);
+      }
       // Reset panels to channels view
       setActivePanel('channels');
       setDrillDownChannel(null);
@@ -405,6 +418,10 @@ export function ChatPage() {
 
   // Show full-page loading when restoring a channel from URL (prevents empty/welcome flash)
   const isRestoringFromUrl = !hasAttemptedRestore && !!searchParams.get('channel')
+
+  const CustomMemberItem = useCallback((props: any) => (
+    <UhmMemberItem {...props} onUserClick={setProfileUserId} />
+  ), []);
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
@@ -641,7 +658,7 @@ export function ChatPage() {
               AddMemberButtonComponent={UhmAddMemberButton}
               AddMemberModalComponent={UhmAddMemberModal}
               addMemberButtonLabel={t('actions.add_member')}
-              MemberItemComponent={UhmMemberItem}
+              MemberItemComponent={CustomMemberItem}
               EmptyStateComponent={UhmTabEmptyState}
               LoadingComponent={UhmTabLoadingState}
               // MediaItemComponent={UhmMediaItem}

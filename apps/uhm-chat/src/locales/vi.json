@@ -268,7 +268,12 @@
     "error": "Cập nhật thất bại",
     "error_name_short": "Tên quá ngắn (tối thiểu 2 ký tự)",
     "error_name_long": "Tên quá dài (tối đa 50 ký tự)",
-    "error_invalid_name": "Tên chứa ký tự không hợp lệ"
+    "error_invalid_name": "Tên chứa ký tự không hợp lệ",
+    "contact_info_label": "Thông tin liên hệ",
+    "user_id_label": "User ID",
+    "email_label": "Email",
+    "phone_label": "Điện thoại",
+    "open_chat": "Mở đoạn chat"
   },
   "overlays": {
     "bannedTitle": "Bạn đã bị cấm",

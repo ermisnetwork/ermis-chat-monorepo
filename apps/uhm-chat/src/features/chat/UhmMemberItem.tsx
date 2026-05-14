@@ -5,14 +5,19 @@ import { CHANNEL_ROLES } from '@ermis-network/ermis-chat-react';
 import { MoreVertical, Shield, UserCheck, ShieldAlert, ShieldPlus, ShieldMinus, UserX, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-export const UhmMemberItem: React.FC<ChannelInfoMemberItemProps> = React.memo(({
+type UhmMemberItemProps = ChannelInfoMemberItemProps & {
+  onUserClick?: (userId: string) => void;
+};
+
+export const UhmMemberItem: React.FC<UhmMemberItemProps> = React.memo(({
   member, AvatarComponent,
   onRemove, canRemove,
   onBan, canBan,
   onUnban, canUnban,
   onPromote, canPromote,
   onDemote, canDemote,
-  roleLabels
+  roleLabels,
+  onUserClick
 }) => {
   const { t } = useTranslation();
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
@@ -33,7 +38,12 @@ export const UhmMemberItem: React.FC<ChannelInfoMemberItemProps> = React.memo(({
           t('roles.member'));
 
   return (
-    <div className={`flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors group ${isPending ? 'opacity-70' : ''}`}>
+    <div 
+      className={`flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors group ${isPending ? 'opacity-70' : ''} ${onUserClick ? 'cursor-pointer' : ''}`}
+      onClick={() => {
+        if (onUserClick) onUserClick(member.user?.id || member.user_id);
+      }}
+    >
       <AvatarComponent
         image={member.user?.avatar}
         name={member.user?.name || member.user?.id}
@@ -149,7 +159,8 @@ export const UhmMemberItem: React.FC<ChannelInfoMemberItemProps> = React.memo(({
     prev.canPromote === next.canPromote &&
     prev.canDemote === next.canDemote &&
     prev.roleLabels === next.roleLabels &&
-    prev.AvatarComponent === next.AvatarComponent
+    prev.AvatarComponent === next.AvatarComponent &&
+    prev.onUserClick === next.onUserClick
   );
 });
 
