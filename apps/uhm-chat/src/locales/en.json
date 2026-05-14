@@ -158,7 +158,10 @@
     "reconnecting": "Reconnecting...",
     "offline": "No internet connection",
     "retry": "Try Again",
-    "connection_restored": "Connection restored"
+    "connection_restored": "Connection restored",
+    "new_version": "A new version is available!",
+    "new_version_desc": "Tap to update the app.",
+    "update": "Update"
   },
   "search": {
     "placeholder": "Search channels, topics, users...",

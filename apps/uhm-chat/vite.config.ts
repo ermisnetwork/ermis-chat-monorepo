@@ -13,7 +13,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       workbox: {
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // Tăng giới hạn lên 5MB
         runtimeCaching: [
@@ -78,5 +78,12 @@ export default defineConfig({
   server: {
     port: 3001,
     strictPort: true,
+    watch: {
+      // Prevent HMR full-page reloads caused by tsup --watch rebuilding dist/
+      ignored: [
+        '**/packages/ermis-chat-sdk/dist/**',
+        '**/packages/ermis-chat-react/dist/**',
+      ],
+    },
   },
 });

@@ -158,7 +158,10 @@
     "reconnecting": "Đang kết nối lại...",
     "offline": "Không có kết nối mạng",
     "retry": "Thử lại",
-    "connection_restored": "Đã kết nối lại"
+    "connection_restored": "Đã kết nối lại",
+    "new_version": "Có phiên bản mới!",
+    "new_version_desc": "Nhấn để cập nhật ứng dụng.",
+    "update": "Cập nhật"
   },
   "search": {
     "placeholder": "Tìm kênh, chủ đề, người dùng...",

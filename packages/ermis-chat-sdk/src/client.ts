@@ -1178,6 +1178,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         this.eventSource?.readyState === EventSourcePolyfill.CONNECTING
       ) {
         this.eventSource.close();
+        this.eventSource = null; // Clear reference so reconnect doesn't bail out early
         setTimeout(() => {
           this.logger('info', 'client:connectToSSE() - Reconnecting to SSE', {});
           this.connectToSSE(onCallBack);
