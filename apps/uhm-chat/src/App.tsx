@@ -25,8 +25,10 @@ const chatClient = ErmisChat.getInstance(
     recoveryConfig: {
       filter: { type: ['messaging', 'team'] },
       options: { message_limit: 1 }
-    }
-  })
+    },
+    userBaseURL: 'http://localhost:5150/uss/v1'
+  },
+)
 
 import { isSafari } from '@/utils/browser'
 

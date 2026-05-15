@@ -233,6 +233,15 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     if (!message) return;
     const messageWithReaction = message;
     this._updateMessage(message, (msg) => {
+      if (msg.content_type === 'mls' || messageWithReaction.content_type === 'mls') {
+        return {
+          ...msg,
+          latest_reactions: messageWithReaction.latest_reactions ?? msg.latest_reactions,
+          reaction_counts: messageWithReaction.reaction_counts ?? msg.reaction_counts,
+          reaction_groups: messageWithReaction.reaction_groups ?? msg.reaction_groups,
+          own_reactions: this._addOwnReactionToMessage(msg.own_reactions, reaction, enforce_unique),
+        };
+      }
       messageWithReaction.own_reactions = this._addOwnReactionToMessage(msg.own_reactions, reaction, enforce_unique);
       return this.formatMessage(messageWithReaction);
     });
@@ -272,6 +281,15 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     if (!message) return;
     const messageWithReaction = message;
     this._updateMessage(message, (msg) => {
+      if (msg.content_type === 'mls' || messageWithReaction.content_type === 'mls') {
+        return {
+          ...msg,
+          latest_reactions: messageWithReaction.latest_reactions ?? msg.latest_reactions,
+          reaction_counts: messageWithReaction.reaction_counts ?? msg.reaction_counts,
+          reaction_groups: messageWithReaction.reaction_groups ?? msg.reaction_groups,
+          own_reactions: this._removeOwnReactionFromMessage(msg.own_reactions, reaction),
+        };
+      }
       messageWithReaction.own_reactions = this._removeOwnReactionFromMessage(msg.own_reactions, reaction);
       return this.formatMessage(messageWithReaction);
     });

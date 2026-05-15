@@ -8,6 +8,7 @@ import WebSocket from 'isomorphic-ws';
 import { Channel } from './channel';
 import { ClientState } from './client_state';
 import { StableWSConnection } from './connection';
+import { IndexedDBMlsStorage } from './mls_storage';
 
 import { TokenManager } from './token_manager';
 
@@ -53,6 +54,7 @@ import {
 function isString(x: unknown): x is string {
   return typeof x === 'string' || x instanceof String;
 }
+
 /**
  * The ErmisChat Client represents the connection securely established between your application
  * and the Ermis core servers. It acts as the primary access point for real-time messaging,
@@ -105,6 +107,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   /** Tracks consecutive REST API failures for exponential backoff purposes. */
   consecutiveFailures: number;
   defaultWSTimeout: number;
+  /** Device ID used by MLS/E2EE sessions and sent to Bellboy over WS/HTTP. */
+  deviceId?: string;
+  /** MLS Manager instance set by MlsManager.initialize() for E2EE event handling. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mlsManager?: any;
 
   private eventSource: EventSourcePolyfill | null = null;
 
@@ -196,6 +203,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   setBaseURL(baseURL: string) {
     this.baseURL = baseURL;
     this.userBaseURL = this.options.userBaseURL || baseURL + '/uss/v1';
+    console.log("userBaseURL: ", this.options.userBaseURL);
+
     this.wsBaseURL = this.baseURL.replace('http', 'ws').replace(':3030', ':8800');
   }
 
@@ -285,6 +294,21 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       console.warn(
         'Please do not use connectUser server side. connectUser impacts MAU and concurrent connection usage and thus your bill. If you have a valid use-case, add "allowServerSideConnect: true" to the client options to disable this warning.',
       );
+    }
+
+    if (this.browser && !this.deviceId) {
+      try {
+        const mlsStorage = new IndexedDBMlsStorage();
+        this.deviceId = await mlsStorage.getDeviceId();
+        this.logger('info', `client:connectUser() - deviceId initialized: ${this.deviceId}`, {
+          tags: ['connection', 'client', 'e2ee'],
+        });
+      } catch (err) {
+        this.logger('warn', 'client:connectUser() - Failed to initialize deviceId from storage', {
+          tags: ['connection', 'client', 'e2ee'],
+          err,
+        });
+      }
     }
 
     // we generate the client id client side
@@ -388,6 +412,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.logger('info', 'client:disconnect() - Disconnecting the client', {
       tags: ['connection', 'client'],
     });
+
+    const mlsMgr = this.mlsManager;
+    if (mlsMgr && typeof mlsMgr.destroy === 'function') {
+      mlsMgr.destroy();
+      this.mlsManager = undefined;
+    }
+    this.deviceId = undefined;
 
     // remove the user specific fields
     delete this.user;
@@ -659,7 +690,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
       // channel event handlers
       const cid = event.cid;
-      const channel = cid ? this.activeChannels[cid] : undefined;
+      const channel =
+        (cid ? this.activeChannels[cid] : undefined) ||
+        (event.type === 'protocol' && cid?.startsWith('mls:') ? this.activeChannels[cid.slice(4)] : undefined);
       if (channel) {
         // _handleChannelEvent is async (e.g. message.new may await queryUser).
         // We MUST wait for it to finish mutating channel state BEFORE calling
@@ -692,7 +725,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const postListenerCallbacks = this._handleClientEvent(event);
 
     const cid = event.cid;
-    const channel = cid ? this.activeChannels[cid] : undefined;
+    const channel =
+      (cid ? this.activeChannels[cid] : undefined) ||
+      (event.type === 'protocol' && cid?.startsWith('mls:') ? this.activeChannels[cid.slice(4)] : undefined);
     if (channel) {
       const result = channel._handleChannelEvent(event);
       if (result && typeof (result as any).then === 'function') {
@@ -879,6 +914,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     });
 
     if (event.type === 'health.check' && event.me) {
+      const remaining = (event.me as any).key_packages_remaining;
+      if (this.mlsManager?.initialized && typeof remaining === 'number') {
+        this.mlsManager.ensureKeyPackages(remaining).catch((err: unknown) => {
+          this.logger('warn', '[MLS] Failed to top up key packages', { err });
+        });
+      }
     }
 
     if ((event.type === 'channel.deleted' || event.type === 'notification.channel_deleted') && event.cid) {
@@ -1072,6 +1113,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       tags: ['connection'],
     });
 
+    if (this.mlsManager?.initialized) {
+      this.mlsManager.markSyncStart();
+    }
+
     const cids = Object.keys(this.activeChannels);
     if (cids.length && this.recoverStateOnReconnect) {
       this.logger('info', `client:recoverState() - Start the querying of ${cids.length} channels`, {
@@ -1093,6 +1138,14 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       this.dispatchEvent({
         type: 'connection.recovered',
       } as Event<ErmisChatGenerics>);
+    }
+
+    if (this.mlsManager?.initialized) {
+      try {
+        await this.mlsManager.sync();
+      } catch (err) {
+        this.logger('error', '[MLS] Failed to sync on reconnect', { err });
+      }
     }
 
     this.wsPromise = Promise.resolve();
@@ -1748,6 +1801,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         ...authorization,
         'stream-auth-type': this.getAuthType(),
         'X-Stream-Client': this.getUserAgent(),
+        ...(this.deviceId ? { 'X-Device-ID': this.deviceId } : {}),
         ...options.headers,
         ...(axiosRequestConfigHeaders || {}),
       },

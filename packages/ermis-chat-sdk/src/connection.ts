@@ -187,6 +187,9 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     let rawURL = `${this.client.wsBaseURL}/connect?json=${qs}&api_key=${
       this.client.apiKey
     }&authorization=${token}&stream-auth-type=${this.client.getAuthType()}&X-Stream-Client=${this.client.getUserAgent()}`;
+    if (this.client.deviceId) {
+      rawURL += `&device_id=${encodeURIComponent(this.client.deviceId)}`;
+    }
     rawURL = encodeURI(rawURL);
     return rawURL;
   };
@@ -332,6 +335,9 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     this._destroyCurrentWSConnection();
 
     try {
+      if (this.client.mlsManager?.initialized) {
+        this.client.mlsManager.markSyncStart();
+      }
       await this._connect();
       this._log('_reconnect() - Waiting for recoverCallBack');
       await this.client.recoverState();
