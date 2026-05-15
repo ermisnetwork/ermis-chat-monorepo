@@ -73,6 +73,7 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   const { ModalComponent } = useChatComponents();
   const Modal = ModalComponent || DefaultModal;
   const backdropRef = useRef<HTMLDivElement>(null);
+  const { client } = useChatClient();
 
   const {
     search,
@@ -99,9 +100,16 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   }, [onDismiss]);
 
   /* ---------- Message preview ---------- */
-  const previewText = message.text
-    ? (message.text.length > 120 ? message.text.slice(0, 120) + '…' : message.text)
-    : '';
+  let previewText = message.text || '';
+  
+  if (previewText && message.mentioned_users && message.mentioned_users.length > 0) {
+    message.mentioned_users.forEach((userId) => {
+      const name = client.state.users[userId]?.name || userId;
+      previewText = previewText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
+    });
+  }
+
+  previewText = previewText.length > 120 ? previewText.slice(0, 120) + '…' : previewText;
   const attachmentCount = message.attachments?.length ?? 0;
 
   const footer = (

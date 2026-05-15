@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
-import { removeAccents } from '../utils';
+import { removeAccents, buildUserMap } from '../utils';
 import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
 
 export function useForwardMessage(message: FormatMessageResponse, onDismiss: () => void) {
@@ -68,12 +68,25 @@ export function useForwardMessage(message: FormatMessageResponse, onDismiss: () 
     const success: string[] = [];
     const failed: string[] = [];
 
+    // Format message text to replace mention IDs with names
+    let formattedMessage = { ...message };
+    if (formattedMessage.text && formattedMessage.mentioned_users && formattedMessage.mentioned_users.length > 0) {
+      let newText = formattedMessage.text;
+      const userMap = buildUserMap(activeChannel.state);
+      
+      formattedMessage.mentioned_users.forEach((userId) => {
+        const name = userMap[userId] || client.state.users[userId]?.name || userId;
+        newText = newText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
+      });
+      formattedMessage.text = newText;
+    }
+
     for (const cid of selectedChannels) {
       const targetChannel = channels.find((c) => c.cid === cid);
       if (!targetChannel) continue;
       try {
         const forwardPayload = createForwardMessagePayload(
-          message,
+          formattedMessage,
           targetChannel.cid as string,
           activeChannel.cid as string,
         );
@@ -96,7 +109,7 @@ export function useForwardMessage(message: FormatMessageResponse, onDismiss: () 
     if (failed.length === 0) {
       setTimeout(() => onDismiss(), 1200);
     }
-  }, [activeChannel, selectedChannels, channels, message, sending, onDismiss]);
+  }, [client, activeChannel, selectedChannels, channels, message, sending, onDismiss]);
 
   return {
     search,

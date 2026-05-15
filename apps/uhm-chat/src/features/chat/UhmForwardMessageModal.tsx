@@ -41,7 +41,14 @@ export function UhmForwardMessageModal({
   } = useForwardMessage(message, onDismiss)
 
   /* --- Message preview details --- */
-  const previewText = message.text || ''
+  let previewText = message.text || ''
+  if (previewText && message.mentioned_users && message.mentioned_users.length > 0) {
+    message.mentioned_users.forEach((userId) => {
+      // In UI, we can try to find from client.state.users
+      const name = client.state.users[userId]?.name || userId;
+      previewText = previewText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
+    });
+  }
   const attachmentCount = message.attachments?.length ?? 0
   const isSticker = isStickerMessage(message)
   const stickerUrl = (message as any).sticker_url || (isSticker ? message.attachments?.[0]?.image_url : undefined)
