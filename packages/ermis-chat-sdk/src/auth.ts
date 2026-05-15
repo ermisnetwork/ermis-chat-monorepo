@@ -28,6 +28,8 @@ export class ErmisAuthProvider {
   constructor(apiKey: string, baseURL: string, options?: ErmisChatOptions) {
     const inputOptions = options || {};
     this.apiKey = apiKey;
+    console.log("userBaseURL: ", options?.userBaseURL);
+
     this.baseURL = options?.userBaseURL || baseURL + '/uss/v1';
 
     this.browser = typeof inputOptions.browser !== 'undefined' ? inputOptions.browser : typeof window !== 'undefined';
