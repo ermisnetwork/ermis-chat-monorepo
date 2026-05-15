@@ -600,6 +600,7 @@ function renderTextWithMentions(
 /** Regular message: text with @mentions + attachments */
 export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ message, onMentionClick }) => {
   const { activeChannel } = useChatClient();
+  const isEncrypted = message.content_type === 'mls' || Boolean((message as any).mls_ciphertext);
 
   const userMap = useMemo<Record<string, string>>(() => {
     return buildUserMap(activeChannel?.state);
@@ -623,6 +624,15 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
   }, [message.attachments, message.text]);
 
   const hasAttachments = attachmentsToRender.length > 0;
+  const encryptedPlaceholder = isEncrypted && !message.text ? (
+    <span className="ermis-message-list__item-text ermis-message-list__item-text--encrypted">
+      {(message as any).e2ee_status === 'failed'
+        ? 'Encrypted message could not be decrypted'
+        : (message as any).e2ee_status === 'decrypting'
+          ? 'Decrypting encrypted message...'
+          : 'Encrypted message'}
+    </span>
+  ) : null;
 
   if (hasAttachments) {
     return (
@@ -630,6 +640,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
         {textContent && (
           <span className="ermis-message-list__item-text">{textContent}</span>
         )}
+        {encryptedPlaceholder}
         <AttachmentList attachments={attachmentsToRender} />
       </div>
     );
@@ -640,12 +651,15 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
       {textContent && (
         <span className="ermis-message-list__item-text">{textContent}</span>
       )}
+      {encryptedPlaceholder}
     </>
   );
 }, (prev, next) => {
   return prev.message.id === next.message.id &&
     prev.message.updated_at === next.message.updated_at &&
     prev.message.text === next.message.text &&
+    prev.message.content_type === next.message.content_type &&
+    (prev.message as any).e2ee_status === (next.message as any).e2ee_status &&
     prev.isOwnMessage === next.isOwnMessage;
 });
 RegularMessage.displayName = 'RegularMessage';

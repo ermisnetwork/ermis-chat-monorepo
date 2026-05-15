@@ -344,6 +344,7 @@ export function getLastMessagePreview(
   const msgType = lastMsg.type || 'regular';
   const isDeleted = isDeletedDisplayMessage(lastMsg);
   const rawText = lastMsg.text ?? '';
+  const isEncrypted = lastMsg.content_type === 'mls' || Boolean((lastMsg as any).mls_ciphertext);
 
   const client = (channel as any).getClient?.() || (channel as any).client;
   const userMap = buildUserMap(channel.state, client?.state?.users);
@@ -372,6 +373,12 @@ export function getLastMessagePreview(
 
   // Regular / other
   let displayText: React.ReactNode = rawText;
+  if (!displayText && isEncrypted) {
+    displayText =
+      (lastMsg as any).e2ee_status === 'failed'
+        ? 'Encrypted message unavailable'
+        : 'Encrypted message';
+  }
   if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
     const att = lastMsg.attachments[0];
     const type = att.type || '';

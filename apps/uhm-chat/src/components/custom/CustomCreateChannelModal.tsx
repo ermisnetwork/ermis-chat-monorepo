@@ -1,4 +1,4 @@
-import { Search, X, Check } from 'lucide-react'
+import { Search, X, Check, LockKeyhole } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -143,7 +143,8 @@ const CustomFooterComponent = ({
 
 const CustomGroupFieldsComponent = ({
   name, onNameChange, description, onDescriptionChange, isPublic, onPublicChange, disabled,
-  groupNameLabel, groupNamePlaceholder, groupDescriptionLabel, groupDescriptionPlaceholder, groupPublicLabel
+  groupNameLabel, groupNamePlaceholder, groupDescriptionLabel, groupDescriptionPlaceholder, groupPublicLabel,
+  e2eeEnabled, onE2eeChange, e2eeLabel, e2eeDescription, e2eeDisabled
 }: any) => {
   return (
     <div className="space-y-4 mb-4">
@@ -179,14 +180,43 @@ const CustomGroupFieldsComponent = ({
           aria-checked={isPublic}
           className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${isPublic ? 'bg-primary' : 'bg-zinc-200 dark:bg-[#3a3555]'}`}
           onClick={() => onPublicChange(!isPublic)}
-          disabled={disabled}
+          disabled={disabled || e2eeEnabled}
         >
           <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${isPublic ? 'translate-x-4' : 'translate-x-0'}`} />
         </button>
       </div>
+      <E2eeToggle
+        enabled={Boolean(e2eeEnabled)}
+        onChange={(enabled: boolean) => onE2eeChange?.(enabled)}
+        disabled={disabled || e2eeDisabled}
+        label={e2eeLabel}
+        description={e2eeDescription}
+      />
     </div>
   )
 }
+
+const E2eeToggle = ({ enabled, onChange, disabled, label, description }: any) => (
+  <div className="flex items-center justify-between gap-4 rounded-lg border border-zinc-200 dark:border-[#3a3555] bg-zinc-50/60 dark:bg-[#211f30]/60 px-3 py-3">
+    <div className="min-w-0">
+      <div className="flex items-center gap-2 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+        <LockKeyhole className="w-4 h-4 text-emerald-600 dark:text-emerald-300" />
+        <span>{label}</span>
+      </div>
+      {description && <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{description}</p>}
+    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${enabled ? 'bg-emerald-500' : 'bg-zinc-200 dark:bg-[#3a3555]'}`}
+      onClick={() => onChange(!enabled)}
+      disabled={disabled}
+    >
+      <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${enabled ? 'translate-x-4' : 'translate-x-0'}`} />
+    </button>
+  </div>
+)
 
 export function CustomCreateChannelModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
   const { t } = useTranslation()
@@ -211,9 +241,13 @@ export function CustomCreateChannelModal({ isOpen, onClose }: { isOpen: boolean,
       nextButtonLabel={t('chat.create_channel_next', 'Next')}
       backButtonLabel={t('chat.create_channel_back', 'Back')}
       emptyStateLabel={t('chat.create_channel_empty_friends', 'No friends found')}
+      e2eeLabel={t('e2ee.toggle_label', 'End-to-end encrypted')}
+      e2eeDescription={t('e2ee.toggle_description', 'Messages and attachments are encrypted for channel members.')}
+      e2eeUnavailableLabel={t('e2ee.unavailable', 'E2EE is unavailable until MLS is initialized.')}
       TabsComponent={CustomTabsComponent}
       FooterComponent={CustomFooterComponent}
       GroupFieldsComponent={CustomGroupFieldsComponent}
+      E2eeToggleComponent={E2eeToggle}
       SearchInputComponent={CustomSearchInputComponent}
       SelectedBoxComponent={CustomSelectedBoxComponent}
       UserItemComponent={CustomUserItemComponent}

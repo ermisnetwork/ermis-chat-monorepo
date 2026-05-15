@@ -467,6 +467,28 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return this._lastSyncStates.get(cid) || null;
   }
 
+  private _getDurableSyncCursor({
+    processedCursor,
+    serverNextCursor,
+    hasMore,
+    bufferedMessages,
+  }: {
+    processedCursor: number;
+    serverNextCursor?: number;
+    hasMore: boolean;
+    bufferedMessages: number;
+  }): number {
+    if (bufferedMessages > 0) {
+      return processedCursor;
+    }
+
+    if (!hasMore && serverNextCursor !== undefined && serverNextCursor >= processedCursor) {
+      return serverNextCursor + 1;
+    }
+
+    return processedCursor;
+  }
+
   /**
    * Sync MLS protocol events for all E2EE channels and restore groups.
    *
@@ -602,9 +624,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             const processedCursor = processResult.processedCursor ?? startedCursor;
             const cursorLagged = serverNextCursor !== undefined && processedCursor < serverNextCursor;
             const retryNeeded = channelResult.has_more || cursorLagged || processResult.bufferedMessages > 0;
+            const durableCursor = this._getDurableSyncCursor({
+              processedCursor,
+              serverNextCursor,
+              hasMore: channelResult.has_more,
+              bufferedMessages: processResult.bufferedMessages,
+            });
 
-            if (processedCursor > startedCursor) {
-              syncCursors[cid] = processedCursor;
+            if (durableCursor > startedCursor) {
+              syncCursors[cid] = durableCursor;
             }
 
             this._emitSyncState(
@@ -1043,6 +1071,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const processedCursor = processResult.processedCursor ?? startedCursor;
       const cursorLagged = serverNextCursor !== undefined && processedCursor < serverNextCursor;
       const blocked = cursorLagged || processResult.bufferedMessages > 0;
+      const durableCursor = this._getDurableSyncCursor({
+        processedCursor,
+        serverNextCursor,
+        hasMore: !!result.has_more,
+        bufferedMessages: processResult.bufferedMessages,
+      });
 
       finalState = this._makeSyncState(
         cid,
@@ -1059,9 +1093,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       );
       this._emitSyncState(finalState);
 
-      if (processedCursor > startedCursor) {
-        cursor = processedCursor;
-        await this.storage.saveSyncTimestamp(cid, String(processedCursor));
+      if (durableCursor > startedCursor) {
+        cursor = durableCursor;
+        await this.storage.saveSyncTimestamp(cid, String(durableCursor));
         await this._persistProvider();
       }
 
@@ -1436,7 +1470,24 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     // 2. Fetch key packages for all members via batch API (no channel needed)
     //    Server auto-excludes sender; members without KPs are silently omitted.
+    const requestedRecipientIds = Array.from(new Set(allMemberUserIds)).filter((userId) => userId !== this.userId);
     const { members } = await this.e2eeClient!.getKeyPackagesByUserIds(allMemberUserIds);
+    const membersWithKeyPackages = new Set(
+      members.filter((member) => member.key_packages?.length > 0).map((member) => member.user_id),
+    );
+    const missingKeyPackageUserIds = requestedRecipientIds.filter((userId) => !membersWithKeyPackages.has(userId));
+
+    if (missingKeyPackageUserIds.length > 0) {
+      this.groups.delete(cid);
+      await this.storage.deleteGroup?.(cid);
+      await this._persistProvider();
+      throw new Error(
+        `[MLS] Cannot create E2EE channel. The following members have no uploaded KeyPackages: ${missingKeyPackageUserIds.join(
+          ', ',
+        )}. Ask them to sign in once with E2EE enabled, then try again.`,
+      );
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const allKeyPackages: any[] = [];
     for (const member of members) {
@@ -1446,9 +1497,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
     }
 
-    if (allKeyPackages.length === 0) {
-      // Channel has only the creator — solo group is fine (DM where B hasn't uploaded KPs yet,
-      // or team channel where creator is the only member). Proceed with solo commit.
+    if (allKeyPackages.length === 0 && requestedRecipientIds.length === 0) {
+      // Channel has only the creator. Proceed with a solo commit.
       console.log('[MLS] createE2eeChannel: no other member KPs found, creating solo group for:', cid);
     }
 
@@ -2427,6 +2477,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const ciphertext = message.mls_ciphertext;
     if (!ciphertext) return null;
 
+    const cachedEditedMessage = await this._loadCachedEditTarget(message);
+    if (cachedEditedMessage) {
+      this._decryptedMsgIds.add(message.id);
+      return this._buildFullMessage(cachedEditedMessage, message);
+    }
+
     // CRITICAL: If MLS sync is in progress (reconnecting from background),
     // do NOT attempt decryption — it would race with the waterfall decrypt
     // and consume ratchet secrets out of order. Instead, WAIT for sync to
@@ -2603,7 +2659,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // save didn't complete before tab suspension). This message is lost, but
       // future messages at higher generations will still work — the ratchet has
       // already advanced past this point.
-      if (errMsg.includes('forward secrecy') || errMsg.includes('SecretReuseError')) {
+      if (this._isForwardSecrecyConsumedError(errMsg)) {
         console.warn('[MLS] Forward secrecy: message already consumed, cannot re-decrypt:', message.id, {
           groupEpoch: Number(group.epoch()),
           msgEpoch: message.mls_epoch,
@@ -2621,6 +2677,30 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         msgEpoch: message.mls_epoch,
         error: errMsg,
       });
+    }
+
+    return null;
+  }
+
+  private _isForwardSecrecyConsumedError(errMsg: string): boolean {
+    return (
+      errMsg.includes('forward secrecy') ||
+      errMsg.includes('SecretReuseError') ||
+      errMsg.includes('requested secret was deleted')
+    );
+  }
+
+  private async _loadCachedEditTarget(message: { id: string; created_at?: string; [key: string]: unknown }) {
+    const replacesId = (message as any).replaces_message_id;
+    if (!replacesId) return null;
+
+    const original = await this.storage.loadE2eeMessage(replacesId);
+    if (!original?.is_edited) return null;
+
+    const originalUpdatedAt = original.updated_at ? new Date(original.updated_at).getTime() : 0;
+    const editCreatedAt = message.created_at ? new Date(message.created_at).getTime() : 0;
+    if (!originalUpdatedAt || !editCreatedAt || originalUpdatedAt >= editCreatedAt) {
+      return original;
     }
 
     return null;
@@ -2952,6 +3032,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         continue;
       }
 
+      const cachedEditedMessage = await this._loadCachedEditTarget(msg);
+      if (cachedEditedMessage) {
+        this._decryptedMsgIds.add(msg.id);
+        decrypted.push(cachedEditedMessage);
+        continue;
+      }
+
       try {
         const { payload, messageType } = this.decryptMessage(cid, msg.mls_ciphertext);
 
@@ -3035,8 +3122,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           decrypted.push(decryptedMsg);
         }
       } catch (err) {
+        const errMsg = (err as Error).message || '';
+        if (this._isForwardSecrecyConsumedError(errMsg)) {
+          this._decryptedMsgIds.add(msg.id);
+          console.warn('[MLS] Skipping consumed MLS message during sync:', msg.id, errMsg);
+          continue;
+        }
         buffered.push(msg);
-        console.warn('[MLS] Buffered message (decrypt failed):', msg.id, (err as Error).message);
+        console.warn('[MLS] Buffered message (decrypt failed):', msg.id, errMsg);
       }
     }
 

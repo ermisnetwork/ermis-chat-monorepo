@@ -326,6 +326,14 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const parentCid = channel?.data?.parent_cid as string | undefined;
   const parentChannel = parentCid && client ? client.activeChannels[parentCid] : undefined;
   let parentChannelName = parentChannel?.data?.name || (parentCid ? 'Unknown' : undefined);
+  const e2eeChannel = parentChannel || channel;
+  const isE2ee = Boolean(e2eeChannel?.data?.mls_enabled);
+  const [isRotatingKey, setIsRotatingKey] = useState(false);
+  const [isEnablingE2ee, setIsEnablingE2ee] = useState(false);
+  const mlsEpoch =
+    isE2ee && e2eeChannel?.cid && typeof client?.mlsManager?.getEpoch === 'function'
+      ? client.mlsManager.getEpoch(e2eeChannel.cid)
+      : undefined;
 
   const handleDeleteChannel = useCallback(async () => {
     if (onDeleteChannelProp) return onDeleteChannelProp();
@@ -341,7 +349,12 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     if (onLeaveChannelProp) return onLeaveChannelProp();
     if (!channel || !currentUserId) return;
     try {
-      await channel.removeMembers([currentUserId]);
+      const mlsManager = channel.getClient().mlsManager;
+      if (channel.data?.mls_enabled && mlsManager?.initialized && channel.id && channel.cid) {
+        await mlsManager.evictMember(channel.type, channel.id, channel.cid, currentUserId);
+      } else {
+        await channel.removeMembers([currentUserId]);
+      }
     } catch (e) {
       console.error("Error leaving channel", e);
     }
@@ -351,7 +364,12 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     if (onRemoveMemberProp) return onRemoveMemberProp(memberId);
     if (!channel) return;
     try {
-      await channel.removeMembers([memberId]);
+      const mlsManager = channel.getClient().mlsManager;
+      if (channel.data?.mls_enabled && mlsManager?.initialized && channel.id && channel.cid) {
+        await mlsManager.evictMember(channel.type, channel.id, channel.cid, memberId);
+      } else {
+        await channel.removeMembers([memberId]);
+      }
     } catch (e) {
       console.error("Error removing member", e);
     }
@@ -392,6 +410,45 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     if (!channel) return;
     try { await channel.unblockUser(); } catch (e) { console.error('Error unblocking user', e); }
   }, [channel, onUnblockUserProp]);
+
+  const handleRotateKey = useCallback(async () => {
+    if (!e2eeChannel?.cid || !client?.mlsManager?.initialized || parentCid) return;
+    try {
+      setIsRotatingKey(true);
+      await client.mlsManager.keyRotation(e2eeChannel.cid);
+    } catch (e) {
+      console.error('Error rotating E2EE key', e);
+    } finally {
+      setIsRotatingKey(false);
+    }
+  }, [client, e2eeChannel?.cid, parentCid]);
+
+  const handleEnableE2ee = useCallback(async () => {
+    if (!channel?.id || !channel?.cid || !client?.mlsManager?.initialized || parentCid || isE2ee) return;
+    try {
+      setIsEnablingE2ee(true);
+      const memberUserIds = Object.keys(channel.state?.members || {});
+      const result = await client.mlsManager.enableE2ee(channel.type, channel.id, channel.cid, memberUserIds);
+      channel.data = {
+        ...channel.data,
+        mls_enabled: true,
+        mls_enabled_at: result?.channel?.mls_enabled_at || result?.mls_enabled_at || new Date().toISOString(),
+        mls_epoch: result?.channel?.mls_epoch ?? result?.epoch ?? channel.data?.mls_epoch,
+      } as any;
+      channel.getClient().dispatchEvent({
+        type: 'channel.updated',
+        cid: channel.cid,
+        channel_type: channel.type,
+        channel_id: channel.id,
+        channel: channel.data,
+        user: channel.getClient().user,
+      } as any);
+    } catch (e) {
+      console.error('Error enabling E2EE', e);
+    } finally {
+      setIsEnablingE2ee(false);
+    }
+  }, [channel, client, parentCid, isE2ee]);
 
   const handlePinChannel = useCallback(async () => {
     if (onPinChannelProp) return onPinChannelProp();
@@ -515,6 +572,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
           isTeamChannel={isTeamChannel}
           parentChannelName={finalParentChannelName}
           isTopic={isTopic}
+          isE2ee={isE2ee}
+          mlsEpoch={mlsEpoch}
         />
 
         {isBanned && (
@@ -560,6 +619,13 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 isPinned={isPinned}
                 topicsEnabled={channel?.data?.topics_enabled === true}
                 currentUserRole={currentUserRole}
+                isE2ee={isE2ee}
+                mlsInitialized={Boolean(client?.mlsManager?.initialized)}
+                mlsEpoch={mlsEpoch}
+                onRotateKey={!isTopic && isE2ee && canManageChannel(currentUserRole) ? handleRotateKey : undefined}
+                rotateKeyDisabled={isRotatingKey || isBlocked || isClosedTopic}
+                onEnableE2ee={!isTopic && !isE2ee && currentUserRole === CHANNEL_ROLES.OWNER ? handleEnableE2ee : undefined}
+                enableE2eeDisabled={isEnablingE2ee || isBlocked || isClosedTopic || !client?.mlsManager?.initialized}
                 searchLabel={actionsSearchLabel}
                 settingsLabel={actionsSettingsLabel}
                 deleteLabel={actionsDeleteLabel}

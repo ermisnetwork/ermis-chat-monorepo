@@ -83,6 +83,7 @@ export interface MlsStorageAdapter {
   // ---- E2EE Messages ----
   saveE2eeMessage(message: E2eeStoredMessage): Promise<void>;
   loadE2eeMessage(messageId: string): Promise<E2eeStoredMessage | null>;
+  loadE2eeMessages?(messageIds: string[]): Promise<Map<string, E2eeStoredMessage>>;
   deleteE2eeMessage(messageId: string): Promise<void>;
   getE2eeMessages(cid: string, limit?: number): Promise<E2eeStoredMessage[]>;
   clearE2eeMessages(cid: string): Promise<void>;
@@ -351,6 +352,31 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       const request = store.get(messageId);
       request.onsuccess = () => resolve((request.result as E2eeStoredMessage) || null);
       request.onerror = () => reject(request.error);
+    });
+  }
+
+  async loadE2eeMessages(messageIds: string[]): Promise<Map<string, E2eeStoredMessage>> {
+    const ids = Array.from(new Set(messageIds.filter(Boolean)));
+    if (ids.length === 0) return new Map();
+
+    const db = await this.openDB();
+    return new Promise<Map<string, E2eeStoredMessage>>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readonly');
+      const store = tx.objectStore(STORE_MESSAGES);
+      const results = new Map<string, E2eeStoredMessage>();
+
+      for (const id of ids) {
+        const request = store.get(id);
+        request.onsuccess = () => {
+          if (request.result) {
+            results.set(id, request.result as E2eeStoredMessage);
+          }
+        };
+        request.onerror = () => reject(request.error);
+      }
+
+      tx.oncomplete = () => resolve(results);
+      tx.onerror = () => reject(tx.error);
     });
   }
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { ChatProvider } from '@ermis-network/ermis-chat-react'
-import { ErmisChat } from '@ermis-network/ermis-chat-sdk'
+import { ErmisChat, MlsManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk'
 import { LoginPage } from '@/pages/LoginPage'
 import { ChatPage } from '@/pages/ChatPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -29,6 +29,23 @@ const chatClient = ErmisChat.getInstance(
     userBaseURL: 'http://localhost:5150/uss/v1'
   },
 )
+
+const mlsManager = new MlsManager()
+let e2eeInitPromise: Promise<void> | null = null
+
+async function initializeE2ee(userId: string) {
+  if (chatClient.mlsManager?.initialized) return
+  if (!e2eeInitPromise) {
+    e2eeInitPromise = (async () => {
+      const wasmModule = await loadOpenMlsWasm('/openmls_wasm_bg.wasm')
+      await mlsManager.initialize(chatClient, userId, { wasmModule })
+    })().catch((err) => {
+      e2eeInitPromise = null
+      throw err
+    })
+  }
+  await e2eeInitPromise
+}
 
 import { isSafari } from '@/utils/browser'
 
@@ -101,7 +118,11 @@ function AppContent() {
       chatClient.connectUser(
         { id: savedUserId },
         savedToken
-      ).catch((err) => {
+      )
+      .then(() => initializeE2ee(savedUserId).catch((err) => {
+        console.warn('[E2EE] Initialization failed; encrypted channels will be disabled.', err)
+      }))
+      .catch((err) => {
         // Distinguish WS failure (network, COOP) vs Auth failure (expired token)
         const parsed = (() => { try { return JSON.parse(err.message) } catch { return err } })()
         const isWSFailure = parsed?.isWSFailure || err?.isWSFailure
@@ -132,7 +153,11 @@ function AppContent() {
     chatClient.connectUser(
       { id: userId },
       token
-    ).catch(err => console.error('Failed to connect user:', err))
+    )
+      .then(() => initializeE2ee(userId).catch((err) => {
+        console.warn('[E2EE] Initialization failed; encrypted channels will be disabled.', err)
+      }))
+      .catch(err => console.error('Failed to connect user:', err))
   }
 
   const callSessionId = useMemo(() => {
