@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip } from 'lucide-react'
+import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
@@ -39,6 +39,7 @@ import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
+import { toast } from 'sonner'
 export function ChatPage() {
   const { t, i18n } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -54,6 +55,7 @@ export function ChatPage() {
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
+  const [rotatingKeyCid, setRotatingKeyCid] = useState<string | null>(null)
   const {
     isCreateChannelModalOpen,
     closeCreateChannelModal,
@@ -277,17 +279,64 @@ export function ChatPage() {
 
   /** Info button injected into ChannelHeader's right side */
   const renderHeaderRight = useCallback(
-    (_channel: ChannelType, actionDisabled?: boolean) => (
-      <button
-        className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95"
-        onClick={toggleChannelInfo}
-        title="Channel info"
-        disabled={actionDisabled}
-      >
-        <Info className="w-[18px] h-[18px]" />
-      </button>
-    ),
-    [toggleChannelInfo],
+    (channel: ChannelType, actionDisabled?: boolean) => {
+      const isE2ee = channel.data?.mls_enabled === true
+      const isTopic = Boolean(channel.data?.parent_cid)
+      const currentUserRole = client.userID ? channel.state?.members?.[client.userID]?.channel_role : undefined
+      const canRotateKey = isE2ee && !isTopic && ['owner', 'moder'].includes(String(currentUserRole))
+      const mlsManager = client.mlsManager
+      const rotating = rotatingKeyCid === channel.cid
+
+      const handleRotateKey = async () => {
+        if (!canRotateKey || !mlsManager?.initialized || !channel.cid || rotating) return
+        try {
+          setRotatingKeyCid(channel.cid)
+          const result = await mlsManager.keyRotation(channel.cid)
+          toast.success(t('e2ee.rotate_success', { epoch: result.epoch, defaultValue: `Key rotated. Epoch ${result.epoch}` }))
+        } catch (err: any) {
+          console.error('[E2EE] Key rotation failed', err)
+          toast.error(err?.message || t('e2ee.rotate_failed', 'Failed to rotate key'))
+        } finally {
+          setRotatingKeyCid(null)
+        }
+      }
+
+      return (
+        <>
+          {isE2ee && (
+            <div
+              className="hidden sm:inline-flex items-center gap-1.5 h-7 px-2 rounded-full border border-emerald-200 bg-emerald-50 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
+              title={t('e2ee.enabled', 'End-to-end encrypted')}
+            >
+              <LockKeyhole className="w-3.5 h-3.5" />
+              <span>E2EE</span>
+              {typeof mlsManager?.getEpoch === 'function' && !isTopic && (
+                <span className="font-mono opacity-70">{mlsManager.getEpoch(channel.cid) ?? '?'}</span>
+              )}
+            </div>
+          )}
+          {canRotateKey && (
+            <button
+              className="inline-flex items-center justify-center w-8 h-8 rounded-full text-amber-600 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+              onClick={handleRotateKey}
+              title={t('e2ee.rotate_key', 'Rotate encryption key')}
+              disabled={actionDisabled || !mlsManager?.initialized || rotating}
+            >
+              <RotateCw className={`w-[17px] h-[17px] ${rotating ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+          <button
+            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95"
+            onClick={toggleChannelInfo}
+            title="Channel info"
+            disabled={actionDisabled}
+          >
+            <Info className="w-[18px] h-[18px]" />
+          </button>
+        </>
+      )
+    },
+    [client, rotatingKeyCid, t, toggleChannelInfo],
   )
 
   const safariCallTooltip = t('safari_call.tooltip', 'Calls are not supported on Safari. Please use Chrome or Firefox.')

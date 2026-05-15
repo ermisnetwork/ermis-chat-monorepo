@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, LockKeyhole } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { TopicModalProps } from '@ermis-network/ermis-chat-react';
 import { Button } from '@/components/ui/button';
@@ -92,6 +92,8 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
   }, [client.activeChannels, activeChannel, propParentChannel, topic, name, emoji, description, originalName, originalEmoji, originalDescription, onClose]);
 
   const isValid = name.trim().length > 0 && emoji.length > 0;
+  const targetParentChannel = propParentChannel || activeChannel;
+  const inheritsE2ee = !topic && targetParentChannel?.data?.mls_enabled === true;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isSaving && onClose()}>
@@ -156,6 +158,12 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
           </div>
 
           {error && <div className="text-[10px] text-red-500 font-bold text-center bg-red-50 dark:bg-red-500/10 p-2 rounded-lg">{error}</div>}
+          {inheritsE2ee && (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+              <LockKeyhole className="w-3.5 h-3.5" />
+              <span>{t('e2ee.topic_inherited', 'E2EE inherited from parent channel')}</span>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="p-4 pt-0 gap-2">

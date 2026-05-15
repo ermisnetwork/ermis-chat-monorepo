@@ -631,12 +631,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       return null;
     }
 
+    const messages = response?.search_result?.messages.map((message: any) => {
+      const user = getUserInfo(message.user_id, Object.values(this.getClient().state.users)) || message.user;
+      return { ...message, user };
+    });
+
     return {
       ...response?.search_result,
-      messages: response?.search_result?.messages.map((message: any) => {
-        const user = getUserInfo(message.user_id, Object.values(this.getClient().state.users)) || message.user;
-        return { ...message, user };
-      }),
+      messages: await this._hydrateE2eeMessagesFromLocalCache(messages),
     };
   }
 
@@ -935,6 +937,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     // Make sure we wait for the connect promise if there is a pending one
     await this.getClient().wsPromise;
 
+    this._seedE2eeStateFromLocalCache(options, messageSetToAddToIfDoesNotExist);
+
     let project_id = this._client.projectId;
     let update_options = { ...options, project_id };
 
@@ -975,6 +979,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.pinned_messages = state.pinned_messages ? enrichWithUserInfo(state.pinned_messages, users) : [];
     state.read = enrichWithUserInfo(state.read || [], users);
     state.channel.is_pinned = state.is_pinned || false;
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
+    state.pinned_messages = await this._hydrateE2eeMessagesFromLocalCache(state.pinned_messages || [], state.channel);
 
     // Process topics for team channels
     // if (this.type === 'team' && state.channel.topics_enabled && state.topics) {
@@ -1060,6 +1066,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.messages = enrichWithUserInfo(state.messages, users);
     state.pinned_messages = state.pinned_messages ? enrichWithUserInfo(state.pinned_messages, users) : [];
     state.read = enrichWithUserInfo(state.read || [], users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
+    state.pinned_messages = await this._hydrateE2eeMessagesFromLocalCache(state.pinned_messages || [], state.channel);
 
     // add any messages to our channel state
     const { messageSet } = this._initializeState(state, messageSetToAddToIfDoesNotExist);
@@ -1096,6 +1104,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -1127,6 +1136,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -1158,6 +1168,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -2158,6 +2169,140 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         `Channel ${this.cid} hasn't been initialized yet. Make sure to call .watch() and wait for it to resolve`,
       );
     }
+  }
+
+  private async _hydrateE2eeMessagesFromLocalCache(
+    messages: MessageResponse<ErmisChatGenerics>[] = [],
+    channelData?: ChannelResponse<ErmisChatGenerics> | ChannelData<ErmisChatGenerics>,
+  ): Promise<MessageResponse<ErmisChatGenerics>[]> {
+    const isE2ee = (channelData as any)?.mls_enabled === true || (this.data as any)?.mls_enabled === true;
+    const storage = this.getClient().mlsManager?.storage;
+    if (!isE2ee || !storage || messages.length === 0) return messages;
+
+    const lookupIds = messages.flatMap((message: any) => {
+      const isEncryptedCarrier = message.content_type === 'mls' || Boolean(message.mls_ciphertext);
+      if (!isEncryptedCarrier) return [];
+      return [message.id, message.replaces_message_id].filter(Boolean);
+    });
+    const cachedMessages =
+      lookupIds.length > 0
+        ? storage.loadE2eeMessages
+          ? await storage.loadE2eeMessages(lookupIds).catch(() => new Map<string, any>())
+          : new Map(
+              (
+                await Promise.all(
+                  Array.from(new Set(lookupIds)).map((id) => storage.loadE2eeMessage(id).catch(() => null)),
+                )
+              )
+                .filter(Boolean)
+                .map((message: any) => [message.id, message]),
+            )
+        : new Map<string, any>();
+    const idsInResponse = new Set(messages.map((message: any) => message.id).filter(Boolean));
+    const currentMessages = this.state.messageSets?.flatMap((set) => set.messages) || [];
+    const currentMessagesById = new Map(currentMessages.map((message: any) => [message.id, message]));
+    const hydrated: MessageResponse<ErmisChatGenerics>[] = [];
+
+    for (const message of messages) {
+      const messageAny = message as any;
+      const isEncryptedCarrier = messageAny.content_type === 'mls' || Boolean(messageAny.mls_ciphertext);
+      if (!isEncryptedCarrier) {
+        hydrated.push(message);
+        continue;
+      }
+
+      const replacesMessageId = messageAny.replaces_message_id;
+      if (replacesMessageId) {
+        const replacedMessage = cachedMessages.get(replacesMessageId);
+        if (replacedMessage || idsInResponse.has(replacesMessageId)) {
+          continue;
+        }
+      }
+
+      const storedMessage = cachedMessages.get(message.id);
+      const currentMessage = currentMessagesById.get(message.id);
+      if (!storedMessage && currentMessage) {
+        const currentAny = currentMessage as any;
+        const currentHasPlaintext =
+          currentAny.content_type === 'standard' ||
+          Boolean(currentAny.text) ||
+          Boolean(currentAny.attachments?.length) ||
+          Boolean(currentAny.sticker_url);
+        if (currentHasPlaintext) {
+          hydrated.push({
+            ...message,
+            ...currentMessage,
+            content_type: 'standard',
+            latest_reactions: messageAny.latest_reactions ?? currentAny.latest_reactions,
+            reaction_counts: messageAny.reaction_counts ?? currentAny.reaction_counts,
+            reaction_groups: messageAny.reaction_groups ?? currentAny.reaction_groups,
+            own_reactions: messageAny.own_reactions ?? currentAny.own_reactions,
+            pinned: message.pinned ?? currentAny.pinned,
+            pinned_at: message.pinned_at ?? currentAny.pinned_at,
+          } as MessageResponse<ErmisChatGenerics>);
+          continue;
+        }
+      }
+
+      if (!storedMessage) {
+        hydrated.push(message);
+        continue;
+      }
+
+      hydrated.push({
+        ...message,
+        ...storedMessage,
+        content_type: 'standard',
+        user: storedMessage.user || message.user,
+        latest_reactions: messageAny.latest_reactions ?? storedMessage.latest_reactions,
+        reaction_counts: messageAny.reaction_counts ?? storedMessage.reaction_counts,
+        reaction_groups: messageAny.reaction_groups ?? storedMessage.reaction_groups,
+        own_reactions: messageAny.own_reactions ?? storedMessage.own_reactions,
+        pinned: message.pinned ?? storedMessage.pinned,
+        pinned_at: message.pinned_at ?? storedMessage.pinned_at,
+        status: message.status,
+      } as MessageResponse<ErmisChatGenerics>);
+    }
+
+    return hydrated;
+  }
+
+  private _seedE2eeStateFromLocalCache(
+    options: ChannelQueryOptions,
+    messageSetToAddToIfDoesNotExist: MessageSetType,
+  ): void {
+    const isE2ee = (this.data as any)?.mls_enabled === true;
+    const storage = this.getClient().mlsManager?.storage;
+    const messageOptions = options?.messages as any;
+    const isWindowedQuery = Boolean(messageOptions?.id_lt || messageOptions?.id_gt || messageOptions?.id_around);
+    if (!isE2ee || !storage || !this.cid || isWindowedQuery) return;
+
+    const limit = typeof messageOptions?.limit === 'number' ? messageOptions.limit : 25;
+    storage
+      .getE2eeMessages(this.cid, limit)
+      .then((storedMessages: any[]) => {
+        if (!storedMessages.length) return;
+        const messages = storedMessages
+          .map(
+            (message: any) =>
+              ({
+                ...message,
+                content_type: 'standard',
+                user: message.user || getUserInfo(message.user_id, Object.values(this.getClient().state.users)),
+                status: 'received',
+              }) as MessageResponse<ErmisChatGenerics>,
+          )
+          .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+        this.state.addMessagesSorted(messages, false, true, true, messageSetToAddToIfDoesNotExist);
+        this.getClient().dispatchEvent({
+          type: 'e2ee.local_messages_loaded' as any,
+          cid: this.cid,
+          messages,
+        } as any);
+      })
+      .catch((err: unknown) =>
+        this.getClient().logger('warn', '[E2EE] Failed to seed messages from local cache', { err }),
+      );
   }
 
   // eslint-disable-next-line sonarjs/cognitive-complexity

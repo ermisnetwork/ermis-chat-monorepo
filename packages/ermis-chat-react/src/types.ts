@@ -1272,6 +1272,10 @@ export type ChannelInfoCoverProps = {
   isTopic?: boolean;
   /** Whether the channel is a team channel */
   isTeamChannel?: boolean;
+  /** Whether this channel or inherited parent topic is E2EE enabled */
+  isE2ee?: boolean;
+  /** Current MLS epoch, if available */
+  mlsEpoch?: number;
 };
 
 export type ChannelInfoActionsProps = {
@@ -1308,6 +1312,15 @@ export type ChannelInfoActionsProps = {
   onCreateTopic?: () => void;
   createTopicLabel?: string;
   topicsEnabled?: boolean;
+  isE2ee?: boolean;
+  mlsInitialized?: boolean;
+  mlsEpoch?: number;
+  onRotateKey?: () => void;
+  rotateKeyLabel?: string;
+  rotateKeyDisabled?: boolean;
+  onEnableE2ee?: () => void;
+  enableE2eeLabel?: string;
+  enableE2eeDisabled?: boolean;
 };
 
 export type ChannelInfoMember = {
@@ -1710,6 +1723,7 @@ export type CreateChannelFooterProps = {
   messageButtonLabel?: string;
   nextButtonLabel?: string;
   backButtonLabel?: string;
+  e2eeEnabled?: boolean;
 };
 
 export type CreateChannelGroupFieldsProps = {
@@ -1725,6 +1739,19 @@ export type CreateChannelGroupFieldsProps = {
   groupDescriptionLabel?: string;
   groupDescriptionPlaceholder?: string;
   groupPublicLabel?: string;
+  e2eeEnabled?: boolean;
+  onE2eeChange?: (enabled: boolean) => void;
+  e2eeLabel?: string;
+  e2eeDescription?: string;
+  e2eeDisabled?: boolean;
+};
+
+export type CreateChannelE2eeToggleProps = {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+  disabled?: boolean;
+  label?: string;
+  description?: string;
 };
 
 export type CreateChannelModalProps = {
@@ -1744,6 +1771,7 @@ export type CreateChannelModalProps = {
     placeholder: string;
   }>;
   SelectedBoxComponent?: React.ComponentType<UserPickerSelectedBoxProps>;
+  E2eeToggleComponent?: React.ComponentType<CreateChannelE2eeToggleProps>;
 
   /** i18n labels */
   title?: string;
@@ -1763,6 +1791,9 @@ export type CreateChannelModalProps = {
   nextButtonLabel?: string;
   backButtonLabel?: string;
   emptyStateLabel?: string;
+  e2eeLabel?: string;
+  e2eeDescription?: string;
+  e2eeUnavailableLabel?: string;
 
   /** File upload configuration for group channel images */
   imageAccept?: string;

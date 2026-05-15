@@ -216,7 +216,12 @@ export function computeDefaultActions(
         isDanger: true,
         onClick: async (ch) => {
           try {
-            await ch.removeMembers([currentUserId]);
+            const mlsManager = ch.getClient().mlsManager;
+            if (ch.data?.mls_enabled && mlsManager?.initialized && ch.id && ch.cid) {
+              await mlsManager.evictMember(ch.type, ch.id, ch.cid, currentUserId);
+            } else {
+              await ch.removeMembers([currentUserId]);
+            }
           } catch (e) {
             console.error('Error leaving channel', e);
           }

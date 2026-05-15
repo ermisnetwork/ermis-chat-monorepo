@@ -127,7 +127,13 @@ export const UhmAddMemberModal: React.FC<AddMemberModalProps> = ({
     if (selectedUsers.length === 0 || isAdding) return;
     try {
       setIsAdding(true);
-      await channel.addMembers(selectedUsers.map(u => u.id));
+      const memberIds = selectedUsers.map(u => u.id);
+      const mlsManager = channel.getClient().mlsManager;
+      if (channel.data?.mls_enabled && mlsManager?.initialized && channel.id && channel.cid) {
+        await mlsManager.addMembers(channel.type, channel.id, channel.cid, memberIds);
+      } else {
+        await channel.addMembers(memberIds);
+      }
       onClose();
     } catch (err) {
       console.error('Failed to add members:', err);
@@ -200,4 +206,3 @@ export const UhmAddMemberModal: React.FC<AddMemberModalProps> = ({
 };
 
 UhmAddMemberModal.displayName = 'UhmAddMemberModal';
-

@@ -10,7 +10,8 @@ import {
   Unlock,
   Ban,
   UserCheck,
-  Plus
+  Plus,
+  RotateCw
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useChatClient, canManageChannel, CHANNEL_ROLES, type ChannelInfoActionsProps } from '@ermis-network/ermis-chat-react';
@@ -49,7 +50,16 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   closeTopicLabel,
   reopenTopicLabel,
   deleteTopicLabel,
-  createTopicLabel
+  createTopicLabel,
+  isE2ee,
+  mlsInitialized,
+  mlsEpoch,
+  onRotateKey,
+  rotateKeyLabel,
+  rotateKeyDisabled,
+  onEnableE2ee,
+  enableE2eeLabel,
+  enableE2eeDisabled
 }) => {
   const { t } = useTranslation();
   const { activeChannel } = useChatClient();
@@ -113,6 +123,24 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
           label={isPinned ? unpinLabel : pinLabel}
           disabled={isBlocked}
         />
+
+        {isE2ee && onRotateKey && (
+          <ActionItem
+            onClick={onRotateKey}
+            icon={RotateCw}
+            label={rotateKeyLabel || `${t('e2ee.rotate_key', 'Rotate encryption key')}${typeof mlsEpoch === 'number' ? ` (${mlsEpoch})` : ''}`}
+            disabled={isBlocked || !mlsInitialized || rotateKeyDisabled}
+          />
+        )}
+
+        {!isE2ee && onEnableE2ee && (
+          <ActionItem
+            onClick={onEnableE2ee}
+            icon={Lock}
+            label={enableE2eeLabel || t('e2ee.enable_channel', 'Enable E2EE')}
+            disabled={isBlocked || !mlsInitialized || enableE2eeDisabled}
+          />
+        )}
 
         {/* Settings Action (Moderator/Owner only) */}
         {isTeamChannel && canManageChannel(currentUserRole) && (
