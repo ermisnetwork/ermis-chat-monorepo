@@ -11,6 +11,7 @@ import {
 } from '@ermis-network/ermis-chat-react'
 import type { Channel, SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk'
 import { UhmChannelActions } from './UhmChannelActions'
+import { TeamChannelBar } from './TeamChannelBar'
 
 interface TopicsPanelProps {
   channel: Channel
@@ -18,6 +19,8 @@ interface TopicsPanelProps {
   onCreateTopic?: (channel: Channel) => void
   onEditTopic?: (topic: Channel) => void
   onShowChannelInfo?: (channel: Channel) => void
+  /** Called when user switches to a different team channel via the sidebar bar */
+  onSwitchChannel?: (channel: Channel) => void
   deletedMessageLabel?: React.ReactNode
   stickerMessageLabel?: React.ReactNode
   photoMessageLabel?: React.ReactNode
@@ -54,6 +57,7 @@ export function TopicsPanel({
   onCreateTopic,
   onEditTopic,
   onShowChannelInfo,
+  onSwitchChannel,
   deletedMessageLabel,
   stickerMessageLabel,
   photoMessageLabel,
@@ -86,75 +90,86 @@ export function TopicsPanel({
   }), [t])
 
   return (
-    <div className="flex flex-col h-full bg-white/60 dark:bg-[#1a1828]/60 backdrop-blur-xl">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/80 dark:bg-[#1a1828]/80 backdrop-blur-md z-10">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onBack}
-          className="rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 shrink-0 h-8 w-8"
-        >
-          <ArrowLeft className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
-        </Button>
+    <div className="flex h-full bg-white/60 dark:bg-[#1a1828]/60 backdrop-blur-xl">
+      {/* Team Channel Sidebar — quick switch between team channels */}
+      {onSwitchChannel && (
+        <TeamChannelBar
+          activeTeamChannel={channel}
+          onSwitchChannel={onSwitchChannel}
+        />
+      )}
 
-        {/* Channel avatar + info */}
-        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-          <Avatar image={channelImage} name={channelName} size={44} disableLightbox />
-          <div className="flex flex-col min-w-0">
-            <h2 className="font-semibold truncate leading-tight">{channelName}</h2>
-            <span className="text-[14px] text-zinc-500 dark:text-zinc-400 leading-tight">
-              {t('chat.topics_count', '{{count}} topics', { count: topics.length + 1 })}
-            </span>
+      {/* Main content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/80 dark:bg-[#1a1828]/80 backdrop-blur-md z-10">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onBack}
+            className="rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 shrink-0 h-8 w-8"
+          >
+            <ArrowLeft className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
+          </Button>
+
+          {/* Channel avatar + info */}
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <Avatar image={channelImage} name={channelName} size={44} disableLightbox />
+            <div className="flex flex-col min-w-0">
+              <h2 className="font-semibold truncate leading-tight">{channelName}</h2>
+              <span className="text-[14px] text-zinc-500 dark:text-zinc-400 leading-tight">
+                {t('chat.topics_count', '{{count}} topics', { count: topics.length + 1 })}
+              </span>
+            </div>
+          </div>
+
+          {/* Header action buttons */}
+          <div className="flex items-center gap-1 shrink-0">
+            {canManage && onCreateTopic && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onCreateTopic(channel)}
+                className="rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 h-8 w-8"
+                title={t('chat.topics_create', 'Create topic')}
+              >
+                <Plus className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
+              </Button>
+            )}
+            {onShowChannelInfo && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onShowChannelInfo(channel)}
+                className="rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 h-8 w-8"
+                title={t('chat.topics_channel_info', 'Channel info')}
+              >
+                <Info className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
+              </Button>
+            )}
           </div>
         </div>
 
-        {/* Header action buttons */}
-        <div className="flex items-center gap-1 shrink-0">
-          {canManage && onCreateTopic && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onCreateTopic(channel)}
-              className="rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 h-8 w-8"
-              title={t('chat.topics_create', 'Create topic')}
-            >
-              <Plus className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
-            </Button>
-          )}
-          {onShowChannelInfo && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onShowChannelInfo(channel)}
-              className="rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 h-8 w-8"
-              title={t('chat.topics_channel_info', 'Channel info')}
-            >
-              <Info className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
-            </Button>
-          )}
+        {/* Topic List — from UI Kit */}
+        <div className="flex-1 overflow-hidden">
+          <TopicList
+            channel={channel}
+            generalTopicLabel={t('chat.topics_general', 'general')}
+            GeneralAvatarComponent={GeneralAvatar as any}
+            TopicAvatarComponent={TopicEmojiAvatar as any}
+            ChannelActionsComponent={UhmChannelActions}
+            actionLabels={actionLabels}
+            onEditTopic={onEditTopic}
+            deletedMessageLabel={deletedMessageLabel}
+            stickerMessageLabel={stickerMessageLabel}
+            photoMessageLabel={photoMessageLabel}
+            videoMessageLabel={videoMessageLabel}
+            voiceRecordingMessageLabel={voiceRecordingMessageLabel}
+            fileMessageLabel={fileMessageLabel}
+            systemMessageTranslations={systemMessageTranslations}
+            signalMessageTranslations={signalMessageTranslations}
+          />
         </div>
-      </div>
-
-      {/* Topic List — from UI Kit */}
-      <div className="flex-1 overflow-hidden">
-        <TopicList
-          channel={channel}
-          generalTopicLabel={t('chat.topics_general', 'general')}
-          GeneralAvatarComponent={GeneralAvatar as any}
-          TopicAvatarComponent={TopicEmojiAvatar as any}
-          ChannelActionsComponent={UhmChannelActions}
-          actionLabels={actionLabels}
-          onEditTopic={onEditTopic}
-          deletedMessageLabel={deletedMessageLabel}
-          stickerMessageLabel={stickerMessageLabel}
-          photoMessageLabel={photoMessageLabel}
-          videoMessageLabel={videoMessageLabel}
-          voiceRecordingMessageLabel={voiceRecordingMessageLabel}
-          fileMessageLabel={fileMessageLabel}
-          systemMessageTranslations={systemMessageTranslations}
-          signalMessageTranslations={signalMessageTranslations}
-        />
       </div>
     </div>
   )

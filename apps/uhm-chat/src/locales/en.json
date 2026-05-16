@@ -76,6 +76,7 @@
     "topics_count": "{{count}} topics",
     "topics_create": "Create topic",
     "topics_channel_info": "Channel info",
+    "teams_label": "Teams",
     "topics_section": "Topics",
     "empty_title": "No conversations yet",
     "empty_subtitle": "Start a conversation by tapping the + button above.",

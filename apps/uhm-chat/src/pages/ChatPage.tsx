@@ -224,6 +224,28 @@ export function ChatPage() {
     setDrillDownChannel(null)
   }, [])
 
+  /** Switch to a different channel from the TeamChannelBar sidebar */
+  const handleSwitchTeamChannel = useCallback((channel: ChannelType) => {
+    setActiveChannel(channel)
+    // Mark as read
+    const ms = channel.state?.membership
+    const chState = channel.state as unknown as Record<string, unknown> | undefined
+    const isBanned = Boolean(ms?.banned)
+    const isPending = isPendingMember(ms?.channel_role as string)
+    if (!isBanned && !isPending && (chState?.unreadCount as number) > 0) {
+      channel.markRead().catch(() => { })
+      if (chState) chState.unreadCount = 0
+    }
+    // If it's a team channel with topics, stay in topics view
+    if (isGroupChannel(channel) && channel.data?.topics_enabled) {
+      setDrillDownChannel(channel)
+    } else {
+      // Otherwise go back to the channels list
+      setDrillDownChannel(null)
+      setActivePanel('channels')
+    }
+  }, [setActiveChannel])
+
   const handleTruncateChannel = useCallback(async (channel: ChannelType) => {
     try {
       await channel.truncate()
@@ -550,6 +572,7 @@ export function ChatPage() {
               onCreateTopic={openCreateTopicModal}
               onEditTopic={openEditTopicModal}
               onShowChannelInfo={() => { setHasOpenedInfo(true); setInfoChannel(drillDownChannel); setShowChannelInfo(true) }}
+              onSwitchChannel={handleSwitchTeamChannel}
               deletedMessageLabel={t('chat.deleted_message')}
               stickerMessageLabel={t('chat.preview_sticker')}
               photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
