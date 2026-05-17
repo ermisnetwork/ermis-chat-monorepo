@@ -13,7 +13,7 @@
  */
 
 import { E2eeClient } from './e2ee';
-import type { MlsStorageAdapter, E2eeStoredMessage } from './mls_storage';
+import type { MlsStorageAdapter, E2eeStoredMessage, PendingE2eeSnapshot } from './mls_storage';
 import { IndexedDBMlsStorage } from './mls_storage';
 import type { ErmisChat } from './client';
 import type { ExtendableGenerics, DefaultGenerics } from './types';
@@ -75,6 +75,8 @@ export interface E2eePayload {
   poll_choice_counts?: Record<string, number>;
   /** Latest poll choices */
   latest_poll_choices?: unknown[];
+  /** E2EE edit history, encrypted inside the latest message snapshot */
+  old_texts?: Array<{ text: string; created_at: string }>;
 }
 
 export interface DecryptResult {
@@ -180,6 +182,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private _syncGateResolve: (() => void) | null = null;
   private _lastSyncStates: Map<string, E2eeSyncState> = new Map();
   private _channelReadyLocks: Map<string, Promise<EnsureE2eeChannelResult>> = new Map();
+  private _channelReadyUntil: Map<string, number> = new Map();
+  private readonly _channelReadyCacheMs = 30_000;
 
   /**
    * Deferred eviction queue — populated during sync when a MemberLeaved system message
@@ -262,7 +266,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 5. Sync MLS events for E2EE channels (restore groups from server)
     await this._syncAndRestoreGroups();
 
-    // 6. Persist Provider state after sync (groups modify the key store)
+    // 6. Persist Provider snapshot after sync (groups modify the key store)
     await this._persistProvider();
 
     // 7. Register this manager on the client so event handlers can access it
@@ -412,6 +416,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return isNaN(ms) ? 0 : ms;
   }
 
+  private _initialSyncCursor(value?: string | number | null): number {
+    if (value === undefined || value === null) return Date.now();
+    const ms = this._toMillis(value);
+    if (!ms) return Date.now();
+    // Bellboy sync uses query_events_after(), so starting exactly at
+    // mls_enabled_at can skip protocol events persisted in the same millisecond.
+    return Math.max(0, ms - 1);
+  }
+
   private _startSyncGate(): void {
     if (this._syncing && this._syncPromise) return;
 
@@ -455,6 +468,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   private _emitSyncState(state: E2eeSyncState): void {
     this._lastSyncStates.set(state.cid, state);
+    if (!state.needs_retry && state.status !== 'failed' && state.status !== 'stale_group_info') {
+      this._channelReadyUntil.set(state.cid, Date.now() + this._channelReadyCacheMs);
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (this.client as any)?.dispatchEvent?.({
       type: 'e2ee.sync_state',
@@ -471,22 +487,76 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     processedCursor,
     serverNextCursor,
     hasMore,
-    bufferedMessages,
   }: {
     processedCursor: number;
     serverNextCursor?: number;
     hasMore: boolean;
     bufferedMessages: number;
   }): number {
-    if (bufferedMessages > 0) {
-      return processedCursor;
-    }
-
     if (!hasMore && serverNextCursor !== undefined && serverNextCursor >= processedCursor) {
       return serverNextCursor + 1;
     }
 
     return processedCursor;
+  }
+
+  private _pendingSnapshotVersion(message: {
+    id?: string;
+    created_at?: string;
+    updated_at?: string;
+    mls_epoch?: number;
+  }): string {
+    const version = message.updated_at || message.created_at || '';
+    return (message.id || '') + ':' + version + ':' + (message.mls_epoch ?? '');
+  }
+
+  private _toPendingSnapshot(
+    cid: string,
+    eventType: 'application' | 'message_updated',
+    message: Record<string, unknown>,
+    receivedCursor?: number,
+    eventTime?: string,
+  ): PendingE2eeSnapshot {
+    const typedMessage = message as { id?: string; created_at?: string; updated_at?: string; mls_epoch?: number };
+    return {
+      cid,
+      event_type: eventType,
+      message_id: String(typedMessage.id || ''),
+      mls_epoch: typeof typedMessage.mls_epoch === 'number' ? typedMessage.mls_epoch : undefined,
+      message,
+      version: this._pendingSnapshotVersion(typedMessage),
+      received_cursor: receivedCursor,
+      event_time: eventTime,
+    };
+  }
+
+  private _dedupePendingSnapshots(messages: PendingE2eeSnapshot[]): PendingE2eeSnapshot[] {
+    const byVersion = new Map<string, PendingE2eeSnapshot>();
+    for (const message of messages) {
+      if (!message.message_id) continue;
+      byVersion.set(message.version, message);
+    }
+    return Array.from(byVersion.values()).sort((a, b) => (a.received_cursor || 0) - (b.received_cursor || 0));
+  }
+
+  private async _savePendingSnapshots(cid: string, messages: PendingE2eeSnapshot[]): Promise<void> {
+    await this.storage.savePendingE2eeSnapshots(cid, this._dedupePendingSnapshots(messages));
+  }
+
+  private async _flushPendingE2eeSnapshots(
+    cid: string,
+  ): Promise<{ decrypted: E2eeStoredMessage[]; pending: PendingE2eeSnapshot[] }> {
+    const pending = this._dedupePendingSnapshots(await this.storage.loadPendingE2eeSnapshots(cid));
+    if (pending.length === 0) return { decrypted: [], pending: [] };
+
+    const { decrypted, buffered } = await this.decryptApplicationMessages(
+      cid,
+      pending.map((snapshot) => snapshot.message as any),
+    );
+    const bufferedVersions = new Set(buffered.map((message: any) => this._pendingSnapshotVersion(message)));
+    const stillPending = pending.filter((snapshot) => bufferedVersions.has(snapshot.version));
+    await this._savePendingSnapshots(cid, stillPending);
+    return { decrypted, pending: stillPending };
   }
 
   /**
@@ -581,6 +651,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       // Step 2: Sync all groups via unified API
       const savedCursors = await this.storage.loadAllSyncTimestamps();
+      const savedRemovedCursor = await this.storage.loadRemovedSyncCursor();
+      let removedCursor = savedRemovedCursor ? this._toMillis(savedRemovedCursor) : 0;
       const groupCids = Array.from(this.groups.keys());
 
       // Build cursor map — use saved timestamp or mls_enabled_at as fallback
@@ -594,27 +666,62 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           const channel = (this.client as any)?.activeChannels?.[cid];
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const mlsEnabledAt = (channel?.data as any)?.mls_enabled_at;
-          // Use mls_enabled_at if available, otherwise Date.now().
+          // Use mls_enabled_at as a bootstrap cursor, otherwise Date.now().
           // NEVER fall back to epoch 0 (1970) — that would fetch the entire message history.
-          syncCursors[cid] = mlsEnabledAt ? this._toMillis(mlsEnabledAt) : Date.now();
+          syncCursors[cid] = this._initialSyncCursor(mlsEnabledAt);
         }
       }
 
       if (Object.keys(syncCursors).length === 0) {
         console.log('[MLS] No existing channels to sync — will check for external join');
-      } else {
-        // Paginated sync loop
-        let hasMore = true;
-        while (hasMore) {
-          hasMore = false;
-          const response = await this.e2eeClient!.syncAll(syncCursors, 100);
+      }
+
+      // Paginated sync loop. It also carries removed_cursor, so keep calling
+      // even when no channel cursor exists locally.
+      let hasMore = true;
+      while (hasMore) {
+        hasMore = false;
+        const response = await this.e2eeClient!.syncAll(syncCursors, 100, removedCursor);
+
+        const removedChannels = response.removed_channels;
+        if (removedChannels?.events?.length) {
+          for (const tombstone of removedChannels.events) {
+            await this._processRemovedChannelTombstone(tombstone);
+          }
+        }
+        if (removedChannels?.next_cursor !== undefined && removedChannels.next_cursor > removedCursor) {
+          removedCursor = removedChannels.next_cursor;
+          await this.storage.saveRemovedSyncCursor(String(removedCursor));
+        }
+        if (removedChannels?.has_more) {
+          hasMore = true;
+        }
 
           for (const [cid, result] of Object.entries(response)) {
+            if (cid === 'removed_channels') continue;
             // Skip non-ChannelSyncResult entries (e.g. "duration" from APIResponse)
             if (!result || typeof result !== 'object' || !('events' in result)) continue;
 
             const channelResult = result as { events: any[]; has_more: boolean; next_cursor?: number };
-            if (!channelResult.events || channelResult.events.length === 0) continue;
+            if (!channelResult.events || channelResult.events.length === 0) {
+              const flushed = await this._flushPendingE2eeSnapshots(cid);
+              this._emitSyncState(
+                this._makeSyncState(
+                  cid,
+                  channelResult.has_more ? 'syncing' : 'ready',
+                  syncCursors[cid] ?? Date.now(),
+                  syncCursors[cid] ?? Date.now(),
+                  {
+                    server_next_cursor: channelResult.next_cursor,
+                    has_more: channelResult.has_more,
+                    needs_retry: channelResult.has_more,
+                    processed_events: 0,
+                    buffered_messages: flushed.pending.length,
+                  },
+                ),
+              );
+              continue;
+            }
 
             const startedCursor = syncCursors[cid] ?? Date.now();
             const processResult = await this._processChannelEvents(cid, channelResult.events, startedCursor);
@@ -623,7 +730,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
               channelResult.next_cursor ?? (fallbackNextCursor ? this._toMillis(fallbackNextCursor) : undefined);
             const processedCursor = processResult.processedCursor ?? startedCursor;
             const cursorLagged = serverNextCursor !== undefined && processedCursor < serverNextCursor;
-            const retryNeeded = channelResult.has_more || cursorLagged || processResult.bufferedMessages > 0;
+            const retryNeeded = channelResult.has_more || cursorLagged;
             const durableCursor = this._getDurableSyncCursor({
               processedCursor,
               serverNextCursor,
@@ -638,11 +745,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             this._emitSyncState(
               this._makeSyncState(
                 cid,
-                cursorLagged || processResult.bufferedMessages > 0
-                  ? 'needs_retry'
-                  : channelResult.has_more
-                  ? 'syncing'
-                  : 'ready',
+                cursorLagged ? 'needs_retry' : channelResult.has_more ? 'syncing' : 'ready',
                 startedCursor,
                 processedCursor,
                 {
@@ -655,26 +758,25 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
               ),
             );
 
-            if (channelResult.has_more && !cursorLagged && processResult.bufferedMessages === 0) {
+            if (channelResult.has_more && !cursorLagged) {
               hasMore = true;
             }
           }
-        }
-
-        // Save all cursors as strings for storage compatibility
-        const cursorsToSave: Record<string, string> = {};
-        for (const [cid, ms] of Object.entries(syncCursors)) {
-          cursorsToSave[cid] = String(ms);
-        }
-        await this.storage.saveAllSyncTimestamps(cursorsToSave);
-        await this._persistProvider();
-
-        console.log(`[MLS] Sync complete. Groups: ${this.groups.size}`);
-
-        // Drain pending evictions (MemberLeaved offline recovery).
-        // Must run AFTER sync loop — epoch is now fully up-to-date.
-        await this._drainPendingEvictions();
       }
+
+      // Save all cursors as strings for storage compatibility
+      const cursorsToSave: Record<string, string> = {};
+      for (const [cid, ms] of Object.entries(syncCursors)) {
+        cursorsToSave[cid] = String(ms);
+      }
+      await this.storage.saveAllSyncTimestamps(cursorsToSave);
+      await this._persistProvider();
+
+      console.log(`[MLS] Sync complete. Groups: ${this.groups.size}`);
+
+      // Drain pending evictions (MemberLeaved offline recovery).
+      // Must run AFTER sync loop — epoch is now fully up-to-date.
+      await this._drainPendingEvictions();
 
       // Step 3: Multi-device — external join for E2EE channels without local group
       // On a new device, no groups are restored from storage.
@@ -691,7 +793,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
         if (missingCids.length > 0) {
           console.log(`[MLS] Multi-device: ${missingCids.length} E2EE channel(s) need external join`);
-          // External join sequentially to avoid race conditions on Provider state
+          // External join sequentially to avoid race conditions on Provider snapshot
           for (const { cid, type, id } of missingCids) {
             try {
               const result = await this.ensureChannelReady(type, id, cid, { source: 'startup' });
@@ -711,23 +813,58 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Process sync events for a single channel (protocol + application messages).
    * Events are already sorted by the server.
    */
+  private async _processRemovedChannelTombstone(tombstone: {
+    cid: string;
+    channel_id?: string;
+    channel_type?: string;
+    parent_cid?: string;
+    removed_at?: string;
+    removed_by?: string;
+    self_remove?: boolean;
+  }): Promise<void> {
+    const cid = tombstone.cid;
+    if (!cid) return;
+
+    this.leaveGroup(cid);
+    this._pendingEvictions.delete(cid);
+    await this._persistPendingEvictions();
+    await this._savePendingSnapshots(cid, []);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const activeChannels = (this.client as any)?.activeChannels;
+    if (activeChannels?.[cid]) {
+      delete activeChannels[cid];
+    }
+
+    console.log('[MLS] Removed channel tombstone processed:', cid, {
+      removed_at: tombstone.removed_at,
+      removed_by: tombstone.removed_by,
+      self_remove: tombstone.self_remove,
+    });
+  }
+
   private async _processChannelEvents(cid: string, events: any[], startedCursor = 0): Promise<ChannelProcessResult> {
     const decryptedMessages: E2eeStoredMessage[] = [];
-    const pendingMlsMessages: any[] = [];
+    const pendingMlsMessages: PendingE2eeSnapshot[] = [];
     let processedEvents = 0;
     let lastSafeCursor = startedCursor;
-    let firstBufferedCursor: number | undefined;
 
     const retryPendingMessages = async () => {
       if (pendingMlsMessages.length === 0) return;
       const retryBatch = pendingMlsMessages.splice(0, pendingMlsMessages.length);
-      const { decrypted, buffered } = await this.decryptApplicationMessages(cid, retryBatch);
+      const { decrypted, buffered } = await this.decryptApplicationMessages(
+        cid,
+        retryBatch.map((snapshot) => snapshot.message as any),
+      );
       decryptedMessages.push(...decrypted);
-      pendingMlsMessages.push(...buffered);
-      if (pendingMlsMessages.length === 0) {
-        firstBufferedCursor = undefined;
-      }
+      const bufferedVersions = new Set(buffered.map((message: any) => this._pendingSnapshotVersion(message)));
+      pendingMlsMessages.push(...retryBatch.filter((snapshot) => bufferedVersions.has(snapshot.version)));
+      await this._savePendingSnapshots(cid, pendingMlsMessages);
     };
+
+    const restoredPending = await this._flushPendingE2eeSnapshots(cid);
+    decryptedMessages.push(...restoredPending.decrypted);
+    pendingMlsMessages.push(...restoredPending.pending);
 
     for (const event of events) {
       const eventCreatedAt = this._getEventCreatedAt(event);
@@ -788,26 +925,17 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
         if (contentType === 'mls') {
           // MLS encrypted message — decrypt at its actual timeline position.
-          // If epoch state is not ready yet, buffer it and expose cursor lag
-          // to the UI instead of advancing the durable cursor past it.
-          const group = this.groups.get(cid);
-          const msgEpoch = msg.mls_epoch || 0;
-          const groupEpoch = group ? Number(group.epoch()) : 0;
-          if (group && msgEpoch < groupEpoch) {
-            console.log(`[MLS] Skipping pre-join message (msg epoch ${msgEpoch} < group epoch ${groupEpoch}):`, msg.id);
-            processedEvents += 1;
-            if (pendingMlsMessages.length === 0) {
-              lastSafeCursor = eventCursor;
-            }
-            continue;
-          }
+          // If epoch state is not ready yet, persist it and let the durable cursor
+          // advance. Pending snapshots are retried after later commits advance the group.
           const { decrypted, buffered } = await this.decryptApplicationMessages(cid, [msg]);
           decryptedMessages.push(...decrypted);
           if (buffered.length > 0) {
-            if (firstBufferedCursor === undefined) {
-              firstBufferedCursor = eventCursor;
-            }
-            pendingMlsMessages.push(...buffered);
+            pendingMlsMessages.push(
+              ...buffered.map((bufferedMessage: any) =>
+                this._toPendingSnapshot(cid, 'application', bufferedMessage, eventCursor, eventCreatedAt),
+              ),
+            );
+            await this._savePendingSnapshots(cid, pendingMlsMessages);
           }
         } else {
           // Standard/system message — save directly, no decryption needed
@@ -826,10 +954,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           });
 
           // ── Offline recovery: Self-remove (SystemMessage types 11, 12, 21) ──
-          // When A/B were offline while C self-left or rejected invite, they missed the WS event.
-          // On sync, ALL clients queue ghost evictions (not just designated evictor).
-          // This ensures that when any client performs a commit action (add, remove,
-          // key rotate), _drainPendingGhosts or atomic remove_users will handle ghost cleanup.
+          // When the designated evictor was offline while C self-left or rejected
+          // invite, they missed the WS event. Queue only on the designated evictor;
+          // normal members must not submit commit_eviction during sync recovery.
           // 11: InviteRejected, 12: MemberLeaved, 21: InviteMessagingRejected
           const msgText: string = msg.text || '';
           if (
@@ -838,6 +965,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           ) {
             const leftUserId = msgText.split(' ')[1];
             if (leftUserId && leftUserId !== this.userId) {
+              const activeChannel = this._getActiveChannel(cid);
+              if (!activeChannel || !this.isDesignatedEvictor(activeChannel)) {
+                continue;
+              }
               const group = this.groups.get(cid);
               if (group) {
                 // Check C still has leaf nodes (another evictor may have already removed them)
@@ -859,6 +990,53 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                 }
               }
             }
+          }
+        }
+      } else if (eventType === 'member_removed') {
+        const removeData = event.data || {};
+        const removedUserId = removeData.member?.user_id;
+        const actorUserId = removeData.user?.id;
+        if (!removedUserId) continue;
+
+        // Keep active channel member state in sync when offline catch-up includes
+        // a member removal metadata event from event:{cid}.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const activeChannel = this._getActiveChannel(cid);
+        if (activeChannel?.state?.members) {
+          delete activeChannel.state.members[removedUserId];
+        }
+
+        if (removedUserId === this.userId) {
+          this.leaveGroup(cid);
+          for (const topicCid of removeData.topic_cids ?? []) {
+            this.leaveGroup(topicCid);
+          }
+          continue;
+        }
+
+        const selfRemoveEvent =
+          removeData.self_remove === true ||
+          (removeData.self_remove === undefined && !!actorUserId && removedUserId === actorUserId);
+        if (!selfRemoveEvent) {
+          continue;
+        }
+        if (!activeChannel || !this.isDesignatedEvictor(activeChannel)) {
+          continue;
+        }
+
+        const group = this.groups.get(cid);
+        if (group) {
+          try {
+            const leafNodes = group.members_by_user_id(removedUserId);
+            if (leafNodes && leafNodes.length > 0) {
+              const queue = this._pendingEvictions.get(cid) ?? new Set<string>();
+              queue.add(removedUserId);
+              this._pendingEvictions.set(cid, queue);
+              await this._persistPendingEvictions();
+              console.log('[MLS] Queued eviction from member_removed sync for', removedUserId, 'in', cid);
+            }
+          } catch (_err) {
+            // members_by_user_id may fail if group is in invalid state — safe to ignore
           }
         }
       } else if (eventType === 'reaction') {
@@ -931,37 +1109,67 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
         console.log('[MLS] Sync: message deleted:', deletedMessageId);
       } else if (eventType === 'message_updated') {
-        // Message updated event from offline sync — update message in local state
+        // Message updated event from offline sync. E2EE updates carry the latest
+        // encrypted snapshot for the same message id.
         const updateData = event.data;
         const updatedMessage = updateData?.message;
         if (!updatedMessage) continue;
+
+        let messageForState = updatedMessage;
+        let updateBuffered = false;
+
+        try {
+          if (updatedMessage.content_type === 'mls' && updatedMessage.mls_ciphertext) {
+            const versionedMessage = {
+              ...updatedMessage,
+              updated_at: updatedMessage.updated_at || updateData.created_at,
+            };
+            const { decrypted, buffered } = await this.decryptApplicationMessages(cid, [versionedMessage]);
+            if (buffered.length > 0) {
+              updateBuffered = true;
+              pendingMlsMessages.push(
+                ...buffered.map((bufferedMessage: any) =>
+                  this._toPendingSnapshot(cid, 'message_updated', bufferedMessage, eventCursor, eventCreatedAt),
+                ),
+              );
+              await this._savePendingSnapshots(cid, pendingMlsMessages);
+            }
+            if (decrypted[0]) {
+              messageForState = this._buildFullMessage(decrypted[0], updatedMessage);
+            }
+          } else {
+            const existingMsg = await this.storage.loadE2eeMessage(updatedMessage.id);
+            if (existingMsg) {
+              await this.storage.saveE2eeMessage({
+                ...existingMsg,
+                text: updatedMessage.text ?? existingMsg.text,
+                updated_at: updateData.created_at,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn('[MLS] Failed to update message in storage during sync:', updatedMessage.id, err);
+        }
+
+        if (updateBuffered) {
+          console.log('[MLS] Sync: buffered message update:', updatedMessage.id);
+          processedEvents += 1;
+          lastSafeCursor = eventCursor;
+          continue;
+        }
 
         // 1. Update in-memory channel state
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const activeChannel = (this.client as any)?.activeChannels?.[cid];
         if (activeChannel?.state) {
-          activeChannel.state.addMessageSorted(updatedMessage, false, false);
-        }
-
-        // 2. Update local storage
-        try {
-          const existingMsg = await this.storage.loadE2eeMessage(updatedMessage.id);
-          if (existingMsg) {
-            await this.storage.saveE2eeMessage({
-              ...existingMsg,
-              text: updatedMessage.text ?? existingMsg.text,
-              updated_at: updateData.created_at,
-            });
-          }
-        } catch (err) {
-          console.warn('[MLS] Failed to update message in storage during sync:', updatedMessage.id, err);
+          activeChannel.state.addMessageSorted(messageForState, false, false);
         }
 
         // 3. Dispatch event for UI re-render
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (this.client as any)?.dispatchEvent?.({
           type: 'message.updated' as any,
-          message: updatedMessage,
+          message: messageForState,
           cid,
         });
 
@@ -986,9 +1194,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
 
       processedEvents += 1;
-      if (pendingMlsMessages.length === 0) {
-        lastSafeCursor = eventCursor;
-      }
+      lastSafeCursor = eventCursor;
     }
 
     if (pendingMlsMessages.length > 0) {
@@ -1029,10 +1235,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     console.log('[MLS] Processed', events.length, 'events for:', cid);
     return {
-      processedCursor:
-        pendingMlsMessages.length > 0 && firstBufferedCursor !== undefined
-          ? Math.max(startedCursor, firstBufferedCursor - 1)
-          : lastSafeCursor,
+      processedCursor: lastSafeCursor,
       processedEvents,
       bufferedMessages: pendingMlsMessages.length,
       decrypted: decryptedMessages,
@@ -1049,6 +1252,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const result = response[cid] as { events?: any[]; has_more?: boolean; next_cursor?: number } | undefined;
 
       if (!result?.events || result.events.length === 0) {
+        const flushed = await this._flushPendingE2eeSnapshots(cid);
         finalState = this._makeSyncState(
           cid,
           result?.has_more ? 'needs_retry' : 'ready',
@@ -1058,6 +1262,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             server_next_cursor: result?.next_cursor,
             has_more: !!result?.has_more,
             needs_retry: !!result?.has_more,
+            buffered_messages: flushed.pending.length,
           },
         );
         this._emitSyncState(finalState);
@@ -1070,7 +1275,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         result.next_cursor ?? (fallbackNextCursor ? this._toMillis(fallbackNextCursor) : undefined);
       const processedCursor = processResult.processedCursor ?? startedCursor;
       const cursorLagged = serverNextCursor !== undefined && processedCursor < serverNextCursor;
-      const blocked = cursorLagged || processResult.bufferedMessages > 0;
+      const blocked = cursorLagged;
       const durableCursor = this._getDurableSyncCursor({
         processedCursor,
         serverNextCursor,
@@ -1103,6 +1308,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         return finalState;
       }
     }
+
+    if (this._pendingEvictions.size > 0) {
+      await this._persistPendingEvictions();
+    }
   }
 
   /**
@@ -1121,7 +1330,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const savedTs = await this.storage.loadSyncTimestamp(cid);
     // Prefer saved cursor; else mls_enabled_at; else now.
     // NEVER use epoch 0 — that would fetch the entire message history.
-    const since = savedTs ? this._toMillis(savedTs) : mlsEnabledAt ? this._toMillis(mlsEnabledAt) : Date.now();
+    const since = savedTs ? this._toMillis(savedTs) : this._initialSyncCursor(mlsEnabledAt);
 
     const syncState = await this._syncChannelFromCursor(cid, since, 100);
 
@@ -1185,7 +1394,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const savedTs = await this.storage.loadSyncTimestamp(cid);
     // Prefer saved cursor; else mls_enabled_at; else now.
     // NEVER use epoch 0 — that would fetch the entire message history.
-    const since = savedTs ? this._toMillis(savedTs) : mlsEnabledAt ? this._toMillis(mlsEnabledAt) : Date.now();
+    const since = savedTs ? this._toMillis(savedTs) : this._initialSyncCursor(mlsEnabledAt);
 
     const syncState = await this._syncChannelFromCursor(cid, since, 100);
 
@@ -1207,9 +1416,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     cid: string,
     _options: { source?: 'startup' | 'reconnect' | 'channel_updated' | 'invite_accepted' | 'open' | string } = {},
   ): Promise<EnsureE2eeChannelResult> {
-    void _options;
+    const source = _options.source;
     if (!this.initialized) {
       return { cid, status: 'failed', error: '[MLS] Not initialized' };
+    }
+
+    const readyUntil = this._channelReadyUntil.get(cid) ?? 0;
+    if (source === 'open' && this.groups.has(cid) && readyUntil > Date.now()) {
+      return { cid, status: 'ready', epoch: this.getEpoch(cid), sync_state: this.getSyncState(cid) || undefined };
     }
 
     const existing = this._channelReadyLocks.get(cid);
@@ -1246,7 +1460,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mlsEnabledAt = (channel?.data as any)?.mls_enabled_at;
       const savedTs = await this.storage.loadSyncTimestamp(cid);
-      const since = savedTs ? this._toMillis(savedTs) : mlsEnabledAt ? this._toMillis(mlsEnabledAt) : Date.now();
+      const since = savedTs ? this._toMillis(savedTs) : this._initialSyncCursor(mlsEnabledAt);
       const syncState = await this._syncChannelFromCursor(cid, since, 100);
       const result: EnsureE2eeChannelResult = {
         cid,
@@ -1785,14 +1999,32 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private async _drainPendingEvictions(): Promise<void> {
     if (this._pendingEvictions.size === 0) return;
 
-    const snapshot = new Map(this._pendingEvictions);
+    const pendingEvictions = new Map(this._pendingEvictions);
     this._pendingEvictions.clear();
 
-    for (const [cid, userIds] of snapshot) {
+    for (const [cid, userIds] of pendingEvictions) {
       const colonIdx = cid.indexOf(':');
       const channelType = cid.substring(0, colonIdx);
       const channelId = cid.substring(colonIdx + 1);
       const group = this.groups.get(cid);
+      const activeChannel = this._getActiveChannel(cid);
+
+      if (!activeChannel) {
+        const requeue = this._pendingEvictions.get(cid) ?? new Set<string>();
+        for (const userId of userIds) {
+          requeue.add(userId);
+        }
+        this._pendingEvictions.set(cid, requeue);
+        continue;
+      }
+
+      if (!this.isDesignatedEvictor(activeChannel)) {
+        console.log('[MLS] _drainPendingEvictions: skip', cid, '— this client is not designated evictor');
+        for (const userId of userIds) {
+          await this._removePendingEviction(cid, userId);
+        }
+        continue;
+      }
 
       for (const userId of userIds) {
         // ── Pre-flight: check if user still has leaf nodes in the ratchet tree ──
@@ -1834,11 +2066,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   /** Snapshot current queue and write to IndexedDB. */
   private async _persistPendingEvictions(): Promise<void> {
-    const snapshot: Record<string, string[]> = {};
+    const pendingEvictions: Record<string, string[]> = {};
     for (const [cid, userIds] of this._pendingEvictions) {
-      snapshot[cid] = Array.from(userIds);
+      pendingEvictions[cid] = Array.from(userIds);
     }
-    await this.storage.savePendingEvictions(snapshot);
+    await this.storage.savePendingEvictions(pendingEvictions);
   }
 
   /** Remove a single user from persisted pending evictions after successful eviction. */
@@ -1900,11 +2132,17 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // Eviction (Reject / Skip / Self-leave handling)
   // ============================================================
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _getActiveChannel(cid: string): any | undefined {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (this.client as any)?.activeChannels?.[cid];
+  }
+
   /**
    * Determine if this client is the designated evictor for a given channel.
    * We use a deterministic rule so that exactly ONE online evictor triggers commit:
-   *   1. Owner (created_by.id) → always evictor
-   *   2. Otherwise → moder with lexicographically lowest user_id
+   *   1. Owner (created_by.id) → evictor when this client is the owner
+   *   2. Otherwise → online moder with lexicographically lowest user_id
    *
    * Roles allowed to remove others (server: channel.rs):
    *   ChannelRole::Owner | ChannelRole::Moder → can remove any member
@@ -1912,22 +2150,30 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    *
    * This prevents the race condition where multiple moders all try to evict simultaneously.
    */
-  isDesignatedEvictor(channel: { data?: Record<string, unknown> }): boolean {
+  isDesignatedEvictor(channel: { data?: Record<string, unknown>; state?: Record<string, unknown> }): boolean {
     if (!this.userId) return false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = channel.data as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const state = channel.state as any;
 
-    // Owner is always the designated evictor (highest priority)
+    // Owner is the designated evictor when their own client is online.
     const createdById = data?.created_by?.id || data?.channel?.created_by?.id;
     if (createdById && createdById === this.userId) return true;
 
-    // Among moders (ChannelRole::Moder on server), pick the lowest-sorted user_id.
-    // Server permits: Owner | Moder | Member(self-only) to call remove_members.
-    // Member cannot evict others, so evictor candidates = Owner + Moder.
-    const members: Array<{ user_id: string; channel_role?: string }> = data?.members || [];
+    const onlineIds = new Set<string>(Object.keys(state?.watchers || {}));
+    onlineIds.add(this.userId);
+    if (createdById && onlineIds.has(createdById)) return false;
+
+    // Among online moders (ChannelRole::Moder on server), pick the lowest-sorted
+    // user_id. Members are not designated commit_eviction callers.
+    const stateMembers = state?.members ? Object.values(state.members) : [];
+    const members: Array<{ user_id?: string; channel_role?: string }> =
+      Array.isArray(data?.members) && data.members.length > 0 ? data.members : (stateMembers as any);
     const eligibleIds = members
-      .filter((m) => ['owner', 'moder'].includes(m.channel_role || ''))
+      .filter((m) => (m.channel_role || '') === 'moder')
       .map((m) => m.user_id)
+      .filter((id): id is string => Boolean(id && onlineIds.has(id)))
       .sort();
     return eligibleIds.length > 0 && eligibleIds[0] === this.userId;
   }
@@ -1951,7 +2197,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     selfLeft = false,
     isRetry = false,
   ): Promise<void> {
-    if (!this.initialized) throw new Error('[MLS] Not initialized');
+    if (!this.provider || !this.identity || !this.client || !this.storage || !this.e2eeClient) {
+      throw new Error('[MLS] Not initialized');
+    }
+    if (!selfLeft && this.userId && targetUserId === this.userId) {
+      throw new Error('[MLS] evictMember cannot remove the current user; use channel.leaveChannelE2ee() for self-leave');
+    }
 
     const group = this.groups.get(cid);
     if (!group) {
@@ -2352,7 +2603,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
     }
 
-    // Snapshot Provider state before process_message — commits advance
+    // Snapshot Provider snapshot before process_message — commits advance
     // the epoch (irreversible). If processing fails mid-way, rollback.
     const snapshot = this.provider.to_bytes();
 
@@ -2417,7 +2668,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
 
       // ROLLBACK: restore Provider from snapshot (commits modify Provider via as_mut)
-      console.warn('[MLS] processCommit failed, rolling back Provider state:', errMsg);
+      console.warn('[MLS] processCommit failed, rolling back Provider snapshot:', errMsg);
       this.provider = wasmModule.Provider.from_bytes(new Uint8Array(snapshot));
       throw err;
     }
@@ -2438,6 +2689,58 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    */
   private _decryptPromises = new Map<string, Promise<Record<string, unknown> | null>>();
 
+  private _messageVersionKey(message: {
+    id: string;
+    created_at?: string;
+    updated_at?: string;
+    mls_epoch?: number;
+    [key: string]: unknown;
+  }): string {
+    const version = message.updated_at || message.created_at || '';
+    return `${message.id}:${version}:${message.mls_epoch ?? ''}`;
+  }
+
+  private _storedMessageCoversVersion(
+    stored: E2eeStoredMessage,
+    message: { created_at?: string; updated_at?: string; [key: string]: unknown },
+  ): boolean {
+    const incomingUpdatedAt = message.updated_at;
+    if (!incomingUpdatedAt) return true;
+    const storedUpdatedAt = stored.updated_at || stored.created_at;
+    return new Date(storedUpdatedAt).getTime() >= new Date(incomingUpdatedAt).getTime();
+  }
+
+  private _storedFromPayload(
+    cid: string,
+    payload: E2eePayload,
+    envelope: { id: string; user?: { id: string }; created_at?: string; updated_at?: string; [key: string]: unknown },
+    fallback?: E2eeStoredMessage | null,
+  ): E2eeStoredMessage {
+    return {
+      id: envelope.id,
+      cid,
+      content_type: 'mls',
+      text: payload.text,
+      attachments: payload.attachments || fallback?.attachments,
+      sticker_url: payload.sticker_url || fallback?.sticker_url,
+      poll_type: payload.poll_type || fallback?.poll_type,
+      poll_choice_counts: payload.poll_choice_counts || fallback?.poll_choice_counts,
+      latest_poll_choices: payload.latest_poll_choices || fallback?.latest_poll_choices,
+      old_texts: payload.old_texts || fallback?.old_texts,
+      is_edited: !!(payload.old_texts?.length || fallback?.old_texts?.length),
+      user_id: envelope.user?.id || fallback?.user_id || '',
+      user: envelope.user ? { ...envelope.user } : fallback?.user,
+      created_at: fallback?.created_at || envelope.created_at || new Date().toISOString(),
+      updated_at: (envelope.updated_at as string | undefined) || envelope.created_at || fallback?.updated_at,
+      type: (envelope as any).type || fallback?.type || 'regular',
+      parent_id: (envelope as any).parent_id || fallback?.parent_id,
+      quoted_message_id: (envelope as any).quoted_message_id || fallback?.quoted_message_id,
+      mentioned_users: (envelope as any).mentioned_users || fallback?.mentioned_users,
+      mentioned_all:
+        (envelope as any).mentioned_all !== undefined ? (envelope as any).mentioned_all : fallback?.mentioned_all,
+    };
+  }
+
   async processE2eeMessage(
     cid: string,
     message: {
@@ -2445,21 +2748,24 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       mls_ciphertext?: Uint8Array;
       user?: { id: string };
       created_at?: string;
+      updated_at?: string;
+      mls_epoch?: number;
       [key: string]: unknown;
     },
   ): Promise<Record<string, unknown> | null> {
-    if (this._decryptPromises.has(message.id)) {
-      console.log('[MLS] processE2eeMessage: deduplicating concurrent request via MlsPlaintextCache:', message.id);
-      return this._decryptPromises.get(message.id)!;
+    const versionKey = this._messageVersionKey(message);
+    if (this._decryptPromises.has(versionKey)) {
+      console.log('[MLS] processE2eeMessage: deduplicating concurrent request via MlsPlaintextCache:', versionKey);
+      return this._decryptPromises.get(versionKey)!;
     }
 
     const promise = this._processE2eeMessageInternal(cid, message);
-    this._decryptPromises.set(message.id, promise);
+    this._decryptPromises.set(versionKey, promise);
 
     try {
       return await promise;
     } finally {
-      this._decryptPromises.delete(message.id);
+      this._decryptPromises.delete(versionKey);
     }
   }
 
@@ -2471,17 +2777,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       mls_ciphertext?: Uint8Array;
       user?: { id: string };
       created_at?: string;
+      updated_at?: string;
+      mls_epoch?: number;
       [key: string]: unknown;
     },
   ): Promise<Record<string, unknown> | null> {
     const ciphertext = message.mls_ciphertext;
     if (!ciphertext) return null;
-
-    const cachedEditedMessage = await this._loadCachedEditTarget(message);
-    if (cachedEditedMessage) {
-      this._decryptedMsgIds.add(message.id);
-      return this._buildFullMessage(cachedEditedMessage, message);
-    }
+    const versionKey = this._messageVersionKey(message);
 
     // CRITICAL: If MLS sync is in progress (reconnecting from background),
     // do NOT attempt decryption — it would race with the waterfall decrypt
@@ -2497,15 +2800,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         // Sync failed — fall through to normal decrypt
       }
       // Re-check dedup after sync: sync may have already decrypted this message
-      if (this._decryptedMsgIds.has(message.id)) {
-        console.log('[MLS] processE2eeMessage: decrypted by sync (post-wait), returning cached:', message.id);
+      if (this._decryptedMsgIds.has(versionKey)) {
+        console.log('[MLS] processE2eeMessage: decrypted by sync (post-wait), returning cached:', versionKey);
         const cached = await this.storage.loadE2eeMessage(message.id);
-        if (cached) return this._buildFullMessage(cached, message);
+        if (cached && this._storedMessageCoversVersion(cached, message)) return this._buildFullMessage(cached, message);
         return null;
       }
       const existing = await this.storage.loadE2eeMessage(message.id);
-      if (existing) {
-        this._decryptedMsgIds.add(message.id);
+      if (existing && this._storedMessageCoversVersion(existing, message)) {
+        this._decryptedMsgIds.add(versionKey);
         return this._buildFullMessage(existing, message);
       }
       // Message not in sync window — fall through to normal decrypt below
@@ -2520,18 +2823,18 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 1. In-memory Set (instant, no async) — catches the race where waterfall
     //    decrypt consumed the ratchet but IndexedDB hasn't flushed yet.
     // 2. IndexedDB lookup — catches messages decrypted in a previous session.
-    if (this._decryptedMsgIds.has(message.id)) {
-      console.log('[MLS] processE2eeMessage: already decrypted (in-memory), skipping:', message.id);
+    if (this._decryptedMsgIds.has(versionKey)) {
+      console.log('[MLS] processE2eeMessage: already decrypted (in-memory), skipping:', versionKey);
       const cached = await this.storage.loadE2eeMessage(message.id);
-      if (cached) return this._buildFullMessage(cached, message);
+      if (cached && this._storedMessageCoversVersion(cached, message)) return this._buildFullMessage(cached, message);
       // IndexedDB hasn't flushed yet — return null, UI will show "Encrypted message"
       // but the plaintext IS saved and will appear on next channel load.
       return null;
     }
     const existing = await this.storage.loadE2eeMessage(message.id);
-    if (existing) {
-      console.log('[MLS] processE2eeMessage: already decrypted (IndexedDB), skipping:', message.id);
-      this._decryptedMsgIds.add(message.id);
+    if (existing && this._storedMessageCoversVersion(existing, message)) {
+      console.log('[MLS] processE2eeMessage: already decrypted (IndexedDB), skipping:', versionKey);
+      this._decryptedMsgIds.add(versionKey);
       return this._buildFullMessage(existing, message);
     }
 
@@ -2557,93 +2860,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // Mark as decrypted IMMEDIATELY after process_message succeeds —
       // before any async IndexedDB writes. This is the in-memory dedup
       // that prevents the race with waterfall decrypt.
-      this._decryptedMsgIds.add(message.id);
+      this._decryptedMsgIds.add(versionKey);
 
       if (messageType === 0) {
-        const replacesId = (message as any).replaces_message_id;
-        if (replacesId) {
-          console.log('[MLS] edit message detected:', {
-            cid,
-            edit_id: message.id,
-            replaces_id: replacesId,
-          });
-        }
-        let storedMsg: E2eeStoredMessage;
-
-        if (replacesId) {
-          const originalMsg = await this.storage.loadE2eeMessage(replacesId);
-          if (originalMsg) {
-            const oldTexts = originalMsg.old_texts || [];
-            oldTexts.push({
-              text: originalMsg.text,
-              created_at:
-                originalMsg.updated_at || originalMsg.created_at || message.created_at || new Date().toISOString(),
-            });
-
-            originalMsg.text = payload.text;
-            originalMsg.is_edited = true;
-            originalMsg.updated_at = message.created_at || new Date().toISOString();
-            originalMsg.old_texts = oldTexts;
-            originalMsg.attachments = payload.attachments || originalMsg.attachments;
-            originalMsg.sticker_url = payload.sticker_url || originalMsg.sticker_url;
-            originalMsg.mentioned_users = (message as any).mentioned_users || originalMsg.mentioned_users;
-            originalMsg.mentioned_all =
-              (message as any).mentioned_all !== undefined ? (message as any).mentioned_all : originalMsg.mentioned_all;
-
-            storedMsg = originalMsg;
-          } else {
-            console.warn('[MLS] Original message not found for edit:', replacesId);
-            // Fallback: save as a standalone message but keep the replaces_message_id
-            storedMsg = {
-              id: message.id,
-              cid,
-              content_type: 'mls',
-              text: payload.text,
-              attachments: payload.attachments,
-              sticker_url: payload.sticker_url,
-              poll_type: payload.poll_type,
-              poll_choice_counts: payload.poll_choice_counts,
-              latest_poll_choices: payload.latest_poll_choices,
-              user_id: message.user?.id || '',
-              user: message.user ? { ...message.user } : undefined,
-              created_at: message.created_at || new Date().toISOString(),
-              updated_at: message.created_at || new Date().toISOString(),
-              type: (message as any).type || 'regular',
-              parent_id: (message as any).parent_id,
-              quoted_message_id: (message as any).quoted_message_id,
-              mentioned_users: (message as any).mentioned_users,
-              mentioned_all: (message as any).mentioned_all,
-              replaces_message_id: replacesId,
-            };
-          }
-        } else {
-          // ApplicationMessage — save decrypted Standard content to local DB
-          storedMsg = {
-            id: message.id,
-            cid,
-            content_type: 'mls',
-            // Decrypted Standard content
-            text: payload.text,
-            attachments: payload.attachments,
-            sticker_url: payload.sticker_url,
-            poll_type: payload.poll_type,
-            poll_choice_counts: payload.poll_choice_counts,
-            latest_poll_choices: payload.latest_poll_choices,
-            // Envelope metadata
-            user_id: message.user?.id || '',
-            user: message.user ? { ...message.user } : undefined,
-            created_at: message.created_at || new Date().toISOString(),
-            type: (message as any).type || 'regular',
-            parent_id: (message as any).parent_id,
-            quoted_message_id: (message as any).quoted_message_id,
-            mentioned_users: (message as any).mentioned_users,
-            mentioned_all: (message as any).mentioned_all,
-          };
-        }
+        const existingMessage = await this.storage.loadE2eeMessage(message.id);
+        const storedMsg = this._storedFromPayload(cid, payload, message, existingMessage);
 
         await this.storage.saveE2eeMessage(storedMsg);
 
-        // CRITICAL: persist provider state after decrypt — the ratchet key was
+        // CRITICAL: persist snapshot after decrypt — the ratchet key was
         // consumed during process_message. Without persisting, a reload would
         // restore stale state where the key appears consumed but no plaintext
         // exists → all future decrypts from this sender would fail.
@@ -2690,22 +2915,6 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     );
   }
 
-  private async _loadCachedEditTarget(message: { id: string; created_at?: string; [key: string]: unknown }) {
-    const replacesId = (message as any).replaces_message_id;
-    if (!replacesId) return null;
-
-    const original = await this.storage.loadE2eeMessage(replacesId);
-    if (!original?.is_edited) return null;
-
-    const originalUpdatedAt = original.updated_at ? new Date(original.updated_at).getTime() : 0;
-    const editCreatedAt = message.created_at ? new Date(message.created_at).getTime() : 0;
-    if (!originalUpdatedAt || !editCreatedAt || originalUpdatedAt >= editCreatedAt) {
-      return original;
-    }
-
-    return null;
-  }
-
   /**
    * Build a full Message object from decrypted E2eeStoredMessage + envelope metadata.
    *
@@ -2729,6 +2938,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       poll_type: stored.poll_type,
       poll_choice_counts: stored.poll_choice_counts,
       latest_poll_choices: stored.latest_poll_choices,
+      old_texts: stored.old_texts,
+      is_edited: stored.is_edited,
       // E2EE status (only present during deferred decryption)
       e2ee_status: (stored as any).e2ee_status || null,
       // Envelope metadata (routing + notifications)
@@ -2868,8 +3079,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   /**
-   * Update an encrypted E2EE message (append-only edit).
-   * The backend will emit message.updated and the edit is reconciled via replaces_message_id.
+   * Update an encrypted E2EE message by overwriting the server snapshot.
+   * The encrypted payload carries the latest text plus cumulative old_texts.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateMessage(
@@ -2891,7 +3102,20 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       cid,
       message_id: messageId,
     });
+    const existingForPayload = await this.storage.loadE2eeMessage(messageId);
+    const oldTexts = existingForPayload
+      ? [
+          ...(existingForPayload.old_texts || []),
+          {
+            text: existingForPayload.text,
+            created_at: existingForPayload.updated_at || existingForPayload.created_at || new Date().toISOString(),
+          },
+        ]
+      : [];
     const payload: E2eePayload = { text };
+    if (oldTexts.length > 0) {
+      payload.old_texts = oldTexts;
+    }
     if (options.attachments && options.attachments.length > 0) {
       payload.attachments = options.attachments;
     }
@@ -2939,14 +3163,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     // Update local plaintext cache for own-device edits (MLS cannot decrypt self-sent).
     try {
-      const existing = await this.storage.loadE2eeMessage(messageId);
+      const existing = existingForPayload || (await this.storage.loadE2eeMessage(messageId));
       if (existing) {
-        const oldTexts = existing.old_texts || [];
-        oldTexts.push({
-          text: existing.text,
-          created_at: existing.updated_at || existing.created_at || new Date().toISOString(),
-        });
-
         await this.storage.saveE2eeMessage({
           ...existing,
           text,
@@ -2984,7 +3202,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       console.warn('[MLS] updateMessage: failed to update local cache:', messageId, err);
     }
 
-    // Persist Provider state after encrypting an edit.
+    // Persist Provider snapshot after encrypting an edit.
     await this._persistProvider();
 
     return response;
@@ -3024,18 +3242,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     for (const msg of sorted) {
       if (!msg.mls_ciphertext) continue;
 
-      // Skip messages already decrypted & stored (MLS forward secrecy:
+      // Skip messages already decrypted & stored for this version (MLS forward secrecy:
       // keys are consumed after first use, re-decrypting would fail)
       const existing = await this.storage.loadE2eeMessage(msg.id);
-      if (existing) {
+      if (existing && this._storedMessageCoversVersion(existing, msg)) {
         decrypted.push(existing);
-        continue;
-      }
-
-      const cachedEditedMessage = await this._loadCachedEditTarget(msg);
-      if (cachedEditedMessage) {
-        this._decryptedMsgIds.add(msg.id);
-        decrypted.push(cachedEditedMessage);
         continue;
       }
 
@@ -3045,86 +3256,18 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         // Mark as decrypted IMMEDIATELY after process_message succeeds —
         // before async IndexedDB write. This prevents the race where WS
         // message.new arrives before saveE2eeMessage() flushes to IndexedDB.
-        this._decryptedMsgIds.add(msg.id);
+        this._decryptedMsgIds.add(this._messageVersionKey(msg));
 
         if (messageType === 0) {
-          const replacesId = (msg as any).replaces_message_id;
-          let decryptedMsg: E2eeStoredMessage;
-
-          if (replacesId) {
-            const originalMsg = await this.storage.loadE2eeMessage(replacesId);
-            if (originalMsg) {
-              const oldTexts = originalMsg.old_texts || [];
-              oldTexts.push({
-                text: originalMsg.text,
-                created_at: originalMsg.updated_at || originalMsg.created_at || msg.created_at,
-              });
-
-              originalMsg.text = payload.text;
-              originalMsg.is_edited = true;
-              originalMsg.updated_at = msg.created_at || new Date().toISOString();
-              originalMsg.old_texts = oldTexts;
-              originalMsg.attachments = payload.attachments || originalMsg.attachments;
-              originalMsg.sticker_url = payload.sticker_url || originalMsg.sticker_url;
-              originalMsg.mentioned_users = (msg as any).mentioned_users || originalMsg.mentioned_users;
-              originalMsg.mentioned_all =
-                (msg as any).mentioned_all !== undefined ? (msg as any).mentioned_all : originalMsg.mentioned_all;
-
-              decryptedMsg = originalMsg;
-            } else {
-              console.warn('[MLS] Original message not found for edit during sync:', replacesId);
-              decryptedMsg = {
-                id: msg.id,
-                cid,
-                content_type: 'mls',
-                text: payload.text,
-                attachments: payload.attachments,
-                sticker_url: payload.sticker_url,
-                poll_type: payload.poll_type,
-                poll_choice_counts: payload.poll_choice_counts,
-                latest_poll_choices: payload.latest_poll_choices,
-                user_id: msg.user?.id || '',
-                user: msg.user ? { ...msg.user } : undefined,
-                created_at: msg.created_at,
-                updated_at: msg.created_at,
-                type: (msg as any).type || 'regular',
-                parent_id: (msg as any).parent_id,
-                quoted_message_id: (msg as any).quoted_message_id,
-                mentioned_users: (msg as any).mentioned_users,
-                mentioned_all: (msg as any).mentioned_all,
-                replaces_message_id: replacesId,
-              };
-            }
-          } else {
-            decryptedMsg = {
-              id: msg.id,
-              cid,
-              content_type: 'mls',
-              // Decrypted Standard content
-              text: payload.text,
-              attachments: payload.attachments,
-              sticker_url: payload.sticker_url,
-              poll_type: payload.poll_type,
-              poll_choice_counts: payload.poll_choice_counts,
-              latest_poll_choices: payload.latest_poll_choices,
-              // Envelope metadata
-              user_id: msg.user?.id || '',
-              user: msg.user ? { ...msg.user } : undefined,
-              created_at: msg.created_at,
-              type: (msg as any).type || 'regular',
-              parent_id: (msg as any).parent_id,
-              quoted_message_id: (msg as any).quoted_message_id,
-              mentioned_users: (msg as any).mentioned_users,
-              mentioned_all: (msg as any).mentioned_all,
-            };
-          }
+          const fallback = await this.storage.loadE2eeMessage(msg.id);
+          const decryptedMsg = this._storedFromPayload(cid, payload, msg, fallback);
           await this.storage.saveE2eeMessage(decryptedMsg);
           decrypted.push(decryptedMsg);
         }
       } catch (err) {
         const errMsg = (err as Error).message || '';
         if (this._isForwardSecrecyConsumedError(errMsg)) {
-          this._decryptedMsgIds.add(msg.id);
+          this._decryptedMsgIds.add(this._messageVersionKey(msg));
           console.warn('[MLS] Skipping consumed MLS message during sync:', msg.id, errMsg);
           continue;
         }
@@ -3196,6 +3339,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this._syncGateResolve = null;
     this._lastSyncStates.clear();
     this._channelReadyLocks.clear();
+    this._channelReadyUntil.clear();
     this._providerRestored = false;
     // Reset storage so next initialize() creates a new user-scoped instance
     this.storage = null as unknown as MlsStorageAdapter;

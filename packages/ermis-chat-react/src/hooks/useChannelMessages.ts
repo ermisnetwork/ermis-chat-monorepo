@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
 import { isPendingMember } from '../channelRoleUtils';
@@ -41,6 +41,7 @@ export function useChannelMessages({
   containerRef,
 }: UseChannelMessagesOptions): void {
   const { client, activeChannel, syncMessages, setMessages, setReadState } = useChatClient();
+  const inviteRefreshInFlightRef = useRef<Set<string>>(new Set());
 
   const scheduleScrollToBottom = useCallback(
     (smooth: boolean, force = false) => {
@@ -107,11 +108,6 @@ export function useChannelMessages({
       }
 
       return Array.from(byId.values())
-        .filter((message: any) => {
-          const replacesId = message.replaces_message_id;
-          const isEncryptedCarrier = message.content_type === 'mls' || Boolean(message.mls_ciphertext);
-          return !(replacesId && isEncryptedCarrier && byId.has(replacesId));
-        })
         .sort((a: any, b: any) => {
           const aTime = new Date(a.created_at || 0).getTime();
           const bTime = new Date(b.created_at || 0).getTime();
@@ -261,22 +257,29 @@ export function useChannelMessages({
       }
     };
 
-    const handleInviteAccepted = (event: Event) => {
-      // Make sure the accepted invite corresponds to the actively opened channel
+    const refreshAfterOwnInviteMembership = (event: Event) => {
       const eventCid =
         event.cid ||
         event.channel?.cid ||
         ((event as any).channel_id ? `${(event as any).channel_type}:${(event as any).channel_id}` : undefined);
-      if (eventCid === activeChannel.cid) {
-        activeChannel
-          .query({ messages: { limit: 30 } })
-          .then(() => {
-            syncMessagesWithE2eeCache();
-            scheduleScrollToBottom(false);
-            activeChannel.markRead().catch(() => {});
-          })
-          .catch((e: any) => console.error('Failed to sync messages after accepting invite', e));
-      }
+      if (eventCid !== activeChannel.cid) return;
+
+      const memberUserId = (event as any).member?.user_id;
+      if (memberUserId && memberUserId !== client.userID) return;
+      if (inviteRefreshInFlightRef.current.has(eventCid)) return;
+
+      inviteRefreshInFlightRef.current.add(eventCid);
+      activeChannel
+        .query({ messages: { limit: 30 } })
+        .then(() => {
+          syncMessagesWithE2eeCache();
+          scheduleScrollToBottom(false);
+          activeChannel.markRead().catch(() => {});
+        })
+        .catch((e: any) => console.error('Failed to refresh channel after invite membership update', e))
+        .finally(() => {
+          inviteRefreshInFlightRef.current.delete(eventCid);
+        });
     };
 
     const handleRecovery = () => {
@@ -322,9 +325,9 @@ export function useChannelMessages({
     const sub8 = activeChannel.on('reaction.new', handleMessageChange);
     const sub9 = activeChannel.on('reaction.deleted', handleMessageChange);
     const sub10 = activeChannel.on('member.unblocked', handleUnblocked);
-    const sub11 = eventClient.on('notification.invite_accepted', handleInviteAccepted);
-    const sub12 = eventClient.on('connection.recovered', handleRecovery);
-    const sub13 = eventClient.on('channels.queried', handleRecovery);
+    const sub11 = eventClient.on('notification.invite_accepted', refreshAfterOwnInviteMembership);
+    const sub12 = eventClient.on('member.joined', refreshAfterOwnInviteMembership);
+    const sub13 = eventClient.on('connection.recovered', handleRecovery);
     const sub14 = eventClient.on('e2ee.message_decrypted' as any, handleE2eeDecrypted);
     const sub15 = eventClient.on('e2ee.post_join_sync' as any, handleE2eeRefresh);
     const sub16 = eventClient.on('e2ee.channel_ready' as any, handleE2eeRefresh);

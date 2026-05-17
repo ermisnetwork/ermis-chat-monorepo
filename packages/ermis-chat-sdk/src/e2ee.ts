@@ -288,7 +288,7 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/message`, data);
   }
 
-  /** Update an encrypted E2EE message (append-only edit). */
+  /** Update an encrypted E2EE message snapshot. */
   async updateMessage(
     channelType: string,
     channelId: string,
@@ -317,8 +317,16 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * @param cursors Map of CID → last sync timestamp (milliseconds since epoch)
    * @param limit Max events per channel (default 100, server caps at 200)
    */
-  async syncAll(cursors: Record<string, number>, limit: number = 100): Promise<UnifiedSyncResponse> {
-    return await this._post(this.baseURL + '/v1/e2ee/sync', { cursors, limit });
+  async syncAll(
+    cursors: Record<string, number>,
+    limit: number = 100,
+    removedCursor?: number,
+  ): Promise<UnifiedSyncResponse> {
+    const body: { cursors: Record<string, number>; limit: number; removed_cursor?: number } = { cursors, limit };
+    if (removedCursor !== undefined) {
+      body.removed_cursor = removedCursor;
+    }
+    return await this._post(this.baseURL + '/v1/e2ee/sync', body);
   }
 
   // ============================================================
@@ -493,6 +501,24 @@ export type E2eeSyncEvent =
         /** Timestamp for timeline sorting */
         created_at: string;
       };
+    }
+  | {
+      type: 'member_removed';
+      /** Member removal metadata from event:{cid}; used to recover self-leave eviction after offline sync. */
+      data: {
+        member: {
+          user_id?: string;
+          channel_role?: string;
+          [key: string]: unknown;
+        };
+        channel_id: string;
+        channel_type: string;
+        topic_cids?: string[];
+        mls_enabled?: boolean;
+        self_remove?: boolean;
+        user?: { id: string; [key: string]: unknown };
+        created_at: string;
+      };
     };
 
 /** Per-channel sync result (used by both syncChannel and syncAll) */
@@ -503,9 +529,26 @@ export interface ChannelSyncResult {
   next_cursor?: number;
 }
 
+export interface RemovedChannelSyncData {
+  cid: string;
+  channel_id: string;
+  channel_type: string;
+  parent_cid?: string;
+  removed_at: string;
+  removed_by: string;
+  self_remove: boolean;
+}
+
+export interface RemovedChannelsSyncResult {
+  events: RemovedChannelSyncData[];
+  has_more: boolean;
+  next_cursor?: number;
+}
+
 /** Response from POST /v1/e2ee/sync */
 export interface UnifiedSyncResponse extends APIResponse {
-  [cid: string]: ChannelSyncResult | unknown;
+  removed_channels?: RemovedChannelsSyncResult;
+  [cid: string]: ChannelSyncResult | RemovedChannelsSyncResult | unknown;
 }
 
 // ============================================================

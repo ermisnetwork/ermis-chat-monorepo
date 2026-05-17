@@ -246,8 +246,6 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         } as any);
       }
 
-      // Re-watch to get full fresh state from server
-      activeChannel.watch().catch(() => {});
     } catch (e: any) {
       console.error('Error accepting invite', e);
     }

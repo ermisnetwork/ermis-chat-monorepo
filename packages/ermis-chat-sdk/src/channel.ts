@@ -668,7 +668,21 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async removeMembersE2ee(members: string[], e2eeOptions: E2EERemoveMembersOptions) {
-    return await this._update({ remove_members: members, ...e2eeOptions });
+    return await this._update({ remove_members: members, ...e2eeOptions, self_remove: false });
+  }
+
+  /**
+   * Self-leave an E2EE channel.
+   *
+   * Sends `self_remove: true` so the server removes channel membership without
+   * requiring an MLS remove commit from the leaving user.
+   */
+  async leaveChannelE2ee(userId: string) {
+    const currentUserId = this.getClient().user?.id;
+    if (currentUserId && userId !== currentUserId) {
+      throw new Error('[E2EE] leaveChannelE2ee can only remove the current user');
+    }
+    return await this._update({ remove_members: [userId], self_remove: true });
   }
 
   async demoteModerators(members: string[]) {
@@ -1746,14 +1760,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         }
         break;
       case 'member.removed': {
-        const removedUserId = event.user?.id || event.member?.user_id;
+        const removedUserId = event.member?.user_id || event.user?.id;
         if (removedUserId) {
           delete channelState.members[removedUserId];
 
           const mlsMgrRemoved = this.getClient().mlsManager;
-          const isSelfLeave = removedUserId === this.getClient().user?.id;
+          const actorUserId = event.user?.id;
+          const currentUserId = this.getClient().user?.id;
+          const currentUserWasRemoved = removedUserId === currentUserId;
+          const selfRemoveEvent =
+            event.self_remove === true ||
+            (event.self_remove === undefined && !!actorUserId && removedUserId === actorUserId);
 
-          if (isSelfLeave) {
+          if (currentUserWasRemoved) {
             if (mlsMgrRemoved?.initialized && this.cid) {
               mlsMgrRemoved.leaveGroup(this.cid);
               if (Array.isArray(event.topic_cids)) {
@@ -1763,6 +1782,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               }
             }
           } else if (
+            selfRemoveEvent &&
             event.mls_enabled &&
             mlsMgrRemoved?.initialized &&
             this.cid &&
@@ -2168,7 +2188,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const lookupIds = messages.flatMap((message: any) => {
       const isEncryptedCarrier = message.content_type === 'mls' || Boolean(message.mls_ciphertext);
       if (!isEncryptedCarrier) return [];
-      return [message.id, message.replaces_message_id].filter(Boolean);
+      return [message.id].filter(Boolean);
     });
     const cachedMessages =
       lookupIds.length > 0
@@ -2184,7 +2204,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 .map((message: any) => [message.id, message]),
             )
         : new Map<string, any>();
-    const idsInResponse = new Set(messages.map((message: any) => message.id).filter(Boolean));
     const currentMessages = this.state.messageSets?.flatMap((set) => set.messages) || [];
     const currentMessagesById = new Map(currentMessages.map((message: any) => [message.id, message]));
     const hydrated: MessageResponse<ErmisChatGenerics>[] = [];
@@ -2195,14 +2214,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       if (!isEncryptedCarrier) {
         hydrated.push(message);
         continue;
-      }
-
-      const replacesMessageId = messageAny.replaces_message_id;
-      if (replacesMessageId) {
-        const replacedMessage = cachedMessages.get(replacesMessageId);
-        if (replacedMessage || idsInResponse.has(replacesMessageId)) {
-          continue;
-        }
       }
 
       const storedMessage = cachedMessages.get(message.id);

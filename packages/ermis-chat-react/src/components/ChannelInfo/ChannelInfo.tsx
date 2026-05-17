@@ -349,14 +349,14 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     if (onLeaveChannelProp) return onLeaveChannelProp();
     if (!channel || !currentUserId) return;
     try {
-      const mlsManager = channel.getClient().mlsManager;
-      if (channel.data?.mls_enabled && mlsManager?.initialized && channel.id && channel.cid) {
-        await mlsManager.evictMember(channel.type, channel.id, channel.cid, currentUserId);
+      if (channel.data?.mls_enabled) {
+        await channel.leaveChannelE2ee(currentUserId);
       } else {
         await channel.removeMembers([currentUserId]);
       }
     } catch (e) {
       console.error("Error leaving channel", e);
+      throw e;
     }
   }, [channel, currentUserId, onLeaveChannelProp]);
 
@@ -365,13 +365,17 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     if (!channel) return;
     try {
       const mlsManager = channel.getClient().mlsManager;
-      if (channel.data?.mls_enabled && mlsManager?.initialized && channel.id && channel.cid) {
+      if (channel.data?.mls_enabled) {
+        if (!mlsManager?.initialized || !channel.id || !channel.cid) {
+          throw new Error('[E2EE] Cannot remove member from E2EE channel before MLS is initialized');
+        }
         await mlsManager.evictMember(channel.type, channel.id, channel.cid, memberId);
       } else {
         await channel.removeMembers([memberId]);
       }
     } catch (e) {
       console.error("Error removing member", e);
+      throw e;
     }
   }, [channel, onRemoveMemberProp]);
 
