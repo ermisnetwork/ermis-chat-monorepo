@@ -63,6 +63,17 @@ export interface E2eeStoredMessage {
   [key: string]: unknown;
 }
 
+export interface PendingE2eeSnapshot {
+  cid: string;
+  event_type: 'application' | 'message_updated';
+  message_id: string;
+  mls_epoch?: number;
+  message: Record<string, unknown>;
+  version: string;
+  received_cursor?: number;
+  event_time?: string;
+}
+
 /**
  * Platform-agnostic storage adapter for MLS state.
  *
@@ -111,6 +122,12 @@ export interface MlsStorageAdapter {
   // ---- Batch Sync Cursors (for unified sync API) ----
   loadAllSyncTimestamps(): Promise<Record<string, string>>;
   saveAllSyncTimestamps(cursors: Record<string, string>): Promise<void>;
+  loadRemovedSyncCursor(): Promise<string | null>;
+  saveRemovedSyncCursor(cursor: string): Promise<void>;
+
+  // ---- Pending E2EE encrypted snapshots ----
+  loadPendingE2eeSnapshots(cid: string): Promise<PendingE2eeSnapshot[]>;
+  savePendingE2eeSnapshots(cid: string, messages: PendingE2eeSnapshot[]): Promise<void>;
 
   // ---- Pending Evictions (offline recovery persistence) ----
   // Map: cid → array of user_ids to evict
@@ -193,7 +210,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
           msgStore.createIndex('cid_created', ['cid', 'created_at'], { unique: false });
         }
 
-        // Meta store: key-value for device_id, provider state, sync timestamps
+        // Meta store: key-value for device_id, snapshot, sync timestamps
         if (!db.objectStoreNames.contains(STORE_META)) {
           db.createObjectStore(STORE_META);
         }
@@ -716,7 +733,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
         const cursor = cursorReq.result;
         if (cursor) {
           const key = cursor.key as string;
-          if (key.startsWith('sync:')) {
+          if (key.startsWith('sync:') && key !== 'sync:removed_channels') {
             const cid = key.slice(5); // Remove 'sync:' prefix
             cursors[cid] = cursor.value as string;
           }
@@ -736,6 +753,57 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       const store = tx.objectStore(STORE_META);
       for (const [cid, ts] of Object.entries(timestamps)) {
         store.put(ts, `sync:${cid}`);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadRemovedSyncCursor(): Promise<string | null> {
+    const db = await this.openDB();
+    return new Promise<string | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const request = store.get('sync:removed_channels');
+      request.onsuccess = () => resolve((request.result as string) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveRemovedSyncCursor(cursor: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(cursor, 'sync:removed_channels');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // ---- Pending E2EE encrypted snapshots ----
+
+  async loadPendingE2eeSnapshots(cid: string): Promise<PendingE2eeSnapshot[]> {
+    const db = await this.openDB();
+    return new Promise<PendingE2eeSnapshot[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const request = store.get(`pending_e2ee_snapshots:${cid}`);
+      request.onsuccess = () => resolve((request.result as PendingE2eeSnapshot[]) || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async savePendingE2eeSnapshots(cid: string, messages: PendingE2eeSnapshot[]): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      const key = `pending_e2ee_snapshots:${cid}`;
+      if (messages.length === 0) {
+        store.delete(key);
+      } else {
+        store.put(messages, key);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);

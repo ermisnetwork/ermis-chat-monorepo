@@ -496,8 +496,6 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
                 user: client.user,
               } as any);
             }
-            // Re-watch to get full state from server
-            activeChannel.watch().catch(() => {});
           } catch (e) {
             console.error('Failed to join public channel', e);
           }

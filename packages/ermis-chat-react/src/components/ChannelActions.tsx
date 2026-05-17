@@ -216,14 +216,14 @@ export function computeDefaultActions(
         isDanger: true,
         onClick: async (ch) => {
           try {
-            const mlsManager = ch.getClient().mlsManager;
-            if (ch.data?.mls_enabled && mlsManager?.initialized && ch.id && ch.cid) {
-              await mlsManager.evictMember(ch.type, ch.id, ch.cid, currentUserId);
+            if (ch.data?.mls_enabled) {
+              await ch.leaveChannelE2ee(currentUserId);
             } else {
               await ch.removeMembers([currentUserId]);
             }
           } catch (e) {
             console.error('Error leaving channel', e);
+            throw e;
           }
         },
       });

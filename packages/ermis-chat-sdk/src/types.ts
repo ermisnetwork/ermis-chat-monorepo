@@ -140,7 +140,6 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     device_id?: string;
     mls_ciphertext?: number[];
     mls_epoch?: number;
-    replaces_message_id?: string;
     old_texts?: Array<{ text: string; created_at: string }>;
     e2ee_status?: string;
     own_reactions?: ReactionResponse<ErmisChatGenerics>[] | null;
@@ -308,6 +307,7 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   };
   topic_cids?: string[];
   mls_enabled?: boolean;
+  self_remove?: boolean;
 };
 
 export type EventHandler<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = (
