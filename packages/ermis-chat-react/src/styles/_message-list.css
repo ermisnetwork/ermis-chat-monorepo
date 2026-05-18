@@ -26,8 +26,8 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
   font-family: var(--ermis-font-family);
-  gap: var(--ermis-spacing-xs);
   position: relative;
 }
 
@@ -37,7 +37,7 @@
   padding-left: 1rem;
   padding-right: 1rem;
   padding-top: var(--ermis-spacing-lg);
-  padding-bottom: var(--ermis-spacing-md);
+  padding-bottom: 16px;
 }
 
 /* Push content to bottom when few messages, margin collapses when content overflows */

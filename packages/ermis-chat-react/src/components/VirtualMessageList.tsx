@@ -585,52 +585,54 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   }
 
   return (
-    <div ref={containerRef} className={`ermis-message-list${className ? ` ${className}` : ''}`}>
-      {showPinnedMessages && (
-        <PinnedMessagesComponent
-          onClickMessage={scrollToMessage}
-          AvatarComponent={AvatarComponent}
-          pinnedMessagesLabel={pinnedMessagesLabel}
-          seeAllLabel={seeAllLabel}
-          collapseLabel={collapseLabel}
-          unpinLabel={unpinLabel}
-          stickerLabel={stickerLabel}
-        />
-      )}
+    <>
+      <div ref={containerRef} className={`ermis-message-list${className ? ` ${className}` : ''}`}>
+        {showPinnedMessages && (
+          <PinnedMessagesComponent
+            onClickMessage={scrollToMessage}
+            AvatarComponent={AvatarComponent}
+            pinnedMessagesLabel={pinnedMessagesLabel}
+            seeAllLabel={seeAllLabel}
+            collapseLabel={collapseLabel}
+            unpinLabel={unpinLabel}
+            stickerLabel={stickerLabel}
+          />
+        )}
 
-      {messages.length === 0 && (
-        EmptyStateIndicator === DefaultEmpty
-          ? <DefaultEmpty title={emptyTitle} subtitle={emptySubtitle} />
-          : <EmptyStateIndicator />
-      )}
+        {messages.length === 0 && (
+          EmptyStateIndicator === DefaultEmpty
+            ? <DefaultEmpty title={emptyTitle} subtitle={emptySubtitle} />
+            : <EmptyStateIndicator />
+        )}
 
-      {pendingInviteeName && (
-        <PendingInviteeNotificationComponent
-          inviteeName={pendingInviteeName}
-          label={typeof pendingInviteeLabel === 'function' ? pendingInviteeLabel(pendingInviteeName) : pendingInviteeLabel}
-        />
-      )}
+        {pendingInviteeName && (
+          <PendingInviteeNotificationComponent
+            inviteeName={pendingInviteeName}
+            label={typeof pendingInviteeLabel === 'function' ? pendingInviteeLabel(pendingInviteeName) : pendingInviteeLabel}
+          />
+        )}
 
-      <VList
-        key={activeChannel?.cid || 'empty'}
-        ref={vlistRef}
-        shift={shiftMode}
-        onScroll={handleScroll}
-        className="ermis-message-list__vlist"
-      >
-        {messageElements}
-      </VList>
+        <VList
+          key={activeChannel?.cid || 'empty'}
+          ref={vlistRef}
+          shift={shiftMode}
+          onScroll={handleScroll}
+          className="ermis-message-list__vlist"
+        >
+          {messageElements}
+        </VList>
 
-      {/* Typing indicator */}
+        {/* Jump to latest button */}
+        {hasNewer && (
+          JumpToLatestButton === DefaultJumpToLatest
+            ? <DefaultJumpToLatest onClick={jumpToLatest} label={jumpToLatestLabel} />
+            : <JumpToLatestButton onClick={jumpToLatest} />
+        )}
+      </div>
+
+      {/* Typing indicator — outside message list, flows between messages and input */}
       {showTypingIndicator && <TypingIndicatorComponent typingIndicatorLabel={typingIndicatorLabel} />}
-
-      {/* Jump to latest button */}
-      {hasNewer && (
-        JumpToLatestButton === DefaultJumpToLatest
-          ? <DefaultJumpToLatest onClick={jumpToLatest} label={jumpToLatestLabel} />
-          : <JumpToLatestButton onClick={jumpToLatest} />
-      )}
-    </div>
+    </>
   );
 });
 
