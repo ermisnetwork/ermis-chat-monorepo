@@ -29,6 +29,18 @@ function isEpochStaleError(err: any): boolean {
   return msg.includes('epoch_stale');
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getApiErrorMessage(err: any): string {
+  return String(err?.response?.data?.message || err?.message || err || '');
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getActiveTargetFromCommitEvictionError(err: any): string | undefined {
+  const msg = getApiErrorMessage(err);
+  const match = msg.match(/target_user_id\s+(\S+)\s+is still an active channel member/);
+  return match?.[1];
+}
+
 function staleGroupInfoError(cid: string): Error & { code: string } {
   const err = new Error(
     `[MLS] GroupInfo is stale for ${cid}; retry after an existing member uploads fresh GroupInfo`,
@@ -48,7 +60,7 @@ export interface MlsManagerOptions {
   wasmPath?: string;
   /**
    * Pre-loaded WASM module. If provided, skips dynamic import.
-   * Consumer should do: `import * as wasm from 'ermis-chat-js-sdk/src/wasm/openmls_wasm.js'`
+   * Consumer should do: `import * as wasm from '@ermis-network/ermis-chat-sdk/src/wasm/openmls_wasm.js'`
    * then `await wasm.default('/openmls_wasm_bg.wasm'); wasm.init();`
    * and pass `wasmModule: wasm`.
    */
@@ -144,7 +156,7 @@ let wasmModule: any = null;
  *
  * @example
  * ```ts
- * import { MlsManager } from 'ermis-chat-js-sdk';
+ * import { MlsManager } from '@ermis-network/ermis-chat-sdk';
  *
  * const mlsManager = new MlsManager();
  * await mlsManager.initialize(client, userId, {
@@ -825,7 +837,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const cid = tombstone.cid;
     if (!cid) return;
 
-    this.leaveGroup(cid);
+    this.leaveGroup(cid, tombstone.removed_at);
     this._pendingEvictions.delete(cid);
     await this._persistPendingEvictions();
     await this._savePendingSnapshots(cid, []);
@@ -881,7 +893,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           case 'welcome': {
             const targetUserIds = (protoMsg.target_user_ids as string[]) || [];
             if (targetUserIds.includes(this.userId!) && !this.groups.has(cid)) {
-              await this.joinGroup(protoMsg.welcome as Uint8Array, protoMsg.ratchet_tree as Uint8Array | undefined);
+              try {
+                await this.joinGroup(protoMsg.welcome as Uint8Array, protoMsg.ratchet_tree as Uint8Array | undefined);
+              } catch (err) {
+                if (this._isMissingKeyPackageError(err)) {
+                  console.warn('[MLS] Skipping stale welcome with no local KeyPackage:', cid, err);
+                  break;
+                }
+                throw err;
+              }
             }
             break;
           }
@@ -1007,9 +1027,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         }
 
         if (removedUserId === this.userId) {
-          this.leaveGroup(cid);
+          this.leaveGroup(cid, eventCreatedAt);
           for (const topicCid of removeData.topic_cids ?? []) {
-            this.leaveGroup(topicCid);
+            this.leaveGroup(topicCid, eventCreatedAt);
           }
           continue;
         }
@@ -1544,6 +1564,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return group;
   }
 
+  private _isMissingKeyPackageError(err: unknown): boolean {
+    const message = String((err as Error)?.message || err || '').toLowerCase();
+    return message.includes('no matching key package') || message.includes('key package was found');
+  }
+
   /**
    * Save group CID marker to storage.
    * Group state lives inside Provider storage, not serialized separately.
@@ -1772,79 +1797,61 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // Add Members (Batch)
   // ============================================================
 
+  /** Ensure the loaded WASM artifact supports composite inline commits. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _requireCompositeCommitMethods(group: any): void {
+    const required = [
+      'commit_member_add_with_removals',
+      'commit_self_update_with_removals',
+      'commit_member_removals',
+    ];
+    for (const method of required) {
+      if (typeof group?.[method] !== 'function') {
+        throw new Error(`[MLS] OpenMLS WASM is outdated: missing ${method}()`);
+      }
+    }
+  }
+
   /**
-   * Batch add multiple users to an E2EE channel.
-  /**
-   * Drain pending ghost evictions for a CID using an atomic remove_users() commit.
+   * Collect pending ghost user_ids that still have MLS leaves.
    *
-   * IMPORTANT: Uses remove_users() (atomic, includes proposals BY VALUE) instead of
-   * propose_remove_user() + commit_pending_proposals() which includes proposals BY REFERENCE.
-   * Proposals by reference fail on receivers who never got the standalone proposal message.
-   *
-   * If there are ghosts to drain, this creates a SEPARATE commit (advances epoch by 1),
-   * sends it to the server, and merges locally. The caller then proceeds with its
-   * main action (add/remove/rotate) as a second commit.
-   *
-   * @returns list of ghost user_ids that were successfully drained
+   * The returned list is safe to pass to composite commit wrappers. Stale queue entries that
+   * no longer have leaves are removed from local persistence, because they were already evicted
+   * by another commit.
    */
-  private async _drainPendingGhosts(cid: string, channelType: string, channelId: string): Promise<string[]> {
+  private async _collectPendingGhosts(cid: string, extraRemoveIds: string[] = []): Promise<string[]> {
     const group = this.groups.get(cid);
     if (!group) return [];
 
-    // 1. Gather pending evictions from Local Queue
-    const pending = this._pendingEvictions.get(cid) || new Set<string>();
-    const ghostsToEvict: string[] = [];
-    for (const userId of pending) {
+    const pending = this._pendingEvictions.get(cid);
+    const candidates = new Set<string>([...(pending ?? []), ...extraRemoveIds]);
+    const ghostsToRemove: string[] = [];
+
+    for (const userId of candidates) {
+      if (!userId) continue;
+      if (this.userId && userId === this.userId) {
+        if (pending?.has(userId)) {
+          pending.delete(userId);
+          await this._removePendingEviction(cid, userId);
+        }
+        continue;
+      }
+
       try {
         const leafNodes = group.members_by_user_id(userId);
         if (leafNodes && leafNodes.length > 0) {
-          ghostsToEvict.push(userId);
+          ghostsToRemove.push(userId);
+        } else if (pending?.has(userId)) {
+          pending.delete(userId);
+          await this._removePendingEviction(cid, userId);
         }
       } catch (_err) {
-        /* ignore */
+        // If membership lookup fails, keep the candidate in the queue. The next sync/action can retry.
       }
     }
 
-    if (ghostsToEvict.length === 0) return [];
-
-    // 2. Atomic remove_users — includes proposals BY VALUE in the commit
-    console.log('[MLS] Draining', ghostsToEvict.length, 'pending ghosts from', cid, ':', ghostsToEvict);
-    const drainBundle = group.remove_users(this.provider, this.identity, ghostsToEvict);
-
-    // 3. Validate group_info
-    const groupInfoBytes = drainBundle.group_info;
-    if (!groupInfoBytes || groupInfoBytes.length === 0) {
-      group.clear_pending_commit(this.provider);
-      await this._persistProvider();
-      throw new Error('[MLS] _drainPendingGhosts: drainBundle.group_info is empty');
-    }
-
-    // 4. Send drain commit to server via commit_eviction endpoint
-    //    (ghosts already left the channel — use MLS-only endpoint)
-    try {
-      if (!this.e2eeClient) throw new Error('[MLS] e2eeClient not initialized');
-      await this.e2eeClient.commitEviction(channelType, channelId, {
-        target_user_id: ghostsToEvict[0], // Primary target for logging
-        commit: Array.from(drainBundle.commit),
-        epoch: Number(group.epoch()),
-        group_info: Array.from(groupInfoBytes),
-      });
-    } catch (err) {
-      // On any error, clear pending commit and let the caller proceed without draining.
-      // The ghosts stay in queue and will be retried next time.
-      console.warn('[MLS] _drainPendingGhosts: server rejected drain commit, skipping:', err);
-      group.clear_pending_commit(this.provider);
-      await this._persistProvider();
-      return [];
-    }
-
-    // 5. Server OK → merge + cleanup queue
-    group.merge_pending_commit(this.provider);
-    await this._persistProvider();
-    await this._cleanupEvictedGhosts(cid, ghostsToEvict);
-
-    console.log('[MLS] Drained ghosts from', cid, 'new epoch:', Number(group.epoch()));
-    return ghostsToEvict;
+    if (pending && pending.size === 0) this._pendingEvictions.delete(cid);
+    return Array.from(new Set(ghostsToRemove));
   }
 
   /**
@@ -1862,6 +1869,42 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     if (pending.size === 0) this._pendingEvictions.delete(cid);
     await this._persistPendingEvictions();
     console.log('[MLS] Cleaned up evicted ghosts:', ghostsEvicted, 'from', cid);
+  }
+
+  private _isActiveChannelMember(cid: string, userId: string): boolean {
+    const activeChannel = this._getActiveChannel(cid);
+    if (!activeChannel) return false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = activeChannel.data as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const state = activeChannel.state as any;
+    const dataMembers = Array.isArray(data?.members) ? data.members : [];
+    if (dataMembers.some((m: any) => m?.user_id === userId)) return true;
+    return Boolean(state?.members?.[userId]);
+  }
+
+  /**
+   * After a concurrent re-add/epoch race, a pending ghost may become an active
+   * member again before our drain-only commit reaches the server. Drop those
+   * entries so retry builds a fresh target_user_ids list from current state.
+   */
+  private async _dropActivePendingEvictions(cid: string, candidates: string[]): Promise<string[]> {
+    const dropped: string[] = [];
+    const pending = this._pendingEvictions.get(cid);
+    for (const userId of new Set(candidates)) {
+      if (!this._isActiveChannelMember(cid, userId)) continue;
+      if (pending?.has(userId)) {
+        pending.delete(userId);
+        await this._removePendingEviction(cid, userId);
+      }
+      dropped.push(userId);
+    }
+    if (pending && pending.size === 0) this._pendingEvictions.delete(cid);
+    if (dropped.length > 0) {
+      await this._persistPendingEvictions();
+      console.log('[MLS] Dropped pending ghosts that are active again:', dropped, 'from', cid);
+    }
+    return dropped;
   }
 
   /**
@@ -1898,11 +1941,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       throw new Error('[MLS] No key packages available for any target user');
     }
 
-    // 3. Phase 1: Drain pending ghosts (separate commit if needed)
-    const colonIdx2 = cid.indexOf(':');
-    await this._drainPendingGhosts(cid, cid.substring(0, colonIdx2), cid.substring(colonIdx2 + 1));
-
-    // 4. Phase 2: Handle ghost re-adds — if a NEW user is still a ghost in the tree, evict first
+    // 3. Handle ghost re-adds — if a NEW user still has an old leaf, remove that
+    // leaf and add the fresh KeyPackage in the same composite commit.
     const ghostReaddIds: string[] = [];
     for (const { userId } of allKeyPackages) {
       try {
@@ -1914,28 +1954,17 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         /* ignore */
       }
     }
-    if (ghostReaddIds.length > 0) {
-      console.log('[MLS] addMembers: evicting ghost re-adds first:', ghostReaddIds);
-      const readdDrain = group.remove_users(this.provider, this.identity, ghostReaddIds);
-      const readdGI = readdDrain.group_info;
-      if (!readdGI || readdGI.length === 0) {
-        group.clear_pending_commit(this.provider);
-        await this._persistProvider();
-        throw new Error('[MLS] addMembers: ghost re-add drain has no group_info');
-      }
-      await this.e2eeClient!.commitEviction(channelType, channelId, {
-        target_user_id: ghostReaddIds[0],
-        commit: Array.from(readdDrain.commit),
-        epoch: Number(group.epoch()),
-        group_info: Array.from(readdGI),
-      });
-      group.merge_pending_commit(this.provider);
-      await this._persistProvider();
-    }
 
-    // 5. Phase 3: Atomic add_members — includes proposals BY VALUE
+    // 4. Composite inline commit: pending ghost removals + main add operation.
+    this._requireCompositeCommitMethods(group);
+    const ghostsToRemove = await this._collectPendingGhosts(cid, ghostReaddIds);
     const kpArray = allKeyPackages.map(({ kp }) => kp);
-    const commitBundle = group.add_members(this.provider, this.identity, kpArray);
+    const commitBundle = group.commit_member_add_with_removals(
+      this.provider,
+      this.identity,
+      ghostsToRemove,
+      kpArray,
+    );
 
     // 4. Export ratchet tree BEFORE merge (need pre-merge state for welcome)
     const ratchetTree = group.export_ratchet_tree();
@@ -1982,6 +2011,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // Server OK → merge pending commit locally
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
+    await this._cleanupEvictedGhosts(cid, ghostsToRemove);
 
     console.log('[MLS] Added', newUserIds.length, 'users to:', cid, 'epoch:', Number(group.epoch()));
     return { epoch: Number(group.epoch()) };
@@ -2000,7 +2030,6 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     if (this._pendingEvictions.size === 0) return;
 
     const pendingEvictions = new Map(this._pendingEvictions);
-    this._pendingEvictions.clear();
 
     for (const [cid, userIds] of pendingEvictions) {
       const colonIdx = cid.indexOf(':');
@@ -2010,56 +2039,58 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const activeChannel = this._getActiveChannel(cid);
 
       if (!activeChannel) {
-        const requeue = this._pendingEvictions.get(cid) ?? new Set<string>();
-        for (const userId of userIds) {
-          requeue.add(userId);
-        }
-        this._pendingEvictions.set(cid, requeue);
         continue;
       }
 
       if (!this.isDesignatedEvictor(activeChannel)) {
-        console.log('[MLS] _drainPendingEvictions: skip', cid, '— this client is not designated evictor');
-        for (const userId of userIds) {
-          await this._removePendingEviction(cid, userId);
-        }
+        console.log('[MLS] _drainPendingEvictions: keep queued for', cid, '— this client is not designated evictor');
         continue;
       }
 
-      for (const userId of userIds) {
-        // ── Pre-flight: check if user still has leaf nodes in the ratchet tree ──
-        if (group) {
-          try {
-            const leafNodes = group.members_by_user_id(userId);
-            if (!leafNodes || leafNodes.length === 0) {
-              console.log('[MLS] _drainPendingEvictions: skip', userId, '— already evicted from', cid);
-              await this._removePendingEviction(cid, userId);
-              continue;
-            }
-          } catch (_checkErr) {
-            // members_by_user_id threw (invalid state) — proceed to evict, let it fail naturally
-          }
+      if (!group) continue;
+
+      const ghostsToRemove = await this._collectPendingGhosts(cid, Array.from(userIds));
+      if (ghostsToRemove.length === 0) continue;
+
+      try {
+        this._requireCompositeCommitMethods(group);
+        const commitBundle = group.commit_member_removals(this.provider, this.identity, ghostsToRemove);
+        const groupInfoBytes = commitBundle.group_info;
+        if (!groupInfoBytes || groupInfoBytes.length === 0) {
+          group.clear_pending_commit(this.provider);
+          await this._persistProvider();
+          throw new Error('[MLS] _drainPendingEvictions: commitBundle.group_info is empty');
         }
 
-        try {
-          // selfLeft=true: queue is only populated from SystemMessage type 12 (self-leave).
-          // Target user already left channel → use POST /commit_eviction.
-          await this.evictMember(channelType, channelId, cid, userId, true);
-          // Eviction succeeded — remove this user from persisted storage
-          await this._removePendingEviction(cid, userId);
-        } catch (err) {
-          // epoch_stale is retried inside evictMember — only truly unexpected errors reach here.
-          // Re-add to queue so the next reconnect will retry.
+        await this.e2eeClient!.commitEviction(channelType, channelId, {
+          target_user_ids: ghostsToRemove,
+          commit: Array.from(commitBundle.commit),
+          epoch: Number(group.epoch()),
+          group_info: Array.from(groupInfoBytes),
+        });
+
+        group.merge_pending_commit(this.provider);
+        await this._persistProvider();
+        await this._cleanupEvictedGhosts(cid, ghostsToRemove);
+      } catch (err) {
+        group.clear_pending_commit(this.provider);
+        await this._persistProvider();
+        const activeTarget = getActiveTargetFromCommitEvictionError(err);
+        if (activeTarget) {
+          await this.sync();
+          await this._dropActivePendingEvictions(cid, [activeTarget]);
           console.warn(
-            '[MLS] _drainPendingEvictions: evictMember failed, will retry on next reconnect:',
+            '[MLS] _drainPendingEvictions: target active again, dropped from retry list:',
             cid,
-            userId,
-            err,
+            activeTarget,
           );
-          const requeue = this._pendingEvictions.get(cid) ?? new Set<string>();
-          requeue.add(userId);
-          this._pendingEvictions.set(cid, requeue);
+          continue;
         }
+        if (isEpochStaleError(err)) {
+          await this.sync();
+          await this._dropActivePendingEvictions(cid, ghostsToRemove);
+        }
+        console.warn('[MLS] _drainPendingEvictions: composite commit failed, queue kept for retry:', cid, err);
       }
     }
   }
@@ -2093,14 +2124,27 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Cleanup local MLS group state after self-leave.
    * Called by channel.ts `member.removed` handler when the removed user is self.
    */
-  leaveGroup(cid: string): void {
-    if (this.groups.has(cid)) {
+  leaveGroup(cid: string, removedAt?: string | number | Date): void {
+    const removedCursor = removedAt instanceof Date ? removedAt.getTime() : removedAt ? this._toMillis(removedAt) : Date.now();
+    const group = this.groups.get(cid);
+    if (group) {
+      try {
+        if (typeof group.delete_state === 'function') {
+          group.delete_state(this.provider);
+        }
+      } catch (err) {
+        console.warn('[MLS] leaveGroup: failed to delete OpenMLS group state for', cid, err);
+      }
       this.groups.delete(cid);
       console.log('[MLS] leaveGroup: deleted local group state for', cid);
-      // Fire-and-forget: clear storage async
-      this._persistProvider().catch(console.warn);
-      this.storage.deleteGroup?.(cid).catch?.(console.warn);
     }
+    // Fire-and-forget: remove the local group marker and move the per-cid cursor
+    // past the removal event. Without this, a later re-add can replay an old
+    // already-consumed Welcome and fail with "No matching key package".
+    this._persistProvider().catch(console.warn);
+    this.storage.deleteGroup?.(cid).catch?.(console.warn);
+    this.storage.saveSyncTimestamp(cid, String(removedCursor)).catch(console.warn);
+    this._savePendingSnapshots(cid, []).catch(console.warn);
   }
 
   /**
@@ -2212,20 +2256,25 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     console.log('[MLS] Evicting member:', targetUserId, 'from:', cid, '(selfLeft:', selfLeft, ')');
 
-    // 1. Collect all user_ids to remove: target + pending ghosts
-    //    Combine into ONE atomic remove_users() call (proposals by value).
-    const allRemoveIds: string[] = [targetUserId];
-    const pending = this._pendingEvictions.get(cid) || new Set<string>();
-    for (const ghostId of pending) {
-      if (ghostId === targetUserId) continue; // already included
-      try {
-        const leafNodes = group.members_by_user_id(ghostId);
-        if (leafNodes && leafNodes.length > 0) {
-          allRemoveIds.push(ghostId);
-        }
-      } catch (_err) {
-        /* ignore */
+    let targetHasLeaf = true;
+    try {
+      const targetLeaves = group.members_by_user_id(targetUserId);
+      targetHasLeaf = Boolean(targetLeaves && targetLeaves.length > 0);
+    } catch (_err) {
+      // Let WASM surface the authoritative error below.
+    }
+
+    // 1. Collect target + pending ghosts and remove them in ONE inline commit.
+    const allRemoveIds = await this._collectPendingGhosts(cid, [targetUserId]);
+    if (!targetHasLeaf && !selfLeft) {
+      throw new Error(`[MLS] evictMember: target ${targetUserId} has no MLS leaf in ${cid}`);
+    }
+    if (allRemoveIds.length === 0) {
+      if (selfLeft) {
+        await this._removePendingEviction(cid, targetUserId);
+        return;
       }
+      throw new Error(`[MLS] evictMember: no MLS leaves to remove for ${targetUserId} in ${cid}`);
     }
     if (allRemoveIds.length > 1) {
       console.log('[MLS] evictMember: bundling', allRemoveIds.length - 1, 'ghosts with target eviction');
@@ -2234,9 +2283,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let commitBundle: any;
     try {
-      commitBundle = group.remove_users(this.provider, this.identity, allRemoveIds);
+      this._requireCompositeCommitMethods(group);
+      commitBundle = group.commit_member_removals(this.provider, this.identity, allRemoveIds);
     } catch (err) {
-      console.error('[MLS] evictMember: WASM remove_users failed:', err);
+      console.error('[MLS] evictMember: WASM commit_member_removals failed:', err);
       throw err;
     }
 
@@ -2256,7 +2306,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         // Use dedicated MLS-only endpoint — bypasses membership check.
         if (!this.e2eeClient) throw new Error('[MLS] e2eeClient not initialized');
         await this.e2eeClient.commitEviction(channelType, channelId, {
-          target_user_id: targetUserId,
+          target_user_ids: allRemoveIds,
           commit: Array.from(commitBundle.commit),
           epoch: Number(group.epoch()),
           group_info: Array.from(groupInfoBytes),
@@ -2276,12 +2326,25 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         });
       }
     } catch (err) {
-      if (isEpochStaleError(err) && !isRetry) {
-        // Another admin already evicted → clear + sync + done (no retry needed, member already out)
-        console.warn('[MLS] evictMember: epoch_stale — another admin already evicted', targetUserId);
+      const activeTarget = getActiveTargetFromCommitEvictionError(err);
+      if (selfLeft && activeTarget) {
+        console.warn('[MLS] evictMember: target active again, dropping pending eviction:', activeTarget);
         group.clear_pending_commit(this.provider);
         await this._persistProvider();
         await this.sync();
+        await this._dropActivePendingEvictions(cid, [activeTarget]);
+        return;
+      }
+      if (isEpochStaleError(err) && !isRetry) {
+        // Another commit won the epoch race. Sync first, drop any targets that
+        // became active again, then let the remaining queue retry from fresh state.
+        console.warn('[MLS] evictMember: epoch_stale — syncing before retry/drop', targetUserId);
+        group.clear_pending_commit(this.provider);
+        await this._persistProvider();
+        await this.sync();
+        if (selfLeft) {
+          await this._dropActivePendingEvictions(cid, allRemoveIds);
+        }
         return;
       }
       group.clear_pending_commit(this.provider);
@@ -2292,9 +2355,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 4. Server OK → merge
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
-    // 5. Queue cleanup AFTER confirmed merge (ghosts that were bundled)
-    const ghostsEvicted = allRemoveIds.filter((id) => id !== targetUserId);
-    await this._cleanupEvictedGhosts(cid, ghostsEvicted);
+    // 5. Queue cleanup AFTER confirmed merge.
+    await this._cleanupEvictedGhosts(cid, allRemoveIds);
     console.log('[MLS] Evicted', targetUserId, 'from:', cid, 'epoch:', Number(group.epoch()));
   }
 
@@ -2377,9 +2439,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   /**
    * Key rotation: rotate own key material for forward secrecy.
    *
-   * 2-phase approach:
-   * Phase 1: Drain pending ghost evictions via _drainPendingGhosts (separate commit)
-   * Phase 2: Atomic self_update() for key rotation (includes proposals BY VALUE)
+   * Composite approach:
+   * Pending ghost removals and the self-update are encoded in one inline commit,
+   * so receivers need only process the commit and the epoch advances by +1.
    *
    * All other members receive the commit(s) via WS and advance their epoch.
    */
@@ -2395,11 +2457,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const channelType = cid.substring(0, colonIdx);
     const channelId = cid.substring(colonIdx + 1);
 
-    // 1. Phase 1: Drain pending ghosts (separate commit if needed)
-    await this._drainPendingGhosts(cid, channelType, channelId);
-
-    // 2. Phase 2: Atomic self_update — includes proposals BY VALUE
-    const bundle = group.self_update(this.provider, this.identity);
+    // 1. Composite inline commit: pending ghost removals + self update.
+    this._requireCompositeCommitMethods(group);
+    const ghostsToRemove = await this._collectPendingGhosts(cid);
+    const bundle = group.commit_self_update_with_removals(this.provider, this.identity, ghostsToRemove);
 
     // 3. Get group_info from bundle (post-commit epoch N+1 state)
     const groupInfoBytes = bundle.group_info;
@@ -2434,6 +2495,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     // 5. Server OK → merge pending commit locally → advances epoch
     group.merge_pending_commit(this.provider);
+    await this._cleanupEvictedGhosts(cid, ghostsToRemove);
 
     // 6. Persist state
     await this._saveGroup(cid);
@@ -3007,6 +3069,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // Strip encrypted fields — only envelope metadata goes to server
     const { attachments: _a, sticker_url: _s, poll_type: _pt, poll_choice_counts: _pc, ...envelopeOptions } = options;
 
+    if (!this.getGroup(cid)) {
+      const ready = await this.ensureChannelReady(channelType, channelId, cid, { source: 'send' });
+      if (!this.getGroup(cid)) {
+        throw new Error(`[MLS] No group for cid: ${cid}; ensureChannelReady status=${ready.status}`);
+      }
+    }
+
     // Encrypt and send with epoch-stale retry:
     // After enableE2ee or when offline, other members may commit (external_join,
     // key rotation) advancing the server epoch. Sync group state and retry once.
@@ -3456,6 +3525,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const topicBundles: any[] = [];
     const processedCids: string[] = [];
+    const topicGhostsByCid = new Map<string, string[]>();
 
     for (let i = 0; i < topicCids.length; i++) {
       const topicCid = topicCids[i];
@@ -3480,7 +3550,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
 
       try {
-        const commitBundle = group.add_members(this.provider, this.identity, kpsForThisTopic);
+        this._requireCompositeCommitMethods(group);
+        const ghostsToRemove = await this._collectPendingGhosts(topicCid, newUserIds);
+        const commitBundle = group.commit_member_add_with_removals(
+          this.provider,
+          this.identity,
+          ghostsToRemove,
+          kpsForThisTopic,
+        );
         const ratchetTree = group.export_ratchet_tree();
         const groupInfo = commitBundle.group_info;
 
@@ -3499,6 +3576,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           epoch: Number(group.epoch()),
         });
         processedCids.push(topicCid);
+        topicGhostsByCid.set(topicCid, ghostsToRemove);
       } catch (err) {
         console.error('[MLS] batchAddMembersToTopics: WASM error for', topicCid, err);
       }
@@ -3534,6 +3612,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       if (result.success) {
         g.merge_pending_commit(this.provider);
+        await this._cleanupEvictedGhosts(result.topic_cid, topicGhostsByCid.get(result.topic_cid) ?? []);
         console.log('[MLS] batchAddMembers: merged', result.topic_cid, 'epoch:', result.epoch);
       } else {
         g.clear_pending_commit(this.provider);

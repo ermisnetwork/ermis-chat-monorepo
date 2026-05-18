@@ -118,14 +118,14 @@ export interface ExternalJoinRequest {
 }
 
 /**
- * CommitEvictionRequest — MLS-only commit for evicting a user who already self-left.
+ * CommitEvictionRequest — MLS-only commit for evicting users who already self-left.
  * Used by `POST /v1/e2ee/channels/{type}/{id}/commit_eviction`.
  * Does NOT touch channel membership (already handled by self_remove in edit_channel).
  */
 export interface CommitEvictionRequest {
-  /** The user_id that already self-left (for logging only — no membership check on server) */
-  target_user_id: string;
-  /** MLS commit bytes from WASM group.remove_users([target_user_id]) */
+  /** All users removed by the composite inline commit. Must already be inactive in channel membership. */
+  target_user_ids: string[];
+  /** MLS commit bytes from WASM commit_member_removals(target_user_ids) */
   commit: number[];
   /** Pre-merge epoch (must match DB epoch — CAS check) */
   epoch: number;
