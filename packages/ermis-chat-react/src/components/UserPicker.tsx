@@ -294,12 +294,17 @@ export const UserPicker: React.FC<UserPickerProps> = ({
   const localFilteredUsers = useMemo(() => {
     const term = removeAccents(search.toLowerCase().trim());
     if (!term) return allUsers;
-    return allUsers.filter(u => {
+    const result: UserPickerUser[] = [];
+    for (const u of allUsers) {
       const name = removeAccents((u.name || '').toLowerCase());
       const email = removeAccents((u.email || '').toLowerCase());
       const phone = removeAccents((u.phone || '').toLowerCase());
-      return name.includes(term) || email.includes(term) || phone.includes(term);
-    });
+      if (name.startsWith(term) || email.startsWith(term) || phone.startsWith(term)) {
+        result.push(u);
+        if (result.length >= 100) break; // optimize for large room
+      }
+    }
+    return result;
   }, [search, allUsers]);
 
   /* ---------- 4. Remote search fallback ---------- */

@@ -27,7 +27,8 @@ export function useForwardMessage(message: FormatMessageResponse, onDismiss: () 
     const cleanQ = removeAccents(q);
     const isStrict = q !== cleanQ;
 
-    return channels.filter((ch) => {
+    const result: Channel[] = [];
+    for (const ch of channels) {
       const name = (ch.data?.name || ch.cid) as string;
       const t = name.toLowerCase();
       const cleanT = removeAccents(t);
@@ -38,14 +39,21 @@ export function useForwardMessage(message: FormatMessageResponse, onDismiss: () 
       const pt = parentName.toLowerCase();
       const cleanPT = removeAccents(pt);
 
+      let matched = false;
       if (isStrict) {
         // Strict match when query has accents
-        return t.includes(q) || pt.includes(q);
+        matched = t.startsWith(q) || pt.startsWith(q);
       } else {
         // Broad match when query is accent-less
-        return cleanT.includes(cleanQ) || cleanPT.includes(cleanQ);
+        matched = cleanT.startsWith(cleanQ) || cleanPT.startsWith(cleanQ);
       }
-    });
+
+      if (matched) {
+        result.push(ch);
+        if (result.length >= 50) break;
+      }
+    }
+    return result;
   }, [channels, search, client.activeChannels]);
 
   /* ---------- Toggle selection ---------- */

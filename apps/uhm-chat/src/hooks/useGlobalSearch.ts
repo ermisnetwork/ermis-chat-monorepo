@@ -82,12 +82,16 @@ export function useGlobalSearch(
     if (!client || !term) return []
     const normalizedTerm = normalizeSearchText(term)
 
-    return Object.values(client.activeChannels).filter((ch) => {
-      // Exclude topic channels
-      if (ch.type === 'topic') return false
+    const results: Channel[] = []
+    for (const ch of Object.values(client.activeChannels)) {
+      if (ch.type === 'topic') continue
       const name = normalizeSearchText((ch.data?.name as string) || '')
-      return name.includes(normalizedTerm)
-    })
+      if (name.startsWith(normalizedTerm)) {
+        results.push(ch)
+        if (results.length >= 50) break
+      }
+    }
+    return results
   }, [client, term])
 
   // ── Section 2: Topics (local instant) ──────────────────────────
@@ -96,24 +100,26 @@ export function useGlobalSearch(
     const results: TopicResult[] = []
     const normalizedTerm = normalizeSearchText(term)
 
-    Object.values(client.activeChannels).forEach((ch) => {
+    for (const ch of Object.values(client.activeChannels)) {
       if (
         ch.type !== 'team' ||
         !ch.data?.topics_enabled ||
         !ch.state?.topics ||
         ch.state.topics.length === 0
-      ) return
+      ) continue
 
       const parentName = (ch.data?.name as string) || ch.cid
       const parentImage = ch.data?.image as string | undefined
 
-      ch.state.topics.forEach((topic: Channel) => {
+      for (const topic of ch.state.topics as Channel[]) {
         const topicName = normalizeSearchText((topic.data?.name as string) || '')
-        if (topicName.includes(normalizedTerm)) {
+        if (topicName.startsWith(normalizedTerm)) {
           results.push({ topic, parentName, parentImage })
+          if (results.length >= 50) break
         }
-      })
-    })
+      }
+      if (results.length >= 50) break
+    }
 
     return results
   }, [client, term])

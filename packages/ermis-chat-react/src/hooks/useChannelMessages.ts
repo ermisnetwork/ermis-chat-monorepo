@@ -144,9 +144,10 @@ export function useChannelMessages({
         // each new animation cancels the previous one mid-way.
         isAtBottomRef.current = true;
         // Instant snap after React processes the state update
-        requestAnimationFrame(() => scrollToBottom(false));
+        setTimeout(() => scrollToBottom(false), 10);
         // Follow-up snaps to catch async height measurements (images, embeds)
-        setTimeout(() => scrollToBottom(false), 100);
+        setTimeout(() => scrollToBottom(false), 50);
+        setTimeout(() => scrollToBottom(false), 150);
         setTimeout(() => scrollToBottom(false), 300);
       } else if (wasAtBottom) {
         scheduleScrollToBottom(true);
