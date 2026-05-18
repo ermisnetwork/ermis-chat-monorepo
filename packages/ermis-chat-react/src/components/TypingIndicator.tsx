@@ -28,16 +28,18 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(({ typ
     }
   }
 
-  if (!isActive) return null;
-
   return (
-    <div className="ermis-typing-indicator ermis-typing-indicator--active">
-      <div className="ermis-typing-indicator__dots">
-        <span className="ermis-typing-indicator__dot" />
-        <span className="ermis-typing-indicator__dot" />
-        <span className="ermis-typing-indicator__dot" />
-      </div>
-      <span className="ermis-typing-indicator__text">{text}</span>
+    <div className={`ermis-typing-indicator-wrapper${isActive ? '' : ' ermis-typing-indicator-wrapper--empty'}`}>
+      {isActive && (
+        <div className="ermis-typing-indicator ermis-typing-indicator--active">
+          <div className="ermis-typing-indicator__dots">
+            <span className="ermis-typing-indicator__dot" />
+            <span className="ermis-typing-indicator__dot" />
+            <span className="ermis-typing-indicator__dot" />
+          </div>
+          <span className="ermis-typing-indicator__text">{text}</span>
+        </div>
+      )}
     </div>
   );
 });
