@@ -1,104 +1,226 @@
 /* ============================================================
-   Message Quick Reactions (Hover popup)
+   Quick Reactions – Vertical Strip (Heart-centered)
+
+   The ❤️ is always the CENTER of the strip.
+   On hover, other emoji expand ABOVE and BELOW the heart.
+   Positioned absolute to .ermis-message-bubble (not wrapper).
    ============================================================ */
 
-.ermis-message-quick-reactions {
+/* ---- Container ---- */
+.ermis-qr {
   position: absolute;
-  bottom: 100%; /* Sits exactly on top of bubble-wrapper, no gap */
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px;
-  padding-bottom: 8px; /* 4px normal padding + 4px transparent gap */
-  border-radius: 20px;
+  bottom: -4px;
+  z-index: 20;
+  /* Hidden until bubble hover */
   opacity: 0;
   visibility: hidden;
-  transform: translateY(4px);
-  /* Fast, snappy transition with NO delay to prevent stuttering */
-  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0.1s ease;
-  z-index: 20;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
-/* Visual background pushed up by the padding gap */
-.ermis-message-quick-reactions::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 4px; /* Leave 4px transparent at the bottom */
-  background-color: var(--ermis-bg-primary);
-  border: 1px solid var(--ermis-border);
-  border-radius: 20px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  z-index: -1;
+/* Other's messages → icon on the right side of bubble */
+.ermis-qr {
+  right: -8px;
 }
 
-
-
-/* Align based on ownership */
-.ermis-message-quick-reactions {
-  left: 0;
-}
-.ermis-message-quick-reactions--own {
-  left: auto;
-  right: 0;
+/* Own messages → icon on the left side of bubble */
+.ermis-qr--own {
+  right: auto;
+  left: -8px;
 }
 
-/* Elevate the bubble wrapper */
-.ermis-message-list__bubble-wrapper:hover,
-.ermis-message-list__bubble-wrapper:has(.ermis-message-quick-reactions--expanded) {
-  z-index: 100;
-}
-
-/* Also elevate ALL ancestors in the virtua list to defeat stacking contexts */
-.ermis-message-list__vlist *:has(.ermis-message-quick-reactions--expanded),
-.ermis-message-list__vlist *:has(.ermis-message-quick-reactions:hover) {
-  z-index: 100 !important;
-}
-
-.ermis-message-list__bubble-wrapper:hover .ermis-message-quick-reactions,
-.ermis-message-quick-reactions:hover {
+/* Show on bubble hover */
+.ermis-message-bubble:hover .ermis-qr,
+.ermis-qr:hover,
+.ermis-qr--expanded {
   opacity: 1;
   visibility: visible;
-  transform: translateY(0);
 }
 
-.ermis-message-quick-reactions--expanded {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-
-.ermis-message-quick-reactions--expanded::before {
-  /* Keep background visible when expanded */
-}
-
-.ermis-message-list__bubble-wrapper:hover .ermis-message-quick-reactions--disabled {
-  opacity: 0.5;
+.ermis-qr--disabled {
+  opacity: 0.4 !important;
   pointer-events: none;
 }
 
-.ermis-message-quick-reactions__btn {
+/* Elevate z-index on hover/expanded so strip & picker overlay neighbors */
+.ermis-message-bubble:hover,
+.ermis-message-bubble:has(.ermis-qr--expanded) {
+  z-index: 100;
+}
+
+.ermis-message-list__vlist *:has(.ermis-qr--expanded),
+.ermis-message-list__vlist *:has(.ermis-qr:hover) {
+  z-index: 100 !important;
+}
+
+/* ---- The Strip (vertical column: above → heart → below) ---- */
+.ermis-qr__strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  gap: 0;
+}
+
+/* ---- Heart Anchor (always visible) ---- */
+.ermis-qr__anchor {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: none;
-  border: none;
-  font-size: 18px;
-  line-height: 1;
-  width: 32px;
-  height: 32px;
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border: 1px solid var(--ermis-border);
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   cursor: pointer;
-  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275), background-color 0.15s;
+  font-size: 13px;
+  line-height: 1;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+              box-shadow 0.2s;
+  z-index: 2;
+  position: relative;
+  outline: none;
+  flex-shrink: 0;
 }
 
-.ermis-message-quick-reactions__btn:hover {
+.ermis-qr__anchor:hover {
+  transform: scale(1.15);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.ermis-qr__anchor--active {
+  background-color: #ffffff !important;
+  border-color: var(--ermis-border) !important;
+}
+
+/* ---- Above / Below Sections ---- */
+.ermis-qr__section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s ease 0.05s;
+}
+
+.ermis-qr__section--above {
+  /* Push items up — collapses into the heart */
+  transform: translateY(4px);
+  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s ease 0.05s,
+              transform 0.2s ease;
+}
+
+.ermis-qr__section--below {
+  /* Push items down — collapses into the heart */
+  transform: translateY(-4px);
+  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s ease 0.05s,
+              transform 0.2s ease;
+}
+
+/* Expanded state */
+.ermis-qr__strip--visible .ermis-qr__section {
+  max-height: 200px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ---- Background pill behind expanded strip ---- */
+.ermis-qr__strip::before {
+  content: '';
+  position: absolute;
+  inset: -3px -3px;
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border: 1px solid var(--ermis-border);
+  border-radius: 18px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: -1;
+  opacity: 0;
+  transform: scaleY(0.5);
+  transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ermis-qr__strip--visible::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+/* ---- Emoji Buttons ---- */
+.ermis-qr__emoji {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+              background-color 0.15s;
+  padding: 0;
+  outline: none;
+  color: inherit;
+  flex-shrink: 0;
+}
+
+.ermis-qr__emoji:hover {
   transform: scale(1.2);
-  background-color: var(--ermis-bg-hover);
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
-.ermis-message-quick-reactions__btn--active {
-  background-color: var(--ermis-bg-active, rgba(99, 102, 241, 0.12));
+.ermis-qr__emoji--active {
+  background-color: rgba(99, 102, 241, 0.1);
+}
+
+.ermis-qr__emoji--more {
+  color: var(--ermis-text-muted);
+  font-size: 12px;
+}
+
+.ermis-qr__emoji--more:hover {
+  color: var(--ermis-text-primary);
+}
+
+/* ---- Full Emoji Picker ---- */
+.ermis-qr__picker {
+  position: absolute;
+  width: 350px;
+  height: 368px;
+  border-radius: 16px;
+  overflow: hidden;
+  background-color: var(--ermis-bg-primary);
+  border: 1px solid var(--ermis-border);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1),
+              0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  z-index: 102;
+}
+
+.ermis-qr__picker--top {
+  bottom: 100%;
+  margin-bottom: 8px;
+}
+
+.ermis-qr__picker--bottom {
+  top: 100%;
+  margin-top: 8px;
+}
+
+.ermis-qr__picker {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ermis-qr__picker--own {
+  left: auto;
+  right: 0;
+  transform: none;
 }

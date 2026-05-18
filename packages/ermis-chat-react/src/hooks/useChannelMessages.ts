@@ -43,18 +43,18 @@ export function useChannelMessages({
   const { client, activeChannel, syncMessages, setReadState } = useChatClient();
 
   const scheduleScrollToBottom = useCallback(
-    (smooth: boolean) => {
+    (smooth: boolean, force = false) => {
       if (smooth) {
         // Trigger smooth scroll exactly once, otherwise browsers will
         // cancel the smooth animation if called multiple times in a row
         setTimeout(() => {
-          if (!isAtBottomRef.current) return;
+          if (!force && !isAtBottomRef.current) return;
           scrollToBottom(true);
         }, 100);
       } else {
         SCROLL_DELAYS.forEach((delay) => {
           setTimeout(() => {
-            if (!isAtBottomRef.current) return;
+            if (!force && !isAtBottomRef.current) return;
             scrollToBottom(false);
           }, delay);
         });
@@ -137,7 +137,18 @@ export function useChannelMessages({
 
       const isOwnMessage = event.message?.user?.id === client.userID || event.message?.user_id === client.userID;
 
-      if (isOwnMessage || wasAtBottom) {
+      if (isOwnMessage) {
+        // Own messages use INSTANT scroll (no smooth animation) to avoid
+        // animation overlap jank during rapid typing. Multiple smooth scrolls
+        // in quick succession cause the visible "jump/snap" effect because
+        // each new animation cancels the previous one mid-way.
+        isAtBottomRef.current = true;
+        // Instant snap after React processes the state update
+        requestAnimationFrame(() => scrollToBottom(false));
+        // Follow-up snaps to catch async height measurements (images, embeds)
+        setTimeout(() => scrollToBottom(false), 100);
+        setTimeout(() => scrollToBottom(false), 300);
+      } else if (wasAtBottom) {
         scheduleScrollToBottom(true);
       }
     };

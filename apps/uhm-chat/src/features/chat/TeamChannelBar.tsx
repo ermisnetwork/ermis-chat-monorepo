@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useTranslation } from 'react-i18next'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   useChatClient,
@@ -24,7 +23,7 @@ interface TeamChannelBarProps {
  * without going back to the main channel list.
  */
 export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChannelBarProps) {
-  const { t } = useTranslation()
+
   const { client } = useChatClient()
   const [channels, setChannels] = useState<Channel[]>([])
 
@@ -51,8 +50,8 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
       const aPinned = a.data?.pinned ? 1 : 0
       const bPinned = b.data?.pinned ? 1 : 0
       if (aPinned !== bPinned) return bPinned - aPinned
-      const aTime = a.state?.last_message_at ? new Date(a.state.last_message_at as string).getTime() : 0
-      const bTime = b.state?.last_message_at ? new Date(b.state.last_message_at as string).getTime() : 0
+      const aTime = a.state?.last_message_at ? new Date(a.state.last_message_at as unknown as string).getTime() : 0
+      const bTime = b.state?.last_message_at ? new Date(b.state.last_message_at as unknown as string).getTime() : 0
       return bTime - aTime
     })
     return result

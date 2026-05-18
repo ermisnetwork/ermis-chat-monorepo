@@ -209,8 +209,8 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
           />
         )}
         <div className="ermis-message-list__bubble-wrapper">
-          {!isSignalMessage(message) && <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!canReact} onAddReactionClick={onAddReactionClick} />}
           <MessageBubble message={message} isOwnMessage={isOwnMessage}>
+            {!isSignalMessage(message) && <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!canReact} onAddReactionClick={onAddReactionClick} />}
             {isForwarded && (
               <span className="ermis-message-list__forwarded-indicator">{forwardedLabel}</span>
             )}

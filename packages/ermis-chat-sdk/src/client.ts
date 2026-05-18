@@ -661,7 +661,21 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       const cid = event.cid;
       const channel = cid ? this.activeChannels[cid] : undefined;
       if (channel) {
-        channel._handleChannelEvent(event);
+        // _handleChannelEvent is async (e.g. message.new may await queryUser).
+        // We MUST wait for it to finish mutating channel state BEFORE calling
+        // listeners, otherwise React listeners (syncMessages) will read stale state.
+        const result = channel._handleChannelEvent(event);
+        if (result && typeof (result as any).then === 'function') {
+          // Async path: defer listeners until state mutations complete
+          (result as Promise<void>).then(() => {
+            this._callClientListeners(event);
+            if (channel) {
+              channel._callChannelListeners(event);
+            }
+            postListenerCallbacks.forEach((c) => c());
+          });
+          return;
+        }
       }
 
       this._callClientListeners(event);
@@ -680,7 +694,17 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const cid = event.cid;
     const channel = cid ? this.activeChannels[cid] : undefined;
     if (channel) {
-      channel._handleChannelEvent(event);
+      const result = channel._handleChannelEvent(event);
+      if (result && typeof (result as any).then === 'function') {
+        (result as Promise<void>).then(() => {
+          this._callClientListeners(event);
+          if (channel) {
+            channel._callChannelListeners(event);
+          }
+          postListenerCallbacks.forEach((c) => c());
+        });
+        return;
+      }
     }
 
     this._callClientListeners(event);
