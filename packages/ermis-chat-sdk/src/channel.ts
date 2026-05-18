@@ -682,7 +682,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (currentUserId && userId !== currentUserId) {
       throw new Error('[E2EE] leaveChannelE2ee can only remove the current user');
     }
-    return await this._update({ remove_members: [userId], self_remove: true });
+    const response = await this._update({ remove_members: [userId], self_remove: true });
+    const mlsManager = this.getClient().mlsManager;
+    if (mlsManager?.initialized && this.cid) {
+      mlsManager.leaveGroup(this.cid, Date.now());
+    }
+    return response;
   }
 
   async demoteModerators(members: string[]) {
@@ -1785,13 +1790,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const selfRemoveEvent =
             event.self_remove === true ||
             (event.self_remove === undefined && !!actorUserId && removedUserId === actorUserId);
+          const removalCursor = (event as any).created_at || (event as any).createdAt || event.message?.created_at;
 
           if (currentUserWasRemoved) {
             if (mlsMgrRemoved?.initialized && this.cid) {
-              mlsMgrRemoved.leaveGroup(this.cid);
+              mlsMgrRemoved.leaveGroup(this.cid, removalCursor);
               if (Array.isArray(event.topic_cids)) {
                 for (const topicCid of event.topic_cids) {
-                  mlsMgrRemoved.leaveGroup(topicCid);
+                  mlsMgrRemoved.leaveGroup(topicCid, removalCursor);
                 }
               }
             }

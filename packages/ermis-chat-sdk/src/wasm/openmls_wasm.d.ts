@@ -181,130 +181,6 @@ export class Group {
   private constructor();
   free(): void;
   /**
-   * Create a new group (legacy API, uses group_id string directly)
-   */
-  static create_new(provider: Provider, founder: Identity, group_id: string): Group;
-  /**
-   * Persist the group's current state to the Provider's storage.
-   *
-   * MUST be called after processing application messages (decrypt) to save
-   * the updated ratchet/secret tree state. Without this, a Provider restore
-   * (e.g., on page reload) will load stale ratchet state, causing
-   * SecretReuseError for messages that were already decrypted.
-   */
-  save_state(provider: Provider): void;
-  /**
-   * Join a group via External Commit
-   *
-   * This allows a user to join a group without needing a Welcome message,
-   * using only the GroupInfo.
-   *
-   * # Arguments
-   * * `provider` - Crypto provider
-   * * `identity` - Identity of the joiner
-   * * `group_info` - Serialized GroupInfo bytes
-   * * `ratchet_tree` - Optional ratchet tree
-   *
-   * # Returns
-   * ExternalJoinResult containing the joined group and commit message to broadcast
-   */
-  static join_external(provider: Provider, identity: Identity, group_info: Uint8Array, ratchet_tree?: RatchetTree | null): ExternalJoinResult;
-  /**
-   * Create a new group with a CID from Ermis
-   *
-   * # Arguments
-   * * `provider` - Crypto provider
-   * * `founder` - Identity of the group creator
-   * * `cid` - Channel ID from Ermis (e.g., "team:channel_abc123")
-   *
-   * # Example
-   * ```javascript
-   * const group = Group.create_with_cid(provider, identity, "team:my_channel");
-   * ```
-   */
-  static create_with_cid(provider: Provider, founder: Identity, cid: string): Group;
-  /**
-   * Join a group using a Welcome message
-   *
-   * # Arguments
-   * * `provider` - Crypto provider
-   * * `welcome` - Serialized Welcome message bytes
-   * * `ratchet_tree` - Optional ratchet tree (if not embedded in welcome)
-   */
-  static join_with_welcome(provider: Provider, welcome: Uint8Array, ratchet_tree?: RatchetTree | null): Group;
-  /**
-   * Join a group using a Welcome (legacy API)
-   */
-  static join(provider: Provider, welcome: Uint8Array, ratchet_tree: RatchetTree): Group;
-  /**
-   * Load a group from the Provider's storage by CID
-   *
-   * After restoring a Provider from bytes (IndexedDB), call this to reopen
-   * a group that was previously created or joined.
-   *
-   * # Arguments
-   * * `provider` - Crypto provider (restored from bytes)
-   * * `cid` - Channel ID (e.g., "team:channel_abc123")
-   */
-  static load(provider: Provider, cid: string): Group;
-  /**
-   * Add members and commit immediately (convenience method)
-   *
-   * Use this when you want to add members without batching.
-   * For batch operations, use `propose_add_member` + `commit_pending_proposals`.
-   */
-  add_members(provider: Provider, sender: Identity, new_members: KeyPackage[]): CommitBundle;
-  /**
-   * Remove ALL devices of a user by user_id and commit immediately
-   *
-   * A user with N devices will have N leaf nodes in the group.
-   * This method finds all of them and removes them in a single commit.
-   */
-  remove_user(provider: Provider, sender: Identity, user_id: string): CommitBundle;
-  /**
-   * Key rotation with immediate commit (convenience method)
-   */
-  self_update(provider: Provider, sender: Identity): CommitBundle;
-  /**
-   * Remove multiple users (all their devices) and commit immediately
-   *
-   * Each user_id may have multiple leaf nodes (devices).
-   * This method finds ALL leaf nodes for ALL specified users
-   * and removes them in a single commit.
-   */
-  remove_users(provider: Provider, sender: Identity, user_ids: string[]): CommitBundle;
-  /**
-   * Remove members and commit immediately (convenience method)
-   */
-  remove_members(provider: Provider, sender: Identity, member_indices: Uint32Array): CommitBundle;
-  /**
-   * Discard the pending commit (rollback)
-   */
-  clear_pending_commit(provider: Provider): void;
-  /**
-   * Merge the pending commit after DS confirmation
-   */
-  merge_pending_commit(provider: Provider): void;
-  /**
-   * Combined propose and commit for adding a single member
-   * This is kept for backwards compatibility with demo code
-   */
-  propose_and_commit_add(provider: Provider, sender: Identity, new_member: KeyPackage): AddMessages;
-  /**
-   * Commit all pending proposals
-   *
-   * This creates a commit message that includes all queued proposals.
-   * Use `merge_pending_commit` after the DS confirms the commit.
-   */
-  commit_pending_proposals(provider: Provider, sender: Identity): CommitBundle;
-  /**
-   * Add a user with multiple devices and commit immediately
-   *
-   * Each KeyPackage represents one device of the same user.
-   * All devices are added in a single commit.
-   */
-  add_user(provider: Provider, sender: Identity, device_key_packages: KeyPackage[]): CommitBundle;
-  /**
    * Export a secret key derived from the group state
    *
    * Useful for deriving encryption keys for media streams, etc.
@@ -477,6 +353,162 @@ export class Group {
    * * `aad` - Bytes to use as AAD (typically JSON-serialized metadata)
    */
   set_aad(aad: Uint8Array): void;
+  /**
+   * Create a new group (legacy API, uses group_id string directly)
+   */
+  static create_new(provider: Provider, founder: Identity, group_id: string): Group;
+  /**
+   * Persist the group's current state to the Provider's storage.
+   *
+   * MUST be called after processing application messages (decrypt) to save
+   * the updated ratchet/secret tree state. Without this, a Provider restore
+   * (e.g., on page reload) will load stale ratchet state, causing
+   * SecretReuseError for messages that were already decrypted.
+   */
+  save_state(provider: Provider): void;
+  /**
+   * Delete this group's persisted OpenMLS state from the Provider storage.
+   *
+   * Use when the local user leaves or is removed from a channel. This clears
+   * the old MLS group state so a later re-add with the same CID can join from
+   * a fresh Welcome without colliding with stale provider records.
+   */
+  delete_state(provider: Provider): void;
+  /**
+   * Join a group via External Commit
+   *
+   * This allows a user to join a group without needing a Welcome message,
+   * using only the GroupInfo.
+   *
+   * # Arguments
+   * * `provider` - Crypto provider
+   * * `identity` - Identity of the joiner
+   * * `group_info` - Serialized GroupInfo bytes
+   * * `ratchet_tree` - Optional ratchet tree
+   *
+   * # Returns
+   * ExternalJoinResult containing the joined group and commit message to broadcast
+   */
+  static join_external(provider: Provider, identity: Identity, group_info: Uint8Array, ratchet_tree?: RatchetTree | null): ExternalJoinResult;
+  /**
+   * Create a new group with a CID from Ermis
+   *
+   * # Arguments
+   * * `provider` - Crypto provider
+   * * `founder` - Identity of the group creator
+   * * `cid` - Channel ID from Ermis (e.g., "team:channel_abc123")
+   *
+   * # Example
+   * ```javascript
+   * const group = Group.create_with_cid(provider, identity, "team:my_channel");
+   * ```
+   */
+  static create_with_cid(provider: Provider, founder: Identity, cid: string): Group;
+  /**
+   * Join a group using a Welcome message
+   *
+   * # Arguments
+   * * `provider` - Crypto provider
+   * * `welcome` - Serialized Welcome message bytes
+   * * `ratchet_tree` - Optional ratchet tree (if not embedded in welcome)
+   */
+  static join_with_welcome(provider: Provider, welcome: Uint8Array, ratchet_tree?: RatchetTree | null): Group;
+  /**
+   * Join a group using a Welcome (legacy API)
+   */
+  static join(provider: Provider, welcome: Uint8Array, ratchet_tree: RatchetTree): Group;
+  /**
+   * Load a group from the Provider's storage by CID
+   *
+   * After restoring a Provider from bytes (IndexedDB), call this to reopen
+   * a group that was previously created or joined.
+   *
+   * # Arguments
+   * * `provider` - Crypto provider (restored from bytes)
+   * * `cid` - Channel ID (e.g., "team:channel_abc123")
+   */
+  static load(provider: Provider, cid: string): Group;
+  /**
+   * Add members and commit immediately (convenience method)
+   *
+   * Use this when you want to add members without batching.
+   * For batch operations, use `propose_add_member` + `commit_pending_proposals`.
+   */
+  add_members(provider: Provider, sender: Identity, new_members: KeyPackage[]): CommitBundle;
+  /**
+   * Remove ALL devices of a user by user_id and commit immediately
+   *
+   * A user with N devices will have N leaf nodes in the group.
+   * This method finds all of them and removes them in a single commit.
+   */
+  remove_user(provider: Provider, sender: Identity, user_id: string): CommitBundle;
+  /**
+   * Key rotation with immediate commit (convenience method)
+   */
+  self_update(provider: Provider, sender: Identity): CommitBundle;
+  /**
+   * Remove multiple users (all their devices) and commit immediately
+   *
+   * Each user_id may have multiple leaf nodes (devices).
+   * This method finds ALL leaf nodes for ALL specified users
+   * and removes them in a single commit.
+   */
+  remove_users(provider: Provider, sender: Identity, user_ids: string[]): CommitBundle;
+  /**
+   * Remove members and commit immediately (convenience method)
+   */
+  remove_members(provider: Provider, sender: Identity, member_indices: Uint32Array): CommitBundle;
+  /**
+   * Discard the pending commit (rollback)
+   */
+  clear_pending_commit(provider: Provider): void;
+  /**
+   * Create one inline commit containing removals, adds, and/or a self-update.
+   *
+   * This POC API intentionally uses `commit_builder().consume_proposal_store(false)` so the
+   * resulting commit contains only the changes requested by this call. The remove/add proposals
+   * are owned by the commit and encoded by value, which avoids receivers depending on standalone
+   * proposal messages being delivered before the commit.
+   */
+  commit_group_changes(provider: Provider, sender: Identity, remove_user_ids: string[], add_members: KeyPackage[], force_self_update: boolean): CommitBundle;
+  /**
+   * Merge the pending commit after DS confirmation
+   */
+  merge_pending_commit(provider: Provider): void;
+  /**
+   * Create one inline commit that removes one or more members.
+   */
+  commit_member_removals(provider: Provider, sender: Identity, remove_user_ids: string[]): CommitBundle;
+  /**
+   * Combined propose and commit for adding a single member
+   * This is kept for backwards compatibility with demo code
+   */
+  propose_and_commit_add(provider: Provider, sender: Identity, new_member: KeyPackage): AddMessages;
+  /**
+   * Commit all pending proposals
+   *
+   * This creates a commit message that includes all queued proposals.
+   * Use `merge_pending_commit` after the DS confirms the commit.
+   */
+  commit_pending_proposals(provider: Provider, sender: Identity): CommitBundle;
+  /**
+   * Create one inline commit that removes stale members and adds new members.
+   *
+   * This is an intent-specific wrapper for SDK callsites. It intentionally shares the
+   * implementation of `commit_group_changes` so duplicate add/remove validation cannot drift.
+   */
+  commit_member_add_with_removals(provider: Provider, sender: Identity, remove_user_ids: string[], add_members: KeyPackage[]): CommitBundle;
+  /**
+   * Create one inline commit that removes stale members and rotates the sender leaf.
+   */
+  commit_self_update_with_removals(provider: Provider, sender: Identity, remove_user_ids: string[]): CommitBundle;
+  /**
+   * Add a user with multiple devices and commit immediately
+   *
+   * Each KeyPackage represents one device of the same user.
+   * All devices are added in a single commit.
+   */
+  add_user(provider: Provider, sender: Identity, device_key_packages: KeyPackage[]): CommitBundle;
 }
 /**
  * Represents a user's MLS identity with credentials and signing keys
@@ -677,52 +709,14 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly __wbg_addmessages_free: (a: number, b: number) => void;
-  readonly __wbg_commitbundle_free: (a: number, b: number) => void;
-  readonly __wbg_externaljoinresult_free: (a: number, b: number) => void;
-  readonly __wbg_group_free: (a: number, b: number) => void;
-  readonly __wbg_mlserror_free: (a: number, b: number) => void;
-  readonly __wbg_ratchettree_free: (a: number, b: number) => void;
-  readonly addmessages_commit: (a: number) => any;
-  readonly addmessages_group_info: (a: number) => [number, number];
-  readonly addmessages_proposal: (a: number) => any;
-  readonly addmessages_welcome: (a: number) => any;
-  readonly commitbundle_commit: (a: number) => [number, number];
-  readonly commitbundle_commit_as_uint8array: (a: number) => any;
-  readonly commitbundle_group_info: (a: number) => [number, number];
-  readonly commitbundle_has_welcome: (a: number) => number;
-  readonly commitbundle_welcome: (a: number) => [number, number];
-  readonly commitbundle_welcome_as_uint8array: (a: number) => any;
-  readonly externaljoinresult_commit: (a: number) => [number, number];
-  readonly externaljoinresult_group: (a: number) => number;
-  readonly group_add_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_clear_pending_commit: (a: number, b: number) => [number, number];
-  readonly group_commit_pending_proposals: (a: number, b: number, c: number) => [number, number, number];
-  readonly group_create_new: (a: number, b: number, c: number, d: number) => number;
-  readonly group_create_with_cid: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_join: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_join_external: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_join_with_welcome: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_load: (a: number, b: number, c: number) => [number, number, number];
-  readonly group_merge_pending_commit: (a: number, b: number) => [number, number];
-  readonly group_propose_and_commit_add: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_remove_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_remove_users: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_save_state: (a: number, b: number) => [number, number];
-  readonly group_self_update: (a: number, b: number, c: number) => [number, number, number];
-  readonly mlserror_code: (a: number) => number;
-  readonly mlserror_message: (a: number) => [number, number];
-  readonly mlserror_new: (a: number, b: number, c: number) => number;
-  readonly ratchettree_from_bytes: (a: number, b: number) => [number, number, number];
-  readonly ratchettree_to_bytes: (a: number) => [number, number];
   readonly __wbg_identity_free: (a: number, b: number) => void;
   readonly __wbg_keypackage_free: (a: number, b: number) => void;
   readonly __wbg_memberinfo_free: (a: number, b: number) => void;
+  readonly __wbg_mlserror_free: (a: number, b: number) => void;
   readonly __wbg_processedmessage_free: (a: number, b: number) => void;
   readonly __wbg_proposalmessage_free: (a: number, b: number) => void;
   readonly __wbg_provider_free: (a: number, b: number) => void;
+  readonly __wbg_ratchettree_free: (a: number, b: number) => void;
   readonly group_cid: (a: number) => [number, number, number, number];
   readonly group_clear_pending_proposals: (a: number, b: number) => [number, number];
   readonly group_create_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
@@ -763,6 +757,9 @@ export interface InitOutput {
   readonly memberinfo_index: (a: number) => number;
   readonly memberinfo_signature_key: (a: number) => [number, number];
   readonly memberinfo_user_id: (a: number) => [number, number];
+  readonly mlserror_code: (a: number) => number;
+  readonly mlserror_message: (a: number) => [number, number];
+  readonly mlserror_new: (a: number, b: number, c: number) => number;
   readonly processedmessage_aad: (a: number) => [number, number];
   readonly processedmessage_content: (a: number) => [number, number];
   readonly processedmessage_epoch: (a: number) => bigint;
@@ -777,9 +774,49 @@ export interface InitOutput {
   readonly provider_from_bytes: (a: number, b: number) => [number, number, number];
   readonly provider_new: () => number;
   readonly provider_to_bytes: (a: number) => [number, number, number, number];
+  readonly ratchettree_from_bytes: (a: number, b: number) => [number, number, number];
+  readonly ratchettree_to_bytes: (a: number) => [number, number];
   readonly validate_key_package_bytes: (a: number, b: number) => number;
   readonly init: () => void;
   readonly greet: () => void;
+  readonly __wbg_addmessages_free: (a: number, b: number) => void;
+  readonly __wbg_commitbundle_free: (a: number, b: number) => void;
+  readonly __wbg_externaljoinresult_free: (a: number, b: number) => void;
+  readonly __wbg_group_free: (a: number, b: number) => void;
+  readonly addmessages_commit: (a: number) => any;
+  readonly addmessages_group_info: (a: number) => [number, number];
+  readonly addmessages_proposal: (a: number) => any;
+  readonly addmessages_welcome: (a: number) => any;
+  readonly commitbundle_commit: (a: number) => [number, number];
+  readonly commitbundle_commit_as_uint8array: (a: number) => any;
+  readonly commitbundle_group_info: (a: number) => [number, number];
+  readonly commitbundle_has_welcome: (a: number) => number;
+  readonly commitbundle_welcome: (a: number) => [number, number];
+  readonly commitbundle_welcome_as_uint8array: (a: number) => any;
+  readonly externaljoinresult_commit: (a: number) => [number, number];
+  readonly externaljoinresult_group: (a: number) => number;
+  readonly group_add_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_clear_pending_commit: (a: number, b: number) => [number, number];
+  readonly group_commit_group_changes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
+  readonly group_commit_member_add_with_removals: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+  readonly group_commit_member_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_commit_pending_proposals: (a: number, b: number, c: number) => [number, number, number];
+  readonly group_commit_self_update_with_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_create_new: (a: number, b: number, c: number, d: number) => number;
+  readonly group_create_with_cid: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_delete_state: (a: number, b: number) => [number, number];
+  readonly group_join: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_join_external: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_join_with_welcome: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_load: (a: number, b: number, c: number) => [number, number, number];
+  readonly group_merge_pending_commit: (a: number, b: number) => [number, number];
+  readonly group_propose_and_commit_add: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_remove_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_remove_users: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_save_state: (a: number, b: number) => [number, number];
+  readonly group_self_update: (a: number, b: number, c: number) => [number, number, number];
   readonly __wbindgen_exn_store: (a: number) => void;
   readonly __externref_table_alloc: () => number;
   readonly __wbindgen_export_2: WebAssembly.Table;
