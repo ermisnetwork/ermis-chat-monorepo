@@ -61,6 +61,9 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
   ws?: WebSocket;
   wsID: number;
 
+  /** Bound visibility change handler for cleanup */
+  private _onVisibilityChange?: () => void;
+
   constructor({ client }: { client: ErmisChat<ErmisChatGenerics> }) {
     /** ErmisChat client */
     this.client = client;
@@ -85,6 +88,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     this.connectionCheckTimeout = this.pingInterval + 10 * 1000;
 
     addConnectionEventListeners(this.onlineStatusChanged);
+    this._addVisibilityChangeListener();
   }
 
   _log(msg: string, extra: UR = {}, level: LogLevel = 'info') {
@@ -207,6 +211,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     }
 
     removeConnectionEventListeners(this.onlineStatusChanged);
+    this._removeVisibilityChangeListener();
 
     this.isHealthy = false;
 
@@ -584,4 +589,74 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
       }
     }, this.connectionCheckTimeout);
   };
+
+  /**
+   * _addVisibilityChangeListener - Detects when the browser tab becomes visible
+   * after the laptop wakes from sleep. When the page resumes, we check if the
+   * WS connection has gone stale and trigger reconnection if needed.
+   *
+   * This is critical because sleeping laptops often do NOT fire the browser's
+   * `online` event (Wi-Fi is restored transparently by the OS), leaving the
+   * dead WebSocket undetected.
+   */
+  _addVisibilityChangeListener() {
+    if (typeof document === 'undefined') return;
+
+    this._onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+
+      const now = new Date();
+      const elapsed = this.lastEvent ? now.getTime() - this.lastEvent.getTime() : Infinity;
+
+      this._log(
+        `_onVisibilityChange() - Page became visible. Last event ${elapsed}ms ago. isHealthy: ${this.isHealthy}`,
+      );
+
+      // Cancel any frozen timers that may fire with large random retry intervals.
+      // During sleep, scheduleConnectionCheck and scheduleNextPing timers are frozen.
+      // When the laptop wakes, they fire with retryInterval(consecutiveFailures)
+      // which can be up to 25 seconds. We clear them to prevent them from competing
+      // with our fast 10ms reconnect.
+      if (this.healthCheckTimeoutRef) {
+        clearTimeout(this.healthCheckTimeoutRef);
+      }
+      if (this.connectionCheckTimeoutRef) {
+        clearTimeout(this.connectionCheckTimeoutRef);
+      }
+
+      if (!this.isHealthy || elapsed > this.connectionCheckTimeout) {
+        // Connection is dead or stale — force fast reconnect
+        this._log('_onVisibilityChange() - Connection unhealthy or stale, fast reconnecting');
+
+        // Reset state so our reconnect isn't blocked by a stale competing attempt
+        this.consecutiveFailures = 0;
+        this.isConnecting = false;
+        this._setHealth(false);
+        this._reconnect({ interval: 10 });
+      } else {
+        // Connection might be OK, send an immediate health check to verify
+        try {
+          const data = [{ type: 'health.check', client_id: this.client.clientID }];
+          this.ws?.send(JSON.stringify(data));
+        } catch (e) {
+          // If send fails, the connection is dead
+          this._log('_onVisibilityChange() - Health check send failed, reconnecting');
+          this.consecutiveFailures = 0;
+          this.isConnecting = false;
+          this._setHealth(false);
+          this._reconnect({ interval: 10 });
+        }
+        // Re-arm the connection check timer
+        this.scheduleConnectionCheck();
+      }
+    };
+
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
+  }
+
+  _removeVisibilityChangeListener() {
+    if (typeof document === 'undefined' || !this._onVisibilityChange) return;
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
+    this._onVisibilityChange = undefined;
+  }
 }

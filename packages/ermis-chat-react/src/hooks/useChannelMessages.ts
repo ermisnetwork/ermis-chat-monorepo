@@ -199,9 +199,22 @@ export function useChannelMessages({
       }
     };
 
-    const handleRecovery = () => {
-      syncMessages();
-      scheduleScrollToBottom(false);
+    const handleRecovery = (event: any) => {
+      // recoverState() only fetches channels with message_limit: 1 (for sidebar previews).
+      // Re-query the active channel with a proper limit to load all missed messages.
+      activeChannel
+        .query({ messages: { limit: 25, include_hidden_messages: true } })
+        .then(() => {
+          syncMessages();
+          setReadState({ ...activeChannel.state.read });
+          scheduleScrollToBottom(false);
+        })
+        .catch((err: any) => {
+          console.error('Failed to recover channel messages after reconnect', err);
+          // Fallback: sync whatever we have from recoverState
+          syncMessages();
+          scheduleScrollToBottom(false);
+        });
     };
 
     const client = activeChannel.getClient();
