@@ -88,14 +88,39 @@ export function useChannelMessages({
       }, 50);
     };
 
+    const isDecryptedPlaintextMessage = (message: any) => {
+      if (!message || message.e2ee_status === 'failed' || message.e2ee_status === 'decrypting') return false;
+      return (
+        typeof message.text === 'string' ||
+        Boolean(message.attachments?.length) ||
+        Boolean(message.sticker_url) ||
+        Boolean(message.poll_type) ||
+        Boolean(message.poll_choice_counts) ||
+        Boolean(message.latest_poll_choices)
+      );
+    };
+
+    const normalizeDecryptedMessage = (message: any) => {
+      if (!isDecryptedPlaintextMessage(message)) return message;
+      return {
+        ...message,
+        content_type: 'standard',
+        type: message.sticker_url ? 'sticker' : message.type,
+      };
+    };
+
     const mergeAndFilterE2eeMessages = (baseMessages: any[], decryptedMessages: any[]) => {
       const byId = new Map(baseMessages.map((msg: any) => [msg.id, msg]));
       for (const decrypted of decryptedMessages) {
+        const normalized = normalizeDecryptedMessage(decrypted);
+        const hasPlaintext = isDecryptedPlaintextMessage(normalized);
         const current: any = byId.get(decrypted.id) || {};
         byId.set(decrypted.id, {
           ...current,
-          ...decrypted,
-          content_type: decrypted.content_type || current.content_type || 'standard',
+          ...normalized,
+          content_type: hasPlaintext
+            ? normalized.content_type || current.content_type || 'standard'
+            : normalized.content_type || current.content_type,
           status: current.status === 'sending' ? current.status : null,
         });
       }

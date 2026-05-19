@@ -129,7 +129,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       updated_at: new Date().toISOString(),
       user: this.getClient().user,
       user_id: this.getClient().userID,
-      type: 'regular',
+      type: message.sticker_url ? 'sticker' : (message.type || 'regular'),
     } as unknown as MessageResponse<ErmisChatGenerics>;
 
     this.state.addMessageSorted(optimisticMessage);

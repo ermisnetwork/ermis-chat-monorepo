@@ -2772,6 +2772,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return new Date(storedUpdatedAt).getTime() >= new Date(incomingUpdatedAt).getTime();
   }
 
+  private _messageTypeForPayload(payload: E2eePayload, fallbackType?: unknown): string {
+    if (payload.sticker_url) return 'sticker';
+    return typeof fallbackType === 'string' && fallbackType ? fallbackType : 'regular';
+  }
+
   private _storedFromPayload(
     cid: string,
     payload: E2eePayload,
@@ -2781,7 +2786,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return {
       id: envelope.id,
       cid,
-      content_type: 'mls',
+      content_type: 'standard',
       text: payload.text,
       attachments: payload.attachments || fallback?.attachments,
       sticker_url: payload.sticker_url || fallback?.sticker_url,
@@ -2794,7 +2799,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       user: envelope.user ? { ...envelope.user } : fallback?.user,
       created_at: fallback?.created_at || envelope.created_at || new Date().toISOString(),
       updated_at: (envelope.updated_at as string | undefined) || envelope.created_at || fallback?.updated_at,
-      type: (envelope as any).type || fallback?.type || 'regular',
+      type: this._messageTypeForPayload(payload, fallback?.type || (envelope as any).type),
       parent_id: (envelope as any).parent_id || fallback?.parent_id,
       quoted_message_id: (envelope as any).quoted_message_id || fallback?.quoted_message_id,
       mentioned_users: (envelope as any).mentioned_users || fallback?.mentioned_users,
@@ -3116,7 +3121,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const storedMsg: E2eeStoredMessage = {
       id: messageId,
       cid,
-      content_type: 'mls',
+      content_type: 'standard',
       text,
       attachments: payload.attachments,
       sticker_url: payload.sticker_url,
@@ -3124,7 +3129,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       poll_choice_counts: payload.poll_choice_counts,
       user_id: this.userId!,
       created_at: now,
-      type: options.sticker_url ? 'sticker' : 'regular',
+      type: this._messageTypeForPayload(payload),
       parent_id: options.parent_id,
       quoted_message_id: options.quoted_message_id,
       mentioned_users: options.mentioned_users,
@@ -3236,6 +3241,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (existing) {
         await this.storage.saveE2eeMessage({
           ...existing,
+          content_type: 'standard',
           text,
           is_edited: true,
           updated_at: new Date().toISOString(),
@@ -3244,6 +3250,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           sticker_url: payload.sticker_url || existing.sticker_url,
           poll_type: payload.poll_type || existing.poll_type,
           poll_choice_counts: payload.poll_choice_counts || existing.poll_choice_counts,
+          type: this._messageTypeForPayload(payload, existing.type),
           mentioned_users: options.mentioned_users || existing.mentioned_users,
           mentioned_all: options.mentioned_all !== undefined ? options.mentioned_all : existing.mentioned_all,
         });
@@ -3251,7 +3258,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         await this.storage.saveE2eeMessage({
           id: messageId,
           cid,
-          content_type: 'mls',
+          content_type: 'standard',
           text,
           attachments: payload.attachments,
           sticker_url: payload.sticker_url,
@@ -3260,7 +3267,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           user_id: this.userId!,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          type: 'regular',
+          type: this._messageTypeForPayload(payload),
           mentioned_users: options.mentioned_users,
           mentioned_all: options.mentioned_all,
           is_edited: true,
