@@ -5,22 +5,16 @@
 /* Sits in normal flow between message list and input.
    Uses a wrapper with fixed height so layout doesn't jump. */
 .ermis-typing-indicator-wrapper {
-  height: 28px;
+  min-height: 20px;
   overflow: hidden;
-  flex-shrink: 0;
   padding-left: 16px;
-}
-
-/* When no one is typing, collapse the wrapper smoothly */
-.ermis-typing-indicator-wrapper--empty {
-  height: 0;
+  display: flex;
 }
 
 .ermis-typing-indicator {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0;
   font-size: 12px;
   color: var(--ermis-text-secondary);
   overflow: hidden;
@@ -66,7 +60,6 @@
 }
 
 @keyframes ermis-typing-bounce {
-
   0%,
   80%,
   100% {
