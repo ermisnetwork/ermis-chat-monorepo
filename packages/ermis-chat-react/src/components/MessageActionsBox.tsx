@@ -5,6 +5,7 @@ import { useChatClient } from '../hooks/useChatClient';
 import type { MessageActionsBoxProps } from '../types';
 import { Dropdown as DefaultDropdown, closeAllDropdowns } from './Dropdown';
 import { useChatComponents } from '../context/ChatComponentsContext';
+import { MessageQuickReactions } from './MessageQuickReactions';
 
 // Aliased for backward compatibility
 export const closeAllActionBoxes = closeAllDropdowns;
@@ -105,6 +106,7 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
             </svg>
           </button>
         )}
+        <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!actions.hasCapReact} />
         {actions.canForward && (
           <button 
             className="ermis-message-list__actions-trigger" 

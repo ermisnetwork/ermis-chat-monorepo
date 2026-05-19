@@ -21,6 +21,7 @@ export type MessageActionList = {
   hasCapPin: boolean;
   hasCapReply: boolean;
   hasCapQuote: boolean;
+  hasCapReact: boolean;
 };
 
 export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: boolean): MessageActionList => {
@@ -50,6 +51,7 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
         hasCapPin: false,
         hasCapReply: false,
         hasCapQuote: false,
+        hasCapReact: false,
       };
     }
 
@@ -82,6 +84,7 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const hasCapReply = hasCapability('send-reply');
     const hasCapQuote = hasCapability('quote-message');
     const hasCapPin = hasCapability('pin-message');
+    const hasCapReact = hasCapability('send-reaction');
 
     return {
       canEdit,
@@ -99,6 +102,7 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
       hasCapPin,
       hasCapReply,
       hasCapQuote,
+      hasCapReact,
     };
   }, [activeChannel, isTeam, isOwner, hasCapability, messageType, message.text, isPinnedFlag, isOwnMessage, isPreviewMode]); // Use capabilities from hook
 };

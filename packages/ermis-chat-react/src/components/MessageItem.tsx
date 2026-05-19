@@ -3,7 +3,6 @@ import type { MessageItemProps, SystemMessageItemProps } from '../types';
 import { QuotedMessagePreview } from './QuotedMessagePreview';
 import { MessageActionsBox } from './MessageActionsBox';
 import { MessageReactions } from './MessageReactions';
-import { MessageQuickReactions } from './MessageQuickReactions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { useChatClient } from '../hooks/useChatClient';
 import { formatTime } from '../utils';
@@ -210,7 +209,6 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
         )}
         <div className="ermis-message-list__bubble-wrapper">
           <MessageBubble message={message} isOwnMessage={isOwnMessage}>
-            {!isSignalMessage(message) && <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!canReact} onAddReactionClick={onAddReactionClick} />}
             {isForwarded && (
               <span className="ermis-message-list__forwarded-indicator">{forwardedLabel}</span>
             )}

@@ -10,17 +10,7 @@ const EmojiPickerLoading = EmojiPicker.Loading as any;
 const EmojiPickerEmpty = EmojiPicker.Empty as any;
 const EmojiPickerList = EmojiPicker.List as any;
 
-/**
- * Reaction strip layout:
- *   👍  ← above (expand up)
- *   😂  ← above (expand up)
- *   ❤️  ← ANCHOR (always visible, center)
- *   😢  ← below (expand down)
- *   🔥  ← below (expand down)
- *   ⋮   ← more (expand down)
- */
-const REACTIONS_ABOVE = ['like', 'haha'];
-const REACTIONS_BELOW = ['sad', 'fire'];
+const REACTIONS = ['like', 'love', 'haha', 'sad', 'fire'];
 
 const EMOJI_MAP: Record<string, string> = {
   like: '👍',
@@ -34,17 +24,13 @@ export const MessageQuickReactions: React.FC<{
   message: FormatMessageResponse;
   isOwnMessage: boolean;
   disabled?: boolean;
-  onAddReactionClick?: (e: React.MouseEvent, messageId: string) => void;
-}> = React.memo(({ message, isOwnMessage, disabled, onAddReactionClick }) => {
+}> = React.memo(({ message, isOwnMessage, disabled }) => {
   const { activeChannel, client } = useChatClient();
   const currentUserId = client?.userID;
   const [isExpanded, setIsExpanded] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerPosition, setPickerPosition] = useState<'top' | 'bottom'>('top');
-  const [isNearTop, setIsNearTop] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Close when clicking outside
   useEffect(() => {
@@ -59,13 +45,6 @@ export const MessageQuickReactions: React.FC<{
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isExpanded, showPicker]);
-
-  useEffect(() => {
-    return () => {
-      if (expandTimerRef.current) clearTimeout(expandTimerRef.current);
-      if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
-    };
-  }, []);
 
   const handleReactionToggle = useCallback(
     async (type: string) => {
@@ -101,53 +80,6 @@ export const MessageQuickReactions: React.FC<{
     [message, currentUserId]
   );
 
-  const handleAnchorEnter = useCallback(() => {
-    if (collapseTimerRef.current) {
-      clearTimeout(collapseTimerRef.current);
-      collapseTimerRef.current = null;
-    }
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const vlist = containerRef.current.closest('.ermis-message-list__vlist');
-      if (vlist) {
-        const vlistRect = vlist.getBoundingClientRect();
-        // The strip expands upwards by about 70px (2 items * ~30px + padding).
-        // Check if the highest reaction would overflow the top of the VList.
-        setIsNearTop(rect.top - 70 < vlistRect.top);
-      } else {
-        setIsNearTop(rect.top < 140);
-      }
-    }
-    expandTimerRef.current = setTimeout(() => setIsExpanded(true), 200);
-  }, []);
-
-  const handleContainerLeave = useCallback(() => {
-    if (expandTimerRef.current) {
-      clearTimeout(expandTimerRef.current);
-      expandTimerRef.current = null;
-    }
-    if (!showPicker) {
-      collapseTimerRef.current = setTimeout(() => setIsExpanded(false), 300);
-    }
-  }, [showPicker]);
-
-  const handleContainerEnter = useCallback(() => {
-    if (collapseTimerRef.current) {
-      clearTimeout(collapseTimerRef.current);
-      collapseTimerRef.current = null;
-    }
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const vlist = containerRef.current.closest('.ermis-message-list__vlist');
-      if (vlist) {
-        const vlistRect = vlist.getBoundingClientRect();
-        setIsNearTop(rect.top - 70 < vlistRect.top);
-      } else {
-        setIsNearTop(rect.top < 140);
-      }
-    }
-  }, []);
-
   const handleMoreClick = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -157,59 +89,46 @@ export const MessageQuickReactions: React.FC<{
         setPickerPosition(rect.top < 388 ? 'bottom' : 'top');
       }
       setShowPicker((prev) => !prev);
+      setIsExpanded(false);
     },
     []
   );
 
-  const containerClass = [
-    'ermis-qr',
-    isOwnMessage ? 'ermis-qr--own' : '',
-    disabled ? 'ermis-qr--disabled' : '',
-    isExpanded ? 'ermis-qr--expanded' : '',
-    isNearTop ? 'ermis-qr--downward' : '',
-  ].filter(Boolean).join(' ');
-
   return (
-    <div
-      ref={containerRef}
-      className={containerClass}
-      onMouseEnter={handleContainerEnter}
-      onMouseLeave={handleContainerLeave}
+    <div 
+      ref={containerRef} 
+      className="ermis-qr-wrapper" 
+      style={{ position: 'relative', display: 'inline-flex' }}
+      onMouseLeave={() => {
+        if (!showPicker) {
+          setIsExpanded(false);
+        }
+      }}
     >
-      {/* Vertical strip: above → heart → below → more */}
-      <div className={`ermis-qr__strip ${isExpanded ? 'ermis-qr__strip--visible' : ''}`}>
-        {/* Items above heart (expand upward) */}
-        <div className="ermis-qr__section ermis-qr__section--above">
-          {REACTIONS_ABOVE.map((type) => (
+      {/* Trigger button (looks like other action buttons) */}
+      <button 
+        className={`ermis-message-list__actions-trigger ${isExpanded || showPicker ? 'ermis-message-list__actions-trigger--active' : ''}`}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!disabled) { setIsExpanded(!isExpanded); setShowPicker(false); } }}
+        title="Add reaction"
+        disabled={disabled}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+          <line x1="9" y1="9" x2="9.01" y2="9" />
+          <line x1="15" y1="9" x2="15.01" y2="9" />
+        </svg>
+      </button>
+
+      {/* Horizontal Strip */}
+      {isExpanded && (
+        <div className="ermis-qr__strip ermis-qr__strip--horizontal" onClick={(e) => e.stopPropagation()}>
+          {REACTIONS.map((type) => (
             <button
               key={type}
               className={`ermis-qr__emoji ${isOwnReaction(type) ? 'ermis-qr__emoji--active' : ''}`}
               title={type}
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleReactionToggle(type); }}
-            >
-              {EMOJI_MAP[type]}
-            </button>
-          ))}
-        </div>
-
-        {/* Heart anchor — always visible */}
-        <button
-          className={`ermis-qr__anchor ${isOwnReaction('love') ? 'ermis-qr__anchor--active' : ''}`}
-          title="Love"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleReactionToggle('love'); }}
-          onMouseEnter={handleAnchorEnter}
-        >
-          ❤️
-        </button>
-
-        {/* Items below heart (expand downward) */}
-        <div className="ermis-qr__section ermis-qr__section--below">
-          {REACTIONS_BELOW.map((type) => (
-            <button
-              key={type}
-              className={`ermis-qr__emoji ${isOwnReaction(type) ? 'ermis-qr__emoji--active' : ''}`}
-              title={type}
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleReactionToggle(type); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleReactionToggle(type); setIsExpanded(false); }}
             >
               {EMOJI_MAP[type]}
             </button>
@@ -226,7 +145,7 @@ export const MessageQuickReactions: React.FC<{
             </svg>
           </button>
         </div>
-      </div>
+      )}
 
       {/* Full emoji picker */}
       {showPicker && (

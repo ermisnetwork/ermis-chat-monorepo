@@ -22,6 +22,7 @@ import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk'
 import {
   useMessageActions,
   useChatClient,
+  MessageQuickReactions,
 } from '@ermis-network/ermis-chat-react'
 import { UhmConfirmDialog } from './UhmConfirmDialog'
 
@@ -178,6 +179,13 @@ export function UhmMessageActions({
             <MessageSquareQuote className="w-[15px] h-[15px]" />
           </button>
         )}
+
+        {/* Reaction */}
+        <MessageQuickReactions 
+          message={message} 
+          isOwnMessage={isOwnMessage} 
+          disabled={!actions.hasCapReact} 
+        />
 
         {/* Forward */}
         {actions.canForward && (

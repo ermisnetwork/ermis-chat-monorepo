@@ -127,7 +127,7 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
 
   return (
     <Tooltip.Provider delayDuration={300}>
-      <div className="w-[62px] shrink-0 flex flex-col items-center gap-2 py-2.5 border-r border-zinc-200/50 dark:border-zinc-800/50 bg-zinc-50/80 dark:bg-[#141220]/60 overflow-y-auto overflow-x-hidden no-scrollbar">
+      <div className="w-[66px] shrink-0 flex flex-col items-center gap-2.5 py-2.5 border-r border-zinc-200/50 dark:border-zinc-800/50 bg-zinc-50/80 dark:bg-[#141220]/60 overflow-y-auto overflow-x-hidden no-scrollbar">
 
         {channels.map((ch) => {
           const isActive = ch.cid === activeCid

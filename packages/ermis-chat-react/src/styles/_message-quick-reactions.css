@@ -1,159 +1,67 @@
 /* ============================================================
-   Quick Reactions – Vertical Strip (Heart-centered)
-
-   The ❤️ is always the CENTER of the strip.
-   On hover, other emoji expand ABOVE and BELOW the heart.
-   Positioned absolute to .ermis-message-bubble (not wrapper).
+   Quick Reactions – Horizontal Strip (In Hover Actions)
    ============================================================ */
 
-/* ---- Container ---- */
-.ermis-qr {
-  position: absolute;
-  bottom: -4px;
-  width: 28px;
-  height: 28px;
-  z-index: 20;
-  /* Hidden until bubble hover */
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.15s ease, visibility 0.15s ease;
-}
-
-/* Other's messages → icon on the right side of bubble */
-.ermis-qr {
-  right: -8px;
-}
-
-/* Own messages → icon on the left side of bubble */
-.ermis-qr--own {
-  right: auto;
-  left: -8px;
-}
-
-/* Show on bubble hover */
-.ermis-message-bubble:hover .ermis-qr,
-.ermis-qr:hover,
-.ermis-qr--expanded {
-  opacity: 1;
-  visibility: visible;
-}
-
-.ermis-qr--disabled {
-  opacity: 0.4 !important;
-  pointer-events: none;
-}
-
-/* Elevate z-index on hover/expanded so strip & picker overlay neighbors */
-.ermis-message-bubble:hover,
-.ermis-message-bubble:has(.ermis-qr--expanded) {
-  z-index: 100;
-}
-
-.ermis-message-list__vlist *:has(.ermis-qr--expanded),
-.ermis-message-list__vlist *:has(.ermis-qr:hover) {
-  z-index: 100 !important;
-}
-
-/* ---- The Strip (vertical column: above → heart → below) ---- */
-.ermis-qr__strip {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 28px;
-  gap: 0;
-}
-
-/* ---- Heart Anchor (always visible) ---- */
-.ermis-qr__anchor {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  border: 1px solid var(--ermis-border);
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
-  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275),
-              box-shadow 0.2s;
-  z-index: 2;
+/* The wrapper is now inline-flex inside the hover actions box */
+.ermis-qr-wrapper {
   position: relative;
-  outline: none;
-  flex-shrink: 0;
+  display: inline-flex;
 }
 
-.ermis-qr__anchor:hover {
-  transform: scale(1.15);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
-}
-
-.ermis-qr__anchor--active {
-  background-color: #ffffff !important;
-  border-color: var(--ermis-border) !important;
-}
-
-/* ---- Above / Below Sections ---- */
-.ermis-qr__section {
+/* ---- Horizontal Strip ---- */
+.ermis-qr__strip--horizontal {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   gap: 2px;
-  overflow: hidden;
-  max-height: 0;
+  background-color: var(--ermis-bg-primary, #ffffff);
+  border: 1px solid var(--ermis-border);
+  border-radius: 20px;
+  padding: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 101;
+  width: max-content;
+  
+  /* Animation */
   opacity: 0;
-  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.2s ease 0.05s;
+  transform: translateX(-50%) scale(0.95);
+  animation: ermis-qr-pop-centered 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
-.ermis-qr__section--above {
-  /* Push items up — collapses into the heart */
-  transform: translateY(4px);
-  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.2s ease 0.05s,
-              transform 0.2s ease;
-}
-
-.ermis-qr__section--below {
-  /* Push items down — collapses into the heart */
-  transform: translateY(-4px);
-  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.2s ease 0.05s,
-              transform 0.2s ease;
-}
-
-/* Expanded state */
-.ermis-qr__strip--visible .ermis-qr__section {
-  max-height: 200px;
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* ---- Background pill behind expanded strip ---- */
-.ermis-qr__strip::before {
+/* Invisible bridge to prevent hover loss when moving mouse from trigger to strip */
+.ermis-qr__strip--horizontal::after {
   content: '';
   position: absolute;
-  inset: -3px -3px;
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  border: 1px solid var(--ermis-border);
-  border-radius: 18px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  z-index: -1;
-  opacity: 0;
-  transform: scaleY(0.5);
-  transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  top: 100%;
+  left: 0;
+  width: 100%;
+  height: 12px; /* Covers the 8px gap + some extra safe area */
 }
 
-.ermis-qr__strip--visible::before {
-  opacity: 1;
-  transform: scaleY(1);
+@keyframes ermis-qr-pop-centered {
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+@keyframes ermis-qr-pop {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Positioning based on message owner */
+.ermis-message-list__item--own .ermis-qr__strip--horizontal {
+  left: 50%; /* Center it relative to the wrapper */
+}
+
+.ermis-message-list__item--other .ermis-qr__strip--horizontal {
+  left: 50%; /* Center it relative to the wrapper */
 }
 
 /* ---- Emoji Buttons ---- */
@@ -163,10 +71,10 @@
   justify-content: center;
   background: transparent;
   border: none;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   cursor: pointer;
   transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275),
@@ -188,7 +96,7 @@
 
 .ermis-qr__emoji--more {
   color: var(--ermis-text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .ermis-qr__emoji--more:hover {
@@ -207,54 +115,26 @@
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1),
               0 8px 10px -6px rgba(0, 0, 0, 0.1);
   z-index: 102;
+  
+  /* Animation */
+  opacity: 0;
+  transform: scale(0.95);
+  animation: ermis-qr-pop 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
 .ermis-qr__picker--top {
-  bottom: 100%;
-  margin-bottom: 8px;
+  bottom: calc(100% + 8px);
 }
 
 .ermis-qr__picker--bottom {
-  top: 100%;
-  margin-top: 8px;
+  top: calc(100% + 8px);
 }
 
-.ermis-qr__picker {
-  left: 50%;
-  transform: translateX(-50%);
+.ermis-message-list__item--own .ermis-qr__picker {
+  right: -8px;
 }
 
-.ermis-qr__picker--own {
-  left: auto;
-  right: 0;
-  transform: none;
-}
-
-/* ============================================================
-   Downward Expansion (When near top of screen)
-   ============================================================ */
-/* When downward, anchor the strip to the top of the container instead of bottom */
-.ermis-qr--downward .ermis-qr__strip {
-  bottom: auto;
-  top: 0;
-}
-
-.ermis-qr--downward .ermis-qr__anchor {
-  order: 1;
-}
-
-.ermis-qr--downward .ermis-qr__section--above,
-.ermis-qr--downward .ermis-qr__section--below {
-  order: 2;
-  transform: translateY(-4px); /* Collapses UP into the anchor */
-}
-
-.ermis-qr--downward .ermis-qr__section--below {
-  order: 3;
-}
-
-/* Reset transform when expanded (existing rules apply max-height/opacity) */
-.ermis-qr--downward .ermis-qr__strip--visible .ermis-qr__section {
-  transform: translateY(0);
+.ermis-message-list__item--other .ermis-qr__picker {
+  left: -8px;
 }
 
