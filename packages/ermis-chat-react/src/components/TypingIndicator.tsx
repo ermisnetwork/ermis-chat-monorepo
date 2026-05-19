@@ -29,7 +29,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(({ typ
   }
 
   return (
-    <div className={`ermis-typing-indicator-wrapper${isActive ? '' : ' ermis-typing-indicator-wrapper--empty'}`}>
+    <div className={`ermis-typing-indicator-wrapper`}>
       {isActive && (
         <div className="ermis-typing-indicator ermis-typing-indicator--active">
           <div className="ermis-typing-indicator__dots">

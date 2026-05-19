@@ -36,12 +36,11 @@
   flex-direction: column !important;
   padding-left: 1rem;
   padding-right: 1rem;
-  padding-top: var(--ermis-spacing-lg);
-  padding-bottom: 16px;
+  padding-top: 1rem;
 }
 
 /* Push content to bottom when few messages, margin collapses when content overflows */
-.ermis-message-list__vlist>div {
+.ermis-message-list__vlist > div {
   margin-top: auto;
 }
 
