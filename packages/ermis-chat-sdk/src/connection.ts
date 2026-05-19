@@ -418,30 +418,26 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     this._log('onclose() - onclose callback - ' + event.code, { event, wsID });
 
     if (event.code === chatCodes.WS_CLOSED_SUCCESS) {
-      // this is a permanent error raised by stream..
-      // usually caused by invalid auth details
-      const error = new Error(`WS connection reject with error ${event.reason}`) as Error & WebSocket.CloseEvent;
-
-      error.reason = event.reason;
-      error.code = event.code;
-      error.wasClean = event.wasClean;
-      error.target = event.target;
-
-      this.rejectPromise?.(error);
-      this._log(`onclose() - WS connection reject with error ${event.reason}`, { event });
-    } else {
-      this.consecutiveFailures += 1;
-      this.totalFailures += 1;
-      this._setHealth(false);
-      this.isConnecting = false;
-
-      this.rejectPromise?.(this._errorFromWSEvent(event));
-
-      this._log(`onclose() - WS connection closed. Calling reconnect ...`, { event });
-
-      // reconnect if its an abnormal failure
-      this._reconnect();
+      // Normal closure (1000) — initiated by us via disconnect() or server clean shutdown.
+      // If we initiated it, the promise is already resolved. Just log and bail.
+      this._log(`onclose() - WS closed normally (1000). reason: ${event.reason}`, { event });
+      return;
     }
+
+    // Reserved codes (1005, 1006, 1015) are never sent on the wire by well-behaved
+    // peers; the browser synthesizes them locally. Treat them the same as any
+    // abnormal closure — bump failure counters and reconnect.
+    this.consecutiveFailures += 1;
+    this.totalFailures += 1;
+    this._setHealth(false);
+    this.isConnecting = false;
+
+    this.rejectPromise?.(this._errorFromWSEvent(event));
+
+    this._log(`onclose() - WS connection closed abnormally (code ${event.code}). Calling reconnect ...`, { event });
+
+    // reconnect on abnormal failure
+    this._reconnect();
   };
 
   onerror = (wsID: number, event: WebSocket.ErrorEvent) => {
@@ -531,7 +527,9 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
 
     try {
       this?.ws?.removeAllListeners();
-      this?.ws?.close();
+      // Always pass a valid close code to avoid sending a reserved 1005 status
+      // on the wire, which triggers "broken close frame" errors.
+      this?.ws?.close(chatCodes.WS_CLOSED_SUCCESS, 'Destroying current WS connection');
     } catch (e) {
       // we don't care
     }

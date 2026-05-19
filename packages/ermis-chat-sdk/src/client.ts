@@ -911,7 +911,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       }
     }
     if (event.type === 'notification.invite_accepted') {
-      //TODO handle channel list and invited channels here
+      // NOTE: Re-watching team channels to load topics is handled by the React UI layer
+      // (useChannelListUpdates) which also triggers necessary React re-renders.
     }
 
     if (event.type === 'member.added') {

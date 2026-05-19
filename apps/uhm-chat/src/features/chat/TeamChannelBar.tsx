@@ -7,6 +7,7 @@ import {
   isTopicChannel,
   isPendingMember,
   isSkippedMember,
+  hasTopicsEnabled,
 } from '@ermis-network/ermis-chat-react'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
 
@@ -18,6 +19,23 @@ interface TeamChannelBarProps {
 }
 
 /**
+ * Get aggregated unread count for a channel.
+ * For team channels with topics enabled, sums unread from parent + all sub-topics.
+ * For other channels, returns the channel's own unread count.
+ */
+function getAggregatedUnread(ch: Channel): number {
+  if (hasTopicsEnabled(ch)) {
+    let total = ch.countUnread() || 0
+    const topics = ch.state?.topics || []
+    for (const topic of topics) {
+      total += topic.countUnread() || 0
+    }
+    return total
+  }
+  return ch.countUnread() || 0
+}
+
+/**
  * A compact vertical sidebar displaying channel avatars for quick switching.
  * Shown inside the Topics Panel to allow navigating to other channels
  * without going back to the main channel list.
@@ -26,6 +44,8 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
 
   const { client } = useChatClient()
   const [channels, setChannels] = useState<Channel[]>([])
+  // Counter to force re-render when topic messages arrive
+  const [, setUpdateTick] = useState(0)
 
   // Gather all non-topic channels from activeChannels
   const computeChannels = useCallback(() => {
@@ -81,6 +101,26 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
     return () => subs.forEach((s) => s.unsubscribe())
   }, [client, computeChannels])
 
+  // Subscribe to topic-level events so unread badges update in real-time
+  useEffect(() => {
+    if (!client) return
+
+    const bump = () => setUpdateTick((c) => c + 1)
+    const subs: { unsubscribe: () => void }[] = []
+
+    channels.forEach((ch) => {
+      if (hasTopicsEnabled(ch)) {
+        const topics = ch.state?.topics || []
+        topics.forEach((t: Channel) => {
+          subs.push(t.on('message.new', bump))
+          subs.push(t.on('message.read', bump))
+        })
+      }
+    })
+
+    return () => subs.forEach((s) => s.unsubscribe())
+  }, [client, channels])
+
   if (channels.length === 0) return null
 
   const activeCid = activeTeamChannel.cid
@@ -94,7 +134,7 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
           const isGroup = isGroupChannel(ch)
           const name = (ch.data?.name || ch.cid) as string
           const image = ch.data?.image as string | undefined
-          const unread = ch.countUnread() || 0
+          const unread = getAggregatedUnread(ch)
 
           return (
             <Tooltip.Root key={ch.cid}>
@@ -150,3 +190,4 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
     </Tooltip.Provider>
   )
 }
+

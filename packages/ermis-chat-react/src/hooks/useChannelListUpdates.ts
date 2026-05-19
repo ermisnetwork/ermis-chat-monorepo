@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
-import { isDirectChannel } from '../channelTypeUtils';
+import { isDirectChannel, isGroupChannel } from '../channelTypeUtils';
 import { isPendingMember } from '../channelRoleUtils';
 
 /**
@@ -226,6 +226,27 @@ export function useChannelListUpdates(
           }
           return [...prev];
         });
+
+        // For team channels with topics: re-watch to load topics from server.
+        // When the user was pending, queryChannels did not return topics.
+        // After accepting the invite, we need a fresh query to hydrate them.
+        if (eventCid) {
+          const existingChannel = client.activeChannels[eventCid];
+          if (existingChannel && isGroupChannel(existingChannel) && existingChannel.data?.topics_enabled) {
+            existingChannel.watch().then(() => {
+              // Notify React hooks (useTopicGroupUpdates) that topics have been loaded
+              existingChannel._callChannelListeners({
+                type: 'channel.updated',
+                cid: existingChannel.cid,
+                channel: existingChannel.data,
+              } as any);
+              // Also trigger channel list re-render
+              setChannels((p) => [...p]);
+            }).catch((err) => {
+              console.error('Failed to re-watch team channel after invite accepted:', err);
+            });
+          }
+        }
 
         // If the channel is NOT in the list yet (e.g. user just joined a public channel
         // from search), add it — same logic as handleChannelCreated
