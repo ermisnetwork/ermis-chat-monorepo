@@ -260,6 +260,10 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   }
 
   private async _sendSignal(payload: SignalData) {
+    // Guard: don't send signals with empty cid (e.g., after call cleanup)
+    const cid = this.cid || payload.cid;
+    if (!cid) return;
+
     try {
       return await this.getClient().post(this.getClient().baseURL + '/signal', {
         ...payload,

@@ -87,7 +87,7 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
 
   return (
     <Tooltip.Provider delayDuration={300}>
-      <div className="w-[62px] shrink-0 flex flex-col items-center gap-1 py-2.5 border-r border-zinc-200/50 dark:border-zinc-800/50 bg-zinc-50/80 dark:bg-[#141220]/60 overflow-y-auto overflow-x-hidden custom-scrollbar">
+      <div className="w-[62px] shrink-0 flex flex-col items-center gap-1 py-2.5 border-r border-zinc-200/50 dark:border-zinc-800/50 bg-zinc-50/80 dark:bg-[#141220]/60 overflow-y-auto overflow-x-hidden no-scrollbar">
 
         {channels.map((ch) => {
           const isActive = ch.cid === activeCid
@@ -103,7 +103,7 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
                   onClick={() => onSwitchChannel(ch)}
                   className={`
                     relative group flex items-center justify-center
-                    w-10 h-10 rounded-2xl transition-all duration-200 shrink-0
+                    w-12 h-12 rounded-2xl transition-all duration-200 shrink-0
                     ${isActive
                       ? 'rounded-xl'
                       : 'hover:rounded-xl hover:shadow-sm active:scale-95'
@@ -113,7 +113,7 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
                   <Avatar
                     image={image}
                     name={name}
-                    size={40}
+                    size={48}
                     className={isGroup ? 'ermis-avatar-wrapper--group' : undefined}
                     disableLightbox
                   />

@@ -1435,9 +1435,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         new Set(data.channels.flatMap((c) => (c.channel.members || []).map((member: any) => member.user.id))),
       ) || [];
 
-    const membersInfo = filterConditions.parent_cid
-      ? Object.values(this.state.users)
-      : await this.getBatchUsers(memberIds);
+    if (!filterConditions.parent_cid) {
+      const dummyMembers = memberIds.map((id) => ({ user: { id } }));
+      await ensureMembersUserInfoLoaded(this as any, dummyMembers);
+    }
+    const membersInfo = Object.values(this.state.users);
     data.channels.forEach((c) => {
       c.channel.members = enrichWithUserInfo(c.channel.members, membersInfo);
       c.messages = enrichWithUserInfo(c.messages, membersInfo);
@@ -1466,7 +1468,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     //   await this.getBatchUsers(userIds);
     // }
 
-    console.log('---channels---', channels);
 
     this.dispatchEvent({
       type: 'channels.queried',

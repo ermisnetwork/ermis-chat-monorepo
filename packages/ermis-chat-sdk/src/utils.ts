@@ -397,6 +397,10 @@ export const getDirectChannelImage = (members: any[], currentUserId: string) => 
   return '';
 };
 
+let pendingBatchUserIds = new Set<string>();
+let pendingBatchUserPromise: Promise<void> | null = null;
+let resolvePendingBatchUserPromise: (() => void) | null = null;
+
 /**
  * Ensure all members' user info are loaded in state.users.
  * @param client ErmisChat client instance
@@ -415,7 +419,33 @@ export async function ensureMembersUserInfoLoaded<ErmisChatGenerics extends Exte
 
   // If there are users missing, fetch and update them into state
   if (missingUserIds.length > 0) {
-    await client.getBatchUsers(missingUserIds);
+    missingUserIds.forEach((id) => pendingBatchUserIds.add(id));
+
+    if (!pendingBatchUserPromise) {
+      pendingBatchUserPromise = new Promise((resolve) => {
+        resolvePendingBatchUserPromise = resolve;
+      });
+
+      setTimeout(async () => {
+        const idsToFetch = Array.from(pendingBatchUserIds);
+        pendingBatchUserIds.clear();
+        const resolveFn = resolvePendingBatchUserPromise;
+
+        pendingBatchUserPromise = null;
+        resolvePendingBatchUserPromise = null;
+
+        if (idsToFetch.length > 0) {
+          try {
+            await client.getBatchUsers(idsToFetch);
+          } catch (e) {
+            console.error('Failed to get batch users', e);
+          }
+        }
+        if (resolveFn) resolveFn();
+      }, 50);
+    }
+
+    await pendingBatchUserPromise;
   }
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useCallback } from 'react';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
 import { isPendingMember } from '../channelRoleUtils';
@@ -63,19 +63,20 @@ export function useChannelMessages({
     [scrollToBottom, isAtBottomRef],
   );
 
+  // Block scroll-triggered loadMore SYNCHRONOUSLY before browser paint.
+  // VList remounts (key change) and fires onScroll during layout — useEffect
+  // runs too late to block it. useLayoutEffect runs before paint/scroll events.
+  useLayoutEffect(() => {
+    if (!activeChannel) return;
+    jumpingRef.current = true;
+    isAtBottomRef.current = true;
+  }, [activeChannel]);
+
   useEffect(() => {
     if (!activeChannel) return;
 
     // Reset state for the new channel
     onChannelSwitch?.();
-
-    // Manually force isAtBottom to true because we are jumping to the bottom.
-    // jumpingRef blocks the resulting scroll event from updating isAtBottomRef,
-    // so if it was false in the previous channel, it would stay false!
-    isAtBottomRef.current = true;
-
-    // Block scroll triggers during channel-switch scroll
-    jumpingRef.current = true;
 
     // Instantly hide the list when channel changes
     const el = containerRef?.current;
@@ -107,10 +108,21 @@ export function useChannelMessages({
           setReadState({ ...activeChannel.state.read });
           scheduleScrollToBottom(false);
           fadeListIn(); // Fade in AFTER query finishes and sync is called
+          // Release jumping guard AFTER scrollToBottom has had time to execute.
+          // syncMessages() triggers a VList re-render which fires onScroll at
+          // offset≈0, and scheduleScrollToBottom's first scroll is at +50ms.
+          // If we release jumpingRef synchronously, loadMore fires before the
+          // scroll. Delay to 150ms so the +50ms scroll runs first.
+          setTimeout(() => {
+            jumpingRef.current = false;
+          }, 150);
         })
         .catch((err: any) => {
           console.error('Failed to query channel on select', err);
           fadeListIn(); // Fade in anyway on error
+          setTimeout(() => {
+            jumpingRef.current = false;
+          }, 100);
         });
     } else {
       // Already queried or disabled: sync cache, scroll and fade in quickly
@@ -121,13 +133,12 @@ export function useChannelMessages({
         scheduleScrollToBottom(false);
         fadeListIn();
       }, 0);
+      // Release after a short delay so scrollToBottom's scroll event doesn't
+      // trigger loadMore
+      setTimeout(() => {
+        jumpingRef.current = false;
+      }, 100);
     }
-
-    // Wait long enough for scrollToBottom's internal retries and the browser
-    // to execute the scroll event
-    setTimeout(() => {
-      jumpingRef.current = false;
-    }, 100);
 
     const handleNewMessage = (event: Event) => {
       // Capture scroll state BEFORE sync causes re-render
@@ -230,7 +241,6 @@ export function useChannelMessages({
     const sub10 = activeChannel.on('member.unblocked', handleUnblocked);
     const sub11 = client.on('notification.invite_accepted', handleInviteAccepted);
     const sub12 = client.on('connection.recovered', handleRecovery);
-    const sub13 = client.on('channels.queried', handleRecovery);
 
     return () => {
       sub1.unsubscribe();
@@ -245,7 +255,6 @@ export function useChannelMessages({
       sub10.unsubscribe();
       sub11.unsubscribe();
       sub12.unsubscribe();
-      sub13.unsubscribe();
     };
   }, [activeChannel, scrollToBottom, scheduleScrollToBottom, syncMessages, onChannelSwitch, setReadState]);
 }

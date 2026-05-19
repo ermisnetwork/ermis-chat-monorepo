@@ -41,6 +41,7 @@ export const MessageQuickReactions: React.FC<{
   const [isExpanded, setIsExpanded] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerPosition, setPickerPosition] = useState<'top' | 'bottom'>('top');
+  const [isNearTop, setIsNearTop] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -105,6 +106,18 @@ export const MessageQuickReactions: React.FC<{
       clearTimeout(collapseTimerRef.current);
       collapseTimerRef.current = null;
     }
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const vlist = containerRef.current.closest('.ermis-message-list__vlist');
+      if (vlist) {
+        const vlistRect = vlist.getBoundingClientRect();
+        // The strip expands upwards by about 70px (2 items * ~30px + padding).
+        // Check if the highest reaction would overflow the top of the VList.
+        setIsNearTop(rect.top - 70 < vlistRect.top);
+      } else {
+        setIsNearTop(rect.top < 140);
+      }
+    }
     expandTimerRef.current = setTimeout(() => setIsExpanded(true), 200);
   }, []);
 
@@ -122,6 +135,16 @@ export const MessageQuickReactions: React.FC<{
     if (collapseTimerRef.current) {
       clearTimeout(collapseTimerRef.current);
       collapseTimerRef.current = null;
+    }
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const vlist = containerRef.current.closest('.ermis-message-list__vlist');
+      if (vlist) {
+        const vlistRect = vlist.getBoundingClientRect();
+        setIsNearTop(rect.top - 70 < vlistRect.top);
+      } else {
+        setIsNearTop(rect.top < 140);
+      }
     }
   }, []);
 
@@ -143,6 +166,7 @@ export const MessageQuickReactions: React.FC<{
     isOwnMessage ? 'ermis-qr--own' : '',
     disabled ? 'ermis-qr--disabled' : '',
     isExpanded ? 'ermis-qr--expanded' : '',
+    isNearTop ? 'ermis-qr--downward' : '',
   ].filter(Boolean).join(' ');
 
   return (

@@ -694,20 +694,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.pinned_messages = state.pinned_messages ? enrichWithUserInfo(state.pinned_messages, users) : [];
     state.read = enrichWithUserInfo(state.read || [], users);
 
-    // Process topics for team channels (already handled in query, but ensuring consistency)
-    if (this.type === 'team' && state.channel.topics_enabled) {
-      const payload = {
-        filter_conditions: { type: ['topic'], parent_cid: this.cid, project_id: this.getClient().projectId },
-        sort: [],
-        message_limit: 25,
-      };
-      const topicsFromApi: any = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
-        this.getClient().baseURL + '/channels',
-        payload,
-      );
-
-      this._processTopics(topicsFromApi.channels || [], users);
-    }
+    // Process topics for team channels (already handled in query)
 
     this.data = state.channel;
 
@@ -833,9 +820,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.channel.is_pinned = state.is_pinned || false;
 
     // Process topics for team channels
-    // if (this.type === 'team' && state.channel.topics_enabled && state.topics) {
-    //   this._processTopics(state.topics, users);
-    // }
+    // NOTE: topic processing is handled by _initializeState() below (line 1837).
+    // Do NOT call _processTopics here — it would cause double hydration.
 
     // update the channel id if it was missing
 

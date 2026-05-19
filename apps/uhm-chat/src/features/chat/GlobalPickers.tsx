@@ -56,6 +56,7 @@ export const GlobalPickers: React.FC = () => {
 
   const [savedRect, setSavedRect] = React.useState<DOMRect | null>(null);
   const lastType = useRef<'emoji' | 'sticker'>('emoji');
+  const [hasOpenedSticker, setHasOpenedSticker] = React.useState(false);
 
   useEffect(() => {
     if (pickerAction.anchorRect) {
@@ -63,6 +64,9 @@ export const GlobalPickers: React.FC = () => {
     }
     if (pickerAction.type) {
       lastType.current = pickerAction.type;
+    }
+    if (pickerAction.type === 'sticker') {
+      setHasOpenedSticker(true);
     }
   }, [pickerAction.anchorRect, pickerAction.type]);
 
@@ -146,12 +150,14 @@ export const GlobalPickers: React.FC = () => {
 
           {/* Sticker Picker */}
           <div style={{ display: currentType === 'sticker' ? 'block' : 'none', width: '350px', height: '400px' }}>
-            <iframe
-              src={stickerIframeUrl}
-              className="w-full h-full border-none bg-white dark:bg-[#1a1828]"
-              title="Global Sticker Picker"
-              sandbox="allow-scripts allow-same-origin"
-            />
+            {hasOpenedSticker && (
+              <iframe
+                src={stickerIframeUrl}
+                className="w-full h-full border-none bg-white dark:bg-[#1a1828]"
+                title="Global Sticker Picker"
+                sandbox="allow-scripts allow-same-origin"
+              />
+            )}
           </div>
         </motion.div>
     </>

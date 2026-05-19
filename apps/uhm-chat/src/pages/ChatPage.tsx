@@ -69,46 +69,80 @@ export function ChatPage() {
   const [hasAttemptedRestore, setHasAttemptedRestore] = useState(false)
 
   // 1. Restore active channel from URL on mount
+  // Instead of calling ch.watch() (which duplicates the queryChannels call from
+  // ChannelList and causes double batch API calls + missing topics), we wait for
+  // the ChannelList's queryChannels to finish and pick up the hydrated channel.
   useEffect(() => {
     if (!client?.userID) return;
 
-    const restoreChannel = async () => {
-      const channelId = searchParams.get('channel')
-      const channelType = searchParams.get('type') || 'messaging'
+    const channelId = searchParams.get('channel')
+    const channelType = searchParams.get('type') || 'messaging'
 
-      if (channelId && !activeChannel && !isRestoringRef.current && !hasAttemptedRestore) {
-        isRestoringRef.current = true
-        try {
-          const ch = client.channel(channelType, channelId)
-          await ch.watch()
+    if (!channelId || activeChannel || isRestoringRef.current || hasAttemptedRestore) {
+      if (!channelId) setHasAttemptedRestore(true)
+      return
+    }
 
-          if (isTopicChannel(ch) && ch.data?.parent_cid) {
-            const parentCid = ch.data.parent_cid as string
-            const [parentType, ...parentIdParts] = parentCid.split(':')
-            const parentId = parentIdParts.join(':')
-            const parent = client.channel(parentType || 'messaging', parentId)
-            await parent.watch()
-            setActiveChannel(ch)
-            setDrillDownChannel(parent)
-            setActivePanel('topics')
-          } else if (isGroupChannel(ch) && ch.data?.topics_enabled) {
-            setActiveChannel(ch)
-            setDrillDownChannel(ch)
-            setActivePanel('topics')
-          } else {
-            setActiveChannel(ch)
-          }
-        } catch (e) {
+    isRestoringRef.current = true
+
+    /** Apply the restored channel to React state.
+     *  Do NOT call markChannelAsFullyQueried here — queryChannels only loads
+     *  ~1 message per channel (sidebar preview). useChannelMessages must still
+     *  call channel.query() to load the full 25 messages for the chat view. */
+    const applyChannel = (ch: ChannelType) => {
+
+      if (isTopicChannel(ch) && ch.data?.parent_cid) {
+        const parentCid = ch.data.parent_cid as string
+        const parent = client.activeChannels[parentCid]
+        if (parent) {
+          setActiveChannel(ch)
+          setDrillDownChannel(parent)
+          setActivePanel('topics')
+        } else {
+          setActiveChannel(ch)
+        }
+      } else if (isGroupChannel(ch) && ch.data?.topics_enabled) {
+        setActiveChannel(ch)
+        setDrillDownChannel(ch)
+        setActivePanel('topics')
+      } else {
+        setActiveChannel(ch)
+      }
+
+      setHasAttemptedRestore(true)
+      requestAnimationFrame(() => { isRestoringRef.current = false })
+    }
+
+    // Fast path: channel already hydrated (e.g. queryChannels finished first)
+    const cid = `${channelType}:${channelId}`
+    const cached = client.activeChannels[cid]
+    if (cached?.initialized) {
+      applyChannel(cached)
+      return
+    }
+
+    // Normal path: wait for ChannelList's queryChannels to finish
+    const sub = client.on('channels.queried', () => {
+      sub.unsubscribe()
+
+      const ch = client.activeChannels[cid]
+      if (ch?.initialized) {
+        applyChannel(ch)
+        return
+      }
+
+      // Fallback: channel not in queryChannels results — fetch individually
+      const fallback = client.channel(channelType, channelId)
+      fallback.watch({ messages: { limit: 25, include_hidden_messages: true } })
+        .then(() => applyChannel(fallback))
+        .catch((e) => {
           console.error("Failed to restore channel from URL:", e)
-        } finally {
           setHasAttemptedRestore(true)
           requestAnimationFrame(() => { isRestoringRef.current = false })
-        }
-      } else if (!channelId) {
-        setHasAttemptedRestore(true)
-      }
-    }
-    restoreChannel()
+        })
+    })
+
+    return () => sub.unsubscribe()
   }, [client?.userID, searchParams, activeChannel, hasAttemptedRestore, setActiveChannel])
 
   // 2. Sync active channel to URL when it changes
@@ -208,7 +242,9 @@ export function ChatPage() {
     setActivePanel('topics')
     // Always select the parent channel (general topic) when drilling down
     setActiveChannel(channel)
-    // Mark the parent channel as read since its messages are now visible (general topic)
+    // Let useChannelMessages call channel.query() to load full messages.
+    // The individual query won't wipe topics (API doesn't return state.topics).
+    // Mark as read since its messages are now visible (general topic)
     const ms = channel.state?.membership
     const chState = channel.state as unknown as Record<string, unknown> | undefined
     const isBanned = Boolean(ms?.banned)

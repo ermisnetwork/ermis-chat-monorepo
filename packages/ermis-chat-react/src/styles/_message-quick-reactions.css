@@ -10,6 +10,8 @@
 .ermis-qr {
   position: absolute;
   bottom: -4px;
+  width: 28px;
+  height: 28px;
   z-index: 20;
   /* Hidden until bubble hover */
   opacity: 0;
@@ -57,7 +59,10 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  position: relative;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 28px;
   gap: 0;
 }
 
@@ -224,3 +229,32 @@
   right: 0;
   transform: none;
 }
+
+/* ============================================================
+   Downward Expansion (When near top of screen)
+   ============================================================ */
+/* When downward, anchor the strip to the top of the container instead of bottom */
+.ermis-qr--downward .ermis-qr__strip {
+  bottom: auto;
+  top: 0;
+}
+
+.ermis-qr--downward .ermis-qr__anchor {
+  order: 1;
+}
+
+.ermis-qr--downward .ermis-qr__section--above,
+.ermis-qr--downward .ermis-qr__section--below {
+  order: 2;
+  transform: translateY(-4px); /* Collapses UP into the anchor */
+}
+
+.ermis-qr--downward .ermis-qr__section--below {
+  order: 3;
+}
+
+/* Reset transform when expanded (existing rules apply max-height/opacity) */
+.ermis-qr--downward .ermis-qr__strip--visible .ermis-qr__section {
+  transform: translateY(0);
+}
+
