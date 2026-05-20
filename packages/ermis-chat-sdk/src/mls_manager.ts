@@ -273,9 +273,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this.e2eeClient = new E2eeClient<ErmisChatGenerics>(client);
 
     // 4. Top up this device's server-side KeyPackage pool on every init.
-    //    The upload endpoint appends KPs, so first read the current count and only
-    //    upload the missing delta to keep the server pool at the target size.
-    await this.ensureKeyPackagesFromServer();
+    //    Prefer the latest health.check count when it arrived before MLS init;
+    //    only query the count endpoint when no health.check count is cached.
+    await this.ensureKeyPackagesFromCachedHealthOrServer();
 
     // 5. Sync MLS events for E2EE channels (restore groups from server)
     await this._syncAndRestoreGroups();
@@ -405,6 +405,16 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     } catch (err) {
       console.warn('[MLS] Failed to check key package count:', err);
     }
+  }
+
+  private async ensureKeyPackagesFromCachedHealthOrServer(): Promise<void> {
+    const cachedRemaining = (this.client as any)?.latestKeyPackagesRemaining;
+    if (typeof cachedRemaining === 'number') {
+      await this.ensureKeyPackages(cachedRemaining);
+      return;
+    }
+
+    await this.ensureKeyPackagesFromServer();
   }
 
   /**
