@@ -63,8 +63,8 @@ export interface KeyRotationRequest {
 }
 
 export interface EnableE2eeRequest {
-  /** TLS-serialized commit bytes from WASM */
-  commit: number[];
+  /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
+  commit?: number[];
   /** TLS-serialized welcome bytes from WASM */
   welcome: number[];
   /** Exported ratchet tree bytes */
