@@ -109,6 +109,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   defaultWSTimeout: number;
   /** Device ID used by MLS/E2EE sessions and sent to Bellboy over WS/HTTP. */
   deviceId?: string;
+  /** Latest current-device KeyPackage count reported by health.check. */
+  latestKeyPackagesRemaining?: number;
   /** MLS Manager instance set by MlsManager.initialize() for E2EE event handling. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mlsManager?: any;
@@ -915,6 +917,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     if (event.type === 'health.check' && event.me) {
       const remaining = (event.me as any).key_packages_remaining;
+      if (typeof remaining === 'number') {
+        this.latestKeyPackagesRemaining = remaining;
+      }
       if (this.mlsManager?.initialized && typeof remaining === 'number') {
         this.mlsManager.ensureKeyPackages(remaining).catch((err: unknown) => {
           this.logger('warn', '[MLS] Failed to top up key packages', { err });
