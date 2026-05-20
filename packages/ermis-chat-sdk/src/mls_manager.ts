@@ -49,6 +49,8 @@ function staleGroupInfoError(cid: string): Error & { code: string } {
   return err;
 }
 
+const KEY_PACKAGE_POOL_TARGET = 100;
+
 // ============================================================
 // Types
 // ============================================================
@@ -191,6 +193,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private _syncing = false;
   private _syncPromise: Promise<void> | null = null;
   private _syncWorkPromise: Promise<void> | null = null;
+  private _keyPackageUploadPromise: Promise<void> | null = null;
   private _syncGateResolve: (() => void) | null = null;
   private _lastSyncStates: Map<string, E2eeSyncState> = new Map();
   private _channelReadyLocks: Map<string, Promise<EnsureE2eeChannelResult>> = new Map();
@@ -269,11 +272,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 3. Create E2eeClient
     this.e2eeClient = new E2eeClient<ErmisChatGenerics>(client);
 
-    // 4. Force upload key packages ONLY if Provider is new (old KPs are useless for new Provider)
-    //    Restored Provider relies on health.check event for top-up.
-    if (!this._providerRestored) {
-      await this._uploadKeyPackages(50);
-    }
+    // 4. Top up this device's server-side KeyPackage pool on every init.
+    //    The upload endpoint appends KPs, so first read the current count and only
+    //    upload the missing delta to keep the server pool at the target size.
+    await this.ensureKeyPackagesFromServer();
 
     // 5. Sync MLS events for E2EE channels (restore groups from server)
     await this._syncAndRestoreGroups();
@@ -359,16 +361,26 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Called internally during init (fresh provider) or from ensureKeyPackages (health.check top-up).
    */
   private async _uploadKeyPackages(count: number): Promise<void> {
-    try {
-      const kps = this.identity.key_packages(this.provider, count);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const serialized = kps.map((kp: any) => Array.from(kp.to_bytes()));
-      await this.e2eeClient!.uploadKeyPackages({ key_packages: serialized });
-      await this._persistProvider();
-      console.log(`[MLS] Uploaded ${count} key packages`);
-    } catch (err) {
-      console.warn('[MLS] Failed to upload key packages:', err);
-    }
+    const uploadCount = Math.max(0, Math.min(KEY_PACKAGE_POOL_TARGET, Math.floor(count)));
+    if (uploadCount === 0) return;
+    if (this._keyPackageUploadPromise) return this._keyPackageUploadPromise;
+
+    this._keyPackageUploadPromise = (async () => {
+      try {
+        const kps = this.identity.key_packages(this.provider, uploadCount);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const serialized = kps.map((kp: any) => Array.from(kp.to_bytes()));
+        await this.e2eeClient!.uploadKeyPackages({ key_packages: serialized });
+        await this._persistProvider();
+        console.log(`[MLS] Uploaded ${uploadCount} key packages`);
+      } catch (err) {
+        console.warn('[MLS] Failed to upload key packages:', err);
+      } finally {
+        this._keyPackageUploadPromise = null;
+      }
+    })();
+
+    return this._keyPackageUploadPromise;
   }
 
   /**
@@ -377,11 +389,21 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * @param knownRemaining - remaining count from health.check event's me.key_packages_remaining
    */
   async ensureKeyPackages(knownRemaining: number): Promise<void> {
-    const target = 50;
-    const toUpload = target - knownRemaining;
-    if (toUpload > 0) {
-      console.log(`[MLS] Key packages low (${knownRemaining}), topping up ${toUpload}...`);
-      await this._uploadKeyPackages(toUpload);
+    if (!Number.isFinite(knownRemaining)) return;
+    const remaining = Math.max(0, Math.floor(knownRemaining));
+    if (remaining >= KEY_PACKAGE_POOL_TARGET) return;
+
+    const toUpload = KEY_PACKAGE_POOL_TARGET - remaining;
+    console.log(`[MLS] Key packages below target (${remaining}/${KEY_PACKAGE_POOL_TARGET}), topping up ${toUpload}...`);
+    await this._uploadKeyPackages(toUpload);
+  }
+
+  async ensureKeyPackagesFromServer(): Promise<void> {
+    try {
+      const response = await this.e2eeClient!.getKeyPackageCount();
+      await this.ensureKeyPackages(response.remaining);
+    } catch (err) {
+      console.warn('[MLS] Failed to check key package count:', err);
     }
   }
 
@@ -709,71 +731,71 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           hasMore = true;
         }
 
-          for (const [cid, result] of Object.entries(response)) {
-            if (cid === 'removed_channels') continue;
-            // Skip non-ChannelSyncResult entries (e.g. "duration" from APIResponse)
-            if (!result || typeof result !== 'object' || !('events' in result)) continue;
+        for (const [cid, result] of Object.entries(response)) {
+          if (cid === 'removed_channels') continue;
+          // Skip non-ChannelSyncResult entries (e.g. "duration" from APIResponse)
+          if (!result || typeof result !== 'object' || !('events' in result)) continue;
 
-            const channelResult = result as { events: any[]; has_more: boolean; next_cursor?: number };
-            if (!channelResult.events || channelResult.events.length === 0) {
-              const flushed = await this._flushPendingE2eeSnapshots(cid);
-              this._emitSyncState(
-                this._makeSyncState(
-                  cid,
-                  channelResult.has_more ? 'syncing' : 'ready',
-                  syncCursors[cid] ?? Date.now(),
-                  syncCursors[cid] ?? Date.now(),
-                  {
-                    server_next_cursor: channelResult.next_cursor,
-                    has_more: channelResult.has_more,
-                    needs_retry: channelResult.has_more,
-                    processed_events: 0,
-                    buffered_messages: flushed.pending.length,
-                  },
-                ),
-              );
-              continue;
-            }
-
-            const startedCursor = syncCursors[cid] ?? Date.now();
-            const processResult = await this._processChannelEvents(cid, channelResult.events, startedCursor);
-            const fallbackNextCursor = this._getEventCreatedAt(channelResult.events[channelResult.events.length - 1]);
-            const serverNextCursor =
-              channelResult.next_cursor ?? (fallbackNextCursor ? this._toMillis(fallbackNextCursor) : undefined);
-            const processedCursor = processResult.processedCursor ?? startedCursor;
-            const cursorLagged = serverNextCursor !== undefined && processedCursor < serverNextCursor;
-            const retryNeeded = channelResult.has_more || cursorLagged;
-            const durableCursor = this._getDurableSyncCursor({
-              processedCursor,
-              serverNextCursor,
-              hasMore: channelResult.has_more,
-              bufferedMessages: processResult.bufferedMessages,
-            });
-
-            if (durableCursor > startedCursor) {
-              syncCursors[cid] = durableCursor;
-            }
-
+          const channelResult = result as { events: any[]; has_more: boolean; next_cursor?: number };
+          if (!channelResult.events || channelResult.events.length === 0) {
+            const flushed = await this._flushPendingE2eeSnapshots(cid);
             this._emitSyncState(
               this._makeSyncState(
                 cid,
-                cursorLagged ? 'needs_retry' : channelResult.has_more ? 'syncing' : 'ready',
-                startedCursor,
-                processedCursor,
+                channelResult.has_more ? 'syncing' : 'ready',
+                syncCursors[cid] ?? Date.now(),
+                syncCursors[cid] ?? Date.now(),
                 {
-                  server_next_cursor: serverNextCursor,
+                  server_next_cursor: channelResult.next_cursor,
                   has_more: channelResult.has_more,
-                  needs_retry: retryNeeded,
-                  processed_events: processResult.processedEvents,
-                  buffered_messages: processResult.bufferedMessages,
+                  needs_retry: channelResult.has_more,
+                  processed_events: 0,
+                  buffered_messages: flushed.pending.length,
                 },
               ),
             );
-
-            if (channelResult.has_more && !cursorLagged) {
-              hasMore = true;
-            }
+            continue;
           }
+
+          const startedCursor = syncCursors[cid] ?? Date.now();
+          const processResult = await this._processChannelEvents(cid, channelResult.events, startedCursor);
+          const fallbackNextCursor = this._getEventCreatedAt(channelResult.events[channelResult.events.length - 1]);
+          const serverNextCursor =
+            channelResult.next_cursor ?? (fallbackNextCursor ? this._toMillis(fallbackNextCursor) : undefined);
+          const processedCursor = processResult.processedCursor ?? startedCursor;
+          const cursorLagged = serverNextCursor !== undefined && processedCursor < serverNextCursor;
+          const retryNeeded = channelResult.has_more || cursorLagged;
+          const durableCursor = this._getDurableSyncCursor({
+            processedCursor,
+            serverNextCursor,
+            hasMore: channelResult.has_more,
+            bufferedMessages: processResult.bufferedMessages,
+          });
+
+          if (durableCursor > startedCursor) {
+            syncCursors[cid] = durableCursor;
+          }
+
+          this._emitSyncState(
+            this._makeSyncState(
+              cid,
+              cursorLagged ? 'needs_retry' : channelResult.has_more ? 'syncing' : 'ready',
+              startedCursor,
+              processedCursor,
+              {
+                server_next_cursor: serverNextCursor,
+                has_more: channelResult.has_more,
+                needs_retry: retryNeeded,
+                processed_events: processResult.processedEvents,
+                buffered_messages: processResult.bufferedMessages,
+              },
+            ),
+          );
+
+          if (channelResult.has_more && !cursorLagged) {
+            hasMore = true;
+          }
+        }
       }
 
       // Save all cursors as strings for storage compatibility
@@ -913,6 +935,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
             if (isOwnDeviceCommit) {
               console.log(`[MLS] Skipping own ${typeField} (already merged):`, cid);
+              break;
+            }
+
+            if (!this.groups.has(cid)) {
+              console.log(`[MLS] Skipping ${typeField} before local group exists:`, cid);
               break;
             }
 
@@ -1628,7 +1655,6 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     let result;
     try {
       result = await this.e2eeClient!.enableE2ee(channelType, channelId, {
-        commit: Array.from(commitBundle.commit),
         welcome: Array.from(commitBundle.welcome),
         ratchet_tree: Array.from(ratchetTree.to_bytes()),
         // Send current pre-merge epoch. Server will store epoch+1 (post-commit).
@@ -1659,7 +1685,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Prepare the MLS bundle for creating a new E2EE channel.
    *
    * Creates a new MLS group, adds all target members (Optimistic Inclusion),
-   * and returns the commit + welcome + ratchet_tree + group_info bundle.
+   * and returns the welcome + ratchet_tree + group_info bundle.
    * The caller passes this bundle to `channel.create({ mls_enabled: true, ...bundle })`.
    *
    * **Messaging (DM)**: When `channelType === 'messaging'`, the method auto-computes
@@ -1681,7 +1707,6 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     cid: string | null,
     allMemberUserIds: string[],
   ): Promise<{
-    commit: number[];
     welcome: number[];
     ratchet_tree: number[];
     group_info: number[];
@@ -1768,7 +1793,6 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     console.log('[MLS] createE2eeChannel: bundle ready for cid:', cid, 'epoch:', Number(group.epoch()));
 
     const result: {
-      commit: number[];
       welcome: number[];
       ratchet_tree: number[];
       group_info: number[];
@@ -1776,7 +1800,6 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       channel_id?: string;
       cid: string;
     } = {
-      commit: Array.from(commitBundle.commit as Uint8Array),
       welcome: allKeyPackages.length > 0 ? Array.from(commitBundle.welcome as Uint8Array) : [],
       ratchet_tree: Array.from(ratchetTree.to_bytes() as Uint8Array),
       group_info: Array.from(exportedGI as Uint8Array),
@@ -1800,11 +1823,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   /** Ensure the loaded WASM artifact supports composite inline commits. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _requireCompositeCommitMethods(group: any): void {
-    const required = [
-      'commit_member_add_with_removals',
-      'commit_self_update_with_removals',
-      'commit_member_removals',
-    ];
+    const required = ['commit_member_add_with_removals', 'commit_self_update_with_removals', 'commit_member_removals'];
     for (const method of required) {
       if (typeof group?.[method] !== 'function') {
         throw new Error(`[MLS] OpenMLS WASM is outdated: missing ${method}()`);
@@ -1959,12 +1978,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this._requireCompositeCommitMethods(group);
     const ghostsToRemove = await this._collectPendingGhosts(cid, ghostReaddIds);
     const kpArray = allKeyPackages.map(({ kp }) => kp);
-    const commitBundle = group.commit_member_add_with_removals(
-      this.provider,
-      this.identity,
-      ghostsToRemove,
-      kpArray,
-    );
+    const commitBundle = group.commit_member_add_with_removals(this.provider, this.identity, ghostsToRemove, kpArray);
 
     // 4. Export ratchet tree BEFORE merge (need pre-merge state for welcome)
     const ratchetTree = group.export_ratchet_tree();
@@ -2125,7 +2139,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Called by channel.ts `member.removed` handler when the removed user is self.
    */
   leaveGroup(cid: string, removedAt?: string | number | Date): void {
-    const removedCursor = removedAt instanceof Date ? removedAt.getTime() : removedAt ? this._toMillis(removedAt) : Date.now();
+    const removedCursor =
+      removedAt instanceof Date ? removedAt.getTime() : removedAt ? this._toMillis(removedAt) : Date.now();
     const group = this.groups.get(cid);
     if (group) {
       try {
@@ -2245,7 +2260,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       throw new Error('[MLS] Not initialized');
     }
     if (!selfLeft && this.userId && targetUserId === this.userId) {
-      throw new Error('[MLS] evictMember cannot remove the current user; use channel.leaveChannelE2ee() for self-leave');
+      throw new Error(
+        '[MLS] evictMember cannot remove the current user; use channel.leaveChannelE2ee() for self-leave',
+      );
     }
 
     const group = this.groups.get(cid);

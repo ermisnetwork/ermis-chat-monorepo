@@ -401,6 +401,7 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     name?: string;
     is_pinned?: boolean;
     mls_enabled?: boolean;
+    /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
     commit?: number[];
     welcome?: number[];
     ratchet_tree?: number[];
