@@ -184,19 +184,10 @@ export const UserPicker: React.FC<UserPickerProps> = ({
     const fetchUsers = async () => {
       if (!client) return;
 
-      const cacheKey = friendsOnly 
-        ? `${client.userID || 'anon'}-friends` 
-        : `${client.userID || 'anon'}-${pageSize}`;
-
-      if (globalUsersCache[cacheKey] && globalUsersCache[cacheKey].users.length > 0) {
-        const cached = globalUsersCache[cacheKey];
-        setAllUsers(cached.users);
-        setHasMore(cached.hasMore);
-        setPage(cached.page);
-        setLoading(false);
-        return;
-      }
-
+      // For friendsOnly mode, always read fresh data from activeChannels.
+      // Do NOT use globalUsersCache here — the friend list can change at any
+      // time (e.g. a new friend request was accepted) and caching would
+      // return stale results, hiding the newly added friend.
       if (friendsOnly) {
         const friends: UserPickerUser[] = [];
         const seenIds = new Set<string>();
@@ -222,13 +213,18 @@ export const UserPicker: React.FC<UserPickerProps> = ({
           setHasMore(false);
           setPage(1);
           setLoading(false);
-
-          globalUsersCache[cacheKey] = {
-            users: friends,
-            page: 1,
-            hasMore: false,
-          };
         }
+        return;
+      }
+
+      const cacheKey = `${client.userID || 'anon'}-${pageSize}`;
+
+      if (globalUsersCache[cacheKey] && globalUsersCache[cacheKey].users.length > 0) {
+        const cached = globalUsersCache[cacheKey];
+        setAllUsers(cached.users);
+        setHasMore(cached.hasMore);
+        setPage(cached.page);
+        setLoading(false);
         return;
       }
 
@@ -254,7 +250,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
     };
     fetchUsers();
     return () => { active = false; };
-  }, [client, pageSize]);
+  }, [client, pageSize, friendsOnly]);
 
   /* ---------- 2. Load more (infinite scroll) ---------- */
   const loadMore = useCallback(async () => {
