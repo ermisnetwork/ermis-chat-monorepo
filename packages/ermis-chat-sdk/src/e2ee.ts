@@ -6,6 +6,7 @@
  */
 
 import type { ErmisChat } from './client';
+import type { RemovedSyncCursor } from './mls_storage';
 import type { APIResponse, ExtendableGenerics, DefaultGenerics } from './types';
 
 // ============================================================
@@ -320,9 +321,12 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   async syncAll(
     cursors: Record<string, number>,
     limit: number = 100,
-    removedCursor?: number,
+    removedCursor?: RemovedSyncCursor,
   ): Promise<UnifiedSyncResponse> {
-    const body: { cursors: Record<string, number>; limit: number; removed_cursor?: number } = { cursors, limit };
+    const body: { cursors: Record<string, number>; limit: number; removed_cursor?: RemovedSyncCursor } = {
+      cursors,
+      limit,
+    };
     if (removedCursor !== undefined) {
       body.removed_cursor = removedCursor;
     }
@@ -530,19 +534,22 @@ export interface ChannelSyncResult {
 }
 
 export interface RemovedChannelSyncData {
+  event_id: string;
   cid: string;
   channel_id: string;
   channel_type: string;
   parent_cid?: string;
   removed_at: string;
   removed_by: string;
+  removal_type: 'self_remove' | 'kicked' | 'invite_rejected' | 'channel_deleted' | string;
+  reason?: string | null;
   self_remove: boolean;
 }
 
 export interface RemovedChannelsSyncResult {
   events: RemovedChannelSyncData[];
   has_more: boolean;
-  next_cursor?: number;
+  next_cursor?: RemovedSyncCursor;
 }
 
 /** Response from POST /v1/e2ee/sync */

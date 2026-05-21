@@ -13,7 +13,7 @@
  */
 
 import { E2eeClient } from './e2ee';
-import type { MlsStorageAdapter, E2eeStoredMessage, PendingE2eeSnapshot } from './mls_storage';
+import type { MlsStorageAdapter, E2eeStoredMessage, PendingE2eeSnapshot, RemovedSyncCursor } from './mls_storage';
 import { IndexedDBMlsStorage } from './mls_storage';
 import type { ErmisChat } from './client';
 import type { ExtendableGenerics, DefaultGenerics } from './types';
@@ -39,6 +39,12 @@ function getActiveTargetFromCommitEvictionError(err: any): string | undefined {
   const msg = getApiErrorMessage(err);
   const match = msg.match(/target_user_id\s+(\S+)\s+is still an active channel member/);
   return match?.[1];
+}
+
+function isRemovedCursorAfter(next: RemovedSyncCursor, current?: RemovedSyncCursor | null): boolean {
+  if (!current) return true;
+  if (next.removed_at !== current.removed_at) return next.removed_at > current.removed_at;
+  return next.event_id > current.event_id;
 }
 
 function staleGroupInfoError(cid: string): Error & { code: string } {
@@ -695,8 +701,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       // Step 2: Sync all groups via unified API
       const savedCursors = await this.storage.loadAllSyncTimestamps();
-      const savedRemovedCursor = await this.storage.loadRemovedSyncCursor();
-      let removedCursor = savedRemovedCursor ? this._toMillis(savedRemovedCursor) : 0;
+      let removedCursor = await this.storage.loadRemovedSyncCursor();
       const groupCids = Array.from(this.groups.keys());
 
       // Build cursor map — use saved timestamp or mls_enabled_at as fallback
@@ -725,7 +730,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       let hasMore = true;
       while (hasMore) {
         hasMore = false;
-        const response = await this.e2eeClient!.syncAll(syncCursors, 100, removedCursor);
+        const response = await this.e2eeClient!.syncAll(syncCursors, 100, removedCursor ?? undefined);
 
         const removedChannels = response.removed_channels;
         if (removedChannels?.events?.length) {
@@ -733,9 +738,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             await this._processRemovedChannelTombstone(tombstone);
           }
         }
-        if (removedChannels?.next_cursor !== undefined && removedChannels.next_cursor > removedCursor) {
+        if (removedChannels?.next_cursor !== undefined && isRemovedCursorAfter(removedChannels.next_cursor, removedCursor)) {
           removedCursor = removedChannels.next_cursor;
-          await this.storage.saveRemovedSyncCursor(String(removedCursor));
+          await this.storage.saveRemovedSyncCursor(removedCursor);
         }
         if (removedChannels?.has_more) {
           hasMore = true;
@@ -858,12 +863,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Events are already sorted by the server.
    */
   private async _processRemovedChannelTombstone(tombstone: {
+    event_id?: string;
     cid: string;
     channel_id?: string;
     channel_type?: string;
     parent_cid?: string;
     removed_at?: string;
     removed_by?: string;
+    removal_type?: string;
+    reason?: string | null;
     self_remove?: boolean;
   }): Promise<void> {
     const cid = tombstone.cid;
@@ -883,6 +891,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     console.log('[MLS] Removed channel tombstone processed:', cid, {
       removed_at: tombstone.removed_at,
       removed_by: tombstone.removed_by,
+      removal_type: tombstone.removal_type,
       self_remove: tombstone.self_remove,
     });
   }

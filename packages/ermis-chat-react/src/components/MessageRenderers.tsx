@@ -600,7 +600,6 @@ function renderTextWithMentions(
 /** Regular message: text with @mentions + attachments */
 export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ message, onMentionClick }) => {
   const { activeChannel } = useChatClient();
-  console.log("message from RegularMessage:", message);
   
   const isEncrypted = message.content_type === 'mls' || Boolean((message as any).mls_ciphertext);
   const hasRawAttachments = Boolean(message.attachments?.length);
