@@ -2,13 +2,14 @@
    Typing Indicator
    ============================================================ */
 
-/* Sits in normal flow between message list and input.
-   Uses a wrapper with fixed height so layout doesn't jump. */
+/* Floats above the input area without taking layout space.
+   Height is 0 so messages/input don't jump; content overflows upward. */
 .ermis-typing-indicator-wrapper {
-  min-height: 20px;
-  overflow: hidden;
+  height: 0;
+  overflow: visible;
   padding-left: 16px;
-  display: flex;
+  position: relative;
+  z-index: 10;
 }
 
 .ermis-typing-indicator {
@@ -17,7 +18,13 @@
   gap: 6px;
   font-size: 12px;
   color: var(--ermis-text-secondary);
-  overflow: hidden;
+  background-color: var(--ermis-bg-primary, #fff);
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--ermis-border, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transform: translateY(-100%);
+  margin-bottom: 8px;
   animation: ermis-typing-appear 0.2s ease-out forwards;
 }
 
@@ -30,12 +37,12 @@
 @keyframes ermis-typing-appear {
   0% {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(calc(-100% + 4px));
   }
 
   100% {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(-100%);
   }
 }
 

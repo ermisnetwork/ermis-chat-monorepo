@@ -445,7 +445,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
           </div>
         )}
 
-        <div className="px-4 pb-3 pt-1">
+        <div className="px-4 pb-3 pt-1.5">
           <div className="relative flex items-end w-full pl-2 pr-1.5 py-1.5 bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 rounded-3xl min-h-[44px]">
             {(isRecording || recordedBlob || isUploadingVoice) ? (
               <div className="flex flex-1 items-center justify-between w-full h-[32px] mb-[1px]">

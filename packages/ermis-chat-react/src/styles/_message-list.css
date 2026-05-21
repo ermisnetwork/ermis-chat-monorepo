@@ -27,6 +27,7 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
   font-family: var(--ermis-font-family);
   position: relative;
 }
@@ -34,9 +35,12 @@
 .ermis-message-list__vlist {
   display: flex !important;
   flex-direction: column !important;
+  flex: 1;
+  min-height: 0;
   padding-left: 1rem;
   padding-right: 1rem;
   padding-top: 1rem;
+  padding-bottom: 0.5rem;
 }
 
 /* Push content to bottom when few messages, margin collapses when content overflows */

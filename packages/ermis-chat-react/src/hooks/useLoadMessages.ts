@@ -57,6 +57,17 @@ export function useLoadMessages({
     setShiftMode(false);
   }, [activeChannel?.cid]);
 
+  // Reset shiftMode to false after the prepend render is committed.
+  // shift should only be true for the single render cycle when older messages
+  // are prepended; leaving it on causes virtua to mis-compensate scroll
+  // positions when new messages are appended at the bottom, which leads
+  // to intermittent message overlapping.
+  useEffect(() => {
+    if (shiftMode) {
+      setShiftMode(false);
+    }
+  }, [shiftMode]);
+
   // Refs synced from state (avoid handleScroll recreation on state change)
   const hasMoreRef = useRef(true);
   hasMoreRef.current = hasMore;
