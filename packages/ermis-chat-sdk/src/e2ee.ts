@@ -301,13 +301,13 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   /**
    * Per-channel sync: fetch protocol + application events for a single channel.
-   * @param since Millisecond timestamp (ms since epoch)
+   * @param since RFC3339 timestamp cursor
    * @param limit Max events to return (default 100, server caps at 200)
    */
   async syncChannel(
     channelType: string,
     channelId: string,
-    since: number,
+    since: string,
     limit: number = 100,
   ): Promise<ChannelSyncResult> {
     return await this._get(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/sync`, { since, limit });
@@ -315,15 +315,15 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   /**
    * Unified sync: fetch all protocol + application events across multiple E2EE channels.
-   * @param cursors Map of CID → last sync timestamp (milliseconds since epoch)
+   * @param cursors Map of CID → last sync timestamp (RFC3339)
    * @param limit Max events per channel (default 100, server caps at 200)
    */
   async syncAll(
-    cursors: Record<string, number>,
+    cursors: Record<string, string>,
     limit: number = 100,
     removedCursor?: RemovedSyncCursor,
   ): Promise<UnifiedSyncResponse> {
-    const body: { cursors: Record<string, number>; limit: number; removed_cursor?: RemovedSyncCursor } = {
+    const body: { cursors: Record<string, string>; limit: number; removed_cursor?: RemovedSyncCursor } = {
       cursors,
       limit,
     };
@@ -529,8 +529,8 @@ export type E2eeSyncEvent =
 export interface ChannelSyncResult {
   events: E2eeSyncEvent[];
   has_more: boolean;
-  /** Millisecond timestamp of the last event — use this for the next sync cursor */
-  next_cursor?: number;
+  /** RFC3339 timestamp of the last event — use this for the next sync cursor */
+  next_cursor?: string;
 }
 
 export interface RemovedChannelSyncData {

@@ -41,9 +41,26 @@ function getActiveTargetFromCommitEvictionError(err: any): string | undefined {
   return match?.[1];
 }
 
+function normalizeRfc3339Cursor(value: string): string {
+  const match = value.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z$/);
+  if (!match) return value;
+  return `${match[1]}.${(match[2] || '').padEnd(9, '0').slice(0, 9)}Z`;
+}
+
+function compareRfc3339Cursor(a?: string | null, b?: string | null): number {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  const left = normalizeRfc3339Cursor(a);
+  const right = normalizeRfc3339Cursor(b);
+  if (left === right) return 0;
+  return left > right ? 1 : -1;
+}
+
 function isRemovedCursorAfter(next: RemovedSyncCursor, current?: RemovedSyncCursor | null): boolean {
   if (!current) return true;
-  if (next.removed_at !== current.removed_at) return next.removed_at > current.removed_at;
+  const removedAtCmp = compareRfc3339Cursor(next.removed_at, current.removed_at);
+  if (removedAtCmp !== 0) return removedAtCmp > 0;
   return next.event_id > current.event_id;
 }
 
@@ -126,9 +143,9 @@ export type E2eeSyncStatus =
 export interface E2eeSyncState {
   cid: string;
   status: E2eeSyncStatus;
-  started_cursor: number;
-  processed_cursor: number;
-  server_next_cursor?: number;
+  started_cursor: string;
+  processed_cursor: string;
+  server_next_cursor?: string;
   has_more: boolean;
   needs_retry: boolean;
   processed_events: number;
@@ -145,7 +162,7 @@ export interface EnsureE2eeChannelResult {
 }
 
 interface ChannelProcessResult {
-  processedCursor?: number;
+  processedCursor?: string;
   processedEvents: number;
   bufferedMessages: number;
   decrypted: E2eeStoredMessage[];
@@ -466,13 +483,25 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return isNaN(ms) ? 0 : ms;
   }
 
-  private _initialSyncCursor(value?: string | number | null): number {
-    if (value === undefined || value === null) return Date.now();
+  private _nowCursor(): string {
+    return new Date().toISOString();
+  }
+
+  private _toCursorString(value?: string | number | Date | null): string {
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'string' && !Number.isFinite(Number(value))) return value;
+    if (value === undefined || value === null) return this._nowCursor();
     const ms = this._toMillis(value);
-    if (!ms) return Date.now();
+    return ms ? new Date(ms).toISOString() : this._nowCursor();
+  }
+
+  private _initialSyncCursor(value?: string | number | null): string {
+    if (value === undefined || value === null) return this._nowCursor();
+    const ms = this._toMillis(value);
+    if (!ms) return this._nowCursor();
     // Bellboy sync uses query_events_after(), so starting exactly at
     // mls_enabled_at can skip protocol events persisted in the same millisecond.
-    return Math.max(0, ms - 1);
+    return new Date(Math.max(0, ms - 1)).toISOString();
   }
 
   private _startSyncGate(): void {
@@ -499,8 +528,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private _makeSyncState(
     cid: string,
     status: E2eeSyncStatus,
-    startedCursor: number,
-    processedCursor: number,
+    startedCursor: string,
+    processedCursor: string,
     overrides: Partial<E2eeSyncState> = {},
   ): E2eeSyncState {
     return {
@@ -538,13 +567,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     serverNextCursor,
     hasMore,
   }: {
-    processedCursor: number;
-    serverNextCursor?: number;
+    processedCursor: string;
+    serverNextCursor?: string;
     hasMore: boolean;
     bufferedMessages: number;
-  }): number {
-    if (!hasMore && serverNextCursor !== undefined && serverNextCursor >= processedCursor) {
-      return serverNextCursor + 1;
+  }): string {
+    if (!hasMore && serverNextCursor !== undefined && compareRfc3339Cursor(serverNextCursor, processedCursor) >= 0) {
+      return serverNextCursor;
     }
 
     return processedCursor;
@@ -564,7 +593,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     cid: string,
     eventType: 'application' | 'message_updated',
     message: Record<string, unknown>,
-    receivedCursor?: number,
+    receivedCursor?: string,
     eventTime?: string,
   ): PendingE2eeSnapshot {
     const typedMessage = message as { id?: string; created_at?: string; updated_at?: string; mls_epoch?: number };
@@ -586,7 +615,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (!message.message_id) continue;
       byVersion.set(message.version, message);
     }
-    return Array.from(byVersion.values()).sort((a, b) => (a.received_cursor || 0) - (b.received_cursor || 0));
+    return Array.from(byVersion.values()).sort((a, b) =>
+      compareRfc3339Cursor(a.received_cursor, b.received_cursor),
+    );
   }
 
   private async _savePendingSnapshots(cid: string, messages: PendingE2eeSnapshot[]): Promise<void> {
@@ -704,18 +735,17 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       let removedCursor = await this.storage.loadRemovedSyncCursor();
       const groupCids = Array.from(this.groups.keys());
 
-      // Build cursor map — use saved timestamp or mls_enabled_at as fallback
-      // Server expects milliseconds (i64), storage may have ISO strings (legacy) or millis
-      const syncCursors: Record<string, number> = {};
+      // Build cursor map — use saved RFC3339 cursor or mls_enabled_at as fallback.
+      const syncCursors: Record<string, string> = {};
       for (const cid of groupCids) {
         if (savedCursors[cid]) {
-          syncCursors[cid] = this._toMillis(savedCursors[cid]);
+          syncCursors[cid] = this._toCursorString(savedCursors[cid]);
         } else {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const channel = (this.client as any)?.activeChannels?.[cid];
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const mlsEnabledAt = (channel?.data as any)?.mls_enabled_at;
-          // Use mls_enabled_at as a bootstrap cursor, otherwise Date.now().
+          // Use mls_enabled_at as a bootstrap cursor, otherwise now.
           // NEVER fall back to epoch 0 (1970) — that would fetch the entire message history.
           syncCursors[cid] = this._initialSyncCursor(mlsEnabledAt);
         }
@@ -751,15 +781,16 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           // Skip non-ChannelSyncResult entries (e.g. "duration" from APIResponse)
           if (!result || typeof result !== 'object' || !('events' in result)) continue;
 
-          const channelResult = result as { events: any[]; has_more: boolean; next_cursor?: number };
+          const channelResult = result as { events: any[]; has_more: boolean; next_cursor?: string };
           if (!channelResult.events || channelResult.events.length === 0) {
             const flushed = await this._flushPendingE2eeSnapshots(cid);
+            const currentCursor = syncCursors[cid] ?? this._nowCursor();
             this._emitSyncState(
               this._makeSyncState(
                 cid,
                 channelResult.has_more ? 'syncing' : 'ready',
-                syncCursors[cid] ?? Date.now(),
-                syncCursors[cid] ?? Date.now(),
+                currentCursor,
+                currentCursor,
                 {
                   server_next_cursor: channelResult.next_cursor,
                   has_more: channelResult.has_more,
@@ -772,13 +803,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             continue;
           }
 
-          const startedCursor = syncCursors[cid] ?? Date.now();
+          const startedCursor = syncCursors[cid] ?? this._nowCursor();
           const processResult = await this._processChannelEvents(cid, channelResult.events, startedCursor);
           const fallbackNextCursor = this._getEventCreatedAt(channelResult.events[channelResult.events.length - 1]);
-          const serverNextCursor =
-            channelResult.next_cursor ?? (fallbackNextCursor ? this._toMillis(fallbackNextCursor) : undefined);
+          const serverNextCursor = channelResult.next_cursor ?? fallbackNextCursor;
           const processedCursor = processResult.processedCursor ?? startedCursor;
-          const cursorLagged = serverNextCursor !== undefined && processedCursor < serverNextCursor;
+          const cursorLagged = serverNextCursor !== undefined && compareRfc3339Cursor(processedCursor, serverNextCursor) < 0;
           const retryNeeded = channelResult.has_more || cursorLagged;
           const durableCursor = this._getDurableSyncCursor({
             processedCursor,
@@ -787,7 +817,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             bufferedMessages: processResult.bufferedMessages,
           });
 
-          if (durableCursor > startedCursor) {
+          if (compareRfc3339Cursor(durableCursor, startedCursor) > 0) {
             syncCursors[cid] = durableCursor;
           }
 
@@ -813,10 +843,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         }
       }
 
-      // Save all cursors as strings for storage compatibility
       const cursorsToSave: Record<string, string> = {};
-      for (const [cid, ms] of Object.entries(syncCursors)) {
-        cursorsToSave[cid] = String(ms);
+      for (const [cid, cursor] of Object.entries(syncCursors)) {
+        cursorsToSave[cid] = cursor;
       }
       await this.storage.saveAllSyncTimestamps(cursorsToSave);
       await this._persistProvider();
@@ -896,7 +925,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     });
   }
 
-  private async _processChannelEvents(cid: string, events: any[], startedCursor = 0): Promise<ChannelProcessResult> {
+  private async _processChannelEvents(
+    cid: string,
+    events: any[],
+    startedCursor = this._nowCursor(),
+  ): Promise<ChannelProcessResult> {
     const decryptedMessages: E2eeStoredMessage[] = [];
     const pendingMlsMessages: PendingE2eeSnapshot[] = [];
     let processedEvents = 0;
@@ -921,7 +954,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     for (const event of events) {
       const eventCreatedAt = this._getEventCreatedAt(event);
-      const eventCursor = eventCreatedAt ? this._toMillis(eventCreatedAt) : lastSafeCursor;
+      const eventCursor = eventCreatedAt || lastSafeCursor;
       // Sync response uses event.type as sole discriminator: "protocol" | "application"
       // Data is always nested in event.data
       const eventType = event.type;
@@ -1268,7 +1301,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (pendingMlsMessages.length === 0 && events.length > 0) {
         const lastEventCreatedAt = this._getEventCreatedAt(events[events.length - 1]);
         if (lastEventCreatedAt) {
-          lastSafeCursor = this._toMillis(lastEventCreatedAt);
+          lastSafeCursor = lastEventCreatedAt;
         }
       }
     }
@@ -1308,14 +1341,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     };
   }
 
-  private async _syncChannelFromCursor(cid: string, since: number, limit = 100): Promise<E2eeSyncState> {
+  private async _syncChannelFromCursor(cid: string, since: string, limit = 100): Promise<E2eeSyncState> {
     let cursor = since;
     let finalState = this._makeSyncState(cid, 'ready', since, since);
 
     while (true) {
       const startedCursor = cursor;
       const response = await this.e2eeClient!.syncAll({ [cid]: startedCursor }, limit);
-      const result = response[cid] as { events?: any[]; has_more?: boolean; next_cursor?: number } | undefined;
+      const result = response[cid] as { events?: any[]; has_more?: boolean; next_cursor?: string } | undefined;
 
       if (!result?.events || result.events.length === 0) {
         const flushed = await this._flushPendingE2eeSnapshots(cid);
@@ -1337,10 +1370,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       const processResult = await this._processChannelEvents(cid, result.events, startedCursor);
       const fallbackNextCursor = this._getEventCreatedAt(result.events[result.events.length - 1]);
-      const serverNextCursor =
-        result.next_cursor ?? (fallbackNextCursor ? this._toMillis(fallbackNextCursor) : undefined);
+      const serverNextCursor = result.next_cursor ?? fallbackNextCursor;
       const processedCursor = processResult.processedCursor ?? startedCursor;
-      const cursorLagged = serverNextCursor !== undefined && processedCursor < serverNextCursor;
+      const cursorLagged = serverNextCursor !== undefined && compareRfc3339Cursor(processedCursor, serverNextCursor) < 0;
       const blocked = cursorLagged;
       const durableCursor = this._getDurableSyncCursor({
         processedCursor,
@@ -1364,9 +1396,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       );
       this._emitSyncState(finalState);
 
-      if (durableCursor > startedCursor) {
+      if (compareRfc3339Cursor(durableCursor, startedCursor) > 0) {
         cursor = durableCursor;
-        await this.storage.saveSyncTimestamp(cid, String(durableCursor));
+        await this.storage.saveSyncTimestamp(cid, durableCursor);
         await this._persistProvider();
       }
 
@@ -1396,7 +1428,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const savedTs = await this.storage.loadSyncTimestamp(cid);
     // Prefer saved cursor; else mls_enabled_at; else now.
     // NEVER use epoch 0 — that would fetch the entire message history.
-    const since = savedTs ? this._toMillis(savedTs) : this._initialSyncCursor(mlsEnabledAt);
+    const since = savedTs ? this._toCursorString(savedTs) : this._initialSyncCursor(mlsEnabledAt);
 
     const syncState = await this._syncChannelFromCursor(cid, since, 100);
 
@@ -1460,7 +1492,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const savedTs = await this.storage.loadSyncTimestamp(cid);
     // Prefer saved cursor; else mls_enabled_at; else now.
     // NEVER use epoch 0 — that would fetch the entire message history.
-    const since = savedTs ? this._toMillis(savedTs) : this._initialSyncCursor(mlsEnabledAt);
+    const since = savedTs ? this._toCursorString(savedTs) : this._initialSyncCursor(mlsEnabledAt);
 
     const syncState = await this._syncChannelFromCursor(cid, since, 100);
 
@@ -1526,7 +1558,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mlsEnabledAt = (channel?.data as any)?.mls_enabled_at;
       const savedTs = await this.storage.loadSyncTimestamp(cid);
-      const since = savedTs ? this._toMillis(savedTs) : this._initialSyncCursor(mlsEnabledAt);
+      const since = savedTs ? this._toCursorString(savedTs) : this._initialSyncCursor(mlsEnabledAt);
       const syncState = await this._syncChannelFromCursor(cid, since, 100);
       const result: EnsureE2eeChannelResult = {
         cid,
@@ -2158,8 +2190,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Called by channel.ts `member.removed` handler when the removed user is self.
    */
   leaveGroup(cid: string, removedAt?: string | number | Date): void {
-    const removedCursor =
-      removedAt instanceof Date ? removedAt.getTime() : removedAt ? this._toMillis(removedAt) : Date.now();
+    const removedCursor = this._toCursorString(removedAt);
     const group = this.groups.get(cid);
     if (group) {
       try {
@@ -2177,7 +2208,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // already-consumed Welcome and fail with "No matching key package".
     this._persistProvider().catch(console.warn);
     this.storage.deleteGroup?.(cid).catch?.(console.warn);
-    this.storage.saveSyncTimestamp(cid, String(removedCursor)).catch(console.warn);
+    this.storage.saveSyncTimestamp(cid, removedCursor).catch(console.warn);
     this._savePendingSnapshots(cid, []).catch(console.warn);
   }
 
@@ -3758,7 +3789,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         await this._uploadGroupInfo('topic', topicChannelId, group);
 
         // Save cursor
-        await this.storage.saveSyncTimestamp(result.topic_cid, String(Date.now()));
+        await this.storage.saveSyncTimestamp(result.topic_cid, this._nowCursor());
 
         console.log('[MLS] batchExternalJoin: joined', result.topic_cid, 'epoch:', result.epoch);
       } else {
