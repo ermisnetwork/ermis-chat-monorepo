@@ -70,12 +70,12 @@ export interface PendingE2eeSnapshot {
   mls_epoch?: number;
   message: Record<string, unknown>;
   version: string;
-  received_cursor?: number;
+  received_cursor?: string;
   event_time?: string;
 }
 
 export interface RemovedSyncCursor {
-  removed_at: number;
+  removed_at: string;
   event_id: string;
 }
 
@@ -776,15 +776,21 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
           resolve(null);
           return;
         }
-        if (typeof value === 'object' && typeof value.removed_at === 'number' && typeof value.event_id === 'string') {
+        if (typeof value === 'object' && typeof value.removed_at === 'string' && typeof value.event_id === 'string') {
           resolve(value as RemovedSyncCursor);
           return;
         }
-        // Legacy storage held a timestamp string. Start the composite cursor at
-        // nil UUID for that millisecond so no same-timestamp history is skipped.
-        const legacyMs = Number(value);
-        if (Number.isFinite(legacyMs)) {
-          resolve({ removed_at: legacyMs, event_id: '00000000-0000-0000-0000-000000000000' });
+        // Legacy storage may hold a numeric millisecond cursor, or the first
+        // composite cursor shape may hold removed_at as a number.
+        const legacyMs = typeof value === 'object' ? Number(value.removed_at) : Number(value);
+        if (Number.isFinite(legacyMs) && legacyMs > 0) {
+          resolve({
+            removed_at: new Date(legacyMs).toISOString(),
+            event_id:
+              typeof value === 'object' && typeof value.event_id === 'string'
+                ? value.event_id
+                : '00000000-0000-0000-0000-000000000000',
+          });
           return;
         }
         resolve(null);
