@@ -74,6 +74,11 @@ export interface PendingE2eeSnapshot {
   event_time?: string;
 }
 
+export interface RemovedSyncCursor {
+  removed_at: number;
+  event_id: string;
+}
+
 /**
  * Platform-agnostic storage adapter for MLS state.
  *
@@ -122,8 +127,8 @@ export interface MlsStorageAdapter {
   // ---- Batch Sync Cursors (for unified sync API) ----
   loadAllSyncTimestamps(): Promise<Record<string, string>>;
   saveAllSyncTimestamps(cursors: Record<string, string>): Promise<void>;
-  loadRemovedSyncCursor(): Promise<string | null>;
-  saveRemovedSyncCursor(cursor: string): Promise<void>;
+  loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null>;
+  saveRemovedSyncCursor(cursor: RemovedSyncCursor): Promise<void>;
 
   // ---- Pending E2EE encrypted snapshots ----
   loadPendingE2eeSnapshots(cid: string): Promise<PendingE2eeSnapshot[]>;
@@ -759,18 +764,36 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     });
   }
 
-  async loadRemovedSyncCursor(): Promise<string | null> {
+  async loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null> {
     const db = await this.openDB();
-    return new Promise<string | null>((resolve, reject) => {
+    return new Promise<RemovedSyncCursor | null>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readonly');
       const store = tx.objectStore(STORE_META);
       const request = store.get('sync:removed_channels');
-      request.onsuccess = () => resolve((request.result as string) || null);
+      request.onsuccess = () => {
+        const value = request.result;
+        if (!value) {
+          resolve(null);
+          return;
+        }
+        if (typeof value === 'object' && typeof value.removed_at === 'number' && typeof value.event_id === 'string') {
+          resolve(value as RemovedSyncCursor);
+          return;
+        }
+        // Legacy storage held a timestamp string. Start the composite cursor at
+        // nil UUID for that millisecond so no same-timestamp history is skipped.
+        const legacyMs = Number(value);
+        if (Number.isFinite(legacyMs)) {
+          resolve({ removed_at: legacyMs, event_id: '00000000-0000-0000-0000-000000000000' });
+          return;
+        }
+        resolve(null);
+      };
       request.onerror = () => reject(request.error);
     });
   }
 
-  async saveRemovedSyncCursor(cursor: string): Promise<void> {
+  async saveRemovedSyncCursor(cursor: RemovedSyncCursor): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');
