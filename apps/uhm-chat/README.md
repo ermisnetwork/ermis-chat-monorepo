@@ -7,10 +7,19 @@
 - E2EE direct/group creation uses the SDK MLS bundle flow. Group E2EE channels are always private.
 - Existing standard channels can be upgraded from Channel Info by the owner when MLS is initialized.
 - E2EE topics inherit encryption from the parent channel. Key rotation is exposed on parent E2EE channels for owners/moderators.
+- PIN Epoch Archive V1 is exposed from E2EE channel headers. Users can create/unlock/change a recovery PIN and restore historical messages by epoch range.
 - SDK and app work now uses this monorepo as the source of truth: `packages/ermis-chat-sdk` and `apps/uhm-chat`.
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-05-22 - production
+
+- Goal: expose PIN Epoch Archive V1 in `apps/uhm-chat` after the backend/SDK contract landed.
+- Code changed: added a localized `UhmRecoveryPinDialog`, wired a recovery PIN icon into E2EE channel headers, added PIN configuration constants, and registered English/Vietnamese copy.
+- Docs changed: this README now records the uhm-chat PIN recovery entry point and behavior.
+- Design decision: uhm-chat renders its own i18n-aware PIN dialog instead of using the generic React UI RecoveryPin component, whose current labels are package-level English defaults.
+- Verification: `yarn workspace uhm-chat build` passed.
 
 ### 2026-05-15 - production
 

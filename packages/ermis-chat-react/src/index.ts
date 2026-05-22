@@ -184,6 +184,8 @@ export { useChannelMessages, markChannelAsFullyQueried } from './hooks/useChanne
 export type { UseChannelMessagesOptions } from './hooks/useChannelMessages';
 
 export { useForwardMessage } from './hooks/useForwardMessage';
+export { useRecoveryPin } from './hooks/useRecoveryPin';
+export type { UseRecoveryPinReturn, RecoveryPinStatus, RecoveryRestoredMessage } from './hooks/useRecoveryPin';
 
 export { QuotedMessagePreview } from './components/QuotedMessagePreview';
 export type { QuotedMessagePreviewProps } from './components/QuotedMessagePreview';
@@ -245,6 +247,20 @@ export type { UserPickerProps, UserPickerUser, UserPickerItemProps, UserPickerSe
 
 export { CreateChannelModal } from './components/CreateChannelModal';
 export type { CreateChannelModalProps } from './types';
+export {
+  RecoveryPinSetup,
+  RecoveryPinRestore,
+  RecoveryPinChange,
+  RecoveryStatus,
+  RecoveryGap,
+} from './components/RecoveryPin';
+export type {
+  RecoveryPinSetupProps,
+  RecoveryPinRestoreProps,
+  RecoveryPinChangeProps,
+  RecoveryStatusProps,
+  RecoveryGapProps,
+} from './components/RecoveryPin';
 
 // Call Components
 export { ErmisCallContext } from './context/ErmisCallContext';

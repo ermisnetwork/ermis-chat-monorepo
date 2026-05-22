@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash } from 'lucide-react'
+import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, KeyRound, Hash } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
@@ -36,6 +36,7 @@ import { UhmTabEmptyState } from '@/features/chat/UhmTabEmptyState'
 import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState'
 import { UhmSignalMessage } from '@/features/chat/UhmSignalMessage'
 import { UserProfileModal } from '@/features/chat/UserProfileModal'
+import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
@@ -56,6 +57,7 @@ export function ChatPage() {
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [rotatingKeyCid, setRotatingKeyCid] = useState<string | null>(null)
+  const [isRecoveryPinOpen, setIsRecoveryPinOpen] = useState(false)
   const {
     isCreateChannelModalOpen,
     closeCreateChannelModal,
@@ -350,10 +352,10 @@ export function ChatPage() {
         try {
           setRotatingKeyCid(channel.cid)
           const result = await mlsManager.keyRotation(channel.cid)
-          toast.success(t('e2ee.rotate_success', { epoch: result.epoch, defaultValue: `Key rotated. Epoch ${result.epoch}` }))
+          toast.success(t('e2ee.rotate_success', { epoch: result.epoch }))
         } catch (err: any) {
           console.error('[E2EE] Key rotation failed', err)
-          toast.error(err?.message || t('e2ee.rotate_failed', 'Failed to rotate key'))
+          toast.error(err?.message || t('e2ee.rotate_failed'))
         } finally {
           setRotatingKeyCid(null)
         }
@@ -364,20 +366,32 @@ export function ChatPage() {
           {isE2ee && (
             <div
               className="hidden sm:inline-flex items-center gap-1.5 h-7 px-2 rounded-full border border-emerald-200 bg-emerald-50 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
-              title={t('e2ee.enabled', 'End-to-end encrypted')}
+              title={t('e2ee.enabled')}
             >
               <LockKeyhole className="w-3.5 h-3.5" />
-              <span>E2EE</span>
+              <span>{t('e2ee.badge')}</span>
               {typeof mlsManager?.getEpoch === 'function' && !isTopic && (
                 <span className="font-mono opacity-70">{mlsManager.getEpoch(channel.cid) ?? '?'}</span>
               )}
             </div>
           )}
+          {isE2ee && (
+            <button
+              className="inline-flex items-center justify-center w-8 h-8 rounded-full text-emerald-600 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+              onClick={() => setIsRecoveryPinOpen(true)}
+              title={t('recovery_pin.open_action')}
+              aria-label={t('recovery_pin.open_action')}
+              disabled={actionDisabled || !mlsManager?.initialized}
+            >
+              <KeyRound className="w-[17px] h-[17px]" />
+            </button>
+          )}
           {canRotateKey && (
             <button
               className="inline-flex items-center justify-center w-8 h-8 rounded-full text-amber-600 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
               onClick={handleRotateKey}
-              title={t('e2ee.rotate_key', 'Rotate encryption key')}
+              title={t('e2ee.rotate_key')}
+              aria-label={t('e2ee.rotate_key')}
               disabled={actionDisabled || !mlsManager?.initialized || rotating}
             >
               <RotateCw className={`w-[17px] h-[17px] ${rotating ? 'animate-spin' : ''}`} />
@@ -386,7 +400,8 @@ export function ChatPage() {
           <button
             className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95"
             onClick={toggleChannelInfo}
-            title="Channel info"
+            title={t('chat.info_title_channel')}
+            aria-label={t('chat.info_title_channel')}
             disabled={actionDisabled}
           >
             <Info className="w-[18px] h-[18px]" />
@@ -828,6 +843,11 @@ export function ChatPage() {
         onClose={() => setProfileUserId(null)}
         userId={profileUserId}
         onSendMessage={handleSendMessageFromProfile}
+      />
+      <UhmRecoveryPinDialog
+        isOpen={isRecoveryPinOpen}
+        onClose={() => setIsRecoveryPinOpen(false)}
+        channel={activeChannel}
       />
       <GlobalPickers />
     </div>

@@ -1,0 +1,97 @@
+.ermis-recovery-pin {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.ermis-recovery-pin__header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.ermis-recovery-pin__header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.ermis-recovery-pin__badge,
+.ermis-recovery-status {
+  border: 1px solid var(--ermis-border-color, #d7dde5);
+  border-radius: 999px;
+  color: var(--ermis-text-muted, #596579);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.ermis-recovery-pin__input {
+  background: var(--ermis-input-bg, #fff);
+  border: 1px solid var(--ermis-border-color, #d7dde5);
+  border-radius: 8px;
+  color: var(--ermis-text-color, #111827);
+  font-size: 14px;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.ermis-recovery-pin__button {
+  align-items: center;
+  background: var(--ermis-primary-color, #2563eb);
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 600;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 12px;
+}
+
+.ermis-recovery-pin__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ermis-recovery-pin__error,
+.ermis-recovery-gap {
+  background: var(--ermis-danger-bg, #fff1f2);
+  border: 1px solid var(--ermis-danger-border, #fecdd3);
+  border-radius: 8px;
+  color: var(--ermis-danger-color, #be123c);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 10px;
+}
+
+.ermis-recovery-status--ready {
+  background: var(--ermis-success-bg, #ecfdf5);
+  border-color: var(--ermis-success-border, #bbf7d0);
+  color: var(--ermis-success-color, #047857);
+}
+
+.ermis-recovery-status--working {
+  background: var(--ermis-info-bg, #eff6ff);
+  border-color: var(--ermis-info-border, #bfdbfe);
+  color: var(--ermis-info-color, #1d4ed8);
+}
+
+.ermis-recovery-status--locked,
+.ermis-recovery-status--idle {
+  background: var(--ermis-muted-bg, #f8fafc);
+}
+
+.ermis-recovery-status--error {
+  background: var(--ermis-danger-bg, #fff1f2);
+  border-color: var(--ermis-danger-border, #fecdd3);
+  color: var(--ermis-danger-color, #be123c);
+}

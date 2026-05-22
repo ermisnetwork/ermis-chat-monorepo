@@ -166,11 +166,40 @@ function debugString(val) {
     // TODO we could test for more things here, like `Set`s and `Map`s.
     return className;
 }
-/**
- * Test function to verify the module is working
- */
-export function greet() {
-    wasm.greet();
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
+function takeFromExternrefTable0(idx) {
+    const value = wasm.__wbindgen_export_2.get(idx);
+    wasm.__externref_table_dealloc(idx);
+    return value;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getDataViewMemory0();
+    const result = [];
+    for (let i = ptr; i < ptr + 4 * len; i += 4) {
+        result.push(wasm.__wbindgen_export_2.get(mem.getUint32(i, true)));
+    }
+    wasm.__externref_drop_slice(ptr, len);
+    return result;
 }
 
 function passArrayJsValueToWasm0(array, malloc) {
@@ -182,6 +211,238 @@ function passArrayJsValueToWasm0(array, malloc) {
     WASM_VECTOR_LEN = array.length;
     return ptr;
 }
+
+let cachedUint32ArrayMemory0 = null;
+
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
+}
+
+function passArray32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+/**
+ * Validate raw key package bytes without constructing a KeyPackage object.
+ *
+ * Performs full validation: TLS deserialization, signature verification,
+ * protocol version check, lifetime check, init_key ≠ encryption_key.
+ *
+ * # Arguments
+ * * `bytes` - TLS-serialized KeyPackage bytes (from server API)
+ *
+ * # Returns
+ * `true` if the KeyPackage is valid, `false` otherwise.
+ *
+ * # Example
+ * ```javascript
+ * const isValid = validate_key_package_bytes(kpBytes);
+ * if (!isValid) console.warn("Invalid KeyPackage!");
+ * ```
+ * @param {Uint8Array} bytes
+ * @returns {boolean}
+ */
+export function validate_key_package_bytes(bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.validate_key_package_bytes(ptr0, len0);
+    return ret !== 0;
+}
+
+/**
+ * @param {Provider} provider
+ * @returns {RecoveryKeypair}
+ */
+export function generate_recovery_keypair(provider) {
+    _assertClass(provider, Provider);
+    const ret = wasm.generate_recovery_keypair(provider.__wbg_ptr);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return RecoveryKeypair.__wrap(ret[0]);
+}
+
+/**
+ * @param {Provider} provider
+ * @param {Uint8Array} adk
+ * @param {Uint8Array} ciphertext
+ * @param {Uint8Array} nonce
+ * @param {Uint8Array} aead_aad
+ * @returns {Uint8Array}
+ */
+export function decrypt_archive_blob(provider, adk, ciphertext, nonce, aead_aad) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(adk, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(nonce, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(aead_aad, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.decrypt_archive_blob(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v5 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v5;
+}
+
+/**
+ * @param {Provider} provider
+ * @param {Uint8Array} archive_bytes
+ * @param {ArchiveBlobAad} aad
+ * @returns {EncryptedArchiveBlob}
+ */
+export function encrypt_archive_blob(provider, archive_bytes, aad) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(archive_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    _assertClass(aad, ArchiveBlobAad);
+    const ret = wasm.encrypt_archive_blob(provider.__wbg_ptr, ptr0, len0, aad.__wbg_ptr);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return EncryptedArchiveBlob.__wrap(ret[0]);
+}
+
+/**
+ * @param {Provider} provider
+ * @param {Uint8Array} recovery_private_key
+ * @param {Uint8Array} kem_output
+ * @param {Uint8Array} ciphertext
+ * @param {Uint8Array} hpke_info
+ * @returns {Uint8Array}
+ */
+export function unwrap_archive_data_key_from_parts(provider, recovery_private_key, kem_output, ciphertext, hpke_info) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(recovery_private_key, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(kem_output, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(hpke_info, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.unwrap_archive_data_key_from_parts(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v5 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v5;
+}
+
+/**
+ * @param {Provider} provider
+ * @param {Uint8Array} adk
+ * @param {Uint8Array} recipient_recovery_public_key
+ * @param {ArchiveKeyWrapInfo} info
+ * @returns {HpkeWrappedArchiveDataKey}
+ */
+export function wrap_archive_data_key(provider, adk, recipient_recovery_public_key, info) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(adk, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(recipient_recovery_public_key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    _assertClass(info, ArchiveKeyWrapInfo);
+    const ret = wasm.wrap_archive_data_key(provider.__wbg_ptr, ptr0, len0, ptr1, len1, info.__wbg_ptr);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return HpkeWrappedArchiveDataKey.__wrap(ret[0]);
+}
+
+/**
+ * @param {Provider} provider
+ * @param {string} pin
+ * @param {Uint8Array} private_key
+ * @param {Uint8Array} public_key
+ * @param {string} key_id
+ * @param {number} ciphersuite
+ * @param {number} iterations
+ * @returns {WrappedRecoveryKey}
+ */
+export function wrap_recovery_private_key(provider, pin, private_key, public_key, key_id, ciphersuite, iterations) {
+    _assertClass(provider, Provider);
+    const ptr0 = passStringToWasm0(pin, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(private_key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(public_key, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passStringToWasm0(key_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.wrap_recovery_private_key(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ciphersuite, iterations);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return WrappedRecoveryKey.__wrap(ret[0]);
+}
+
+/**
+ * @param {Provider} provider
+ * @param {Uint8Array} recovery_private_key
+ * @param {HpkeWrappedArchiveDataKey} wrapped
+ * @returns {Uint8Array}
+ */
+export function unwrap_archive_data_key(provider, recovery_private_key, wrapped) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(recovery_private_key, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    _assertClass(wrapped, HpkeWrappedArchiveDataKey);
+    const ret = wasm.unwrap_archive_data_key(provider.__wbg_ptr, ptr0, len0, wrapped.__wbg_ptr);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * @param {Provider} provider
+ * @param {string} pin
+ * @param {WrappedRecoveryKey} wrapped
+ * @returns {Uint8Array}
+ */
+export function unwrap_recovery_private_key(provider, pin, wrapped) {
+    _assertClass(provider, Provider);
+    const ptr0 = passStringToWasm0(pin, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    _assertClass(wrapped, WrappedRecoveryKey);
+    const ret = wasm.unwrap_recovery_private_key(provider.__wbg_ptr, ptr0, len0, wrapped.__wbg_ptr);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Test function to verify the module is working
+ */
+export function greet() {
+    wasm.greet();
+}
+
+/**
+ * Initialize the WASM module
+ *
+ * Call this once at startup to set up panic hooks for better error messages.
+ */
+export function init() {
+    wasm.init();
+}
+
 /**
  * Compute the deterministic channel_id for E2EE Messaging (DM) channels.
  *
@@ -224,90 +485,74 @@ export function hash_channel_id(project_id, user_ids) {
 }
 
 /**
- * Initialize the WASM module
- *
- * Call this once at startup to set up panic hooks for better error messages.
+ * Decrypt and verify an MLS private message using a V2 archive + snapshot.
+ * @param {Provider} provider
+ * @param {Uint8Array} archive
+ * @param {Uint8Array} snapshot
+ * @param {Uint8Array} ciphertext
+ * @param {boolean} allow_own_messages
+ * @param {number} max_forward_distance
+ * @returns {ArchivedMessage}
  */
-export function init() {
-    wasm.init();
-}
-
-function getArrayU8FromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
-}
-
-function _assertClass(instance, klass) {
-    if (!(instance instanceof klass)) {
-        throw new Error(`expected instance of ${klass.name}`);
-    }
-}
-
-function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
-
-function takeFromExternrefTable0(idx) {
-    const value = wasm.__wbindgen_export_2.get(idx);
-    wasm.__externref_table_dealloc(idx);
-    return value;
-}
-
-function getArrayJsValueFromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    const mem = getDataViewMemory0();
-    const result = [];
-    for (let i = ptr; i < ptr + 4 * len; i += 4) {
-        result.push(wasm.__wbindgen_export_2.get(mem.getUint32(i, true)));
-    }
-    wasm.__externref_drop_slice(ptr, len);
-    return result;
-}
-/**
- * Validate raw key package bytes without constructing a KeyPackage object.
- *
- * Performs full validation: TLS deserialization, signature verification,
- * protocol version check, lifetime check, init_key ≠ encryption_key.
- *
- * # Arguments
- * * `bytes` - TLS-serialized KeyPackage bytes (from server API)
- *
- * # Returns
- * `true` if the KeyPackage is valid, `false` otherwise.
- *
- * # Example
- * ```javascript
- * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) console.warn("Invalid KeyPackage!");
- * ```
- * @param {Uint8Array} bytes
- * @returns {boolean}
- */
-export function validate_key_package_bytes(bytes) {
-    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+export function decrypt_with_epoch_archive_v2(provider, archive, snapshot, ciphertext, allow_own_messages, max_forward_distance) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(archive, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.validate_key_package_bytes(ptr0, len0);
-    return ret !== 0;
-}
-
-let cachedUint32ArrayMemory0 = null;
-
-function getUint32ArrayMemory0() {
-    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
-        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    const ptr1 = passArray8ToWasm0(snapshot, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.decrypt_with_epoch_archive_v2(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, allow_own_messages, max_forward_distance);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
-    return cachedUint32ArrayMemory0;
+    return ArchivedMessage.__wrap(ret[0]);
 }
 
-function passArray32ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 4, 4) >>> 0;
-    getUint32ArrayMemory0().set(arg, ptr / 4);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
+/**
+ * Decrypt sender data using an archived epoch without consuming the message ratchet.
+ * @param {Provider} provider
+ * @param {Uint8Array} archive
+ * @param {Uint8Array} ciphertext
+ * @returns {ArchivedSenderData}
+ */
+export function peek_sender_data_from_archive(provider, archive, ciphertext) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(archive, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.peek_sender_data_from_archive(provider.__wbg_ptr, ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ArchivedSenderData.__wrap(ret[0]);
 }
+
+/**
+ * Decrypt and verify an MLS private message using archived epoch state.
+ *
+ * `max_forward_distance` uses `0` as "use archive default".
+ * @param {Provider} provider
+ * @param {Uint8Array} archive
+ * @param {Uint8Array} ciphertext
+ * @param {boolean} allow_own_messages
+ * @param {number} max_forward_distance
+ * @returns {ArchivedMessage}
+ */
+export function decrypt_with_epoch_archive(provider, archive, ciphertext, allow_own_messages, max_forward_distance) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(archive, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.decrypt_with_epoch_archive(provider.__wbg_ptr, ptr0, len0, ptr1, len1, allow_own_messages, max_forward_distance);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ArchivedMessage.__wrap(ret[0]);
+}
+
 /**
  * Type of processed message
  * @enum {0 | 1 | 2}
@@ -439,6 +684,271 @@ export class AddMessages {
     }
 }
 
+const ArchiveBlobAadFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_archiveblobaad_free(ptr >>> 0, 1));
+
+export class ArchiveBlobAad {
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        ArchiveBlobAadFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_archiveblobaad_free(ptr, 0);
+    }
+    /**
+     * @param {string} cid
+     * @param {bigint} epoch
+     * @param {string} scope
+     * @param {string} blob_id
+     * @param {string} snapshot_hash
+     */
+    constructor(cid, epoch, scope, blob_id, snapshot_hash) {
+        const ptr0 = passStringToWasm0(cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(scope, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(blob_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(snapshot_hash, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.archiveblobaad_new(ptr0, len0, epoch, ptr1, len1, ptr2, len2, ptr3, len3);
+        this.__wbg_ptr = ret >>> 0;
+        ArchiveBlobAadFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    to_bytes() {
+        const ret = wasm.archiveblobaad_to_bytes(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+
+const ArchiveKeyWrapInfoFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_archivekeywrapinfo_free(ptr >>> 0, 1));
+
+export class ArchiveKeyWrapInfo {
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        ArchiveKeyWrapInfoFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_archivekeywrapinfo_free(ptr, 0);
+    }
+    /**
+     * @param {string} channel_id
+     * @param {bigint} epoch
+     * @param {string} scope
+     * @param {string} blob_id
+     * @param {string} snapshot_hash
+     * @param {string} recipient_key_id
+     */
+    constructor(channel_id, epoch, scope, blob_id, snapshot_hash, recipient_key_id) {
+        const ptr0 = passStringToWasm0(channel_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(scope, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(blob_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(snapshot_hash, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passStringToWasm0(recipient_key_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.archivekeywrapinfo_new(ptr0, len0, epoch, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+        this.__wbg_ptr = ret >>> 0;
+        ArchiveKeyWrapInfoFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    to_bytes() {
+        const ret = wasm.archivekeywrapinfo_to_bytes(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+
+const ArchivedMessageFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_archivedmessage_free(ptr >>> 0, 1));
+/**
+ * Application plaintext recovered from an archived epoch.
+ */
+export class ArchivedMessage {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(ArchivedMessage.prototype);
+        obj.__wbg_ptr = ptr;
+        ArchivedMessageFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        ArchivedMessageFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_archivedmessage_free(ptr, 0);
+    }
+    /**
+     * Get the sender ratchet generation.
+     * @returns {number}
+     */
+    get generation() {
+        const ret = wasm.archivedmessage_generation(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Whether this message was sent by the archive owner's own leaf.
+     * @returns {boolean}
+     */
+    get own_message() {
+        const ret = wasm.archivedmessage_own_message(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Get the sender's leaf index.
+     * @returns {number}
+     */
+    get sender_index() {
+        const ret = wasm.archivedmessage_sender_index(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Get the additional authenticated data.
+     * @returns {Uint8Array}
+     */
+    get aad() {
+        const ret = wasm.archivedmessage_aad(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Get the MLS epoch.
+     * @returns {bigint}
+     */
+    get epoch() {
+        const ret = wasm.archivedmessage_epoch(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * Get the decrypted application content.
+     * @returns {Uint8Array}
+     */
+    get content() {
+        const ret = wasm.archivedmessage_content(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+
+const ArchivedSenderDataFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_archivedsenderdata_free(ptr >>> 0, 1));
+/**
+ * Sender data decoded from an archived epoch.
+ */
+export class ArchivedSenderData {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(ArchivedSenderData.prototype);
+        obj.__wbg_ptr = ptr;
+        ArchivedSenderDataFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        ArchivedSenderDataFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_archivedsenderdata_free(ptr, 0);
+    }
+    /**
+     * Get the sender ratchet generation.
+     * @returns {number}
+     */
+    get generation() {
+        const ret = wasm.archivedsenderdata_generation(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Whether this message was sent by the archive owner's own leaf.
+     * @returns {boolean}
+     */
+    get own_message() {
+        const ret = wasm.archivedsenderdata_own_message(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Get the MLS content type.
+     * @returns {string}
+     */
+    get content_type() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.archivedsenderdata_content_type(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Get the sender's leaf index.
+     * @returns {number}
+     */
+    get sender_index() {
+        const ret = wasm.archivedsenderdata_sender_index(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Get the MLS epoch.
+     * @returns {bigint}
+     */
+    get epoch() {
+        const ret = wasm.archivedmessage_epoch(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+}
+
 const CommitBundleFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_commitbundle_free(ptr >>> 0, 1));
@@ -528,6 +1038,123 @@ export class CommitBundle {
     }
 }
 
+const EncryptedArchiveBlobFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_encryptedarchiveblob_free(ptr >>> 0, 1));
+
+export class EncryptedArchiveBlob {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(EncryptedArchiveBlob.prototype);
+        obj.__wbg_ptr = ptr;
+        EncryptedArchiveBlobFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        EncryptedArchiveBlobFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_encryptedarchiveblob_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get ciphertext() {
+        const ret = wasm.encryptedarchiveblob_ciphertext(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get adk() {
+        const ret = wasm.encryptedarchiveblob_adk(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get nonce() {
+        const ret = wasm.encryptedarchiveblob_nonce(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get aead_aad() {
+        const ret = wasm.encryptedarchiveblob_aead_aad(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+
+const ExportedEpochArchiveV2Finalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_exportedepocharchivev2_free(ptr >>> 0, 1));
+
+export class ExportedEpochArchiveV2 {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(ExportedEpochArchiveV2.prototype);
+        obj.__wbg_ptr = ptr;
+        ExportedEpochArchiveV2Finalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        ExportedEpochArchiveV2Finalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_exportedepocharchivev2_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get archive_bytes() {
+        const ret = wasm.exportedepocharchivev2_archive_bytes(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get snapshot_hash() {
+        const ret = wasm.exportedepocharchivev2_snapshot_hash(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get snapshot_bytes() {
+        const ret = wasm.exportedepocharchivev2_snapshot_bytes(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+
 const ExternalJoinResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_externaljoinresult_free(ptr >>> 0, 1));
@@ -603,6 +1230,185 @@ export class Group {
         wasm.__wbg_group_free(ptr, 0);
     }
     /**
+     * Create a new group (legacy API, uses group_id string directly)
+     * @param {Provider} provider
+     * @param {Identity} founder
+     * @param {string} group_id
+     * @returns {Group}
+     */
+    static create_new(provider, founder, group_id) {
+        _assertClass(provider, Provider);
+        _assertClass(founder, Identity);
+        const ptr0 = passStringToWasm0(group_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_create_new(provider.__wbg_ptr, founder.__wbg_ptr, ptr0, len0);
+        return Group.__wrap(ret);
+    }
+    /**
+     * Persist the group's current state to the Provider's storage.
+     *
+     * MUST be called after processing application messages (decrypt) to save
+     * the updated ratchet/secret tree state. Without this, a Provider restore
+     * (e.g., on page reload) will load stale ratchet state, causing
+     * SecretReuseError for messages that were already decrypted.
+     * @param {Provider} provider
+     */
+    save_state(provider) {
+        _assertClass(provider, Provider);
+        const ret = wasm.group_save_state(this.__wbg_ptr, provider.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Delete this group's persisted OpenMLS state from the Provider storage.
+     *
+     * Use when the local user leaves or is removed from a channel. This clears
+     * the old MLS group state so a later re-add with the same CID can join from
+     * a fresh Welcome without colliding with stale provider records.
+     * @param {Provider} provider
+     */
+    delete_state(provider) {
+        _assertClass(provider, Provider);
+        const ret = wasm.group_delete_state(this.__wbg_ptr, provider.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Join a group via External Commit
+     *
+     * This allows a user to join a group without needing a Welcome message,
+     * using only the GroupInfo.
+     *
+     * # Arguments
+     * * `provider` - Crypto provider
+     * * `identity` - Identity of the joiner
+     * * `group_info` - Serialized GroupInfo bytes
+     * * `ratchet_tree` - Optional ratchet tree
+     *
+     * # Returns
+     * ExternalJoinResult containing the joined group and commit message to broadcast
+     * @param {Provider} provider
+     * @param {Identity} identity
+     * @param {Uint8Array} group_info
+     * @param {RatchetTree | null} [ratchet_tree]
+     * @returns {ExternalJoinResult}
+     */
+    static join_external(provider, identity, group_info, ratchet_tree) {
+        _assertClass(provider, Provider);
+        _assertClass(identity, Identity);
+        const ptr0 = passArray8ToWasm0(group_info, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        let ptr1 = 0;
+        if (!isLikeNone(ratchet_tree)) {
+            _assertClass(ratchet_tree, RatchetTree);
+            ptr1 = ratchet_tree.__destroy_into_raw();
+        }
+        const ret = wasm.group_join_external(provider.__wbg_ptr, identity.__wbg_ptr, ptr0, len0, ptr1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ExternalJoinResult.__wrap(ret[0]);
+    }
+    /**
+     * Create a new group with a CID from Ermis
+     *
+     * # Arguments
+     * * `provider` - Crypto provider
+     * * `founder` - Identity of the group creator
+     * * `cid` - Channel ID from Ermis (e.g., "team:channel_abc123")
+     *
+     * # Example
+     * ```javascript
+     * const group = Group.create_with_cid(provider, identity, "team:my_channel");
+     * ```
+     * @param {Provider} provider
+     * @param {Identity} founder
+     * @param {string} cid
+     * @returns {Group}
+     */
+    static create_with_cid(provider, founder, cid) {
+        _assertClass(provider, Provider);
+        _assertClass(founder, Identity);
+        const ptr0 = passStringToWasm0(cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_create_with_cid(provider.__wbg_ptr, founder.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
+     * Join a group using a Welcome message
+     *
+     * # Arguments
+     * * `provider` - Crypto provider
+     * * `welcome` - Serialized Welcome message bytes
+     * * `ratchet_tree` - Optional ratchet tree (if not embedded in welcome)
+     * @param {Provider} provider
+     * @param {Uint8Array} welcome
+     * @param {RatchetTree | null} [ratchet_tree]
+     * @returns {Group}
+     */
+    static join_with_welcome(provider, welcome, ratchet_tree) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        let ptr1 = 0;
+        if (!isLikeNone(ratchet_tree)) {
+            _assertClass(ratchet_tree, RatchetTree);
+            ptr1 = ratchet_tree.__destroy_into_raw();
+        }
+        const ret = wasm.group_join_with_welcome(provider.__wbg_ptr, ptr0, len0, ptr1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
+     * Join a group using a Welcome (legacy API)
+     * @param {Provider} provider
+     * @param {Uint8Array} welcome
+     * @param {RatchetTree} ratchet_tree
+     * @returns {Group}
+     */
+    static join(provider, welcome, ratchet_tree) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        _assertClass(ratchet_tree, RatchetTree);
+        var ptr1 = ratchet_tree.__destroy_into_raw();
+        const ret = wasm.group_join(provider.__wbg_ptr, ptr0, len0, ptr1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
+     * Load a group from the Provider's storage by CID
+     *
+     * After restoring a Provider from bytes (IndexedDB), call this to reopen
+     * a group that was previously created or joined.
+     *
+     * # Arguments
+     * * `provider` - Crypto provider (restored from bytes)
+     * * `cid` - Channel ID (e.g., "team:channel_abc123")
+     * @param {Provider} provider
+     * @param {string} cid
+     * @returns {Group}
+     */
+    static load(provider, cid) {
+        _assertClass(provider, Provider);
+        const ptr0 = passStringToWasm0(cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_load(provider.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
      * Export a secret key derived from the group state
      *
      * Useful for deriving encryption keys for media streams, etc.
@@ -643,6 +1449,17 @@ export class Group {
     own_leaf_index() {
         const ret = wasm.group_own_leaf_index(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * Export V2 archive bytes plus canonical member snapshot.
+     * @returns {ExportedEpochArchiveV2}
+     */
+    archive_epoch_v2() {
+        const ret = wasm.group_archive_epoch_v2(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ExportedEpochArchiveV2.__wrap(ret[0]);
     }
     /**
      * Export group info for external commits
@@ -709,6 +1526,23 @@ export class Group {
         return RatchetTree.__wrap(ret);
     }
     /**
+     * Export the current epoch archive for historical message recovery.
+     *
+     * The returned bytes contain MLS secret material. Applications must encrypt
+     * them with their PIN/vault key before uploading or persisting outside the
+     * local device.
+     * @returns {Uint8Array}
+     */
+    archive_current_epoch() {
+        const ret = wasm.group_archive_current_epoch(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * Get the CID (group_id as string)
      *
      * This returns the original cid string used to create the group,
@@ -762,6 +1596,271 @@ export class Group {
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
+    }
+    /**
+     * Add members and commit immediately (convenience method)
+     *
+     * Use this when you want to add members without batching.
+     * For batch operations, use `propose_add_member` + `commit_pending_proposals`.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {KeyPackage[]} new_members
+     * @returns {CommitBundle}
+     */
+    add_members(provider, sender, new_members) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passArrayJsValueToWasm0(new_members, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_add_members(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Remove ALL devices of a user by user_id and commit immediately
+     *
+     * A user with N devices will have N leaf nodes in the group.
+     * This method finds all of them and removes them in a single commit.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {string} user_id
+     * @returns {CommitBundle}
+     */
+    remove_user(provider, sender, user_id) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passStringToWasm0(user_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_remove_user(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Key rotation with immediate commit (convenience method)
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @returns {CommitBundle}
+     */
+    self_update(provider, sender) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ret = wasm.group_self_update(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Remove multiple users (all their devices) and commit immediately
+     *
+     * Each user_id may have multiple leaf nodes (devices).
+     * This method finds ALL leaf nodes for ALL specified users
+     * and removes them in a single commit.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {string[]} user_ids
+     * @returns {CommitBundle}
+     */
+    remove_users(provider, sender, user_ids) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passArrayJsValueToWasm0(user_ids, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_remove_users(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Remove members and commit immediately (convenience method)
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {Uint32Array} member_indices
+     * @returns {CommitBundle}
+     */
+    remove_members(provider, sender, member_indices) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passArray32ToWasm0(member_indices, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_remove_members(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Discard the pending commit (rollback)
+     * @param {Provider} provider
+     */
+    clear_pending_commit(provider) {
+        _assertClass(provider, Provider);
+        const ret = wasm.group_clear_pending_commit(this.__wbg_ptr, provider.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Create one inline commit containing removals, adds, and/or a self-update.
+     *
+     * This API uses `commit_builder().consume_proposal_store(false)` so the
+     * resulting commit contains only the changes requested by this call. The
+     * remove/add proposals are owned by the commit and encoded by value, which
+     * avoids receivers depending on standalone proposal messages being delivered
+     * before the commit.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {string[]} remove_user_ids
+     * @param {KeyPackage[]} add_members
+     * @param {boolean} force_self_update
+     * @returns {CommitBundle}
+     */
+    commit_group_changes(provider, sender, remove_user_ids, add_members, force_self_update) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passArrayJsValueToWasm0(remove_user_ids, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayJsValueToWasm0(add_members, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.group_commit_group_changes(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0, ptr1, len1, force_self_update);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Merge the pending commit after DS confirmation
+     * @param {Provider} provider
+     */
+    merge_pending_commit(provider) {
+        _assertClass(provider, Provider);
+        const ret = wasm.group_merge_pending_commit(this.__wbg_ptr, provider.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Create one inline commit that removes one or more members.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {string[]} remove_user_ids
+     * @returns {CommitBundle}
+     */
+    commit_member_removals(provider, sender, remove_user_ids) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passArrayJsValueToWasm0(remove_user_ids, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_commit_member_removals(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Combined propose and commit for adding a single member
+     * This is kept for backwards compatibility with demo code
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {KeyPackage} new_member
+     * @returns {AddMessages}
+     */
+    propose_and_commit_add(provider, sender, new_member) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        _assertClass(new_member, KeyPackage);
+        const ret = wasm.group_propose_and_commit_add(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, new_member.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return AddMessages.__wrap(ret[0]);
+    }
+    /**
+     * Commit all pending proposals
+     *
+     * This creates a commit message that includes all queued proposals.
+     * Use `merge_pending_commit` after the DS confirms the commit.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @returns {CommitBundle}
+     */
+    commit_pending_proposals(provider, sender) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ret = wasm.group_commit_pending_proposals(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Create one inline commit that removes stale members and adds new members.
+     *
+     * This is an intent-specific wrapper for SDK callsites. It intentionally
+     * shares the implementation of `commit_group_changes` so duplicate
+     * add/remove validation cannot drift.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {string[]} remove_user_ids
+     * @param {KeyPackage[]} add_members
+     * @returns {CommitBundle}
+     */
+    commit_member_add_with_removals(provider, sender, remove_user_ids, add_members) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passArrayJsValueToWasm0(remove_user_ids, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayJsValueToWasm0(add_members, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.group_commit_member_add_with_removals(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Create one inline commit that removes stale members and rotates the sender leaf.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {string[]} remove_user_ids
+     * @returns {CommitBundle}
+     */
+    commit_self_update_with_removals(provider, sender, remove_user_ids) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passArrayJsValueToWasm0(remove_user_ids, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_commit_self_update_with_removals(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
+    }
+    /**
+     * Add a user with multiple devices and commit immediately
+     *
+     * Each KeyPackage represents one device of the same user.
+     * All devices are added in a single commit.
+     * @param {Provider} provider
+     * @param {Identity} sender
+     * @param {KeyPackage[]} device_key_packages
+     * @returns {CommitBundle}
+     */
+    add_user(provider, sender, device_key_packages) {
+        _assertClass(provider, Provider);
+        _assertClass(sender, Identity);
+        const ptr0 = passArrayJsValueToWasm0(device_key_packages, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_add_user(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitBundle.__wrap(ret[0]);
     }
     /**
      * Leave the group by creating a self-remove proposal
@@ -1045,447 +2144,91 @@ export class Group {
         const len0 = WASM_VECTOR_LEN;
         wasm.group_set_aad(this.__wbg_ptr, ptr0, len0);
     }
+}
+
+const HpkeWrappedArchiveDataKeyFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_hpkewrappedarchivedatakey_free(ptr >>> 0, 1));
+
+export class HpkeWrappedArchiveDataKey {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(HpkeWrappedArchiveDataKey.prototype);
+        obj.__wbg_ptr = ptr;
+        HpkeWrappedArchiveDataKeyFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        HpkeWrappedArchiveDataKeyFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_hpkewrappedarchivedatakey_free(ptr, 0);
+    }
     /**
-     * Create a new group (legacy API, uses group_id string directly)
-     * @param {Provider} provider
-     * @param {Identity} founder
-     * @param {string} group_id
-     * @returns {Group}
+     * @returns {Uint8Array}
      */
-    static create_new(provider, founder, group_id) {
-        _assertClass(provider, Provider);
-        _assertClass(founder, Identity);
-        const ptr0 = passStringToWasm0(group_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    get ciphertext() {
+        const ret = wasm.hpkewrappedarchivedatakey_ciphertext(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @param {Uint8Array} bytes
+     * @returns {HpkeWrappedArchiveDataKey}
+     */
+    static from_bytes(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_create_new(provider.__wbg_ptr, founder.__wbg_ptr, ptr0, len0);
-        return Group.__wrap(ret);
-    }
-    /**
-     * Persist the group's current state to the Provider's storage.
-     *
-     * MUST be called after processing application messages (decrypt) to save
-     * the updated ratchet/secret tree state. Without this, a Provider restore
-     * (e.g., on page reload) will load stale ratchet state, causing
-     * SecretReuseError for messages that were already decrypted.
-     * @param {Provider} provider
-     */
-    save_state(provider) {
-        _assertClass(provider, Provider);
-        const ret = wasm.group_save_state(this.__wbg_ptr, provider.__wbg_ptr);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
-     * Delete this group's persisted OpenMLS state from the Provider storage.
-     *
-     * Use when the local user leaves or is removed from a channel. This clears
-     * the old MLS group state so a later re-add with the same CID can join from
-     * a fresh Welcome without colliding with stale provider records.
-     * @param {Provider} provider
-     */
-    delete_state(provider) {
-        _assertClass(provider, Provider);
-        const ret = wasm.group_delete_state(this.__wbg_ptr, provider.__wbg_ptr);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
-     * Join a group via External Commit
-     *
-     * This allows a user to join a group without needing a Welcome message,
-     * using only the GroupInfo.
-     *
-     * # Arguments
-     * * `provider` - Crypto provider
-     * * `identity` - Identity of the joiner
-     * * `group_info` - Serialized GroupInfo bytes
-     * * `ratchet_tree` - Optional ratchet tree
-     *
-     * # Returns
-     * ExternalJoinResult containing the joined group and commit message to broadcast
-     * @param {Provider} provider
-     * @param {Identity} identity
-     * @param {Uint8Array} group_info
-     * @param {RatchetTree | null} [ratchet_tree]
-     * @returns {ExternalJoinResult}
-     */
-    static join_external(provider, identity, group_info, ratchet_tree) {
-        _assertClass(provider, Provider);
-        _assertClass(identity, Identity);
-        const ptr0 = passArray8ToWasm0(group_info, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        let ptr1 = 0;
-        if (!isLikeNone(ratchet_tree)) {
-            _assertClass(ratchet_tree, RatchetTree);
-            ptr1 = ratchet_tree.__destroy_into_raw();
-        }
-        const ret = wasm.group_join_external(provider.__wbg_ptr, identity.__wbg_ptr, ptr0, len0, ptr1);
+        const ret = wasm.hpkewrappedarchivedatakey_from_bytes(ptr0, len0);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
-        return ExternalJoinResult.__wrap(ret[0]);
+        return HpkeWrappedArchiveDataKey.__wrap(ret[0]);
     }
     /**
-     * Create a new group with a CID from Ermis
-     *
-     * # Arguments
-     * * `provider` - Crypto provider
-     * * `founder` - Identity of the group creator
-     * * `cid` - Channel ID from Ermis (e.g., "team:channel_abc123")
-     *
-     * # Example
-     * ```javascript
-     * const group = Group.create_with_cid(provider, identity, "team:my_channel");
-     * ```
-     * @param {Provider} provider
-     * @param {Identity} founder
-     * @param {string} cid
-     * @returns {Group}
+     * @returns {Uint8Array}
      */
-    static create_with_cid(provider, founder, cid) {
-        _assertClass(provider, Provider);
-        _assertClass(founder, Identity);
-        const ptr0 = passStringToWasm0(cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_create_with_cid(provider.__wbg_ptr, founder.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return Group.__wrap(ret[0]);
+    get kem_output() {
+        const ret = wasm.hpkewrappedarchivedatakey_kem_output(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
-     * Join a group using a Welcome message
-     *
-     * # Arguments
-     * * `provider` - Crypto provider
-     * * `welcome` - Serialized Welcome message bytes
-     * * `ratchet_tree` - Optional ratchet tree (if not embedded in welcome)
-     * @param {Provider} provider
-     * @param {Uint8Array} welcome
-     * @param {RatchetTree | null} [ratchet_tree]
-     * @returns {Group}
+     * @returns {number}
      */
-    static join_with_welcome(provider, welcome, ratchet_tree) {
-        _assertClass(provider, Provider);
-        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        let ptr1 = 0;
-        if (!isLikeNone(ratchet_tree)) {
-            _assertClass(ratchet_tree, RatchetTree);
-            ptr1 = ratchet_tree.__destroy_into_raw();
-        }
-        const ret = wasm.group_join_with_welcome(provider.__wbg_ptr, ptr0, len0, ptr1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return Group.__wrap(ret[0]);
+    get ciphersuite() {
+        const ret = wasm.hpkewrappedarchivedatakey_ciphersuite(this.__wbg_ptr);
+        return ret;
     }
     /**
-     * Join a group using a Welcome (legacy API)
-     * @param {Provider} provider
-     * @param {Uint8Array} welcome
-     * @param {RatchetTree} ratchet_tree
-     * @returns {Group}
+     * @returns {Uint8Array}
      */
-    static join(provider, welcome, ratchet_tree) {
-        _assertClass(provider, Provider);
-        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        _assertClass(ratchet_tree, RatchetTree);
-        var ptr1 = ratchet_tree.__destroy_into_raw();
-        const ret = wasm.group_join(provider.__wbg_ptr, ptr0, len0, ptr1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
+    to_bytes() {
+        const ret = wasm.hpkewrappedarchivedatakey_to_bytes(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
         }
-        return Group.__wrap(ret[0]);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
-     * Load a group from the Provider's storage by CID
-     *
-     * After restoring a Provider from bytes (IndexedDB), call this to reopen
-     * a group that was previously created or joined.
-     *
-     * # Arguments
-     * * `provider` - Crypto provider (restored from bytes)
-     * * `cid` - Channel ID (e.g., "team:channel_abc123")
-     * @param {Provider} provider
-     * @param {string} cid
-     * @returns {Group}
+     * @returns {Uint8Array}
      */
-    static load(provider, cid) {
-        _assertClass(provider, Provider);
-        const ptr0 = passStringToWasm0(cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_load(provider.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return Group.__wrap(ret[0]);
-    }
-    /**
-     * Add members and commit immediately (convenience method)
-     *
-     * Use this when you want to add members without batching.
-     * For batch operations, use `propose_add_member` + `commit_pending_proposals`.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {KeyPackage[]} new_members
-     * @returns {CommitBundle}
-     */
-    add_members(provider, sender, new_members) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passArrayJsValueToWasm0(new_members, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_add_members(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Remove ALL devices of a user by user_id and commit immediately
-     *
-     * A user with N devices will have N leaf nodes in the group.
-     * This method finds all of them and removes them in a single commit.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {string} user_id
-     * @returns {CommitBundle}
-     */
-    remove_user(provider, sender, user_id) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passStringToWasm0(user_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_remove_user(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Key rotation with immediate commit (convenience method)
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @returns {CommitBundle}
-     */
-    self_update(provider, sender) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ret = wasm.group_self_update(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Remove multiple users (all their devices) and commit immediately
-     *
-     * Each user_id may have multiple leaf nodes (devices).
-     * This method finds ALL leaf nodes for ALL specified users
-     * and removes them in a single commit.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {string[]} user_ids
-     * @returns {CommitBundle}
-     */
-    remove_users(provider, sender, user_ids) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passArrayJsValueToWasm0(user_ids, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_remove_users(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Remove members and commit immediately (convenience method)
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {Uint32Array} member_indices
-     * @returns {CommitBundle}
-     */
-    remove_members(provider, sender, member_indices) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passArray32ToWasm0(member_indices, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_remove_members(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Discard the pending commit (rollback)
-     * @param {Provider} provider
-     */
-    clear_pending_commit(provider) {
-        _assertClass(provider, Provider);
-        const ret = wasm.group_clear_pending_commit(this.__wbg_ptr, provider.__wbg_ptr);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
-     * Create one inline commit containing removals, adds, and/or a self-update.
-     *
-     * This POC API intentionally uses `commit_builder().consume_proposal_store(false)` so the
-     * resulting commit contains only the changes requested by this call. The remove/add proposals
-     * are owned by the commit and encoded by value, which avoids receivers depending on standalone
-     * proposal messages being delivered before the commit.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {string[]} remove_user_ids
-     * @param {KeyPackage[]} add_members
-     * @param {boolean} force_self_update
-     * @returns {CommitBundle}
-     */
-    commit_group_changes(provider, sender, remove_user_ids, add_members, force_self_update) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passArrayJsValueToWasm0(remove_user_ids, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayJsValueToWasm0(add_members, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.group_commit_group_changes(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0, ptr1, len1, force_self_update);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Merge the pending commit after DS confirmation
-     * @param {Provider} provider
-     */
-    merge_pending_commit(provider) {
-        _assertClass(provider, Provider);
-        const ret = wasm.group_merge_pending_commit(this.__wbg_ptr, provider.__wbg_ptr);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
-     * Create one inline commit that removes one or more members.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {string[]} remove_user_ids
-     * @returns {CommitBundle}
-     */
-    commit_member_removals(provider, sender, remove_user_ids) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passArrayJsValueToWasm0(remove_user_ids, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_commit_member_removals(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Combined propose and commit for adding a single member
-     * This is kept for backwards compatibility with demo code
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {KeyPackage} new_member
-     * @returns {AddMessages}
-     */
-    propose_and_commit_add(provider, sender, new_member) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        _assertClass(new_member, KeyPackage);
-        const ret = wasm.group_propose_and_commit_add(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, new_member.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return AddMessages.__wrap(ret[0]);
-    }
-    /**
-     * Commit all pending proposals
-     *
-     * This creates a commit message that includes all queued proposals.
-     * Use `merge_pending_commit` after the DS confirms the commit.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @returns {CommitBundle}
-     */
-    commit_pending_proposals(provider, sender) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ret = wasm.group_commit_pending_proposals(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Create one inline commit that removes stale members and adds new members.
-     *
-     * This is an intent-specific wrapper for SDK callsites. It intentionally shares the
-     * implementation of `commit_group_changes` so duplicate add/remove validation cannot drift.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {string[]} remove_user_ids
-     * @param {KeyPackage[]} add_members
-     * @returns {CommitBundle}
-     */
-    commit_member_add_with_removals(provider, sender, remove_user_ids, add_members) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passArrayJsValueToWasm0(remove_user_ids, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayJsValueToWasm0(add_members, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.group_commit_member_add_with_removals(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0, ptr1, len1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Create one inline commit that removes stale members and rotates the sender leaf.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {string[]} remove_user_ids
-     * @returns {CommitBundle}
-     */
-    commit_self_update_with_removals(provider, sender, remove_user_ids) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passArrayJsValueToWasm0(remove_user_ids, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_commit_self_update_with_removals(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
-    }
-    /**
-     * Add a user with multiple devices and commit immediately
-     *
-     * Each KeyPackage represents one device of the same user.
-     * All devices are added in a single commit.
-     * @param {Provider} provider
-     * @param {Identity} sender
-     * @param {KeyPackage[]} device_key_packages
-     * @returns {CommitBundle}
-     */
-    add_user(provider, sender, device_key_packages) {
-        _assertClass(provider, Provider);
-        _assertClass(sender, Identity);
-        const ptr0 = passArrayJsValueToWasm0(device_key_packages, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.group_add_user(this.__wbg_ptr, provider.__wbg_ptr, sender.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return CommitBundle.__wrap(ret[0]);
+    get hpke_info() {
+        const ret = wasm.hpkewrappedarchivedatakey_hpke_info(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
 }
 
@@ -1866,7 +2609,7 @@ export class ProcessedMessage {
      * @returns {number}
      */
     get sender_index() {
-        const ret = wasm.processedmessage_sender_index(this.__wbg_ptr);
+        const ret = wasm.archivedmessage_sender_index(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -1893,7 +2636,7 @@ export class ProcessedMessage {
      * @returns {bigint}
      */
     get epoch() {
-        const ret = wasm.processedmessage_epoch(this.__wbg_ptr);
+        const ret = wasm.archivedmessage_epoch(this.__wbg_ptr);
         return BigInt.asUintN(64, ret);
     }
     /**
@@ -2091,6 +2834,156 @@ export class RatchetTree {
      */
     to_bytes() {
         const ret = wasm.ratchettree_to_bytes(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+
+const RecoveryKeypairFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_recoverykeypair_free(ptr >>> 0, 1));
+
+export class RecoveryKeypair {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(RecoveryKeypair.prototype);
+        obj.__wbg_ptr = ptr;
+        RecoveryKeypairFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RecoveryKeypairFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_recoverykeypair_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get public_key() {
+        const ret = wasm.recoverykeypair_public_key(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {number}
+     */
+    get ciphersuite() {
+        const ret = wasm.hpkewrappedarchivedatakey_ciphersuite(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get private_key() {
+        const ret = wasm.recoverykeypair_private_key(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {string}
+     */
+    get key_id() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.recoverykeypair_key_id(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+}
+
+const WrappedRecoveryKeyFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wrappedrecoverykey_free(ptr >>> 0, 1));
+
+export class WrappedRecoveryKey {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(WrappedRecoveryKey.prototype);
+        obj.__wbg_ptr = ptr;
+        WrappedRecoveryKeyFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WrappedRecoveryKeyFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wrappedrecoverykey_free(ptr, 0);
+    }
+    /**
+     * @param {Uint8Array} bytes
+     * @returns {WrappedRecoveryKey}
+     */
+    static from_bytes(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wrappedrecoverykey_from_bytes(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return WrappedRecoveryKey.__wrap(ret[0]);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get public_key() {
+        const ret = wasm.wrappedrecoverykey_public_key(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {number}
+     */
+    get ciphersuite() {
+        const ret = wasm.wrappedrecoverykey_ciphersuite(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {string}
+     */
+    get key_id() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wrappedrecoverykey_key_id(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    to_bytes() {
+        const ret = wasm.wrappedrecoverykey_to_bytes(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;

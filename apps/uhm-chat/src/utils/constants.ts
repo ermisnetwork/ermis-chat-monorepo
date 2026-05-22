@@ -16,3 +16,8 @@ export const OTP_CONFIG = {
   CODE_LENGTH: 6,
   PHONE_METHOD: 'Sms',
 } as const;
+
+export const RECOVERY_PIN_CONFIG = {
+  MIN_DIGITS: 8,
+  RESTORE_PREVIEW_LIMIT: 8,
+} as const;
