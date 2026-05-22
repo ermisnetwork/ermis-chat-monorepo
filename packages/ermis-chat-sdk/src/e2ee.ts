@@ -163,6 +163,117 @@ export interface UpdateE2eeMessageRequest {
   };
 }
 
+export interface UploadRecoveryVaultRequest {
+  vault_bytes: number[];
+}
+
+export interface RecoveryVaultResponse extends APIResponse {
+  vault_bytes: number[];
+}
+
+export interface RecoveryPublicKeyResponse extends APIResponse {
+  public_key: number[];
+  key_id: string;
+  ciphersuite: number;
+}
+
+export interface UploadEpochArchiveRequest {
+  epoch: number;
+  archive_blob_id: string;
+  idempotency_key: string;
+  scope: 'account_owned';
+  encrypted_archive: {
+    ciphertext: number[];
+    nonce: number[];
+    aead_aad: number[];
+  };
+  snapshot: {
+    snapshot_bytes: number[];
+    snapshot_hash: string;
+  };
+  wraps: Array<{
+    recipient_user_id: string;
+    recipient_recovery_key_id: string;
+    hpke_kem_output: number[];
+    hpke_ciphertext: number[];
+    ciphersuite: number;
+    hpke_info: number[];
+  }>;
+}
+
+export interface EpochIndexEntry {
+  epoch: number;
+  scope: string;
+  blob_id: string;
+}
+
+export interface ArchiveBlobRecord {
+  archive_blob_id: string;
+  cid: string;
+  epoch: number;
+  archive_scope: string;
+  exporter_user_id: string;
+  exporter_device_id: string;
+  member_snapshot_hash: string;
+  encrypted_archive_bytes: number[];
+  aead_nonce: number[];
+  aead_aad: number[];
+  created_at: string;
+}
+
+export interface ArchiveKeyWrapRecord {
+  archive_blob_id: string;
+  recipient_user_id: string;
+  recipient_recovery_key_id: string;
+  hpke_kem_output: number[];
+  hpke_ciphertext: number[];
+  ciphersuite: number;
+  hpke_info: number[];
+  epoch: number;
+  created_at: string;
+}
+
+export interface MemberSnapshotRecord {
+  snapshot_hash: string;
+  cid: string;
+  first_seen_epoch: number;
+  last_seen_epoch: number;
+  snapshot_bytes: number[];
+  created_at: string;
+}
+
+export interface QueryEpochArchivesRequest {
+  list_epochs?: boolean;
+  epoch_from?: number;
+  epoch_to?: number;
+  include_snapshots?: boolean;
+  include_wraps?: boolean;
+}
+
+export interface QueryEpochArchivesResponse extends APIResponse {
+  epochs?: EpochIndexEntry[];
+  blobs?: ArchiveBlobRecord[];
+  wraps?: ArchiveKeyWrapRecord[];
+  snapshots?: Record<string, MemberSnapshotRecord>;
+}
+
+export interface CiphertextCursor {
+  last_event_key: string;
+}
+
+export interface HistoricalCiphertext {
+  message_id: string;
+  mls_ciphertext: number[];
+  mls_epoch: number;
+  created_at: string;
+}
+
+export interface CiphertextQueryResponse extends APIResponse {
+  ciphertexts: HistoricalCiphertext[];
+  has_more: boolean;
+  next_cursor?: CiphertextCursor;
+}
+
 // ============================================================
 // E2EE API Client
 // ============================================================
@@ -259,6 +370,53 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       user_ids: userIds,
       ...(countPerDevice && countPerDevice > 1 ? { count_per_device: countPerDevice } : {}),
     });
+  }
+
+  // ---- Recovery Vault ----
+
+  async uploadRecoveryVault(data: UploadRecoveryVaultRequest): Promise<APIResponse> {
+    return await this._post(this.baseURL + '/v1/e2ee/recovery/vault', data);
+  }
+
+  async getRecoveryVault(): Promise<RecoveryVaultResponse> {
+    return await this._get(this.baseURL + '/v1/e2ee/recovery/vault');
+  }
+
+  async getRecoveryPublicKey(userId: string): Promise<RecoveryPublicKeyResponse> {
+    return await this._get(this.baseURL + `/v1/e2ee/recovery/public_key/${userId}`);
+  }
+
+  // ---- Epoch Archives ----
+
+  async uploadEpochArchive(
+    channelType: string,
+    channelId: string,
+    data: UploadEpochArchiveRequest,
+  ): Promise<APIResponse> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives`, data);
+  }
+
+  async queryEpochArchives(
+    channelType: string,
+    channelId: string,
+    data: QueryEpochArchivesRequest,
+  ): Promise<QueryEpochArchivesResponse> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/query`, data);
+  }
+
+  async getArchiveSnapshot(channelType: string, channelId: string, hash: string): Promise<MemberSnapshotRecord> {
+    return await this._get(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/snapshot/${hash}`);
+  }
+
+  async queryArchiveCiphertexts(
+    channelType: string,
+    channelId: string,
+    data: { epoch_from: number; epoch_to: number; cursor?: CiphertextCursor; limit?: number },
+  ): Promise<CiphertextQueryResponse> {
+    return await this._post(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/ciphertexts/query`,
+      data,
+    );
   }
 
   // ---- Enable E2EE ----

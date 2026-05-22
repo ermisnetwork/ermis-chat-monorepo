@@ -79,6 +79,17 @@ export interface RemovedSyncCursor {
   event_id: string;
 }
 
+export interface PendingArchiveUpload {
+  cid: string;
+  channel_type: string;
+  channel_id: string;
+  epoch: number;
+  scope: 'account_owned';
+  upload: unknown;
+  retry_count: number;
+  created_at: number;
+}
+
 /**
  * Platform-agnostic storage adapter for MLS state.
  *
@@ -138,6 +149,13 @@ export interface MlsStorageAdapter {
   // Map: cid → array of user_ids to evict
   loadPendingEvictions(): Promise<Record<string, string[]>>;
   savePendingEvictions(data: Record<string, string[]>): Promise<void>;
+
+  // ---- PIN Epoch Archive recovery ----
+  saveArchiveUpload(upload: PendingArchiveUpload): Promise<void>;
+  loadPendingArchiveUploads(): Promise<PendingArchiveUpload[]>;
+  deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
+  saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void>;
+  loadRecoveryPublicKey(userId: string): Promise<Uint8Array | null>;
 }
 
 // ============================================================
@@ -147,12 +165,13 @@ export interface MlsStorageAdapter {
 const DB_NAME_PREFIX = 'ermis_mls';
 /** Global DB (no userId) — only used for migrating legacy device_id */
 const DB_NAME_LEGACY = 'ermis_mls';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORE_IDENTITY = 'identity';
 const STORE_MESSAGES = 'messages';
 const STORE_META = 'meta';
 const STORE_GROUPS = 'groups';
+const STORE_ARCHIVE_UPLOADS = 'archive_uploads';
 
 /** localStorage key for device_id — global, per-browser */
 const DEVICE_ID_LS_KEY = 'ermis_device_id';
@@ -224,6 +243,10 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
         if (!db.objectStoreNames.contains(STORE_GROUPS)) {
           db.createObjectStore(STORE_GROUPS);
         }
+
+        if (!db.objectStoreNames.contains(STORE_ARCHIVE_UPLOADS)) {
+          db.createObjectStore(STORE_ARCHIVE_UPLOADS);
+        }
       };
 
       request.onsuccess = () => resolve(request.result);
@@ -286,6 +309,9 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
         }
         if (!db.objectStoreNames.contains(STORE_GROUPS)) {
           db.createObjectStore(STORE_GROUPS);
+        }
+        if (!db.objectStoreNames.contains(STORE_ARCHIVE_UPLOADS)) {
+          db.createObjectStore(STORE_ARCHIVE_UPLOADS);
         }
       };
 
@@ -864,6 +890,76 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // ---- PIN Epoch Archive recovery ----
+
+  async saveArchiveUpload(upload: PendingArchiveUpload): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readwrite');
+      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
+      const archiveBlobId = (upload.upload as any)?.archive_blob_id || 'unknown';
+      store.put(upload, `${upload.cid}:${upload.epoch}:${archiveBlobId}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadPendingArchiveUploads(): Promise<PendingArchiveUpload[]> {
+    const db = await this.openDB();
+    return new Promise<PendingArchiveUpload[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readonly');
+      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
+      const request = store.getAll();
+      request.onsuccess = () => resolve((request.result as PendingArchiveUpload[]) || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readwrite');
+      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
+      if (archiveBlobId) {
+        store.delete(`${cid}:${epoch}:${archiveBlobId}`);
+      } else {
+        const prefix = `${cid}:${epoch}:`;
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (cursor) {
+            if (String(cursor.key).startsWith(prefix)) cursor.delete();
+            cursor.continue();
+          }
+        };
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(publicKey, `recovery_public_key:${userId}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadRecoveryPublicKey(userId: string): Promise<Uint8Array | null> {
+    const db = await this.openDB();
+    return new Promise<Uint8Array | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const request = store.get(`recovery_public_key:${userId}`);
+      request.onsuccess = () => resolve((request.result as Uint8Array) || null);
+      request.onerror = () => reject(request.error);
     });
   }
 }
