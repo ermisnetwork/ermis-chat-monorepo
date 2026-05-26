@@ -504,6 +504,40 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return new Date(Math.max(0, ms - 1)).toISOString();
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _getMembershipCreatedAt(channel: any): string | undefined {
+    if (!this.userId || !channel) return undefined;
+
+    const membership = channel.state?.membership;
+    if (membership?.created_at) return membership.created_at;
+
+    const stateMember = channel.state?.members?.[this.userId];
+    if (stateMember?.created_at) return stateMember.created_at;
+
+    const dataMembers = Array.isArray(channel.data?.members) ? channel.data.members : [];
+    const dataMember = dataMembers.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (member: any) => member?.user_id === this.userId || member?.user?.id === this.userId,
+    );
+    return dataMember?.created_at;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _membershipBoundedCursor(channel: any, savedTs?: string | number | null): string {
+    const mlsEnabledAt = channel?.data?.mls_enabled_at;
+    const memberCreatedAt = this._getMembershipCreatedAt(channel);
+    const candidates: string[] = [];
+
+    if (savedTs) candidates.push(this._toCursorString(savedTs));
+    if (memberCreatedAt) candidates.push(this._initialSyncCursor(memberCreatedAt));
+    if (mlsEnabledAt) candidates.push(this._initialSyncCursor(mlsEnabledAt));
+
+    if (candidates.length === 0) return this._nowCursor();
+    return candidates.reduce((latest, cursor) =>
+      compareRfc3339Cursor(latest, cursor) >= 0 ? latest : cursor,
+    );
+  }
+
   private _startSyncGate(): void {
     if (this._syncing && this._syncPromise) return;
 
@@ -735,20 +769,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       let removedCursor = await this.storage.loadRemovedSyncCursor();
       const groupCids = Array.from(this.groups.keys());
 
-      // Build cursor map — use saved RFC3339 cursor or mls_enabled_at as fallback.
+      // Build cursor map bounded by the current membership. On re-invite this
+      // prevents replaying protocol events from the old membership.
       const syncCursors: Record<string, string> = {};
       for (const cid of groupCids) {
-        if (savedCursors[cid]) {
-          syncCursors[cid] = this._toCursorString(savedCursors[cid]);
-        } else {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const channel = (this.client as any)?.activeChannels?.[cid];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const mlsEnabledAt = (channel?.data as any)?.mls_enabled_at;
-          // Use mls_enabled_at as a bootstrap cursor, otherwise now.
-          // NEVER fall back to epoch 0 (1970) — that would fetch the entire message history.
-          syncCursors[cid] = this._initialSyncCursor(mlsEnabledAt);
-        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const channel = (this.client as any)?.activeChannels?.[cid];
+        syncCursors[cid] = this._membershipBoundedCursor(channel, savedCursors[cid]);
       }
 
       if (Object.keys(syncCursors).length === 0) {
@@ -852,9 +879,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       console.log(`[MLS] Sync complete. Groups: ${this.groups.size}`);
 
-      // Drain pending evictions (MemberLeaved offline recovery).
-      // Must run AFTER sync loop — epoch is now fully up-to-date.
-      await this._drainPendingEvictions();
+      // Pending evictions are intentionally deferred. The next MLS membership
+      // commit bundles them through _collectPendingGhosts(); sync itself must
+      // not submit commit_eviction immediately after an invite reject.
 
       // Step 3: Multi-device — external join for E2EE channels without local group
       // On a new device, no groups are restored from storage.
@@ -1423,12 +1450,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const channel = (this.client as any)?.activeChannels?.[cid];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mlsEnabledAt = (channel?.data as any)?.mls_enabled_at;
     const savedTs = await this.storage.loadSyncTimestamp(cid);
-    // Prefer saved cursor; else mls_enabled_at; else now.
-    // NEVER use epoch 0 — that would fetch the entire message history.
-    const since = savedTs ? this._toCursorString(savedTs) : this._initialSyncCursor(mlsEnabledAt);
+    const since = this._membershipBoundedCursor(channel, savedTs);
 
     const syncState = await this._syncChannelFromCursor(cid, since, 100);
 
@@ -1487,12 +1510,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const channel = (this.client as any)?.activeChannels?.[cid];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mlsEnabledAt = (channel?.data as any)?.mls_enabled_at;
     const savedTs = await this.storage.loadSyncTimestamp(cid);
-    // Prefer saved cursor; else mls_enabled_at; else now.
-    // NEVER use epoch 0 — that would fetch the entire message history.
-    const since = savedTs ? this._toCursorString(savedTs) : this._initialSyncCursor(mlsEnabledAt);
+    const since = this._membershipBoundedCursor(channel, savedTs);
 
     const syncState = await this._syncChannelFromCursor(cid, since, 100);
 
@@ -1555,10 +1574,35 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // Local group exists, but the cursor can still be behind. Run a bounded
       // catch-up sync and let the returned state tell UI whether another retry
       // is needed.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mlsEnabledAt = (channel?.data as any)?.mls_enabled_at;
       const savedTs = await this.storage.loadSyncTimestamp(cid);
-      const since = savedTs ? this._toCursorString(savedTs) : this._initialSyncCursor(mlsEnabledAt);
+      const memberCreatedAt = this._getMembershipCreatedAt(channel);
+      const membershipCursor = memberCreatedAt ? this._initialSyncCursor(memberCreatedAt) : undefined;
+      const savedCursor = savedTs ? this._toCursorString(savedTs) : undefined;
+
+      if (
+        source === 'invite_accepted' &&
+        membershipCursor &&
+        (!savedCursor || compareRfc3339Cursor(membershipCursor, savedCursor) > 0)
+      ) {
+        await this._deleteLocalGroupState(cid);
+        const result = await this.syncNewChannel(channelType, channelId, cid);
+        if (
+          result.sync_state &&
+          !result.sync_state.needs_retry &&
+          result.status !== 'failed' &&
+          result.status !== 'stale_group_info'
+        ) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (this.client as any)?.dispatchEvent?.({
+            type: 'e2ee.channel_ready',
+            cid,
+            sync_state: result.sync_state,
+          } as any);
+        }
+        return result;
+      }
+
+      const since = this._membershipBoundedCursor(channel, savedTs);
       const syncState = await this._syncChannelFromCursor(cid, since, 100);
       const result: EnsureE2eeChannelResult = {
         cid,
@@ -2082,84 +2126,6 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return { epoch: Number(group.epoch()) };
   }
 
-  // ============================================================
-  /**
-   * Drain the deferred eviction queue built during sync.
-   * Runs after the sync loop so epoch is fully up-to-date before we commit.
-   *
-   * Retry strategy:
-   * - `epoch_stale`: handled automatically inside `evictMember` (clear + sync + retry once)
-   * - Other failures: logged and skipped — next reconnect sync will re-queue from SystemMessage
-   */
-  private async _drainPendingEvictions(): Promise<void> {
-    if (this._pendingEvictions.size === 0) return;
-
-    const pendingEvictions = new Map(this._pendingEvictions);
-
-    for (const [cid, userIds] of pendingEvictions) {
-      const colonIdx = cid.indexOf(':');
-      const channelType = cid.substring(0, colonIdx);
-      const channelId = cid.substring(colonIdx + 1);
-      const group = this.groups.get(cid);
-      const activeChannel = this._getActiveChannel(cid);
-
-      if (!activeChannel) {
-        continue;
-      }
-
-      if (!this.isDesignatedEvictor(activeChannel)) {
-        console.log('[MLS] _drainPendingEvictions: keep queued for', cid, '— this client is not designated evictor');
-        continue;
-      }
-
-      if (!group) continue;
-
-      const ghostsToRemove = await this._collectPendingGhosts(cid, Array.from(userIds));
-      if (ghostsToRemove.length === 0) continue;
-
-      try {
-        this._requireCompositeCommitMethods(group);
-        const commitBundle = group.commit_member_removals(this.provider, this.identity, ghostsToRemove);
-        const groupInfoBytes = commitBundle.group_info;
-        if (!groupInfoBytes || groupInfoBytes.length === 0) {
-          group.clear_pending_commit(this.provider);
-          await this._persistProvider();
-          throw new Error('[MLS] _drainPendingEvictions: commitBundle.group_info is empty');
-        }
-
-        await this.e2eeClient!.commitEviction(channelType, channelId, {
-          target_user_ids: ghostsToRemove,
-          commit: Array.from(commitBundle.commit),
-          epoch: Number(group.epoch()),
-          group_info: Array.from(groupInfoBytes),
-        });
-
-        group.merge_pending_commit(this.provider);
-        await this._persistProvider();
-        await this._cleanupEvictedGhosts(cid, ghostsToRemove);
-      } catch (err) {
-        group.clear_pending_commit(this.provider);
-        await this._persistProvider();
-        const activeTarget = getActiveTargetFromCommitEvictionError(err);
-        if (activeTarget) {
-          await this.sync();
-          await this._dropActivePendingEvictions(cid, [activeTarget]);
-          console.warn(
-            '[MLS] _drainPendingEvictions: target active again, dropped from retry list:',
-            cid,
-            activeTarget,
-          );
-          continue;
-        }
-        if (isEpochStaleError(err)) {
-          await this.sync();
-          await this._dropActivePendingEvictions(cid, ghostsToRemove);
-        }
-        console.warn('[MLS] _drainPendingEvictions: composite commit failed, queue kept for retry:', cid, err);
-      }
-    }
-  }
-
   /** Snapshot current queue and write to IndexedDB. */
   private async _persistPendingEvictions(): Promise<void> {
     const pendingEvictions: Record<string, string[]> = {};
@@ -2184,6 +2150,26 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   // Self-Leave & Orphaned Group Cleanup
   // ============================================================
+
+  private async _deleteLocalGroupState(cid: string): Promise<void> {
+    const group = this.groups.get(cid);
+    if (group) {
+      try {
+        if (typeof group.delete_state === 'function') {
+          group.delete_state(this.provider);
+        }
+      } catch (err) {
+        console.warn('[MLS] _deleteLocalGroupState: failed to delete OpenMLS group state for', cid, err);
+      }
+      this.groups.delete(cid);
+      console.log('[MLS] _deleteLocalGroupState: deleted local group state for', cid);
+    }
+
+    this._channelReadyUntil.delete(cid);
+    await this.storage.deleteGroup?.(cid);
+    await this._savePendingSnapshots(cid, []);
+    await this._persistProvider();
+  }
 
   /**
    * Cleanup local MLS group state after self-leave.
@@ -2245,6 +2231,56 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private _getActiveChannel(cid: string): any | undefined {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (this.client as any)?.activeChannels?.[cid];
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _membershipRoleForChannel(channel: any): string | undefined {
+    if (!this.userId || !channel) return undefined;
+
+    const stateMember = channel.state?.members?.[this.userId];
+    if (stateMember?.channel_role) return stateMember.channel_role;
+
+    const membership = channel.state?.membership;
+    if (membership?.channel_role) return membership.channel_role;
+
+    const dataMembers = Array.isArray(channel.data?.members) ? channel.data.members : [];
+    const dataMember = dataMembers.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (member: any) => member?.user_id === this.userId || member?.user?.id === this.userId,
+    );
+    return dataMember?.channel_role;
+  }
+
+  private _isInactiveInviteRole(role?: string): boolean {
+    return role === 'pending' || role === 'rejected' || role === 'skipped';
+  }
+
+  isChannelMlsSyncBlocked(cid: string): boolean {
+    return this._isInactiveInviteRole(this._membershipRoleForChannel(this._getActiveChannel(cid)));
+  }
+
+  async queuePendingEviction(cid: string, targetUserId: string): Promise<boolean> {
+    if (!targetUserId || (this.userId && targetUserId === this.userId)) return false;
+
+    const activeChannel = this._getActiveChannel(cid);
+    if (!activeChannel || !this.isDesignatedEvictor(activeChannel)) return false;
+
+    const group = this.groups.get(cid);
+    if (!group) return false;
+
+    try {
+      const leafNodes = group.members_by_user_id(targetUserId);
+      if (!leafNodes || leafNodes.length === 0) return false;
+    } catch (_err) {
+      return false;
+    }
+
+    const queue = this._pendingEvictions.get(cid) ?? new Set<string>();
+    queue.add(targetUserId);
+    this._pendingEvictions.set(cid, queue);
+    await this._persistPendingEvictions();
+    console.log('[MLS] Queued pending eviction for', targetUserId, 'in', cid);
+    return true;
   }
 
   /**

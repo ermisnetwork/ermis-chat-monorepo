@@ -946,6 +946,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
     if (event.type === 'notification.invite_rejected') {
       if (event.member?.user_id === this.userID && event.cid) {
+        if (event.mls_enabled && this.mlsManager?.initialized) {
+          const rejectTimestamp = event.created_at || event.createdAt || event.message?.created_at || Date.now();
+          this.mlsManager.leaveGroup(event.cid, rejectTimestamp);
+          if (Array.isArray(event.topic_cids)) {
+            for (const topicCid of event.topic_cids) {
+              this.mlsManager.leaveGroup(topicCid, rejectTimestamp);
+            }
+          }
+        }
+
         client.state.deleteAllChannelReference(event.cid);
         this.activeChannels[event.cid]?._disconnect();
 

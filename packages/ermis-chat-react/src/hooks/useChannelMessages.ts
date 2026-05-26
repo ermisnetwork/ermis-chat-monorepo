@@ -20,6 +20,8 @@ export type UseChannelMessagesOptions = {
 const fullyQueriedChannels = new Set<string>();
 export const markChannelAsFullyQueried = (cid: string) => fullyQueriedChannels.add(cid);
 
+const isInactiveInviteRole = (role?: string) => isPendingMember(role) || role === 'rejected' || role === 'skipped';
+
 /**
  * Schedule multiple scroll-to-bottom attempts with increasing delays.
  * Handles content that changes height after initial render (images, embeds).
@@ -175,6 +177,7 @@ export function useChannelMessages({
 
     const ensureE2eeChannelReady = () => {
       if (!activeChannel.data?.mls_enabled || !client.mlsManager?.initialized || !activeChannel.cid) return;
+      if (isInactiveInviteRole(activeChannel.state?.membership?.channel_role as string)) return;
       client.mlsManager
         .ensureChannelReady(activeChannel.type, activeChannel.id, activeChannel.cid, { source: 'open' })
         .then(() => syncMessagesWithE2eeCache())
