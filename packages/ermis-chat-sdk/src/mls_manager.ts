@@ -986,337 +986,383 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // Data is always nested in event.data
       const eventType = event.type;
 
-      if (eventType === 'protocol') {
-        const protoMsg = event.data || event.message || event;
-        const typeField = protoMsg.type || protoMsg.type_field;
+      switch (eventType) {
+        case 'protocol': {
+          const protoMsg = event.data || event.message || event;
+          const typeField = protoMsg.type || protoMsg.type_field;
 
-        switch (typeField) {
-          case 'welcome': {
-            const targetUserIds = (protoMsg.target_user_ids as string[]) || [];
-            if (targetUserIds.includes(this.userId!) && !this.groups.has(cid)) {
-              try {
-                await this.joinGroup(protoMsg.welcome as Uint8Array, protoMsg.ratchet_tree as Uint8Array | undefined);
-              } catch (err) {
-                if (this._isMissingKeyPackageError(err)) {
-                  console.warn('[MLS] Skipping stale welcome with no local KeyPackage:', cid, err);
+          switch (typeField) {
+            case 'welcome': {
+              const targetUserIds = (protoMsg.target_user_ids as string[]) || [];
+              if (targetUserIds.includes(this.userId!) && !this.groups.has(cid)) {
+                try {
+                  await this.joinGroup(protoMsg.welcome as Uint8Array, protoMsg.ratchet_tree as Uint8Array | undefined);
+                } catch (err) {
+                  if (this._isMissingKeyPackageError(err)) {
+                    console.warn('[MLS] Skipping stale welcome with no local KeyPackage:', cid, err);
+                    break;
+                  }
+                  throw err;
+                }
+              }
+              break;
+            }
+            case 'commit':
+            case 'external_commit': {
+              const protoDeviceId = protoMsg.device_id;
+              const protoUserId = protoMsg.user?.id;
+              const isOwnDeviceCommit =
+                protoUserId === this.userId && !!protoDeviceId && protoDeviceId === this.deviceId;
+
+              if (isOwnDeviceCommit) {
+                console.log(`[MLS] Skipping own ${typeField} (already merged):`, cid);
+                break;
+              }
+
+              if (!this.groups.has(cid)) {
+                console.log(`[MLS] Skipping ${typeField} before local group exists:`, cid);
+                break;
+              }
+
+              // Pre-check: if group epoch already advanced past this commit's epoch,
+              // the commit was already applied (e.g. we merged it before last reload).
+              // Do NOT call group.process_message() — for ExternalCommit, OpenMLS
+              // returns an AEAD error (not epoch mismatch) which corrupts ratchet state.
+              const commitEventEpoch: number = protoMsg.epoch ?? -1;
+              const currentGroup = this.groups.get(cid);
+              if (currentGroup && commitEventEpoch >= 0) {
+                const groupEpoch = Number(currentGroup.epoch());
+                if (groupEpoch >= commitEventEpoch) {
+                  console.log(
+                    `[MLS] processCommit: commit at epoch ${commitEventEpoch} already applied (group at ${groupEpoch}), skipping:`,
+                    cid,
+                  );
                   break;
                 }
-                throw err;
               }
-            }
-            break;
-          }
-          case 'commit':
-          case 'external_commit': {
-            const protoDeviceId = protoMsg.device_id;
-            const protoUserId = protoMsg.user?.id;
-            const isOwnDeviceCommit = protoUserId === this.userId && !!protoDeviceId && protoDeviceId === this.deviceId;
-
-            if (isOwnDeviceCommit) {
-              console.log(`[MLS] Skipping own ${typeField} (already merged):`, cid);
+              const commit = protoMsg.commit;
+              await this.processCommit(cid, commit as Uint8Array, commitEventEpoch);
               break;
             }
-
-            if (!this.groups.has(cid)) {
-              console.log(`[MLS] Skipping ${typeField} before local group exists:`, cid);
-              break;
-            }
-
-            // Pre-check: if group epoch already advanced past this commit's epoch,
-            // the commit was already applied (e.g. we merged it before last reload).
-            // Do NOT call group.process_message() — for ExternalCommit, OpenMLS
-            // returns an AEAD error (not epoch mismatch) which corrupts ratchet state.
-            const commitEventEpoch: number = protoMsg.epoch ?? -1;
-            const currentGroup = this.groups.get(cid);
-            if (currentGroup && commitEventEpoch >= 0) {
-              const groupEpoch = Number(currentGroup.epoch());
-              if (groupEpoch >= commitEventEpoch) {
-                console.log(
-                  `[MLS] processCommit: commit at epoch ${commitEventEpoch} already applied (group at ${groupEpoch}), skipping:`,
-                  cid,
-                );
-                break;
-              }
-            }
-            const commit = protoMsg.commit;
-            await this.processCommit(cid, commit as Uint8Array, commitEventEpoch);
-            break;
           }
+          await retryPendingMessages();
+          break;
         }
-        await retryPendingMessages();
-      } else if (eventType === 'application') {
-        // Application message — data nested in event.data
-        const msg = event.data || event.message;
-        const contentType = msg.content_type;
+        case 'application': {
+          // Application message — data nested in event.data
+          const msg = event.data || event.message;
+          const contentType = msg.content_type;
 
-        if (contentType === 'mls') {
-          // MLS encrypted message — decrypt at its actual timeline position.
-          // If epoch state is not ready yet, persist it and let the durable cursor
-          // advance. Pending snapshots are retried after later commits advance the group.
-          const { decrypted, buffered } = await this.decryptApplicationMessages(cid, [msg]);
-          decryptedMessages.push(...decrypted);
-          if (buffered.length > 0) {
-            pendingMlsMessages.push(
-              ...buffered.map((bufferedMessage: any) =>
-                this._toPendingSnapshot(cid, 'application', bufferedMessage, eventCursor, eventCreatedAt),
-              ),
-            );
-            await this._savePendingSnapshots(cid, pendingMlsMessages);
-          }
-        } else {
-          // Standard/system message — save directly, no decryption needed
-          await this.storage.saveE2eeMessage({
-            id: msg.id,
-            cid,
-            content_type: 'standard',
-            text: msg.text || '',
-            user_id: msg.user?.id || '',
-            user: msg.user ? { ...msg.user } : undefined,
-            created_at: msg.created_at || new Date().toISOString(),
-            type: msg.message_type || msg.type || 'system',
-            parent_id: msg.parent_id,
-            quoted_message_id: msg.quoted_message_id,
-            mentioned_users: msg.mentioned_users,
-          });
-
-          // ── Offline recovery: Self-remove (SystemMessage types 11, 12, 21) ──
-          // When the designated evictor was offline while C self-left or rejected
-          // invite, they missed the WS event. Queue only on the designated evictor;
-          // normal members must not submit commit_eviction during sync recovery.
-          // 11: InviteRejected, 12: MemberLeaved, 21: InviteMessagingRejected
-          const msgText: string = msg.text || '';
-          if (
-            (msg.message_type === 'system' || msg.type === 'system') &&
-            (msgText.startsWith('12 ') || msgText.startsWith('11 ') || msgText.startsWith('21 '))
-          ) {
-            const leftUserId = msgText.split(' ')[1];
-            if (leftUserId && leftUserId !== this.userId) {
-              const activeChannel = this._getActiveChannel(cid);
-              if (!activeChannel || !this.isDesignatedEvictor(activeChannel)) {
-                continue;
-              }
-              const group = this.groups.get(cid);
-              if (group) {
-                // Check C still has leaf nodes (another evictor may have already removed them)
-                try {
-                  const leafNodes = group.members_by_user_id(leftUserId);
-                  if (leafNodes && leafNodes.length > 0) {
-                    // Queue the eviction — will be drained after sync loop finishes
-                    // or bundled into the next commit action (add/remove/rotate).
-                    const queue = this._pendingEvictions.get(cid) ?? new Set<string>();
-                    queue.add(leftUserId);
-                    this._pendingEvictions.set(cid, queue);
-                    console.log('[MLS] Queued eviction (offline recovery) for', leftUserId, 'in', cid);
-                    // Persist immediately so the queue survives a crash/reconnect
-                    // even after the sync cursor has advanced past this SystemMessage.
-                    this._persistPendingEvictions().catch(console.warn);
-                  }
-                } catch (_err) {
-                  // members_by_user_id may fail if group is in invalid state — safe to ignore
-                }
-              }
-            }
-          }
-        }
-      } else if (eventType === 'member_removed') {
-        const removeData = event.data || {};
-        const removedUserId = removeData.member?.user_id;
-        const actorUserId = removeData.user?.id;
-        if (!removedUserId) continue;
-
-        // Keep active channel member state in sync when offline catch-up includes
-        // a member removal metadata event from event:{cid}.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const activeChannel = this._getActiveChannel(cid);
-        if (activeChannel?.state?.members) {
-          delete activeChannel.state.members[removedUserId];
-        }
-
-        if (removedUserId === this.userId) {
-          this.leaveGroup(cid, eventCreatedAt);
-          for (const topicCid of removeData.topic_cids ?? []) {
-            this.leaveGroup(topicCid, eventCreatedAt);
-          }
-          continue;
-        }
-
-        const selfRemoveEvent =
-          removeData.self_remove === true ||
-          (removeData.self_remove === undefined && !!actorUserId && removedUserId === actorUserId);
-        if (!selfRemoveEvent) {
-          continue;
-        }
-        if (!activeChannel || !this.isDesignatedEvictor(activeChannel)) {
-          continue;
-        }
-
-        const group = this.groups.get(cid);
-        if (group) {
-          try {
-            const leafNodes = group.members_by_user_id(removedUserId);
-            if (leafNodes && leafNodes.length > 0) {
-              const queue = this._pendingEvictions.get(cid) ?? new Set<string>();
-              queue.add(removedUserId);
-              this._pendingEvictions.set(cid, queue);
-              await this._persistPendingEvictions();
-              console.log('[MLS] Queued eviction from member_removed sync for', removedUserId, 'in', cid);
-            }
-          } catch (_err) {
-            // members_by_user_id may fail if group is in invalid state — safe to ignore
-          }
-        }
-      } else if (eventType === 'reaction') {
-        // Reaction metadata event — update reaction state for the target message
-        const reactionData = event.data;
-        const messageId = reactionData?.message_id;
-        if (!messageId) continue;
-
-        // 1. Update in-memory channel state (if channel is active and has the message)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const activeChannel = (this.client as any)?.activeChannels?.[cid];
-        if (activeChannel?.state?.messageSets) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          activeChannel.state.messageSets.forEach((messageSet: any) => {
-            for (let i = 0; i < messageSet.messages.length; i++) {
-              if (messageSet.messages[i].id === messageId) {
-                messageSet.messages[i] = {
-                  ...messageSet.messages[i],
-                  latest_reactions: reactionData.latest_reactions ?? messageSet.messages[i].latest_reactions,
-                  reaction_counts: reactionData.reaction_counts ?? messageSet.messages[i].reaction_counts,
-                };
-                break;
-              }
-            }
-          });
-        }
-
-        // 2. Update local storage — merge reaction fields only
-        try {
-          const existingMsg = await this.storage.loadE2eeMessage(messageId);
-          if (existingMsg) {
-            await this.storage.saveE2eeMessage({
-              ...existingMsg,
-              latest_reactions: reactionData.latest_reactions ?? existingMsg.latest_reactions,
-              reaction_counts: reactionData.reaction_counts ?? existingMsg.reaction_counts,
-            });
-          }
-        } catch (err) {
-          console.warn('[MLS] Failed to update reactions in storage:', messageId, err);
-        }
-      } else if (eventType === 'message_deleted') {
-        // Message deleted event from offline sync — remove message from local state
-        const deleteData = event.data;
-        const deletedMessageId = deleteData?.message_id;
-        if (!deletedMessageId) continue;
-
-        // 1. Remove from in-memory channel state
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const activeChannel = (this.client as any)?.activeChannels?.[cid];
-        if (activeChannel?.state) {
-          activeChannel.state.removeMessage({ id: deletedMessageId });
-          // Also remove from pinned messages if applicable
-          activeChannel.state.removePinnedMessage({ id: deletedMessageId });
-        }
-
-        // 2. Remove from local IndexedDB storage
-        try {
-          await this.storage.deleteE2eeMessage(deletedMessageId);
-        } catch (err) {
-          console.warn('[MLS] Failed to delete message from storage during sync:', deletedMessageId, err);
-        }
-
-        // 3. Dispatch event for UI re-render
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (this.client as any)?.dispatchEvent?.({
-          type: 'message.deleted' as any,
-          message: { id: deletedMessageId },
-          cid,
-        });
-
-        console.log('[MLS] Sync: message deleted:', deletedMessageId);
-      } else if (eventType === 'message_updated') {
-        // Message updated event from offline sync. E2EE updates carry the latest
-        // encrypted snapshot for the same message id.
-        const updateData = event.data;
-        const updatedMessage = updateData?.message;
-        if (!updatedMessage) continue;
-
-        let messageForState = updatedMessage;
-        let updateBuffered = false;
-
-        try {
-          if (updatedMessage.content_type === 'mls' && updatedMessage.mls_ciphertext) {
-            const versionedMessage = {
-              ...updatedMessage,
-              updated_at: updatedMessage.updated_at || updateData.created_at,
-            };
-            const { decrypted, buffered } = await this.decryptApplicationMessages(cid, [versionedMessage]);
+          if (contentType === 'mls') {
+            // MLS encrypted message — decrypt at its actual timeline position.
+            // If epoch state is not ready yet, persist it and let the durable cursor
+            // advance. Pending snapshots are retried after later commits advance the group.
+            const { decrypted, buffered } = await this.decryptApplicationMessages(cid, [msg]);
+            decryptedMessages.push(...decrypted);
             if (buffered.length > 0) {
-              updateBuffered = true;
               pendingMlsMessages.push(
                 ...buffered.map((bufferedMessage: any) =>
-                  this._toPendingSnapshot(cid, 'message_updated', bufferedMessage, eventCursor, eventCreatedAt),
+                  this._toPendingSnapshot(cid, 'application', bufferedMessage, eventCursor, eventCreatedAt),
                 ),
               );
               await this._savePendingSnapshots(cid, pendingMlsMessages);
             }
-            if (decrypted[0]) {
-              messageForState = this._buildFullMessage(decrypted[0], updatedMessage);
-            }
           } else {
-            const existingMsg = await this.storage.loadE2eeMessage(updatedMessage.id);
+            // Standard/system message — save directly, no decryption needed
+            await this.storage.saveE2eeMessage({
+              id: msg.id,
+              cid,
+              content_type: 'standard',
+              text: msg.text || '',
+              user_id: msg.user?.id || '',
+              user: msg.user ? { ...msg.user } : undefined,
+              created_at: msg.created_at || new Date().toISOString(),
+              type: msg.message_type || msg.type || 'system',
+              parent_id: msg.parent_id,
+              quoted_message_id: msg.quoted_message_id,
+              mentioned_users: msg.mentioned_users,
+            });
+
+            // ── Legacy offline recovery fallback: Self-remove (SystemMessage types 11, 12, 21) ──
+            // When the designated evictor was offline while C self-left or rejected
+            // invite, they missed the WS event. Queue only on the designated evictor;
+            // normal members must not submit commit_eviction during sync recovery.
+            // Typed notification sync events are the primary signal for invite_rejected.
+            // 11: InviteRejected, 12: MemberLeaved, 21: InviteMessagingRejected
+            const msgText: string = msg.text || '';
+            if (
+              (msg.message_type === 'system' || msg.type === 'system') &&
+              (msgText.startsWith('12 ') || msgText.startsWith('11 ') || msgText.startsWith('21 '))
+            ) {
+              const leftUserId = msgText.split(' ')[1];
+              if (leftUserId && leftUserId !== this.userId) {
+                const activeChannel = this._getActiveChannel(cid);
+                if (!activeChannel || !this.isDesignatedEvictor(activeChannel)) {
+                  continue;
+                }
+                const group = this.groups.get(cid);
+                if (group) {
+                  // Check C still has leaf nodes (another evictor may have already removed them)
+                  try {
+                    const leafNodes = group.members_by_user_id(leftUserId);
+                    if (leafNodes && leafNodes.length > 0) {
+                      // Queue the eviction to be bundled into the next commit action
+                      // (add/remove/rotate).
+                      const queue = this._pendingEvictions.get(cid) ?? new Set<string>();
+                      queue.add(leftUserId);
+                      this._pendingEvictions.set(cid, queue);
+                      console.log('[MLS] Queued eviction (offline recovery) for', leftUserId, 'in', cid);
+                      // Persist immediately so the queue survives a crash/reconnect
+                      // even after the sync cursor has advanced past this SystemMessage.
+                      this._persistPendingEvictions().catch(console.warn);
+                    }
+                  } catch (_err) {
+                    // members_by_user_id may fail if group is in invalid state — safe to ignore
+                  }
+                }
+              }
+            }
+          }
+          break;
+        }
+        case 'invite_rejected': {
+          const rejectData = event.data || {};
+          const rejectedUserId = rejectData.member?.user_id;
+          if (!rejectedUserId) break;
+
+          const activeChannel = this._getActiveChannel(cid);
+          if (activeChannel?.state?.members) {
+            delete activeChannel.state.members[rejectedUserId];
+          }
+
+          if (rejectedUserId === this.userId) {
+            this.leaveGroup(cid, eventCreatedAt);
+            for (const topicCid of rejectData.topic_cids ?? []) {
+              this.leaveGroup(topicCid, eventCreatedAt);
+            }
+          } else if (rejectData.mls_enabled) {
+            await this.queuePendingEviction(cid, rejectedUserId);
+            for (const topicCid of rejectData.topic_cids ?? []) {
+              await this.queuePendingEviction(topicCid, rejectedUserId);
+            }
+          }
+          break;
+        }
+        case 'invite_accepted':
+        case 'invite_messaging_rejected':
+        case 'invite_messaging_skipped':
+          break;
+        case 'member_removed': {
+          const removeData = event.data || {};
+          const removedUserId = removeData.member?.user_id;
+          const actorUserId = removeData.user?.id;
+          if (!removedUserId) continue;
+
+          // Keep active channel member state in sync when offline catch-up includes
+          // a member removal metadata event from event:{cid}.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const activeChannel = this._getActiveChannel(cid);
+          if (activeChannel?.state?.members) {
+            delete activeChannel.state.members[removedUserId];
+          }
+
+          if (removedUserId === this.userId) {
+            this.leaveGroup(cid, eventCreatedAt);
+            for (const topicCid of removeData.topic_cids ?? []) {
+              this.leaveGroup(topicCid, eventCreatedAt);
+            }
+            continue;
+          }
+
+          const selfRemoveEvent =
+            removeData.self_remove === true ||
+            (removeData.self_remove === undefined && !!actorUserId && removedUserId === actorUserId);
+          if (!selfRemoveEvent) {
+            continue;
+          }
+          if (!activeChannel || !this.isDesignatedEvictor(activeChannel)) {
+            continue;
+          }
+
+          const group = this.groups.get(cid);
+          if (group) {
+            try {
+              const leafNodes = group.members_by_user_id(removedUserId);
+              if (leafNodes && leafNodes.length > 0) {
+                const queue = this._pendingEvictions.get(cid) ?? new Set<string>();
+                queue.add(removedUserId);
+                this._pendingEvictions.set(cid, queue);
+                await this._persistPendingEvictions();
+                console.log('[MLS] Queued eviction from member_removed sync for', removedUserId, 'in', cid);
+              }
+            } catch (_err) {
+              // members_by_user_id may fail if group is in invalid state — safe to ignore
+            }
+          }
+          break;
+        }
+        case 'reaction': {
+          // Reaction metadata event — update reaction state for the target message
+          const reactionData = event.data;
+          const messageId = reactionData?.message_id;
+          if (!messageId) continue;
+
+          // 1. Update in-memory channel state (if channel is active and has the message)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const activeChannel = (this.client as any)?.activeChannels?.[cid];
+          if (activeChannel?.state?.messageSets) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            activeChannel.state.messageSets.forEach((messageSet: any) => {
+              for (let i = 0; i < messageSet.messages.length; i++) {
+                if (messageSet.messages[i].id === messageId) {
+                  messageSet.messages[i] = {
+                    ...messageSet.messages[i],
+                    latest_reactions: reactionData.latest_reactions ?? messageSet.messages[i].latest_reactions,
+                    reaction_counts: reactionData.reaction_counts ?? messageSet.messages[i].reaction_counts,
+                  };
+                  break;
+                }
+              }
+            });
+          }
+
+          // 2. Update local storage — merge reaction fields only
+          try {
+            const existingMsg = await this.storage.loadE2eeMessage(messageId);
             if (existingMsg) {
               await this.storage.saveE2eeMessage({
                 ...existingMsg,
-                text: updatedMessage.text ?? existingMsg.text,
-                updated_at: updateData.created_at,
+                latest_reactions: reactionData.latest_reactions ?? existingMsg.latest_reactions,
+                reaction_counts: reactionData.reaction_counts ?? existingMsg.reaction_counts,
               });
             }
+          } catch (err) {
+            console.warn('[MLS] Failed to update reactions in storage:', messageId, err);
           }
-        } catch (err) {
-          console.warn('[MLS] Failed to update message in storage during sync:', updatedMessage.id, err);
+          break;
         }
+        case 'message_deleted': {
+          // Message deleted event from offline sync — remove message from local state
+          const deleteData = event.data;
+          const deletedMessageId = deleteData?.message_id;
+          if (!deletedMessageId) continue;
 
-        if (updateBuffered) {
-          console.log('[MLS] Sync: buffered message update:', updatedMessage.id);
-          processedEvents += 1;
-          lastSafeCursor = eventCursor;
-          continue;
-        }
-
-        // 1. Update in-memory channel state
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const activeChannel = (this.client as any)?.activeChannels?.[cid];
-        if (activeChannel?.state) {
-          activeChannel.state.addMessageSorted(messageForState, false, false);
-        }
-
-        // 3. Dispatch event for UI re-render
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (this.client as any)?.dispatchEvent?.({
-          type: 'message.updated' as any,
-          message: messageForState,
-          cid,
-        });
-
-        console.log('[MLS] Sync: message updated:', updatedMessage.id);
-      } else if (eventType === 'message_pin') {
-        // Pin/unpin event from offline sync — update pinned messages list
-        const pinData = event.data;
-        const pinnedMessage = pinData?.message;
-        if (!pinnedMessage) continue;
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const activeChannel = (this.client as any)?.activeChannels?.[cid];
-        if (activeChannel?.state) {
-          if (pinData.action === 'message.pinned') {
-            activeChannel.state.addPinnedMessage(pinnedMessage);
-          } else {
-            activeChannel.state.removePinnedMessage(pinnedMessage);
+          // 1. Remove from in-memory channel state
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const activeChannel = (this.client as any)?.activeChannels?.[cid];
+          if (activeChannel?.state) {
+            activeChannel.state.removeMessage({ id: deletedMessageId });
+            // Also remove from pinned messages if applicable
+            activeChannel.state.removePinnedMessage({ id: deletedMessageId });
           }
-        }
 
-        console.log('[MLS] Sync: message', pinData.action, ':', pinnedMessage.id);
+          // 2. Remove from local IndexedDB storage
+          try {
+            await this.storage.deleteE2eeMessage(deletedMessageId);
+          } catch (err) {
+            console.warn('[MLS] Failed to delete message from storage during sync:', deletedMessageId, err);
+          }
+
+          // 3. Dispatch event for UI re-render
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (this.client as any)?.dispatchEvent?.({
+            type: 'message.deleted' as any,
+            message: { id: deletedMessageId },
+            cid,
+          });
+
+          console.log('[MLS] Sync: message deleted:', deletedMessageId);
+          break;
+        }
+        case 'message_updated': {
+          // Message updated event from offline sync. E2EE updates carry the latest
+          // encrypted snapshot for the same message id.
+          const updateData = event.data;
+          const updatedMessage = updateData?.message;
+          if (!updatedMessage) continue;
+
+          let messageForState = updatedMessage;
+          let updateBuffered = false;
+
+          try {
+            if (updatedMessage.content_type === 'mls' && updatedMessage.mls_ciphertext) {
+              const versionedMessage = {
+                ...updatedMessage,
+                updated_at: updatedMessage.updated_at || updateData.created_at,
+              };
+              const { decrypted, buffered } = await this.decryptApplicationMessages(cid, [versionedMessage]);
+              if (buffered.length > 0) {
+                updateBuffered = true;
+                pendingMlsMessages.push(
+                  ...buffered.map((bufferedMessage: any) =>
+                    this._toPendingSnapshot(cid, 'message_updated', bufferedMessage, eventCursor, eventCreatedAt),
+                  ),
+                );
+                await this._savePendingSnapshots(cid, pendingMlsMessages);
+              }
+              if (decrypted[0]) {
+                messageForState = this._buildFullMessage(decrypted[0], updatedMessage);
+              }
+            } else {
+              const existingMsg = await this.storage.loadE2eeMessage(updatedMessage.id);
+              if (existingMsg) {
+                await this.storage.saveE2eeMessage({
+                  ...existingMsg,
+                  text: updatedMessage.text ?? existingMsg.text,
+                  updated_at: updateData.created_at,
+                });
+              }
+            }
+          } catch (err) {
+            console.warn('[MLS] Failed to update message in storage during sync:', updatedMessage.id, err);
+          }
+
+          if (updateBuffered) {
+            console.log('[MLS] Sync: buffered message update:', updatedMessage.id);
+            processedEvents += 1;
+            lastSafeCursor = eventCursor;
+            continue;
+          }
+
+          // 1. Update in-memory channel state
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const activeChannel = (this.client as any)?.activeChannels?.[cid];
+          if (activeChannel?.state) {
+            activeChannel.state.addMessageSorted(messageForState, false, false);
+          }
+
+          // 3. Dispatch event for UI re-render
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (this.client as any)?.dispatchEvent?.({
+            type: 'message.updated' as any,
+            message: messageForState,
+            cid,
+          });
+
+          console.log('[MLS] Sync: message updated:', updatedMessage.id);
+          break;
+        }
+        case 'message_pin': {
+          // Pin/unpin event from offline sync — update pinned messages list
+          const pinData = event.data;
+          const pinnedMessage = pinData?.message;
+          if (!pinnedMessage) continue;
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const activeChannel = (this.client as any)?.activeChannels?.[cid];
+          if (activeChannel?.state) {
+            if (pinData.action === 'message.pinned') {
+              activeChannel.state.addPinnedMessage(pinnedMessage);
+            } else {
+              activeChannel.state.removePinnedMessage(pinnedMessage);
+            }
+          }
+
+          console.log('[MLS] Sync: message', pinData.action, ':', pinnedMessage.id);
+          break;
+        }
+        default:
+          break;
       }
 
       processedEvents += 1;
@@ -1399,7 +1445,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const fallbackNextCursor = this._getEventCreatedAt(result.events[result.events.length - 1]);
       const serverNextCursor = result.next_cursor ?? fallbackNextCursor;
       const processedCursor = processResult.processedCursor ?? startedCursor;
-      const cursorLagged = serverNextCursor !== undefined && compareRfc3339Cursor(processedCursor, serverNextCursor) < 0;
+      const cursorLagged =
+        serverNextCursor !== undefined && compareRfc3339Cursor(processedCursor, serverNextCursor) < 0;
       const blocked = cursorLagged;
       const durableCursor = this._getDurableSyncCursor({
         processedCursor,
