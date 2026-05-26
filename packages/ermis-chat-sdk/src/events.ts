@@ -26,6 +26,7 @@ export const EVENT_MAP = {
   'notification.channel_deleted': true,
   'notification.invite_accepted': true,
   'notification.invite_rejected': true,
+  'notification.invite_messaging_rejected': true,
   'notification.invite_messaging_skipped': true,
   'pollchoice.new': true,
   'reaction.deleted': true,
