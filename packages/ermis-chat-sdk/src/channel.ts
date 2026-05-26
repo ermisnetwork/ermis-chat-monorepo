@@ -106,6 +106,17 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this._client;
   }
 
+  private _isE2eeQuery(): boolean {
+    return (this.data as any)?.mls_enabled === true || (this._data as any)?.mls_enabled === true;
+  }
+
+  private _queryDataPayload(): ChannelData<ErmisChatGenerics> | ChannelResponse<ErmisChatGenerics> | undefined {
+    if (!this._data || Object.keys(this._data).length === 0) return undefined;
+    const data = { ...(this._data as any) };
+    delete data.messages;
+    return Object.keys(data).length > 0 ? data : undefined;
+  }
+
   /**
    * Sends a message to this channel.
    * By default, it pushes the message eagerly (optimistically) to the local UI state before the server replies.
@@ -959,7 +970,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this._seedE2eeStateFromLocalCache(options, messageSetToAddToIfDoesNotExist);
 
     let project_id = this._client.projectId;
-    let update_options = { ...options, project_id };
+    const update_options = this._isE2eeQuery() ? { project_id } : { ...options, project_id };
 
     let queryURL = `${this.getClient().baseURL}/channels/${this.type}`;
     if (this.id) {
@@ -977,8 +988,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       ...update_options,
     };
 
-    if (this._data && Object.keys(this._data).length > 0) {
-      payload.data = this._data;
+    const dataPayload = this._queryDataPayload();
+    if (dataPayload) {
+      payload.data = dataPayload;
     }
 
     const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
@@ -1070,8 +1082,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       project_id,
     };
 
-    if (this._data && Object.keys(this._data).length > 0) {
-      payload.data = this._data;
+    const dataPayload = this._queryDataPayload();
+    if (dataPayload) {
+      payload.data = dataPayload;
     }
 
     const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
@@ -1860,7 +1873,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
           const mlsMgr = this.getClient().mlsManager;
           const channelData = event.channel as any;
-          if (mlsMgr?.initialized && channelData?.mls_enabled && channelData?.mls_enabled_at && this.cid) {
+          if (
+            mlsMgr?.initialized &&
+            channelData?.mls_enabled &&
+            channelData?.mls_enabled_at &&
+            this.cid &&
+            !mlsMgr.isChannelMlsSyncBlocked(this.cid)
+          ) {
             mlsMgr
               .ensureChannelReady(this.type, this.id, this.cid, { source: 'channel_updated' })
               .catch((err: unknown) => {
@@ -1966,13 +1985,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             event.mls_enabled &&
             mlsMgrReject?.initialized &&
             this.cid &&
-            this.type &&
-            this.id &&
-            mlsMgrReject.isDesignatedEvictor(channel)
+            this.type === 'team' &&
+            this.id
           ) {
             const targetUserId = event.member.user_id;
-            mlsMgrReject.evictMember(this.type, this.id, this.cid, targetUserId).catch((err: unknown) => {
-              this.getClient().logger('error', '[MLS Event] Failed to evictMember after invite_rejected', {
+            mlsMgrReject.queuePendingEviction(this.cid, targetUserId).catch((err: unknown) => {
+              this.getClient().logger('error', '[MLS Event] Failed to queue pending eviction after invite_rejected', {
                 err,
                 cid: this.cid,
                 user_id: targetUserId,
@@ -1982,10 +2000,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             if (Array.isArray(event.topic_cids)) {
               for (const topicCid of event.topic_cids) {
                 const colonIdx = topicCid.indexOf(':');
-                const topicType = topicCid.substring(0, colonIdx);
-                const topicId = topicCid.substring(colonIdx + 1);
-                mlsMgrReject.evictMember(topicType, topicId, topicCid, targetUserId).catch((err: unknown) => {
-                  this.getClient().logger('error', '[MLS Event] Failed to evictMember topic after invite_rejected', {
+                if (colonIdx <= 0) continue;
+                mlsMgrReject.queuePendingEviction(topicCid, targetUserId).catch((err: unknown) => {
+                  this.getClient().logger('error', '[MLS Event] Failed to queue topic pending eviction after invite_rejected', {
                     err,
                     cid: topicCid,
                     user_id: targetUserId,
@@ -2118,7 +2135,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         switch (protoType) {
           case 'welcome': {
             const targetIds = (protoMsg.target_user_ids as string[]) || [];
-            if (targetIds.includes(mlsMgrProto.userId) && !mlsMgrProto.getGroup(this.cid)) {
+            if (
+              targetIds.includes(mlsMgrProto.userId) &&
+              !mlsMgrProto.getGroup(this.cid) &&
+              !mlsMgrProto.isChannelMlsSyncBlocked(this.cid)
+            ) {
               mlsMgrProto.joinGroup(protoMsg.welcome, protoMsg.ratchet_tree).catch((err: unknown) => {
                 this.getClient().logger('error', '[MLS Event] Failed to process welcome', {
                   err,
