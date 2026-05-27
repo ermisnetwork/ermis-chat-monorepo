@@ -1,18 +1,18 @@
-import { useState, useEffect, useMemo } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { ChatProvider } from '@ermis-network/ermis-chat-react';
-import { ErmisChat, MlsManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk';
-import { LoginPage } from '@/pages/LoginPage';
-import { ChatPage } from '@/pages/ChatPage';
-import { NotFoundPage } from '@/pages/NotFoundPage';
-import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants';
-import { UhmModal } from '@/components/custom/UhmModal';
-import { UhmForwardMessageModal } from '@/features/chat/UhmForwardMessageModal';
-import { UhmCallUI } from '@/features/chat/UhmCallUI';
-import { UhmChannelListError } from '@/components/custom/UhmChannelListError';
-import { SafariCallGuard } from '@/components/custom/SafariCallGuard';
-import i18n from './i18n';
-import { toast, Toaster } from 'sonner';
+import { useState, useEffect, useMemo } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { ChatProvider } from '@ermis-network/ermis-chat-react'
+import { ErmisChat, MlsManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk'
+import { LoginPage } from '@/pages/LoginPage'
+import { ChatPage } from '@/pages/ChatPage'
+import { NotFoundPage } from '@/pages/NotFoundPage'
+import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants'
+import { UhmModal } from '@/components/custom/UhmModal'
+import { UhmForwardMessageModal } from '@/features/chat/UhmForwardMessageModal'
+import { UhmCallUI } from '@/features/chat/UhmCallUI'
+import { UhmChannelListError } from '@/components/custom/UhmChannelListError'
+import { SafariCallGuard } from '@/components/custom/SafariCallGuard'
+import i18n from './i18n'
+import { toast, Toaster } from 'sonner'
 
 // Initialize client with env variables
 const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || '';
@@ -25,6 +25,7 @@ const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_D
   },
   userBaseURL: `${API_DEFAULTS.BASE_URL}/uss/v1`,
 });
+
 
 const mlsManager = new MlsManager();
 let e2eeInitPromise: Promise<void> | null = null;

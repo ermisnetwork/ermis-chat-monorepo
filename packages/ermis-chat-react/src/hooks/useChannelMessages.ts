@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
 import { isPendingMember } from '../channelRoleUtils';
