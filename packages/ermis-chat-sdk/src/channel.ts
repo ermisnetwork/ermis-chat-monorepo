@@ -2204,7 +2204,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
   }
 
-  private async _hydrateE2eeMessagesFromLocalCache(
+  async _hydrateE2eeMessagesFromLocalCache(
     messages: MessageResponse<ErmisChatGenerics>[] = [],
     channelData?: ChannelResponse<ErmisChatGenerics> | ChannelData<ErmisChatGenerics>,
   ): Promise<MessageResponse<ErmisChatGenerics>[]> {

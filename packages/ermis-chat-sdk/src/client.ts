@@ -1531,12 +1531,36 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       }
     });
 
+    // Hydrate E2EE messages from local cache BEFORE initializing state.
+    // Without this, encrypted API messages overwrite decrypted local messages,
+    // causing the UI to show "encrypted message" until the user switches channels.
+    if (this.mlsManager?.storage) {
+      await Promise.all(
+        data.channels.map(async (channelState) => {
+          const isE2ee = (channelState.channel as any)?.mls_enabled === true;
+          if (!isE2ee || !channelState.messages?.length) return;
+
+          // Get or create the channel instance (reused by hydrateChannels below)
+          const ch = this.channel(channelState.channel.type, channelState.channel.id);
+          channelState.messages = await ch._hydrateE2eeMessagesFromLocalCache(
+            channelState.messages,
+            channelState.channel,
+          );
+          if (channelState.pinned_messages?.length) {
+            channelState.pinned_messages = await ch._hydrateE2eeMessagesFromLocalCache(
+              channelState.pinned_messages,
+              channelState.channel,
+            );
+          }
+        }),
+      );
+    }
+
     const { channels, userIds } = this.hydrateChannels(data.channels, stateOptions);
 
     // if (userIds.length > 0) {
     //   await this.getBatchUsers(userIds);
     // }
-
 
     this.dispatchEvent({
       type: 'channels.queried',

@@ -61,7 +61,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     setLoading(true)
 
     try {
-      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.USS_BASE_URL)
+      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, `${API_DEFAULTS.BASE_URL}/uss/v1`)
       authProviderRef.current = provider
 
       let res
@@ -126,7 +126,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     setError('')
     setLoading(true)
     try {
-      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.USS_BASE_URL)
+      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, `${API_DEFAULTS.BASE_URL}/uss/v1`)
       
       const res = await provider.loginWithGoogle(credentialResponse.credential) as any
       if (res && res.success !== false) {
