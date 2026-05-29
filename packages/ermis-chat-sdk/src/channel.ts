@@ -1896,6 +1896,22 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             event.message.quoted_message.user = quotedUser;
           }
           event.message = channelState.addReaction(event.reaction, event.message);
+
+          // Patch E2EE local cache with updated reaction metadata
+          const mlsMgrReaction = this.getClient().mlsManager;
+          const isE2eeReaction = (this.data as any)?.mls_enabled;
+          if (isE2eeReaction && mlsMgrReaction?.initialized && event.message?.id) {
+            mlsMgrReaction.storage.loadE2eeMessage(event.message.id).then((local: any) => {
+              if (!local) return;
+              mlsMgrReaction.storage.saveE2eeMessage({
+                ...local,
+                latest_reactions: event.message?.latest_reactions,
+                reaction_counts: event.message?.reaction_counts,
+              });
+            }).catch((err: unknown) => {
+              this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.new', { err });
+            });
+          }
         }
         break;
       case 'reaction.deleted':
@@ -1915,6 +1931,24 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         if (event.reaction) {
           event.reaction.user = getUserInfo(event.reaction.user?.id || '', users);
           event.message = channelState.removeReaction(event.reaction, event.message);
+        }
+
+        // Patch E2EE local cache with updated reaction metadata
+        {
+          const mlsMgrReactionDel = this.getClient().mlsManager;
+          const isE2eeReactionDel = (this.data as any)?.mls_enabled;
+          if (isE2eeReactionDel && mlsMgrReactionDel?.initialized && event.message?.id) {
+            mlsMgrReactionDel.storage.loadE2eeMessage(event.message.id).then((local: any) => {
+              if (!local) return;
+              mlsMgrReactionDel.storage.saveE2eeMessage({
+                ...local,
+                latest_reactions: event.message?.latest_reactions,
+                reaction_counts: event.message?.reaction_counts,
+              });
+            }).catch((err: unknown) => {
+              this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.deleted', { err });
+            });
+          }
         }
         break;
       case 'member.joined':
@@ -2273,11 +2307,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         continue;
       }
 
+      const userId = storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
+      const enrichedUser = getUserInfo(userId, Object.values(this.getClient().state.users))
+        || storedMessage.user
+        || message.user;
+
       hydrated.push({
         ...message,
         ...storedMessage,
         content_type: 'standard',
-        user: storedMessage.user || message.user,
+        user: enrichedUser,
         latest_reactions: messageAny.latest_reactions ?? storedMessage.latest_reactions,
         reaction_counts: messageAny.reaction_counts ?? storedMessage.reaction_counts,
         reaction_groups: messageAny.reaction_groups ?? storedMessage.reaction_groups,

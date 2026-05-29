@@ -90,7 +90,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
 
   const handleE2eeChange = useCallback((enabled: boolean) => {
     setE2eeEnabled(enabled);
-    if (enabled) setIsPublic(false);
   }, []);
 
   /* ---------- Exclude IDs for Direct ---------- */
@@ -189,7 +188,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         const payload: any = {
           name: name.trim(),
           members: memberIds,
-          public: e2eeEnabled ? false : isPublic,
+          public: isPublic,
         };
 
         if (description.trim()) {
