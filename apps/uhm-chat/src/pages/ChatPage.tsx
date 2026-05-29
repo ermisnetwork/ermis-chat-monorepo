@@ -124,16 +124,25 @@ export function ChatPage() {
     }
 
     // Normal path: wait for ChannelList's queryChannels to finish
-    const sub = client.on('channels.queried', () => {
-      sub.unsubscribe()
-
+    let resolved = false
+    const tryResolve = () => {
+      if (resolved) return false
       const ch = client.activeChannels[cid]
       if (ch?.initialized) {
+        resolved = true
+        sub.unsubscribe()
         applyChannel(ch)
-        return
+        return true
       }
+      return false
+    }
+
+    const sub = client.on('channels.queried', () => {
+      if (tryResolve()) return
 
       // Fallback: channel not in queryChannels results — fetch individually
+      resolved = true
+      sub.unsubscribe()
       const fallback = client.channel(channelType, channelId)
       fallback.watch({ messages: { limit: 25, include_hidden_messages: true } })
         .then(() => applyChannel(fallback))
@@ -144,7 +153,25 @@ export function ChatPage() {
         })
     })
 
-    return () => sub.unsubscribe()
+    // Safety: recheck immediately in case the event already fired before we subscribed
+    const recheckId = setTimeout(() => tryResolve(), 100)
+
+    // Ultimate safety net: if restore doesn't complete in 5s, drop the skeleton
+    const safetyId = setTimeout(() => {
+      if (!resolved) {
+        resolved = true
+        sub.unsubscribe()
+        console.warn('[ChatPage] URL restore timed out after 5s, dropping skeleton overlay')
+        setHasAttemptedRestore(true)
+        requestAnimationFrame(() => { isRestoringRef.current = false })
+      }
+    }, 5000)
+
+    return () => {
+      sub.unsubscribe()
+      clearTimeout(recheckId)
+      clearTimeout(safetyId)
+    }
   }, [client?.userID, searchParams, activeChannel, hasAttemptedRestore, setActiveChannel])
 
   // 2. Sync active channel to URL when it changes

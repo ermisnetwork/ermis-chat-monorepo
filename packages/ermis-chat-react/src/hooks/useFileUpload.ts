@@ -89,7 +89,10 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
     setHasContent(true);
 
     newItems.forEach((item) => uploadSingleFile(item));
-  }, [uploadSingleFile, setHasContent]);
+
+    // Auto-focus the input so user can press Enter to send immediately
+    editableRef.current?.focus();
+  }, [uploadSingleFile, setHasContent, editableRef]);
 
   const handleRemoveFile = useCallback((id: string) => {
     setFiles((prev) => {

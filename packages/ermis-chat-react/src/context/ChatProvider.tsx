@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useState, useCallback, useRef, useMemo } from 'react';
 import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import type { Theme, ChatContextValue, ChatProviderProps, ReadStateEntry } from '../types';
 import { ErmisCallProvider } from '../components/ErmisCallProvider';
@@ -40,6 +40,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   const activeChannel = activeChannelRaw;
   const activeChannelCidRef = useRef<string | null>(null);
 
+  // In-memory draft storage — Map<cid, innerHTML>
+  // O(1) lookup/insert/delete, bounded by number of visited channels per session
+  const draftsRef = useRef<Map<string, string>>(new Map());
+
   const setActiveChannel = useCallback((channel: Channel | null) => {
     const newCid = channel?.cid || null;
     if (activeChannelCidRef.current === newCid) return;
@@ -58,6 +62,25 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
       setMessages([...activeChannel.state.latestMessages]);
     }
   }, [activeChannel]);
+
+  /** Save a draft message (innerHTML) for a specific channel */
+  const setDraft = useCallback((cid: string, html: string) => {
+    if (html && html.trim()) {
+      draftsRef.current.set(cid, html);
+    } else {
+      draftsRef.current.delete(cid);
+    }
+  }, []);
+
+  /** Retrieve the saved draft for a specific channel */
+  const getDraft = useCallback((cid: string): string | undefined => {
+    return draftsRef.current.get(cid);
+  }, []);
+
+  /** Clear all saved drafts (e.g. on logout) */
+  const clearAllDrafts = useCallback(() => {
+    draftsRef.current.clear();
+  }, []);
 
   const value: ChatContextValue = {
     client,
@@ -79,6 +102,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     jumpToMessageId,
     setJumpToMessageId,
     enableCall,
+    setDraft,
+    getDraft,
+    clearAllDrafts,
   };
 
   const CallUIView = CallUIComponent ? <CallUIComponent /> : (

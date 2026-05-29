@@ -37,7 +37,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   DragAndDropOverlayComponent = UhmDragAndDropOverlay,
 }) => {
   const { t } = useTranslation();
-  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
+  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage, setDraft, getDraft } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
@@ -45,6 +45,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   const editableRef = useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
+  const prevChannelCidRef = useRef<string | null>(null);
 
   const { hasCapability } = useChannelCapabilities();
   const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
@@ -214,7 +215,12 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     buildPayload,
     reset: resetMentions,
     syncMessages,
-    onSend: () => { },
+    onSend: () => {
+      // Clear draft after successful send
+      if (activeChannel?.cid) {
+        setDraft(activeChannel.cid, '');
+      }
+    },
     onBeforeSend: async (text: string) => {
       // Keyword validation (links)
       if (!canSendLinks && text) {
@@ -333,6 +339,40 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       editableRef.current.focus();
     }
   }, [activeChannel, quotedMessage, editingMessage]);
+
+  // Draft save/restore on channel switch
+  useEffect(() => {
+    // Save draft from PREVIOUS channel before switching
+    if (prevChannelCidRef.current && editableRef.current) {
+      const currentHtml = editableRef.current.innerHTML;
+      setDraft(prevChannelCidRef.current, currentHtml);
+    }
+
+    // Restore draft for NEW channel
+    const newCid = activeChannel?.cid || null;
+    prevChannelCidRef.current = newCid;
+
+    if (newCid && editableRef.current) {
+      const draft = getDraft(newCid);
+      if (draft) {
+        editableRef.current.innerHTML = draft;
+        setHasContent(!!editableRef.current.textContent?.trim());
+        // Move cursor to end of restored draft
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(editableRef.current);
+        range.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      } else {
+        editableRef.current.innerHTML = '';
+        setHasContent(false);
+      }
+    } else {
+      if (editableRef.current) editableRef.current.innerHTML = '';
+      setHasContent(false);
+    }
+  }, [activeChannel, setDraft, getDraft]);
 
   useEffect(() => {
     if (editingMessage && editableRef.current) {

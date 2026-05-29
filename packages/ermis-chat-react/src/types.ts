@@ -56,6 +56,12 @@ export type ChatContextValue = {
   setJumpToMessageId: (id: string | null) => void;
   /** Indicates whether the direct call feature is enabled */
   enableCall?: boolean;
+  /** Save a draft message (innerHTML) for a specific channel */
+  setDraft: (cid: string, html: string) => void;
+  /** Retrieve the saved draft for a specific channel */
+  getDraft: (cid: string) => string | undefined;
+  /** Clear all saved drafts (e.g. on logout) */
+  clearAllDrafts: () => void;
 };
 
 import type { ChatComponentsContextValue } from './context/ChatComponentsContext';

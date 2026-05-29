@@ -64,13 +64,14 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   DragAndDropOverlayComponent = DefaultDragAndDropOverlay,
   maxCharsLabel = 'Tin nhắn không được vượt quá 5000 ký tự.',
 }) => {
-  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
+  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage, setDraft, getDraft } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
   const { isPreviewMode } = usePreviewState(activeChannel, client.userID);
   const editableRef = React.useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
+  const prevChannelCidRef = useRef<string | null>(null);
 
   const { role, isGroupChannel: isTeamChannel, hasCapability } = useChannelCapabilities();
   const isTopic = isTopicChannel(activeChannel);
@@ -207,8 +208,12 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       lastMsgSentAtRef.current = Date.now();
       setCooldownEnd(Date.now() + memberMessageCooldown);
     }
+    // Clear draft after successful send
+    if (activeChannel?.cid) {
+      setDraft(activeChannel.cid, '');
+    }
     onSend?.(text);
-  }, [isSlowModeApplied, memberMessageCooldown, onSend]);
+  }, [isSlowModeApplied, memberMessageCooldown, onSend, activeChannel, setDraft]);
 
   // Auto-focus when channel changes or when reply/edit is selected
   useEffect(() => {
@@ -339,6 +344,12 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   });
 
   useEffect(() => {
+    // Save draft from PREVIOUS channel before switching
+    if (prevChannelCidRef.current && editableRef.current) {
+      const currentHtml = editableRef.current.innerHTML;
+      setDraft(prevChannelCidRef.current, currentHtml);
+    }
+
     reset();
     handleEmojiClose();
     setFiles((prev) => {
@@ -347,13 +358,31 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       });
       return [];
     });
-    setHasContent(false);
+
+    // Restore draft for NEW channel
+    const newCid = activeChannel?.cid || null;
+    prevChannelCidRef.current = newCid;
+
+    if (newCid && editableRef.current) {
+      const draft = getDraft(newCid);
+      if (draft) {
+        editableRef.current.innerHTML = draft;
+        setHasContent(!!editableRef.current.textContent?.trim());
+        moveCaretToEnd(editableRef.current);
+      } else {
+        editableRef.current.innerHTML = '';
+        setHasContent(false);
+      }
+    } else {
+      if (editableRef.current) editableRef.current.innerHTML = '';
+      setHasContent(false);
+    }
 
     // Stop typing indicator on channel switch / unmount
     return () => {
       activeChannel?.stopTyping();
     };
-  }, [activeChannel, reset, handleEmojiClose, setFiles]);
+  }, [activeChannel, reset, handleEmojiClose, setFiles, setDraft, getDraft]);
 
   /* ---------- Input event handlers ---------- */
   const handleInput = useCallback(() => {
