@@ -29,6 +29,18 @@ export type RecoveryGapProps = {
   className?: string;
 };
 
+export type RecoveryGateProps = {
+  onSkip?: () => void;
+  className?: string;
+};
+
+export type RecoveryRestoreProgressProps = {
+  restoredEpochs: number;
+  totalEpochs: number;
+  gaps?: Array<{ epoch?: number; reason: string }>;
+  className?: string;
+};
+
 const MIN_PIN_DIGITS = 8;
 
 const pinError = (pin: string, minDigits = MIN_PIN_DIGITS): string | null => {
@@ -196,8 +208,10 @@ export const RecoveryStatus: React.FC<RecoveryStatusProps> = ({
   const label = useMemo(() => {
     if (resolvedStatus === 'working') return 'Recovery syncing';
     if (resolvedStatus === 'error') return 'Recovery error';
+    if (recovery.recoveryStatus?.hasIncompleteRestore) return 'Recovery pending';
+    if ((recovery.recoveryStatus?.channelsWithPermanentGaps.length || 0) > 0) return 'Recovery has gaps';
     return resolvedHasKey ? 'Recovery ready' : 'Recovery locked';
-  }, [resolvedHasKey, resolvedStatus]);
+  }, [recovery.recoveryStatus, resolvedHasKey, resolvedStatus]);
 
   return (
     <span className={`ermis-recovery-status ermis-recovery-status--${resolvedStatus}${className ? ` ${className}` : ''}`}>
@@ -209,5 +223,57 @@ export const RecoveryStatus: React.FC<RecoveryStatusProps> = ({
 export const RecoveryGap: React.FC<RecoveryGapProps> = ({ epoch, reason, className }) => (
   <div className={`ermis-recovery-gap${className ? ` ${className}` : ''}`}>
     {epoch !== undefined ? `Epoch ${epoch}: ` : ''}{reason}
+  </div>
+);
+
+export const RecoveryGate: React.FC<RecoveryGateProps> = ({ onSkip, className }) => {
+  const recovery = useRecoveryPin();
+  const [skipped, setSkipped] = useState(false);
+  const status = recovery.recoveryStatus;
+  if (skipped || !status) return null;
+
+  const skip = () => {
+    setSkipped(true);
+    onSkip?.();
+  };
+
+  if (!status.hasVault) {
+    return (
+      <div className={`ermis-recovery-gate${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true">
+        <RecoveryPinSetup onComplete={recovery.refresh} />
+        <button className="ermis-recovery-pin__button ermis-recovery-pin__button--secondary" type="button" onClick={skip}>
+          Skip
+        </button>
+      </div>
+    );
+  }
+
+  if (!status.unlocked && status.hasIncompleteRestore) {
+    return (
+      <div className={`ermis-recovery-gate${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true">
+        <RecoveryPinRestore onComplete={recovery.refresh} />
+        <button className="ermis-recovery-pin__button ermis-recovery-pin__button--secondary" type="button" onClick={skip}>
+          Skip
+        </button>
+      </div>
+    );
+  }
+
+  return null;
+};
+
+export const RecoveryRestoreProgress: React.FC<RecoveryRestoreProgressProps> = ({
+  restoredEpochs,
+  totalEpochs,
+  gaps = [],
+  className,
+}) => (
+  <div className={`ermis-recovery-progress${className ? ` ${className}` : ''}`}>
+    <div className="ermis-recovery-progress__summary">
+      {restoredEpochs}/{totalEpochs} epochs restored
+    </div>
+    {gaps.map((gap, index) => (
+      <RecoveryGap key={`${gap.epoch ?? 'gap'}-${index}`} epoch={gap.epoch} reason={gap.reason} />
+    ))}
   </div>
 );

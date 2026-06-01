@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { ChatProvider } from '@ermis-network/ermis-chat-react'
 import { ErmisChat, MlsManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk'
@@ -23,7 +23,7 @@ const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_D
     filter: { type: ['messaging', 'team'] },
     options: { message_limit: 1 },
   },
-  userBaseURL: `${API_DEFAULTS.BASE_URL}/uss/v1`,
+  userBaseURL: `${API_DEFAULTS.USS_BASE_URL}/uss/v1`,
 });
 
 
@@ -45,6 +45,50 @@ async function initializeE2ee(userId: string) {
 }
 
 import { isSafari } from '@/utils/browser';
+
+type BootstrapPhase = 'restoring' | 'idle' | 'connecting' | 'e2ee' | 'ready' | 'error';
+
+function bootstrapMessage(phase: BootstrapPhase) {
+  if (phase === 'connecting') return i18n.t('app.bootstrap_connecting', 'Signing in and preparing your session...');
+  if (phase === 'e2ee') return i18n.t('app.bootstrap_e2ee', 'Preparing end-to-end encryption...');
+  if (phase === 'error') return i18n.t('app.bootstrap_failed', 'Could not finish secure startup.');
+  return i18n.t('app.bootstrap_restoring', 'Restoring your session...');
+}
+
+function BootstrapScreen({
+  phase,
+  error,
+  onRetry,
+}: {
+  phase: BootstrapPhase;
+  error?: string | null;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="flex h-screen items-center justify-center bg-zinc-50 px-6 dark:bg-[#1a1828]">
+      <div className="w-full max-w-sm rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-xl dark:border-zinc-800 dark:bg-[#211f30]">
+        <div className="mx-auto mb-4 h-10 w-10 animate-pulse rounded-2xl bg-[#7949EC]/15" />
+        <div className="text-[16px] font-semibold text-zinc-950 dark:text-zinc-50">
+          {bootstrapMessage(phase)}
+        </div>
+        {error && (
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-medium text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200">
+            {error}
+          </div>
+        )}
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-[#7949EC] px-4 text-[13px] font-semibold text-white shadow-sm hover:bg-[#6840d8]"
+          >
+            {i18n.t('app.retry', 'Try Again')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // Global API Error Handling
 let lastToastTime = 0;
@@ -77,22 +121,25 @@ chatClient.axiosInstance.interceptors.response.use(
 // Auth guard component for protected routes
 function AuthRoute({
   isAuthenticated,
-  isRestoring,
+  chatReady,
   children,
 }: {
   isAuthenticated: boolean;
-  isRestoring: boolean;
+  chatReady: boolean;
   children: React.ReactNode;
 }) {
-  if (isRestoring) return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]" />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!chatReady) return <BootstrapScreen phase="restoring" />;
   return <>{children}</>;
 }
 
 // Main component containing Auth and Routing logic
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isRestoring, setIsRestoring] = useState(true);
+  const [chatReady, setChatReady] = useState(false);
+  const [bootstrapPhase, setBootstrapPhase] = useState<BootstrapPhase>('restoring');
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [pendingBootstrap, setPendingBootstrap] = useState<{ userId: string; token: string } | null>(null);
 
   const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) === 'dark' ? 'dark' : 'light';
   const navigate = useNavigate();
@@ -107,9 +154,66 @@ function AppContent() {
     [],
   );
 
+  const clearSavedSession = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.USER_ID);
+    localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID);
+  }, []);
+
+  const bootstrapSession = useCallback(async (
+    userId: string,
+    token: string,
+    options: { navigateToChat?: boolean } = {},
+  ) => {
+    setPendingBootstrap({ userId, token });
+    setBootstrapError(null);
+    setChatReady(false);
+    setIsAuthenticated(false);
+
+    try {
+      setBootstrapPhase('connecting');
+      await chatClient.connectUser({ id: userId }, token);
+
+      setBootstrapPhase('e2ee');
+      await initializeE2ee(userId);
+
+      setIsAuthenticated(true);
+      setChatReady(true);
+      setBootstrapPhase('ready');
+      setBootstrapError(null);
+      if (options.navigateToChat) {
+        navigate('/chat', { replace: true });
+      }
+    } catch (err: any) {
+      const parsed = (() => {
+        try {
+          return JSON.parse(err?.message);
+        } catch {
+          return err;
+        }
+      })();
+      const status = err?.response?.status || parsed?.status;
+      const isAuthFailure = status === 401 || status === 403;
+
+      setChatReady(false);
+      setIsAuthenticated(false);
+      if (isAuthFailure) {
+        clearSavedSession();
+        setPendingBootstrap(null);
+        setBootstrapPhase('idle');
+        setBootstrapError(null);
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      setBootstrapPhase('error');
+      setBootstrapError(err?.message || i18n.t('app.bootstrap_failed', 'Could not finish secure startup.'));
+      console.error('[Bootstrap] Failed to initialize chat:', err);
+    }
+  }, [clearSavedSession, navigate]);
+
   // Restore login session from localStorage on mount
   useEffect(() => {
-    // Restore theme for document
     if (savedTheme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
@@ -120,57 +224,16 @@ function AppContent() {
     const savedUserId = localStorage.getItem(STORAGE_KEYS.USER_ID);
 
     if (savedToken && savedUserId) {
-      // Fire-and-forget: connectUser runs in background, WS errors handled by
-      // useConnectionStatus hook in ChatPage (connection.changed event)
-      chatClient
-        .connectUser({ id: savedUserId }, savedToken)
-        .then(() =>
-          initializeE2ee(savedUserId).catch((err) => {
-            console.warn('[E2EE] Initialization failed; encrypted channels will be disabled.', err);
-          }),
-        )
-        .catch((err) => {
-          // Distinguish WS failure (network, COOP) vs Auth failure (expired token)
-          const parsed = (() => {
-            try {
-              return JSON.parse(err.message);
-            } catch {
-              return err;
-            }
-          })();
-          const isWSFailure = parsed?.isWSFailure || err?.isWSFailure;
-
-          if (!isWSFailure) {
-            // Token expired or invalid → clear and require re-login
-            localStorage.removeItem(STORAGE_KEYS.TOKEN);
-            localStorage.removeItem(STORAGE_KEYS.USER_ID);
-            localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID);
-            setIsAuthenticated(false);
-          }
-        });
-
-      // Always navigate to ChatPage, WS errors shown via banner in ChatPage
-      setIsAuthenticated(true);
-      setIsRestoring(false);
+      void bootstrapSession(savedUserId, savedToken);
     } else {
-      setIsRestoring(false);
+      setBootstrapPhase('idle');
+      setChatReady(false);
+      setIsAuthenticated(false);
     }
-  }, []);
+  }, [bootstrapSession, savedTheme]);
 
   const handleLoginSuccess = (userId: string, token: string) => {
-    // Always navigate to ChatPage regardless of WS connection status
-    setIsAuthenticated(true);
-    navigate('/chat', { replace: true });
-
-    // Fire-and-forget: WS connection runs in background
-    chatClient
-      .connectUser({ id: userId }, token)
-      .then(() =>
-        initializeE2ee(userId).catch((err) => {
-          console.warn('[E2EE] Initialization failed; encrypted channels will be disabled.', err);
-        }),
-      )
-      .catch((err) => console.error('Failed to connect user:', err));
+    void bootstrapSession(userId, token, { navigateToChat: true });
   };
 
   const callSessionId = useMemo(() => {
@@ -181,9 +244,16 @@ function AppContent() {
     return id;
   }, []);
 
-  // Show blank screen while restoring auth
-  if (isRestoring) {
-    return <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-[#1a1828]" />;
+  if (bootstrapPhase !== 'idle' && bootstrapPhase !== 'ready') {
+    return (
+      <BootstrapScreen
+        phase={bootstrapPhase}
+        error={bootstrapError}
+        onRetry={bootstrapPhase === 'error' && pendingBootstrap
+          ? () => void bootstrapSession(pendingBootstrap.userId, pendingBootstrap.token, { navigateToChat: true })
+          : undefined}
+      />
+    );
   }
 
   return (
@@ -210,7 +280,7 @@ function AppContent() {
         <Route
           path="/chat"
           element={
-            <AuthRoute isAuthenticated={isAuthenticated} isRestoring={isRestoring}>
+            <AuthRoute isAuthenticated={isAuthenticated} chatReady={chatReady}>
               <ChatPage />
             </AuthRoute>
           }

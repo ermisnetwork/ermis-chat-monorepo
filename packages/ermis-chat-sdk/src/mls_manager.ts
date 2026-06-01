@@ -18,6 +18,7 @@ import type {
   ArchiveKeyWrapRecord,
   CiphertextCursor,
   HistoricalCiphertext,
+  QueryEpochArchivesResponse,
   UploadEpochArchiveRequest,
 } from './e2ee';
 import type {
@@ -26,6 +27,11 @@ import type {
   PendingE2eeSnapshot,
   RemovedSyncCursor,
   PendingArchiveUpload,
+  PendingDeferredArchive,
+  RestorePermanentGapReason,
+  RestoreProgressRecord,
+  RestoreStatus,
+  RestoreTransientFailureReason,
 } from './mls_storage';
 import { IndexedDBMlsStorage } from './mls_storage';
 import type { ErmisChat } from './client';
@@ -45,6 +51,13 @@ function isEpochStaleError(err: any): boolean {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getApiErrorMessage(err: any): string {
   return String(err?.response?.data?.message || err?.message || err || '');
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isVaultMissingError(err: any): boolean {
+  const status = err?.response?.status || err?.status;
+  const msg = getApiErrorMessage(err).toLowerCase();
+  return status === 404 || msg.includes('recovery vault not found');
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,6 +99,10 @@ function staleGroupInfoError(cid: string): Error & { code: string } {
 }
 
 const KEY_PACKAGE_POOL_TARGET = 100;
+const RESTORE_EPOCH_BATCH_SIZE = 25;
+const RESTORE_EPOCH_MAX_SPAN = 100;
+const RESTORE_DECRYPT_MAX_RETRIES = 3;
+const RESTORE_NETWORK_MAX_RETRIES = 5;
 
 function cidFromParts(channelType: string, channelId: string): string {
   return `${channelType}:${channelId}`;
@@ -98,6 +115,33 @@ function channelPartsFromCid(cid: string): { channelType: string; channelId: str
     channelType: cid.substring(0, colonIdx),
     channelId: cid.substring(colonIdx + 1),
   };
+}
+
+function splitRestoreEpochBatches(epochs: number[]): number[][] {
+  const batches: number[][] = [];
+  let current: number[] = [];
+  let startEpoch: number | null = null;
+
+  for (const epoch of epochs) {
+    if (current.length === 0) {
+      current = [epoch];
+      startEpoch = epoch;
+      continue;
+    }
+
+    const span = epoch - (startEpoch ?? epoch);
+    if (current.length >= RESTORE_EPOCH_BATCH_SIZE || span > RESTORE_EPOCH_MAX_SPAN) {
+      batches.push(current);
+      current = [epoch];
+      startEpoch = epoch;
+      continue;
+    }
+
+    current.push(epoch);
+  }
+
+  if (current.length > 0) batches.push(current);
+  return batches;
 }
 
 function bytesToHex(bytes: Uint8Array | number[]): string {
@@ -204,14 +248,68 @@ export interface EnsureE2eeChannelResult {
   error?: string;
 }
 
+export type E2eeBootstrapStatus = 'idle' | 'running' | 'done' | 'failed';
+
+export interface E2eeBootstrapProgress {
+  total: number;
+  completed: number;
+  running_cid?: string;
+  failed_cids: string[];
+  status: E2eeBootstrapStatus;
+}
+
+export interface BootstrapKnownE2eeChannelsOptions {
+  source?: 'startup' | 'channels_queried' | 'manual' | string;
+  priorityActiveCid?: string;
+}
+
+export interface BootstrapKnownE2eeChannelsResult extends E2eeBootstrapProgress {
+  results: EnsureE2eeChannelResult[];
+}
+
 export interface RestoredMessage {
   epoch: number;
   messageId?: string;
   plaintext?: E2eePayload;
   source?: 'archive';
   createdAt?: string;
+  message?: Record<string, unknown>;
+  synced?: boolean;
   gap?: boolean;
-  reason?: 'no_archive' | 'no_matching_wrap' | 'missing_snapshot' | 'adk_unwrap_error' | 'decrypt_error';
+  reason?: 'no_archive' | 'no_matching_wrap' | 'missing_snapshot' | 'expired_restore_window' | 'adk_unwrap_error' | 'decrypt_error';
+}
+
+export interface RecoveryStatus {
+  hasVault: boolean;
+  unlocked: boolean;
+  hasIncompleteRestore: boolean;
+  incompleteChannels: string[];
+  channelsWithPermanentGaps: string[];
+  e2eeBootstrapRunning?: boolean;
+  e2eeBootstrapCompleted?: number;
+  e2eeBootstrapTotal?: number;
+}
+
+interface RestoreQueueEntry {
+  cid: string;
+  channelType: string;
+  channelId: string;
+  priority: 'active' | 'background';
+  options?: { fromEpoch?: number; toEpoch?: number };
+}
+
+interface CurrentArchiveMaterial {
+  cid: string;
+  channelType: string;
+  channelId: string;
+  epochBigInt: bigint;
+  epoch: number;
+  archiveBlobId: string;
+  snapshotHash: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  exported: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  encrypted: any;
 }
 
 interface ChannelProcessResult {
@@ -220,6 +318,24 @@ interface ChannelProcessResult {
   bufferedMessages: number;
   decrypted: E2eeStoredMessage[];
 }
+
+type ActiveMessageEnvelope = Record<string, unknown> & {
+  id: string;
+  user?: { id: string; [key: string]: unknown };
+  user_id?: string;
+  created_at?: string | Date;
+  updated_at?: string | Date | null;
+  mls_epoch?: number;
+};
+
+type ArchiveMessageEnvelope = Record<string, unknown> & {
+  id: string;
+  user?: { id: string; [key: string]: unknown };
+  user_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  mls_epoch?: number;
+};
 
 // WASM module — loaded dynamically
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -281,6 +397,21 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private _recoveryCiphersuite: number | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _wrappedRecoveryKey: any = null;
+  private _recoveryVaultKnown: boolean | null = null;
+  private _recoveryVaultBytes: number[] | null = null;
+  private _recoveryPublicMetadataPromise: Promise<{ vault_bytes: number[] } | null> | null = null;
+  private _archiveStashKey: CryptoKey | null = null;
+  private _archiveStashKeyPromise: Promise<CryptoKey> | null = null;
+  private _restoreQueue: RestoreQueueEntry[] = [];
+  private _restoreQueueRunning = false;
+  private _bootstrapKnownChannelsPromise: Promise<BootstrapKnownE2eeChannelsResult> | null = null;
+  private _channelBootstrapSub: { unsubscribe?: () => void } | null = null;
+  private _e2eeBootstrapProgress: E2eeBootstrapProgress = {
+    total: 0,
+    completed: 0,
+    failed_cids: [],
+    status: 'idle',
+  };
 
   /**
    * Deferred eviction queue — populated during sync when a MemberLeaved system message
@@ -354,6 +485,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 3. Create E2eeClient
     this.e2eeClient = new E2eeClient<ErmisChatGenerics>(client);
 
+    // Load public recovery metadata before sync so this device can upload
+    // account-owned archives without requiring the user to enter the PIN first.
+    await this._loadRecoveryPublicMetadata().catch((err) => {
+      console.warn('[MLS] Recovery public metadata unavailable during init:', err);
+    });
+
+    // Normalize interrupted restore jobs before status/UI checks.
+    await this._normalizeStaleRestoreProgress();
+
     // 4. Top up this device's server-side KeyPackage pool on every init.
     //    Prefer the latest health.check count when it arrived before MLS init;
     //    only query the count endpoint when no health.check count is cached.
@@ -368,8 +508,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 7. Register this manager on the client so event handlers can access it
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (this.client as any).mlsManager = this;
+    this._registerKnownChannelBootstrapListener();
 
     this.initialized = true;
+    (this.client as any)?.dispatchEvent?.({
+      type: 'e2ee.initialized',
+      user_id: this.userId,
+      device_id: this.deviceId,
+    } as any);
     console.log('[MLS] Manager initialized', {
       userId: this.userId,
       deviceId: this.deviceId,
@@ -515,6 +661,73 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // PIN Epoch Archive Recovery
   // ============================================================
 
+  private async _fetchVault(): Promise<{ vault_bytes: number[] } | null> {
+    try {
+      return await this.e2eeClient!.getRecoveryVault();
+    } catch (err) {
+      if (isVaultMissingError(err)) return null;
+      throw err;
+    }
+  }
+
+  private async _loadRecoveryPublicMetadata(): Promise<{ vault_bytes: number[] } | null> {
+    if (this._recoveryVaultKnown === false) return null;
+    if (this._recoveryVaultKnown === true && this._recoveryVaultBytes && this._recoveryPublicKey && this._recoveryKeyId) {
+      return { vault_bytes: this._recoveryVaultBytes };
+    }
+
+    if (this._recoveryPublicMetadataPromise) {
+      return this._recoveryPublicMetadataPromise;
+    }
+
+    const loadPromise = (async () => {
+      const vault = await this._fetchVault();
+      this._recoveryVaultKnown = vault !== null;
+      this._recoveryVaultBytes = vault ? [...vault.vault_bytes] : null;
+      if (!vault) return null;
+
+      const wrapped = wasmModule.WrappedRecoveryKey.from_bytes(new Uint8Array(vault.vault_bytes));
+      this._recoveryPublicKey = new Uint8Array(wrapped.public_key);
+      this._recoveryKeyId = wrapped.key_id;
+      this._recoveryCiphersuite = wrapped.ciphersuite;
+      this._wrappedRecoveryKey = wrapped;
+      await this.storage.saveRecoveryPublicKey(this.userId!, this._recoveryPublicKey);
+      await this._flushDeferredArchives();
+      return vault;
+    })();
+
+    this._recoveryPublicMetadataPromise = loadPromise;
+    try {
+      return await loadPromise;
+    } finally {
+      if (this._recoveryPublicMetadataPromise === loadPromise) {
+        this._recoveryPublicMetadataPromise = null;
+      }
+    }
+  }
+
+  async getRecoveryStatus(): Promise<RecoveryStatus> {
+    const vault = await this._loadRecoveryPublicMetadata();
+    const deviceId = this.deviceId || (await this.storage.getDeviceId());
+    const incompleteRecords = await this.storage.loadIncompleteRestores(this.userId!, deviceId);
+    const gapRecords = await this.storage.loadRestoresWithPermanentGaps(this.userId!, deviceId);
+    return {
+      hasVault: vault !== null,
+      unlocked: this._recoveryPrivateKey !== null,
+      hasIncompleteRestore: incompleteRecords.length > 0,
+      incompleteChannels: incompleteRecords.map((record) => record.cid),
+      channelsWithPermanentGaps: gapRecords.map((record) => record.cid),
+      e2eeBootstrapRunning: this._e2eeBootstrapProgress.status === 'running',
+      e2eeBootstrapCompleted: this._e2eeBootstrapProgress.completed,
+      e2eeBootstrapTotal: this._e2eeBootstrapProgress.total,
+    };
+  }
+
+  clearRecoveryUnlock(): void {
+    this._recoveryPrivateKey = null;
+    this._wrappedRecoveryKey = null;
+  }
+
   async setupRecoveryPin(pin: string): Promise<void> {
     if (!/^\d{8,}$/.test(pin)) {
       throw new Error('PIN must be at least 8 digits');
@@ -531,24 +744,36 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     );
     const vaultBytes = wrapped.to_bytes();
     await this.e2eeClient!.uploadRecoveryVault({ vault_bytes: Array.from(vaultBytes) });
+    this._recoveryVaultKnown = true;
+    this._recoveryVaultBytes = Array.from(vaultBytes);
+    this._recoveryPublicMetadataPromise = null;
     this._recoveryPrivateKey = new Uint8Array(keypair.private_key);
     this._recoveryPublicKey = new Uint8Array(keypair.public_key);
     this._recoveryKeyId = keypair.key_id;
     this._recoveryCiphersuite = keypair.ciphersuite;
     this._wrappedRecoveryKey = wrapped;
     await this.storage.saveRecoveryPublicKey(this.userId!, this._recoveryPublicKey);
+    await this._flushDeferredArchives();
+    await this._archiveKnownE2eeChannels();
+    await this._enqueueIncompleteRestores();
   }
 
   async unlockRecoveryVault(pin: string): Promise<void> {
-    const { vault_bytes } = await this.e2eeClient!.getRecoveryVault();
-    const wrapped = wasmModule.WrappedRecoveryKey.from_bytes(new Uint8Array(vault_bytes));
+    const vault = await this._loadRecoveryPublicMetadata();
+    if (!vault) throw new Error('Recovery vault not found.');
+    const wrapped = this._wrappedRecoveryKey || wasmModule.WrappedRecoveryKey.from_bytes(new Uint8Array(vault.vault_bytes));
     const privateKey = wasmModule.unwrap_recovery_private_key(this.provider, pin, wrapped);
+    this._recoveryVaultKnown = true;
+    this._recoveryVaultBytes = [...vault.vault_bytes];
     this._recoveryPrivateKey = new Uint8Array(privateKey);
     this._recoveryPublicKey = new Uint8Array(wrapped.public_key);
     this._recoveryKeyId = wrapped.key_id;
     this._recoveryCiphersuite = wrapped.ciphersuite;
     this._wrappedRecoveryKey = wrapped;
     await this.storage.saveRecoveryPublicKey(this.userId!, this._recoveryPublicKey);
+    await this._flushDeferredArchives();
+    await this._archiveKnownE2eeChannels();
+    await this._enqueueIncompleteRestores();
   }
 
   async changeRecoveryPin(oldPin: string, newPin: string): Promise<void> {
@@ -575,39 +800,69 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   async archiveCurrentEpoch(channelType: string, channelId: string): Promise<void> {
-    if (!this._recoveryPublicKey || !this._recoveryKeyId) return;
     const cid = cidFromParts(channelType, channelId);
     const group = this.groups.get(cid);
     if (!group) return;
-    const exported = group.archive_epoch_v2();
     const epochBigInt = toEpochBigInt(group.epoch());
     const epoch = Number(epochBigInt);
+
+    if (await this._hasArchiveAcknowledged(cid, epoch)) return;
+    if (await this._hasPendingArchiveWork(cid, epoch)) return;
+
+    const material = this._exportCurrentArchiveMaterial(channelType, channelId, cid, group, epochBigInt, epoch);
+
+    if (!this._recoveryPublicKey || !this._recoveryKeyId) {
+      await this._stashDeferredArchive(material);
+      return;
+    }
+
+    await this._enqueueArchiveUploadFromMaterial(material, new Uint8Array(material.encrypted.adk));
+    await this._drainArchiveUploadQueue();
+  }
+
+  private _exportCurrentArchiveMaterial(
+    channelType: string,
+    channelId: string,
+    cid: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    group: any,
+    epochBigInt: bigint,
+    epoch: number,
+  ): CurrentArchiveMaterial {
+    const exported = group.archive_epoch_v2();
     const archiveBlobId = newArchiveBlobId();
     const snapshotHash = bytesToHex(exported.snapshot_hash);
     const aad = new wasmModule.ArchiveBlobAad(cid, epochBigInt, 'account_owned', archiveBlobId, snapshotHash);
     const encrypted = wasmModule.encrypt_archive_blob(this.provider, exported.archive_bytes, aad);
+    return { cid, channelType, channelId, epochBigInt, epoch, archiveBlobId, snapshotHash, exported, encrypted };
+  }
+
+  private async _enqueueArchiveUploadFromMaterial(material: CurrentArchiveMaterial, adk: Uint8Array): Promise<void> {
+    if (!this._recoveryPublicKey || !this._recoveryKeyId) {
+      throw new Error('Recovery public key is not available.');
+    }
     const info = new wasmModule.ArchiveKeyWrapInfo(
-      cid,
-      epochBigInt,
+      material.cid,
+      material.epochBigInt,
       'account_owned',
-      archiveBlobId,
-      snapshotHash,
+      material.archiveBlobId,
+      material.snapshotHash,
       this._recoveryKeyId,
     );
-    const wrappedAdk = wasmModule.wrap_archive_data_key(this.provider, encrypted.adk, this._recoveryPublicKey, info);
+    const wrappedAdk = wasmModule.wrap_archive_data_key(this.provider, adk, this._recoveryPublicKey, info);
     const upload: UploadEpochArchiveRequest = {
-      epoch,
-      archive_blob_id: archiveBlobId,
-      idempotency_key: `${epoch}:account_owned:${this.deviceId || 'web'}`,
+      epoch: material.epoch,
+      archive_blob_id: material.archiveBlobId,
+      idempotency_key: `${material.epoch}:account_owned:${this.deviceId || 'web'}:${material.archiveBlobId}`,
       scope: 'account_owned',
       encrypted_archive: {
-        ciphertext: Array.from(encrypted.ciphertext),
-        nonce: Array.from(encrypted.nonce),
-        aead_aad: Array.from(encrypted.aead_aad),
+        ciphertext: Array.from(material.encrypted.ciphertext),
+        nonce: Array.from(material.encrypted.nonce),
+        aead_aad: Array.from(material.encrypted.aead_aad),
       },
       snapshot: {
-        snapshot_bytes: Array.from(exported.snapshot_bytes),
-        snapshot_hash: snapshotHash,
+        snapshot_bytes: Array.from(material.exported.snapshot_bytes),
+        snapshot_hash: material.snapshotHash,
       },
       wraps: [
         {
@@ -620,8 +875,243 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         },
       ],
     };
-    await this._enqueueArchiveUpload({ cid, channel_type: channelType, channel_id: channelId, epoch, scope: 'account_owned', upload, retry_count: 0, created_at: Date.now() });
-    await this._drainArchiveUploadQueue();
+    await this._enqueueArchiveUpload({
+      cid: material.cid,
+      channel_type: material.channelType,
+      channel_id: material.channelId,
+      epoch: material.epoch,
+      scope: 'account_owned',
+      upload,
+      retry_count: 0,
+      created_at: Date.now(),
+    });
+  }
+
+  private async _stashDeferredArchive(material: CurrentArchiveMaterial): Promise<void> {
+    const encryptedAdk = await this._encryptArchiveStashBytes(new Uint8Array(material.encrypted.adk));
+    const now = Date.now();
+    await this.storage.saveDeferredArchive({
+      cid: material.cid,
+      channel_type: material.channelType,
+      channel_id: material.channelId,
+      epoch: material.epoch,
+      scope: 'account_owned',
+      archive_blob_id: material.archiveBlobId,
+      encrypted_archive: {
+        ciphertext: Array.from(material.encrypted.ciphertext),
+        nonce: Array.from(material.encrypted.nonce),
+        aead_aad: Array.from(material.encrypted.aead_aad),
+      },
+      snapshot: {
+        snapshot_bytes: Array.from(material.exported.snapshot_bytes),
+        snapshot_hash: material.snapshotHash,
+      },
+      encrypted_adk: encryptedAdk,
+      retry_count: 0,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  private async _hasArchiveAcknowledged(cid: string, epoch: number): Promise<boolean> {
+    if (!this._recoveryKeyId) return false;
+    return !!(await this.storage.loadArchiveAck(cid, epoch, this._recoveryKeyId));
+  }
+
+  private async _hasPendingArchiveWork(cid: string, epoch: number): Promise<boolean> {
+    const [uploads, deferred] = await Promise.all([
+      this.storage.loadPendingArchiveUploads(),
+      this.storage.loadPendingDeferredArchives(),
+    ]);
+    return uploads.some((item) => item.cid === cid && item.epoch === epoch)
+      || deferred.some((item) => item.cid === cid && item.epoch === epoch);
+  }
+
+  private _getBrowserCrypto(): Crypto {
+    const cryptoImpl = globalThis.crypto;
+    if (!cryptoImpl?.subtle || !cryptoImpl.getRandomValues) {
+      throw new Error('WebCrypto is required to protect deferred archive material.');
+    }
+    return cryptoImpl;
+  }
+
+  private async _getArchiveStashKey(): Promise<CryptoKey> {
+    if (this._archiveStashKey) return this._archiveStashKey;
+    if (this._archiveStashKeyPromise) return this._archiveStashKeyPromise;
+
+    this._archiveStashKeyPromise = (async () => {
+      const existing = await this.storage.loadArchiveStashKey();
+      if (existing) {
+        this._archiveStashKey = existing;
+        return existing;
+      }
+      const key = await this._getBrowserCrypto().subtle.generateKey(
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt'],
+      );
+      await this.storage.saveArchiveStashKey(key);
+      this._archiveStashKey = key;
+      return key;
+    })();
+
+    try {
+      return await this._archiveStashKeyPromise;
+    } finally {
+      this._archiveStashKeyPromise = null;
+    }
+  }
+
+  private async _encryptArchiveStashBytes(bytes: Uint8Array): Promise<{ ciphertext: number[]; nonce: number[] }> {
+    const cryptoImpl = this._getBrowserCrypto();
+    const key = await this._getArchiveStashKey();
+    const nonce = new Uint8Array(12);
+    cryptoImpl.getRandomValues(nonce);
+    const plaintext = new Uint8Array(bytes.length);
+    plaintext.set(bytes);
+    const ciphertext = await cryptoImpl.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plaintext.buffer);
+    return { ciphertext: Array.from(new Uint8Array(ciphertext)), nonce: Array.from(nonce) };
+  }
+
+  private async _decryptArchiveStashBytes(encrypted: { ciphertext: number[]; nonce: number[] }): Promise<Uint8Array> {
+    const key = await this._getArchiveStashKey();
+    const plaintext = await this._getBrowserCrypto().subtle.decrypt(
+      { name: 'AES-GCM', iv: new Uint8Array(encrypted.nonce) },
+      key,
+      new Uint8Array(encrypted.ciphertext).buffer,
+    );
+    return new Uint8Array(plaintext);
+  }
+
+  private _listKnownE2eeChannels(): Array<{ cid: string; channelType: string; channelId: string }> {
+    const activeChannels = (this.client as any)?.activeChannels as Record<string, any> | undefined;
+    if (!activeChannels) return [];
+    const seen = new Set<string>();
+    const channels: Array<{ cid: string; channelType: string; channelId: string }> = [];
+    for (const [cid, channel] of Object.entries(activeChannels)) {
+      if (!channel?.id || channel.data?.mls_enabled !== true || seen.has(cid)) continue;
+      if (this._isInactiveInviteRole(this._membershipRoleForChannel(channel))) continue;
+      seen.add(cid);
+      channels.push({ cid, channelType: channel.type, channelId: channel.id });
+    }
+    return channels;
+  }
+
+  private _emitBootstrapProgress(progress: E2eeBootstrapProgress): void {
+    this._e2eeBootstrapProgress = { ...progress, failed_cids: [...progress.failed_cids] };
+    (this.client as any)?.dispatchEvent?.({
+      type: 'e2ee.bootstrap_progress',
+      ...this._e2eeBootstrapProgress,
+    } as any);
+  }
+
+  private _registerKnownChannelBootstrapListener(): void {
+    if (this._channelBootstrapSub || !(this.client as any)?.on) return;
+    this._channelBootstrapSub = (this.client as any).on('channels.queried', () => {
+      void this.bootstrapKnownE2eeChannels({ source: 'channels_queried' });
+    });
+  }
+
+  async bootstrapKnownE2eeChannels(
+    options: BootstrapKnownE2eeChannelsOptions = {},
+  ): Promise<BootstrapKnownE2eeChannelsResult> {
+    if (!this.initialized) {
+      return { ...this._e2eeBootstrapProgress, results: [] };
+    }
+    if (this._bootstrapKnownChannelsPromise) {
+      return this._bootstrapKnownChannelsPromise;
+    }
+
+    const work = (async (): Promise<BootstrapKnownE2eeChannelsResult> => {
+      const knownChannels = this._listKnownE2eeChannels();
+      let channels = knownChannels.filter((channel) => !this.groups.has(channel.cid));
+      if (options.priorityActiveCid) {
+        channels = [
+          ...channels.filter((channel) => channel.cid === options.priorityActiveCid),
+          ...channels.filter((channel) => channel.cid !== options.priorityActiveCid),
+        ];
+      }
+
+      const failedCids: string[] = [];
+      const results: EnsureE2eeChannelResult[] = [];
+      this._emitBootstrapProgress({
+        total: channels.length,
+        completed: 0,
+        failed_cids: failedCids,
+        status: channels.length > 0 ? 'running' : 'done',
+      });
+
+      let completed = 0;
+      for (const channel of channels) {
+        this._emitBootstrapProgress({
+          total: channels.length,
+          completed,
+          running_cid: channel.cid,
+          failed_cids: failedCids,
+          status: 'running',
+        });
+
+        try {
+          const result = await this.ensureChannelReady(channel.channelType, channel.channelId, channel.cid, {
+            source: options.source || 'startup',
+          });
+          results.push(result);
+          if (result.status === 'failed' || result.status === 'stale_group_info') {
+            failedCids.push(channel.cid);
+          } else if (this.groups.has(channel.cid)) {
+            await this.safeArchiveCurrentEpoch(channel.channelType, channel.channelId);
+            if (this._recoveryPrivateKey) {
+              this.enqueueRestore(channel.channelType, channel.channelId, 'background');
+            }
+          }
+        } catch (err) {
+          failedCids.push(channel.cid);
+          results.push({
+            cid: channel.cid,
+            status: 'failed',
+            error: err instanceof Error ? err.message : String(err),
+          });
+          console.warn('[MLS] Known E2EE channel bootstrap failed:', channel.cid, err);
+        } finally {
+          completed += 1;
+          this._emitBootstrapProgress({
+            total: channels.length,
+            completed,
+            failed_cids: failedCids,
+            status: failedCids.length > 0 && completed === channels.length ? 'failed' : 'running',
+          });
+        }
+      }
+
+      const finalStatus: E2eeBootstrapStatus = failedCids.length > 0 ? 'failed' : 'done';
+      const finalProgress: E2eeBootstrapProgress = {
+        total: channels.length,
+        completed,
+        failed_cids: failedCids,
+        status: finalStatus,
+      };
+      this._emitBootstrapProgress(finalProgress);
+      if (this._recoveryPrivateKey) {
+        for (const channel of knownChannels) {
+          if (this.groups.has(channel.cid)) {
+            this.enqueueRestore(channel.channelType, channel.channelId, 'background');
+          }
+        }
+      }
+      return { ...finalProgress, results };
+    })().finally(() => {
+      this._bootstrapKnownChannelsPromise = null;
+    });
+
+    this._bootstrapKnownChannelsPromise = work;
+    return work;
+  }
+
+  private async _archiveKnownE2eeChannels(): Promise<void> {
+    for (const channel of this._listKnownE2eeChannels()) {
+      if (!this.groups.has(channel.cid)) continue;
+      await this.safeArchiveCurrentEpoch(channel.channelType, channel.channelId);
+    }
   }
 
   private async archiveCurrentEpochForCid(cid: string): Promise<void> {
@@ -630,21 +1120,324 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     await this.archiveCurrentEpoch(parts.channelType, parts.channelId);
   }
 
+  private async safeArchiveCurrentEpoch(channelType: string, channelId: string): Promise<void> {
+    try {
+      await this.archiveCurrentEpoch(channelType, channelId);
+    } catch (err) {
+      console.warn('[MLS] Archive current epoch failed; continuing MLS flow:', channelType, channelId, err);
+    }
+  }
+
+  private async safeArchiveCurrentEpochForCid(cid: string): Promise<void> {
+    const parts = channelPartsFromCid(cid);
+    if (!parts) return;
+    await this.safeArchiveCurrentEpoch(parts.channelType, parts.channelId);
+  }
+
   private async _enqueueArchiveUpload(upload: PendingArchiveUpload): Promise<void> {
     await this.storage.saveArchiveUpload(upload);
+  }
+
+  private async _flushDeferredArchives(): Promise<void> {
+    if (!this._recoveryPublicKey || !this._recoveryKeyId) return;
+    const deferred = await this.storage.loadPendingDeferredArchives();
+    for (const record of deferred) {
+      try {
+        if (await this._hasArchiveAcknowledged(record.cid, record.epoch)) {
+          await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+          continue;
+        }
+
+        const pendingUploads = await this.storage.loadPendingArchiveUploads();
+        const alreadyQueued = pendingUploads.some(
+          (item) => item.cid === record.cid && item.epoch === record.epoch
+            && (item.upload as UploadEpochArchiveRequest)?.archive_blob_id === record.archive_blob_id,
+        );
+        if (alreadyQueued) {
+          await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+          continue;
+        }
+
+        const adk = await this._decryptArchiveStashBytes(record.encrypted_adk);
+        await this._enqueueArchiveUploadFromDeferred(record, adk);
+        await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+      } catch (err) {
+        await this.storage.saveDeferredArchive({
+          ...record,
+          retry_count: record.retry_count + 1,
+          updated_at: Date.now(),
+        });
+        console.warn('[MLS] Deferred archive flush failed; keeping for retry:', record.cid, record.epoch, err);
+      }
+    }
+    await this._drainArchiveUploadQueue();
+  }
+
+  private async _enqueueArchiveUploadFromDeferred(record: PendingDeferredArchive, adk: Uint8Array): Promise<void> {
+    if (!this._recoveryPublicKey || !this._recoveryKeyId) {
+      throw new Error('Recovery public key is not available.');
+    }
+    const epochBigInt = BigInt(record.epoch);
+    const info = new wasmModule.ArchiveKeyWrapInfo(
+      record.cid,
+      epochBigInt,
+      record.scope,
+      record.archive_blob_id,
+      record.snapshot.snapshot_hash,
+      this._recoveryKeyId,
+    );
+    const wrappedAdk = wasmModule.wrap_archive_data_key(this.provider, adk, this._recoveryPublicKey, info);
+    const upload: UploadEpochArchiveRequest = {
+      epoch: record.epoch,
+      archive_blob_id: record.archive_blob_id,
+      idempotency_key: `${record.epoch}:account_owned:${this.deviceId || 'web'}:${record.archive_blob_id}`,
+      scope: record.scope,
+      encrypted_archive: record.encrypted_archive,
+      snapshot: record.snapshot,
+      wraps: [
+        {
+          recipient_user_id: this.userId!,
+          recipient_recovery_key_id: this._recoveryKeyId,
+          hpke_kem_output: Array.from(wrappedAdk.kem_output),
+          hpke_ciphertext: Array.from(wrappedAdk.ciphertext),
+          ciphersuite: wrappedAdk.ciphersuite,
+          hpke_info: Array.from(wrappedAdk.hpke_info),
+        },
+      ],
+    };
+    await this._enqueueArchiveUpload({
+      cid: record.cid,
+      channel_type: record.channel_type,
+      channel_id: record.channel_id,
+      epoch: record.epoch,
+      scope: record.scope,
+      upload,
+      retry_count: record.retry_count,
+      created_at: record.created_at,
+    });
+  }
+
+  private async _markArchiveUploadAcknowledged(item: PendingArchiveUpload, upload: UploadEpochArchiveRequest, reason?: string): Promise<void> {
+    const keyId = upload.wraps?.[0]?.recipient_recovery_key_id;
+    if (!keyId) return;
+    const status = reason === 'duplicate_cap'
+      ? 'duplicate_cap'
+      : reason === 'idempotent' ? 'idempotent' : 'uploaded';
+    await this.storage.saveArchiveAck({
+      cid: item.cid,
+      epoch: item.epoch,
+      recovery_key_id: keyId,
+      status,
+      archive_blob_id: upload.archive_blob_id,
+      updated_at: Date.now(),
+    });
   }
 
   private async _drainArchiveUploadQueue(): Promise<void> {
     const pending = await this.storage.loadPendingArchiveUploads();
     for (const item of pending) {
+      const upload = item.upload as UploadEpochArchiveRequest;
       try {
-        await this.e2eeClient!.uploadEpochArchive(item.channel_type, item.channel_id, item.upload as UploadEpochArchiveRequest);
-        await this.storage.deleteArchiveUpload(item.cid, item.epoch, (item.upload as UploadEpochArchiveRequest).archive_blob_id);
+        const response = await this.e2eeClient!.uploadEpochArchive(
+          item.channel_type,
+          item.channel_id,
+          upload,
+        );
+        await this.storage.deleteArchiveUpload(item.cid, item.epoch, upload.archive_blob_id);
+        await this._markArchiveUploadAcknowledged(item, upload, response.reason);
+        if (response.stored === false) {
+          console.debug('[MLS] Archive upload acknowledged without storing:', item.cid, item.epoch, response.reason);
+        }
       } catch (err) {
         item.retry_count += 1;
         await this.storage.saveArchiveUpload(item);
         console.warn('[MLS] Archive upload failed, queued for retry:', item.cid, item.epoch, err);
       }
+    }
+  }
+
+  private _newRestoreProgressRecord(channelType: string, channelId: string): RestoreProgressRecord {
+    const now = Date.now();
+    return {
+      device_id: this.deviceId!,
+      cid: cidFromParts(channelType, channelId),
+      user_id: this.userId!,
+      channel_type: channelType,
+      channel_id: channelId,
+      status: 'pending',
+      completed_epochs: [],
+      permanent_gaps: [],
+      transient_failures: [],
+      last_checked_at: now,
+      updated_at: now,
+    };
+  }
+
+  private _normalizeProgress(record: RestoreProgressRecord): RestoreProgressRecord {
+    const completed = Array.from(new Set(record.completed_epochs || [])).sort((a, b) => a - b);
+    const permanentByEpoch = new Map<number, RestoreProgressRecord['permanent_gaps'][number]>();
+    for (const gap of record.permanent_gaps || []) permanentByEpoch.set(gap.epoch, gap);
+    const transientByEpoch = new Map<number, RestoreProgressRecord['transient_failures'][number]>();
+    for (const failure of record.transient_failures || []) {
+      if (!permanentByEpoch.has(failure.epoch)) transientByEpoch.set(failure.epoch, failure);
+    }
+    return {
+      ...record,
+      completed_epochs: completed,
+      permanent_gaps: Array.from(permanentByEpoch.values()).sort((a, b) => a.epoch - b.epoch),
+      transient_failures: Array.from(transientByEpoch.values()).sort((a, b) => a.epoch - b.epoch),
+    };
+  }
+
+  private async _loadOrCreateRestoreProgress(channelType: string, channelId: string): Promise<RestoreProgressRecord> {
+    const cid = cidFromParts(channelType, channelId);
+    const existing = await this.storage.loadRestoreProgress(this.userId!, this.deviceId!, cid);
+    return this._normalizeProgress(existing || this._newRestoreProgressRecord(channelType, channelId));
+  }
+
+  private async _saveRestoreProgress(record: RestoreProgressRecord, status?: RestoreStatus): Promise<RestoreProgressRecord> {
+    const next = this._normalizeProgress({
+      ...record,
+      status: status || record.status,
+      last_checked_at: Date.now(),
+      updated_at: Date.now(),
+    });
+    await this.storage.saveRestoreProgress(next);
+    this._emitRestoreProgress(next);
+    return next;
+  }
+
+  private _emitRestoreProgress(record: RestoreProgressRecord): void {
+    (this.client as any)?.dispatchEvent?.({
+      type: 'e2ee.restore_progress',
+      cid: record.cid,
+      restore_progress: record,
+      status: record.status,
+      completed_epochs: record.completed_epochs,
+      permanent_gaps: record.permanent_gaps,
+      transient_failures: record.transient_failures,
+    } as any);
+  }
+
+  private _markEpochCompleted(record: RestoreProgressRecord, epoch: number): RestoreProgressRecord {
+    const completed = new Set(record.completed_epochs);
+    completed.add(epoch);
+    return this._normalizeProgress({
+      ...record,
+      completed_epochs: Array.from(completed),
+      permanent_gaps: record.permanent_gaps.filter((gap) => gap.epoch !== epoch),
+      transient_failures: record.transient_failures.filter((failure) => failure.epoch !== epoch),
+    });
+  }
+
+  private _addPermanentGap(
+    record: RestoreProgressRecord,
+    epoch: number,
+    reason: RestorePermanentGapReason,
+  ): RestoreProgressRecord {
+    return this._normalizeProgress({
+      ...record,
+      completed_epochs: record.completed_epochs.filter((completed) => completed !== epoch),
+      permanent_gaps: [
+        ...record.permanent_gaps.filter((gap) => gap.epoch !== epoch),
+        { epoch, reason, updated_at: Date.now() },
+      ],
+      transient_failures: record.transient_failures.filter((failure) => failure.epoch !== epoch),
+    });
+  }
+
+  private _addTransientFailure(
+    record: RestoreProgressRecord,
+    epoch: number,
+    reason: RestoreTransientFailureReason,
+  ): RestoreProgressRecord {
+    const existing = record.transient_failures.find((failure) => failure.epoch === epoch);
+    const maxRetries = reason === 'decrypt_error' ? RESTORE_DECRYPT_MAX_RETRIES : RESTORE_NETWORK_MAX_RETRIES;
+    const retryCount = (existing?.retry_count || 0) + 1;
+    if (retryCount >= maxRetries && reason === 'decrypt_error') {
+      return this._addPermanentGap(record, epoch, 'decrypt_error');
+    }
+    return this._normalizeProgress({
+      ...record,
+      completed_epochs: record.completed_epochs.filter((completed) => completed !== epoch),
+      transient_failures: [
+        ...record.transient_failures.filter((failure) => failure.epoch !== epoch),
+        { epoch, reason, retry_count: retryCount, max_retries: maxRetries, updated_at: Date.now() },
+      ],
+    });
+  }
+
+  private _finalRestoreStatus(record: RestoreProgressRecord): RestoreStatus {
+    const retryable = record.transient_failures.some((failure) => failure.retry_count < failure.max_retries);
+    if (retryable) return 'failed';
+    if (record.transient_failures.length > 0) return 'done_with_gaps';
+    return record.permanent_gaps.length > 0 ? 'done_with_gaps' : 'done';
+  }
+
+  private async _normalizeStaleRestoreProgress(): Promise<void> {
+    if (!this.userId || !this.deviceId || !this.storage) return;
+    const running = await this.storage.loadIncompleteRestores(this.userId, this.deviceId);
+    await Promise.all(
+      running
+        .filter((record) => record.status === 'running')
+        .map((record) => this._saveRestoreProgress(record, 'partial')),
+    );
+  }
+
+  async getRestoreProgress(channelType: string, channelId: string): Promise<RestoreProgressRecord | null> {
+    if (!this.userId || !this.deviceId) return null;
+    const cid = cidFromParts(channelType, channelId);
+    const record = await this.storage.loadRestoreProgress(this.userId, this.deviceId, cid);
+    return record ? this._normalizeProgress(record) : null;
+  }
+
+  enqueueRestore(
+    channelType: string,
+    channelId: string,
+    priority: 'active' | 'background' = 'background',
+    options?: { fromEpoch?: number; toEpoch?: number },
+  ): void {
+    const cid = cidFromParts(channelType, channelId);
+    this._restoreQueue = this._restoreQueue.filter((entry) => entry.cid !== cid);
+    const entry: RestoreQueueEntry = { cid, channelType, channelId, priority, options };
+    if (priority === 'active') this._restoreQueue.unshift(entry);
+    else this._restoreQueue.push(entry);
+    void this._drainRestoreQueue();
+  }
+
+  private async _enqueueIncompleteRestores(): Promise<void> {
+    await this.bootstrapKnownE2eeChannels({ source: 'manual' });
+    const records = await this.storage.loadIncompleteRestores(this.userId!, this.deviceId!);
+    const queued = new Set<string>();
+    for (const record of records) {
+      if (record.status === 'done' || record.status === 'done_with_gaps') continue;
+      if (!this.groups.has(record.cid)) continue;
+      queued.add(record.cid);
+      this.enqueueRestore(record.channel_type, record.channel_id, 'background');
+    }
+
+    for (const channel of this._listKnownE2eeChannels()) {
+      if (queued.has(channel.cid)) continue;
+      if (!this.groups.has(channel.cid)) continue;
+      this.enqueueRestore(channel.channelType, channel.channelId, 'background');
+    }
+  }
+
+  private async _drainRestoreQueue(): Promise<void> {
+    if (this._restoreQueueRunning) return;
+    this._restoreQueueRunning = true;
+    try {
+      while (this._restoreQueue.length > 0) {
+        const entry = this._restoreQueue.shift()!;
+        try {
+          await this.restoreHistoricalMessages(entry.channelType, entry.channelId, entry.options);
+        } catch (err) {
+          console.warn('[MLS] Restore queue entry failed:', entry.cid, err);
+          if (!this._recoveryPrivateKey) break;
+        }
+      }
+    } finally {
+      this._restoreQueueRunning = false;
     }
   }
 
@@ -656,114 +1449,206 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     if (!this._recoveryPrivateKey) {
       throw new Error('Recovery vault not unlocked.');
     }
+    const cid = cidFromParts(channelType, channelId);
+    let progress = await this._loadOrCreateRestoreProgress(channelType, channelId);
     const epochListResponse = await this.e2eeClient!.queryEpochArchives(channelType, channelId, { list_epochs: true });
-    const targetEpochs = (epochListResponse.epochs || [])
-      .map((entry) => entry.epoch)
-      .filter((epoch) => (options?.fromEpoch === undefined || epoch >= options.fromEpoch) && (options?.toEpoch === undefined || epoch <= options.toEpoch));
-    if (targetEpochs.length === 0) return [];
-    const epochFrom = Math.min(...targetEpochs);
-    const epochTo = Math.max(...targetEpochs);
-    const material = await this.e2eeClient!.queryEpochArchives(channelType, channelId, {
-      epoch_from: epochFrom,
-      epoch_to: epochTo,
-      include_snapshots: true,
-      include_wraps: true,
-    });
+    const serverEpochs = Array.from(new Set((epochListResponse.epochs || []).map((entry) => entry.epoch)))
+      .filter(
+        (epoch) =>
+          (options?.fromEpoch === undefined || epoch >= options.fromEpoch) &&
+          (options?.toEpoch === undefined || epoch <= options.toEpoch),
+      )
+      .sort((a, b) => a - b);
+    const completedEpochs = new Set(progress.completed_epochs);
+    const permanentGapEpochs = new Set(progress.permanent_gaps.map((gap) => gap.epoch));
+    const retryableEpochs = new Set(
+      progress.transient_failures
+        .filter((failure) => failure.retry_count < failure.max_retries)
+        .map((failure) => failure.epoch),
+    );
+    const targetEpochs = serverEpochs
+      .filter((epoch) => {
+        if (completedEpochs.has(epoch) || permanentGapEpochs.has(epoch)) return false;
+        return true;
+      })
+      .concat(
+        Array.from(retryableEpochs).filter(
+          (epoch) => serverEpochs.includes(epoch) && !completedEpochs.has(epoch) && !permanentGapEpochs.has(epoch),
+        ),
+      )
+      .filter((epoch, index, all) => all.indexOf(epoch) === index)
+      .sort((a, b) => a - b);
 
-    const allCiphertexts: HistoricalCiphertext[] = [];
-    let cursor: CiphertextCursor | undefined;
-    do {
-      const batch = await this.e2eeClient!.queryArchiveCiphertexts(channelType, channelId, {
-        epoch_from: epochFrom,
-        epoch_to: epochTo,
-        cursor,
-        limit: 500,
-      });
-      allCiphertexts.push(...batch.ciphertexts);
-      cursor = batch.has_more ? batch.next_cursor : undefined;
-    } while (cursor);
-
-    const byEpoch = new Map<number, HistoricalCiphertext[]>();
-    for (const ciphertext of allCiphertexts) {
-      if (!byEpoch.has(ciphertext.mls_epoch)) byEpoch.set(ciphertext.mls_epoch, []);
-      byEpoch.get(ciphertext.mls_epoch)!.push(ciphertext);
+    if (targetEpochs.length === 0) {
+      progress = await this._saveRestoreProgress(progress, this._finalRestoreStatus(progress));
+      return [];
     }
-
-    const wrapsByBlobId = new Map<string, ArchiveKeyWrapRecord>();
-    for (const wrap of material.wraps || []) {
-      wrapsByBlobId.set(wrap.archive_blob_id, wrap);
-    }
+    progress = await this._saveRestoreProgress({ ...progress, target_epochs: targetEpochs }, 'running');
 
     const restored: RestoredMessage[] = [];
+    const restoredMessagesForState: Record<string, unknown>[] = [];
+    const activeEnvelopes = this._collectActiveChannelEnvelopes(cid);
     const decoder = new TextDecoder();
-    for (const epoch of targetEpochs) {
-      const blobs = (material.blobs || []).filter((blob) => blob.epoch === epoch);
-      if (blobs.length === 0) {
-        restored.push({ epoch, gap: true, reason: 'no_archive' });
-        continue;
+    for (const epochBatch of splitRestoreEpochBatches(targetEpochs)) {
+      const epochFrom = Math.min(...epochBatch);
+      const epochTo = Math.max(...epochBatch);
+      let material: QueryEpochArchivesResponse;
+      const allCiphertexts: HistoricalCiphertext[] = [];
+      try {
+        material = await this.e2eeClient!.queryEpochArchives(channelType, channelId, {
+          epoch_from: epochFrom,
+          epoch_to: epochTo,
+          include_snapshots: true,
+          include_wraps: true,
+        });
+
+        let cursor: CiphertextCursor | undefined;
+        do {
+          const batch = await this.e2eeClient!.queryArchiveCiphertexts(channelType, channelId, {
+            epoch_from: epochFrom,
+            epoch_to: epochTo,
+            cursor,
+            limit: 500,
+          });
+          allCiphertexts.push(...batch.ciphertexts);
+          cursor = batch.has_more ? batch.next_cursor : undefined;
+        } while (cursor);
+      } catch (err) {
+        const reason: RestoreTransientFailureReason = (err as any)?.response?.status >= 500 ? 'server_error' : 'network_error';
+        for (const epoch of epochBatch) {
+          progress = this._addTransientFailure(progress, epoch, reason);
+        }
+        await this._saveRestoreProgress(progress, this._finalRestoreStatus(progress));
+        throw err;
       }
 
-      let archiveBytes: Uint8Array | null = null;
-      let matchedBlob: ArchiveBlobRecord | null = null;
-      for (const blob of blobs) {
-        const wrap = wrapsByBlobId.get(blob.archive_blob_id);
-        if (!wrap) continue;
-        try {
-          const adk = wasmModule.unwrap_archive_data_key_from_parts(
-            this.provider,
-            this._recoveryPrivateKey,
-            new Uint8Array(wrap.hpke_kem_output),
-            new Uint8Array(wrap.hpke_ciphertext),
-            new Uint8Array(wrap.hpke_info),
-          );
-          archiveBytes = wasmModule.decrypt_archive_blob(
-            this.provider,
-            adk,
-            new Uint8Array(blob.encrypted_archive_bytes),
-            new Uint8Array(blob.aead_nonce),
-            new Uint8Array(blob.aead_aad),
-          );
-          matchedBlob = blob;
-          break;
-        } catch (_) {
+      const byEpoch = new Map<number, HistoricalCiphertext[]>();
+      for (const ciphertext of allCiphertexts) {
+        if (!byEpoch.has(ciphertext.mls_epoch)) byEpoch.set(ciphertext.mls_epoch, []);
+        byEpoch.get(ciphertext.mls_epoch)!.push(ciphertext);
+      }
+
+      const wrapsByBlobId = new Map<string, ArchiveKeyWrapRecord>();
+      for (const wrap of material.wraps || []) {
+        wrapsByBlobId.set(wrap.archive_blob_id, wrap);
+      }
+
+      for (const epoch of epochBatch) {
+        const blobs = (material.blobs || []).filter((blob) => blob.epoch === epoch);
+        if (blobs.length === 0) {
+          restored.push({ epoch, gap: true, reason: 'no_archive' });
+          progress = this._addPermanentGap(progress, epoch, 'no_archive');
+          progress = await this._saveRestoreProgress(progress, 'running');
           continue;
         }
-      }
 
-      if (!archiveBytes || !matchedBlob) {
-        restored.push({ epoch, gap: true, reason: 'no_matching_wrap' });
-        continue;
-      }
-      const snapshot = material.snapshots?.[matchedBlob.member_snapshot_hash];
-      if (!snapshot) {
-        restored.push({ epoch, gap: true, reason: 'missing_snapshot' });
-        continue;
-      }
-
-      for (const ciphertext of byEpoch.get(epoch) || []) {
-        try {
-          const plaintext = wasmModule.decrypt_with_epoch_archive_v2(
-            this.provider,
-            archiveBytes,
-            new Uint8Array(snapshot.snapshot_bytes),
-            new Uint8Array(ciphertext.mls_ciphertext),
-            true,
-            0,
-          );
-          const raw = decoder.decode(plaintext.content);
-          const parsed = JSON.parse(raw);
-          restored.push({
-            epoch,
-            messageId: ciphertext.message_id,
-            plaintext: parsed && typeof parsed.text === 'string' ? parsed : { text: raw },
-            source: 'archive',
-            createdAt: ciphertext.created_at,
-          });
-        } catch (_) {
-          restored.push({ epoch, messageId: ciphertext.message_id, gap: true, reason: 'decrypt_error' });
+        let archiveBytes: Uint8Array | null = null;
+        let matchedBlob: ArchiveBlobRecord | null = null;
+        for (const blob of blobs) {
+          const wrap = wrapsByBlobId.get(blob.archive_blob_id);
+          if (!wrap) continue;
+          try {
+            const adk = wasmModule.unwrap_archive_data_key_from_parts(
+              this.provider,
+              this._recoveryPrivateKey,
+              new Uint8Array(wrap.hpke_kem_output),
+              new Uint8Array(wrap.hpke_ciphertext),
+              new Uint8Array(wrap.hpke_info),
+            );
+            archiveBytes = wasmModule.decrypt_archive_blob(
+              this.provider,
+              adk,
+              new Uint8Array(blob.encrypted_archive_bytes),
+              new Uint8Array(blob.aead_nonce),
+              new Uint8Array(blob.aead_aad),
+            );
+            matchedBlob = blob;
+            break;
+          } catch (_) {
+            continue;
+          }
         }
+
+        if (!archiveBytes || !matchedBlob) {
+          restored.push({ epoch, gap: true, reason: 'no_matching_wrap' });
+          progress = this._addPermanentGap(progress, epoch, 'no_matching_wrap');
+          progress = await this._saveRestoreProgress(progress, 'running');
+          continue;
+        }
+        const snapshot = material.snapshots?.[matchedBlob.member_snapshot_hash];
+        if (!snapshot) {
+          restored.push({ epoch, gap: true, reason: 'missing_snapshot' });
+          progress = this._addPermanentGap(progress, epoch, 'missing_snapshot');
+          progress = await this._saveRestoreProgress(progress, 'running');
+          continue;
+        }
+
+        let epochHadDecryptError = false;
+        for (const ciphertext of byEpoch.get(epoch) || []) {
+          try {
+            const archivedMessage = wasmModule.decrypt_with_epoch_archive_v2(
+              this.provider,
+              archiveBytes,
+              new Uint8Array(snapshot.snapshot_bytes),
+              new Uint8Array(ciphertext.mls_ciphertext),
+              true,
+              0,
+            );
+            const raw = decoder.decode(archivedMessage.content);
+            const parsed = JSON.parse(raw);
+            const payload: E2eePayload = parsed && typeof parsed.text === 'string' ? parsed : { text: raw };
+            const activeEnvelope = activeEnvelopes.get(ciphertext.message_id);
+            const envelope = this._buildArchiveMessageEnvelope(cid, ciphertext, activeEnvelope, archivedMessage);
+            const existingMessage = await this.storage.loadE2eeMessage(ciphertext.message_id);
+            const storedMessage = {
+              ...this._storedFromPayload(cid, payload, envelope, existingMessage),
+              isRestored: true,
+              restoredFrom: 'epoch_archive',
+              archiveBlobId: matchedBlob.archive_blob_id,
+              restoredAt: Date.now(),
+              restoredEpoch: epoch,
+            };
+            await this.storage.saveE2eeMessage(storedMessage);
+            this._decryptedMsgIds.add(this._messageVersionKey(envelope));
+
+            const fullMessage = this._buildFullMessage(storedMessage, envelope);
+            restoredMessagesForState.push(fullMessage);
+            restored.push({
+              epoch,
+              messageId: ciphertext.message_id,
+              plaintext: payload,
+              source: 'archive',
+              createdAt: ciphertext.created_at,
+              message: fullMessage,
+              synced: true,
+            });
+          } catch (_) {
+            epochHadDecryptError = true;
+            restored.push({ epoch, messageId: ciphertext.message_id, gap: true, reason: 'decrypt_error' });
+          }
+        }
+
+        if (epochHadDecryptError) {
+          progress = this._addTransientFailure(progress, epoch, 'decrypt_error');
+        } else {
+          progress = this._markEpochCompleted(progress, epoch);
+        }
+        progress = await this._saveRestoreProgress(progress, 'running');
       }
     }
+
+    progress = await this._saveRestoreProgress(progress, this._finalRestoreStatus(progress));
+
+    if (restoredMessagesForState.length > 0) {
+      const activeChannel = this.client?.activeChannels?.[cid];
+      activeChannel?.state?.addMessagesSorted(restoredMessagesForState as any[], false, true, true, 'current');
+      this.client?.dispatchEvent({
+        type: 'e2ee.local_messages_loaded' as any,
+        cid,
+        messages: restoredMessagesForState,
+      } as any);
+    }
+
     return restored;
   }
 
@@ -1216,7 +2101,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           // External join sequentially to avoid race conditions on Provider snapshot
           for (const { cid, type, id } of missingCids) {
             try {
-              const result = await this.ensureChannelReady(type, id, cid, { source: 'startup' });
+              const result = await this.syncNewChannel(type, id, cid);
               console.log('[MLS] Multi-device ensure completed:', cid, result.status);
             } catch (err) {
               console.warn('[MLS] Multi-device external join failed:', cid, err);
@@ -2044,7 +2929,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this.groups.set(cid, group);
     await this._saveGroup(cid);
     await this._persistProvider();
-    await this.archiveCurrentEpochForCid(cid);
+    await this.safeArchiveCurrentEpochForCid(cid);
     console.log('[MLS] Joined group via Welcome:', cid);
     return group;
   }
@@ -2130,7 +3015,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 6. Merge pending commit locally (only after server OK)
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
-    await this.archiveCurrentEpoch(channelType, channelId);
+    await this.safeArchiveCurrentEpoch(channelType, channelId);
 
     console.log('[MLS] E2EE enabled for channel:', cid, 'epoch:', Number(group.epoch()));
     return result;
@@ -2484,7 +3369,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // Server OK → merge pending commit locally
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
-    await this.archiveCurrentEpoch(channelType, channelId);
+    await this.safeArchiveCurrentEpoch(channelType, channelId);
     await this._cleanupEvictedGhosts(cid, ghostsToRemove);
 
     console.log('[MLS] Added', newUserIds.length, 'users to:', cid, 'epoch:', Number(group.epoch()));
@@ -2901,7 +3786,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 4. Server OK → merge
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
-    await this.archiveCurrentEpoch(channelType, channelId);
+    await this.safeArchiveCurrentEpoch(channelType, channelId);
     // 5. Queue cleanup AFTER confirmed merge.
     await this._cleanupEvictedGhosts(cid, allRemoveIds);
     console.log('[MLS] Evicted', targetUserId, 'from:', cid, 'epoch:', Number(group.epoch()));
@@ -2975,7 +3860,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // 6. Upload GroupInfo AFTER merge — this is the only correct timing for external join.
       //    The joiner's N+1 state is now fully committed, so export_group_info() is valid.
       await this._uploadGroupInfo(channelType, channelId, group);
-      await this.archiveCurrentEpoch(channelType, channelId);
+      await this.safeArchiveCurrentEpoch(channelType, channelId);
 
       console.log('[MLS] External join completed for:', cid, 'epoch:', Number(group.epoch()));
       return { epoch: Number(group.epoch()), status: 'joined_external' };
@@ -3048,7 +3933,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 6. Persist state
     await this._saveGroup(cid);
     await this._persistProvider();
-    await this.archiveCurrentEpoch(channelType, channelId);
+    await this.safeArchiveCurrentEpoch(channelType, channelId);
 
     console.log('[MLS] Key rotation completed for:', cid, 'epoch:', Number(group.epoch()));
     return { epoch: Number(group.epoch()) };
@@ -3223,6 +4108,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       console.log('[MLS] Commit processed for:', cid, 'epoch:', Number(group.epoch()));
       await this._persistProvider();
+      await this.safeArchiveCurrentEpochForCid(cid);
 
       // Post-commit queue hygiene: remove users that were evicted by this commit.
       // When another admin's commit removes a ghost, our local queue still has
@@ -3324,6 +4210,73 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private _messageTypeForPayload(payload: E2eePayload, fallbackType?: unknown): string {
     if (payload.sticker_url) return 'sticker';
     return typeof fallbackType === 'string' && fallbackType ? fallbackType : 'regular';
+  }
+
+  private _dateishToIso(value: unknown): string | undefined {
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'string' && value) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return new Date(value).toISOString();
+    return undefined;
+  }
+
+  private _collectActiveChannelEnvelopes(cid: string): Map<string, ActiveMessageEnvelope> {
+    const activeChannel = this.client?.activeChannels?.[cid];
+    const messageSets = (activeChannel?.state?.messageSets || []) as Array<{ messages?: ActiveMessageEnvelope[] }>;
+    const pinnedMessages = (activeChannel?.state?.pinnedMessages || []) as ActiveMessageEnvelope[];
+    const messages = [
+      ...messageSets.flatMap((set) => set.messages || []),
+      ...pinnedMessages,
+    ];
+    const envelopes = new Map<string, ActiveMessageEnvelope>();
+    for (const message of messages) {
+      if (message?.id) envelopes.set(message.id, message);
+    }
+    return envelopes;
+  }
+
+  private _buildArchiveMessageEnvelope(
+    cid: string,
+    ciphertext: HistoricalCiphertext,
+    activeEnvelope: ActiveMessageEnvelope | undefined,
+    archivedMessage: {
+      epoch?: bigint;
+      generation?: number;
+      own_message?: boolean;
+      sender_index?: number;
+    },
+  ): ArchiveMessageEnvelope {
+    const fallbackUserId =
+      activeEnvelope?.user?.id ||
+      activeEnvelope?.user_id ||
+      ciphertext.user?.id ||
+      ciphertext.user_id ||
+      (archivedMessage.own_message ? this.userId || undefined : undefined);
+    const fallbackUser =
+      activeEnvelope?.user ||
+      ciphertext.user ||
+      (fallbackUserId ? this.client?.state?.users?.[fallbackUserId] || { id: fallbackUserId } : undefined);
+    const createdAt =
+      this._dateishToIso(activeEnvelope?.created_at) ||
+      this._dateishToIso(ciphertext.created_at) ||
+      new Date().toISOString();
+    const updatedAt = this._dateishToIso(activeEnvelope?.updated_at) || this._dateishToIso(ciphertext.updated_at);
+
+    return {
+      ...(activeEnvelope || {}),
+      ...ciphertext,
+      id: ciphertext.message_id,
+      cid,
+      user: fallbackUser,
+      user_id: fallbackUserId,
+      created_at: createdAt,
+      updated_at: updatedAt,
+      mls_epoch: ciphertext.mls_epoch,
+      mls_ciphertext: new Uint8Array(ciphertext.mls_ciphertext),
+      archive_epoch: archivedMessage.epoch !== undefined ? Number(archivedMessage.epoch) : ciphertext.mls_epoch,
+      archive_generation: archivedMessage.generation,
+      archive_own_message: archivedMessage.own_message,
+      archive_sender_index: archivedMessage.sender_index,
+    };
   }
 
   private _storedFromPayload(
@@ -3956,6 +4909,27 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this.deviceId = null;
     this.e2eeClient = null;
     this.client = null;
+    this._recoveryPrivateKey = null;
+    this._recoveryPublicKey = null;
+    this._recoveryKeyId = null;
+    this._recoveryCiphersuite = null;
+    this._wrappedRecoveryKey = null;
+    this._recoveryVaultKnown = null;
+    this._recoveryVaultBytes = null;
+    this._recoveryPublicMetadataPromise = null;
+    this._archiveStashKey = null;
+    this._archiveStashKeyPromise = null;
+    this._restoreQueue = [];
+    this._restoreQueueRunning = false;
+    this._bootstrapKnownChannelsPromise = null;
+    this._channelBootstrapSub?.unsubscribe?.();
+    this._channelBootstrapSub = null;
+    this._e2eeBootstrapProgress = {
+      total: 0,
+      completed: 0,
+      failed_cids: [],
+      status: 'idle',
+    };
     this._decryptedMsgIds.clear();
     this._pendingEvictions.clear();
     this._syncing = false;
@@ -4179,7 +5153,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     await this._persistProvider();
     for (const result of response.results) {
       if (result.success) {
-        await this.archiveCurrentEpochForCid(result.topic_cid);
+        await this.safeArchiveCurrentEpochForCid(result.topic_cid);
       }
     }
     return response;
@@ -4292,7 +5266,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     await this._persistProvider();
     for (const result of response.results) {
       if (result.success) {
-        await this.archiveCurrentEpochForCid(result.topic_cid);
+        await this.safeArchiveCurrentEpochForCid(result.topic_cid);
       }
     }
     return response;

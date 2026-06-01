@@ -338,6 +338,9 @@ export function useChannelMessages({
 
     const handleE2eeRefresh = (event: any) => {
       if (event?.cid === activeChannel.cid) {
+        if (Array.isArray(event.messages) && event.messages.length > 0) {
+          mergeDecryptedMessages(event.messages);
+        }
         syncStoredE2eeMessages();
       }
     };

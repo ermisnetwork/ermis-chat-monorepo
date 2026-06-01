@@ -185,7 +185,7 @@ export type { UseChannelMessagesOptions } from './hooks/useChannelMessages';
 
 export { useForwardMessage } from './hooks/useForwardMessage';
 export { useRecoveryPin } from './hooks/useRecoveryPin';
-export type { UseRecoveryPinReturn, RecoveryPinStatus, RecoveryRestoredMessage } from './hooks/useRecoveryPin';
+export type { UseRecoveryPinReturn, RecoveryPinStatus, RecoveryRestoredMessage, RecoveryStatusInfo } from './hooks/useRecoveryPin';
 
 export { QuotedMessagePreview } from './components/QuotedMessagePreview';
 export type { QuotedMessagePreviewProps } from './components/QuotedMessagePreview';
@@ -253,6 +253,8 @@ export {
   RecoveryPinChange,
   RecoveryStatus,
   RecoveryGap,
+  RecoveryGate,
+  RecoveryRestoreProgress,
 } from './components/RecoveryPin';
 export type {
   RecoveryPinSetupProps,
@@ -260,6 +262,8 @@ export type {
   RecoveryPinChangeProps,
   RecoveryStatusProps,
   RecoveryGapProps,
+  RecoveryGateProps,
+  RecoveryRestoreProgressProps,
 } from './components/RecoveryPin';
 
 // Call Components

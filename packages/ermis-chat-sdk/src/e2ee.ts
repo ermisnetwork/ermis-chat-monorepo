@@ -201,6 +201,15 @@ export interface UploadEpochArchiveRequest {
   }>;
 }
 
+export type UploadEpochArchiveReason = 'stored' | 'idempotent' | 'duplicate_cap';
+
+export interface UploadEpochArchiveResponse extends APIResponse {
+  ok: boolean;
+  stored: boolean;
+  reason?: UploadEpochArchiveReason;
+  message?: string;
+}
+
 export interface EpochIndexEntry {
   epoch: number;
   scope: string;
@@ -266,6 +275,14 @@ export interface HistoricalCiphertext {
   mls_ciphertext: number[];
   mls_epoch: number;
   created_at: string;
+  updated_at?: string;
+  type?: string;
+  user_id?: string;
+  user?: { id: string; [key: string]: unknown };
+  parent_id?: string;
+  quoted_message_id?: string;
+  mentioned_all?: boolean;
+  mentioned_users?: string[];
 }
 
 export interface CiphertextQueryResponse extends APIResponse {
@@ -392,7 +409,7 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     channelType: string,
     channelId: string,
     data: UploadEpochArchiveRequest,
-  ): Promise<APIResponse> {
+  ): Promise<UploadEpochArchiveResponse> {
     return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives`, data);
   }
 

@@ -177,6 +177,10 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           createdChannel = client.channel('messaging', response.channel.id);
           await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
           markChannelAsFullyQueried(createdChannel.cid);
+          if (e2eeEnabled && client.mlsManager?.initialized && createdChannel.id) {
+            client.mlsManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
+              .catch((err: unknown) => console.warn('[E2EE] Initial epoch archive failed:', err));
+          }
         }
       } else {
         // Group Channel
@@ -221,6 +225,10 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           createdChannel = client.channel('team', response.channel.id);
           await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
           markChannelAsFullyQueried(createdChannel.cid);
+          if (e2eeEnabled && client.mlsManager?.initialized && createdChannel.id) {
+            client.mlsManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
+              .catch((err: unknown) => console.warn('[E2EE] Initial epoch archive failed:', err));
+          }
         }
       }
 
