@@ -184,7 +184,7 @@ export function UhmMessageActions({
         <MessageQuickReactions 
           message={message} 
           isOwnMessage={isOwnMessage} 
-          disabled={!actions.hasCapReact} 
+          disabled={!actions.hasCapReact } 
         />
 
         {/* Forward */}

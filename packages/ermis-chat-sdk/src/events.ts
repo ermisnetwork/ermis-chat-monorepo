@@ -45,5 +45,9 @@ export const EVENT_MAP = {
   'channel.topic.reopen': true,
   'channel.topic.updated': true,
   'protocol': true,
+  'e2ee.initialized': true,
+  'e2ee.bootstrap_progress': true,
   'e2ee.message_decrypted': true,
+  'e2ee.local_messages_loaded': true,
+  'e2ee.restore_progress': true,
 };

@@ -4,6 +4,8 @@ export {
   RecoveryPinChange,
   RecoveryStatus,
   RecoveryGap,
+  RecoveryGate,
+  RecoveryRestoreProgress,
 } from './RecoveryPin';
 
 export type {
@@ -12,4 +14,6 @@ export type {
   RecoveryPinChangeProps,
   RecoveryStatusProps,
   RecoveryGapProps,
+  RecoveryGateProps,
+  RecoveryRestoreProgressProps,
 } from './RecoveryPin';

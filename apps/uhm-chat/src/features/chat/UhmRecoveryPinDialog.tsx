@@ -18,11 +18,15 @@ import { Label } from '@/components/ui/label'
 import { RECOVERY_PIN_CONFIG } from '@/utils/constants'
 
 type RecoveryMode = 'unlock' | 'setup' | 'change' | 'restore'
+type RecoveryDialogVariant = 'channel' | 'gate'
 
 type UhmRecoveryPinDialogProps = {
   isOpen: boolean
   onClose: () => void
   channel: ChannelType | null | undefined
+  variant?: RecoveryDialogVariant
+  onSkip?: () => void
+  onUnlocked?: () => void
 }
 
 type MlsRecoveryManager = {
@@ -55,6 +59,9 @@ export function UhmRecoveryPinDialog({
   isOpen,
   onClose,
   channel,
+  variant = 'channel',
+  onSkip,
+  onUnlocked,
 }: UhmRecoveryPinDialogProps) {
   const { t } = useTranslation()
   const { client } = useChatClient()
@@ -62,6 +69,7 @@ export function UhmRecoveryPinDialog({
   const { refresh } = recovery
   const mlsManager = client?.mlsManager as MlsRecoveryManager | undefined
   const mlsInitialized = mlsManager?.initialized === true
+  const isGate = variant === 'gate'
   const isE2eeChannel = channel?.data?.mls_enabled === true
   const currentEpoch = channel?.cid && typeof mlsManager?.getEpoch === 'function'
     ? mlsManager.getEpoch(channel.cid)
@@ -96,10 +104,10 @@ export function UhmRecoveryPinDialog({
   }, [isOpen, mlsInitialized, refresh])
 
   useEffect(() => {
-    if (isOpen && recovery.hasRecoveryKey) {
+    if (isOpen && !isGate && recovery.hasRecoveryKey) {
       setMode('restore')
     }
-  }, [isOpen, recovery.hasRecoveryKey])
+  }, [isGate, isOpen, recovery.hasRecoveryKey])
 
   const validatePin = useCallback((value: string): string | null => {
     if (!value) return null
@@ -164,6 +172,10 @@ export function UhmRecoveryPinDialog({
       toast.success(t('recovery_pin.setup_success'))
       setPin('')
       setConfirmPin('')
+      if (isGate) {
+        onUnlocked?.()
+        return
+      }
       setMode('restore')
     })
   }
@@ -175,6 +187,10 @@ export function UhmRecoveryPinDialog({
       await recovery.unlockRecoveryVault(pin)
       toast.success(t('recovery_pin.unlock_success'))
       setPin('')
+      if (isGate) {
+        onUnlocked?.()
+        return
+      }
       setMode('restore')
     })
   }
@@ -215,7 +231,7 @@ export function UhmRecoveryPinDialog({
       )
     }
 
-    if (!isE2eeChannel) {
+    if (!isGate && !isE2eeChannel) {
       return (
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[13px] font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-300">
           {t('recovery_pin.e2ee_required')}
@@ -223,30 +239,52 @@ export function UhmRecoveryPinDialog({
       )
     }
 
+    const activeMode = isGate
+      ? recovery.recoveryStatus?.hasVault === false ? 'setup' : 'unlock'
+      : mode
+
     return (
       <>
-        <div className="grid grid-cols-4 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800/60">
-          {tabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                setMode(id)
-                setLocalError(null)
-              }}
-              className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-md text-[12px] font-semibold transition-colors ${
-                mode === id
-                  ? 'bg-white text-zinc-950 shadow-sm dark:bg-zinc-950 dark:text-zinc-50'
-                  : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              <span className="truncate">{label}</span>
-            </button>
-          ))}
-        </div>
+        {isGate && activeMode === 'unlock' && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] font-medium text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">
+            {(recovery.recoveryStatus?.incompleteChannels.length || 0) > 0
+              ? t('recovery_pin.gate_description', {
+                count: recovery.recoveryStatus?.incompleteChannels.length || 0,
+              })
+              : t('recovery_pin.gate_generic_description')}
+          </div>
+        )}
 
-        {mode === 'unlock' && (
+        {isGate && activeMode === 'setup' && (
+          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[13px] font-medium text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
+            {t('recovery_pin.gate_setup_description')}
+          </div>
+        )}
+
+        {!isGate && (
+          <div className="grid grid-cols-4 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800/60">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => {
+                  setMode(id)
+                  setLocalError(null)
+                }}
+                className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-md text-[12px] font-semibold transition-colors ${
+                  mode === id
+                    ? 'bg-white text-zinc-950 shadow-sm dark:bg-zinc-950 dark:text-zinc-50'
+                    : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="truncate">{label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {activeMode === 'unlock' && (
           <form className="space-y-4" onSubmit={handleUnlock}>
             <div className="space-y-1.5">
               <Label htmlFor="recovery-unlock-pin" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
@@ -267,12 +305,17 @@ export function UhmRecoveryPinDialog({
             {unlockError && <ErrorText>{unlockError}</ErrorText>}
             <Button type="submit" disabled={!pin || !!unlockError || working} className="w-full">
               {working && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t('recovery_pin.unlock_action')}
+              {isGate ? t('recovery_pin.gate_restore_action') : t('recovery_pin.unlock_action')}
             </Button>
+            {isGate && onSkip && (
+              <Button type="button" variant="ghost" disabled={working} onClick={onSkip} className="w-full">
+                {t('recovery_pin.gate_skip_action')}
+              </Button>
+            )}
           </form>
         )}
 
-        {mode === 'setup' && (
+        {activeMode === 'setup' && (
           <form className="space-y-4" onSubmit={handleSetup}>
             <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] font-medium text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
               {t('recovery_pin.setup_note')}
@@ -316,10 +359,15 @@ export function UhmRecoveryPinDialog({
               {working && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t('recovery_pin.setup_action')}
             </Button>
+            {isGate && onSkip && (
+              <Button type="button" variant="ghost" disabled={working} onClick={onSkip} className="w-full">
+                {t('recovery_pin.gate_skip_action')}
+              </Button>
+            )}
           </form>
         )}
 
-        {mode === 'change' && (
+        {!isGate && mode === 'change' && (
           <form className="space-y-4" onSubmit={handleChange}>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -363,7 +411,7 @@ export function UhmRecoveryPinDialog({
           </form>
         )}
 
-        {mode === 'restore' && (
+        {!isGate && mode === 'restore' && (
           <form className="space-y-4" onSubmit={handleRestore}>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -447,31 +495,33 @@ export function UhmRecoveryPinDialog({
         <DialogHeader className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
           <DialogTitle className="flex items-center gap-2 text-[16px]">
             <KeyRound className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
-            {t('recovery_pin.title')}
+            {isGate ? t('recovery_pin.gate_title') : t('recovery_pin.title')}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 p-5">
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/30">
-            <div className="min-w-0">
-              <div className="truncate text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                {channel?.data?.name || channel?.id || t('recovery_pin.no_channel')}
+          {!isGate && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/30">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
+                  {channel?.data?.name || channel?.id || t('recovery_pin.no_channel')}
+                </div>
+                <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                  {typeof currentEpoch === 'number' && currentEpoch >= 0
+                    ? t('recovery_pin.current_epoch', { epoch: currentEpoch })
+                    : t('recovery_pin.epoch_unknown')}
+                </div>
               </div>
-              <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                {typeof currentEpoch === 'number' && currentEpoch >= 0
-                  ? t('recovery_pin.current_epoch', { epoch: currentEpoch })
-                  : t('recovery_pin.epoch_unknown')}
+              <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                recovery.hasRecoveryKey
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                  : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+              }`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${recovery.hasRecoveryKey ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
+                {recovery.hasRecoveryKey ? t('recovery_pin.status_ready') : t('recovery_pin.status_locked')}
               </div>
             </div>
-            <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold ${
-              recovery.hasRecoveryKey
-                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
-            }`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${recovery.hasRecoveryKey ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
-              {recovery.hasRecoveryKey ? t('recovery_pin.status_ready') : t('recovery_pin.status_locked')}
-            </div>
-          </div>
+          )}
 
           {renderBody()}
         </div>
