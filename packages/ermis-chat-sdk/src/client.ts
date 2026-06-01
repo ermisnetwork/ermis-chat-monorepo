@@ -708,6 +708,15 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
               channel._callChannelListeners(event);
             }
             postListenerCallbacks.forEach((c) => c());
+          }).catch((err) => {
+            this.logger('error', 'client:_handleChannelEvent() failed', { err, event });
+            // Even if state mutation failed partially, we must still notify listeners
+            // otherwise UI gets permanently stuck and misses the event.
+            this._callClientListeners(event);
+            if (channel) {
+              channel._callChannelListeners(event);
+            }
+            postListenerCallbacks.forEach((c) => c());
           });
           return;
         }

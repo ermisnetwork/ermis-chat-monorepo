@@ -277,7 +277,16 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
       this.ws.onclose = this.onclose.bind(this, this.wsID);
       this.ws.onerror = this.onerror.bind(this, this.wsID);
       this.ws.onmessage = this.onmessage.bind(this, this.wsID);
-      const response = await this.connectionOpen;
+      const response = await Promise.race([
+        this.connectionOpen,
+        new Promise<ConnectAPIResponse<ErmisChatGenerics>>((_, reject) =>
+          setTimeout(() => {
+            const err: any = new Error('WS connection timeout');
+            err.isWSFailure = true;
+            reject(err);
+          }, 5000)
+        )
+      ]);
       this.isConnecting = false;
 
       if (response) {
@@ -286,6 +295,13 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     } catch (err: any) {
       this.isConnecting = false;
       this._log(`_connect() - Error - `, err);
+      
+      this.rejectPromise?.(err);
+      if (this.ws) {
+        try {
+          this.ws.close(chatCodes.WS_CLOSED_SUCCESS, 'WS connection timeout');
+        } catch (e) {}
+      }
 
       throw err;
     }

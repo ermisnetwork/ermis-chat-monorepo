@@ -122,7 +122,7 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
       // If consumer provides custom save handler, delegate entirely
       if (onSave) {
         if (selectedFile) {
-          const response = await channel.sendFile(selectedFile, selectedFile.name, selectedFile.type);
+          const response = await channel.uploadFilePresigned(selectedFile, selectedFile.name, selectedFile.type);
           (payload || {} as EditChannelData).image = response.file;
         }
         await onSave(payload || {});
@@ -135,7 +135,7 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
 
       // Upload image if changed
       if (selectedFile) {
-        const response = await channel.sendFile(selectedFile, selectedFile.name, selectedFile.type);
+        const response = await channel.uploadFilePresigned(selectedFile, selectedFile.name, selectedFile.type);
         finalPayload.image = response.file;
       }
 

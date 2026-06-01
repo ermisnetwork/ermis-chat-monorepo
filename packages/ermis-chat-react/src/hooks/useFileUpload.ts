@@ -35,7 +35,14 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
         ? new File([file], normalizedName, { type: file.type, lastModified: file.lastModified })
         : file;
 
-      const response = await activeChannel.sendFile(fileToUpload, fileToUpload.name, fileToUpload.type);
+      const response = await activeChannel.uploadFilePresigned(
+        fileToUpload,
+        fileToUpload.name,
+        fileToUpload.type || 'application/octet-stream',
+        (progress) => {
+          // You could update progress here if you extend FilePreviewItem to have a progress field
+        }
+      );
       const uploadedUrl = response.file;
 
       let thumbUrl = '';
@@ -44,7 +51,7 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
           const thumbBlob = await activeChannel.getThumbBlobVideo(file);
           if (thumbBlob) {
             const thumbFile = new File([thumbBlob], `thumb_${normalizedName}.jpg`, { type: 'image/jpeg' });
-            const thumbResp = await activeChannel.sendFile(thumbFile, thumbFile.name, 'image/jpeg');
+            const thumbResp = await activeChannel.uploadFilePresigned(thumbFile, thumbFile.name, 'image/jpeg');
             thumbUrl = thumbResp.file;
           }
         } catch {

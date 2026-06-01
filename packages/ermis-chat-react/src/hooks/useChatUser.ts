@@ -14,7 +14,15 @@ export const useChatUser = <ErmisChatGenerics extends ExtendableGenerics = Defau
 
     const handleUserUpdated = (event: any) => {
       if (event.me) {
-        setUser((prev) => ({ ...prev, ...event.me }));
+        setUser((prev) => {
+          const update = { ...event.me };
+          // Do not let periodic health checks wipe out the user's name/avatar with empty strings
+          if (event.type === 'health.check') {
+            if (!update.name) delete update.name;
+            if (!update.avatar) delete update.avatar;
+          }
+          return { ...prev, ...update };
+        });
       }
     };
 

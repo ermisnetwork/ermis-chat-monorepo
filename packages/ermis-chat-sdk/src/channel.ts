@@ -354,6 +354,78 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   ) {
     return this.getClient().sendFile(`${this._channelURL()}/file`, uri, name, contentType, user);
   }
+
+  /**
+   * Uploads a file directly to the storage bucket via a presigned URL, bypassing the server.
+   * This reduces server bandwidth and latency for file uploads.
+   *
+   * @param file       - The File or Blob to upload
+   * @param name       - The file name
+   * @param contentType - The MIME type of the file
+   * @param onProgress - Optional callback for upload progress (browser only)
+   */
+  async uploadFilePresigned(
+    file: File | Blob | Buffer,
+    name: string,
+    contentType: string,
+    onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void,
+  ): Promise<{ file: string }> {
+    // 1. Request presigned URL
+    const presignResp = await this.getClient().post<{ attachment_id: string; upload_url: string; expires_in_secs: number }>(
+      `${this._channelURL()}/file/presign`,
+      {
+        file_name: name,
+        content_type: contentType,
+      },
+    );
+
+    // 2. Upload directly to storage (R2/S3)
+    await new Promise<void>((resolve, reject) => {
+      if (typeof XMLHttpRequest !== 'undefined') {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', presignResp.upload_url);
+        xhr.setRequestHeader('Content-Type', contentType);
+
+        xhr.upload.onprogress = ({ loaded, total }) => {
+          if (total > 0 && onProgress) {
+            onProgress({ loaded, total, percentage: Math.round((loaded / total) * 100) });
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status < 300) resolve();
+          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+        };
+
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(file as any);
+      } else {
+        // Fallback for Node.js
+        fetch(presignResp.upload_url, {
+          method: 'PUT',
+          headers: { 'Content-Type': contentType },
+          body: file as any,
+        })
+          .then((res) => {
+            if (res.ok) resolve();
+            else reject(new Error(`Upload failed: HTTP ${res.status}`));
+          })
+          .catch(reject);
+      }
+    });
+
+    // 3. Confirm upload
+    const confirmResp = await this.getClient().post<{ file: string }>(
+      `${this._channelURL()}/file/confirm`,
+      {
+        attachment_id: presignResp.attachment_id,
+        file_name: name,
+        content_type: contentType,
+      },
+    );
+
+    return confirmResp;
+  }
   /**
    * Pre-process files (normalize names), upload them in parallel,
    * generate video thumbnails, and build attachment payloads.
@@ -385,7 +457,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     // 2. Upload all files in parallel
     const uploadResults = await Promise.allSettled(
-      processedFiles.map((file) => this.sendFile(file, file.name, file.type)),
+      processedFiles.map((file) => this.uploadFilePresigned(file, file.name, file.type || 'application/octet-stream')),
     );
 
     // 3. For successful video uploads, generate and upload thumbnails
@@ -401,7 +473,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               const thumbBlob = await this.getThumbBlobVideo(files[i]);
               if (thumbBlob) {
                 const thumbFile = new File([thumbBlob], `thumb_${processedFiles[i].name}.jpg`, { type: 'image/jpeg' });
-                const thumbResp = await this.sendFile(thumbFile, thumbFile.name, 'image/jpeg');
+                const thumbResp = await this.uploadFilePresigned(thumbFile, thumbFile.name, 'image/jpeg');
                 thumbUrls.set(i, thumbResp.file);
               }
             } catch {
@@ -1558,8 +1630,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const existUser = users.find((user) => user.id === event.user?.id);
           if (!existUser) {
             if (event.user?.id) {
-              const resUser = await this.getClient().queryUser(event.user.id);
-              users.push(resUser);
+              try {
+                const resUser = await this.getClient().queryUser(event.user.id);
+                users.push(resUser);
+              } catch (err) {
+                this._client.logger('warn', 'Failed to query user for new message, using event user fallback', { err });
+                users.push(event.user as any);
+              }
             }
           }
 
@@ -1957,8 +2034,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const existUser = users.find((user) => user.id === event.member?.user_id);
 
           if (!existUser) {
-            const resUser = await this.getClient().queryUser(event.member?.user_id);
-            users.push(resUser);
+            try {
+              const resUser = await this.getClient().queryUser(event.member?.user_id);
+              users.push(resUser);
+            } catch (err) {
+              this._client.logger('warn', 'Failed to query user for member joined, using event member fallback', { err });
+              if (event.member?.user) users.push(event.member.user as any);
+            }
           }
 
           const user = getUserInfo(event.member.user_id, users);
