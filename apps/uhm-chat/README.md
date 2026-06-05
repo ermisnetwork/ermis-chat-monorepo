@@ -39,6 +39,20 @@
 - Design decision: the prompt remains soft-blocking with “later” behavior, but setup is now encouraged early because epochs sent before any vault/archive exists cannot be recreated cryptographically.
 - Verification: `npm run build:uhm` passed.
 
+### 2026-06-05 - production
+
+- Goal: prevent active-channel entry from re-triggering PIN history restore after reload when the channel's restore progress is already terminal locally.
+- Code changed: `ChatPage` now waits for the active channel's local `restore_progress` lookup before enqueueing active restore, and restore progress events mark the active CID as checked.
+- Design decision: uhm-chat treats stored `done`/`done_with_gaps` progress as the source of truth for automatic active restore prompts; manual range restore remains available from the PIN dialog.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, and `yarn workspace uhm-chat build` passed.
+
+### 2026-06-05 - production
+
+- Goal: stop the recovery PIN popup from appearing on every reload once local history restore is already complete.
+- Code changed: the app-entry recovery gate now opens only when SDK recovery status reports incomplete restore work, and active-channel fallback prompts only for CIDs in `incompleteChannels`.
+- Design decision: a locked vault alone is not enough reason to interrupt login; PIN entry is requested for restore work, while manual setup/change/restore remains available from the header action.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, and `yarn workspace uhm-chat build` passed.
+
 ### 2026-06-01 - production
 
 - Goal: remove confusing “0 channels unfinished” recovery copy and align app UX with deferred archive setup.

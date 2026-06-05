@@ -140,7 +140,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       updated_at: new Date().toISOString(),
       user: this.getClient().user,
       user_id: this.getClient().userID,
-      type: message.sticker_url ? 'sticker' : (message.type || 'regular'),
+      type: message.sticker_url ? 'sticker' : message.type || 'regular',
     } as unknown as MessageResponse<ErmisChatGenerics>;
 
     this.state.addMessageSorted(optimisticMessage);
@@ -927,13 +927,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const parentMlsEnabled = (this.data as any)?.mls_enabled || false;
     const explicitMlsEnabled = data?.mls_enabled === true;
+    const gatedTopic = data?.gate === true;
+    const ownTopicGroup = gatedTopic || (!parentMlsEnabled && explicitMlsEnabled);
     if (parentMlsEnabled || explicitMlsEnabled) {
       const mlsManager = this.getClient().mlsManager;
-      if (mlsManager?.initialized) {
+      payload.data.mls_enabled = true;
+      if (ownTopicGroup && mlsManager?.initialized) {
         try {
           const memberIds = Object.keys(this.state?.members || {});
           const bundle = await mlsManager.createE2eeTopic(topicCid, memberIds);
-          payload.data.mls_enabled = true;
           payload.data.commit = bundle.commit;
           payload.data.welcome = bundle.welcome;
           payload.data.ratchet_tree = bundle.ratchet_tree;
@@ -1796,7 +1798,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               mlsMgrRemoved.leaveGroup(this.cid, removalCursor);
               if (Array.isArray(event.topic_cids)) {
                 for (const topicCid of event.topic_cids) {
-                  mlsMgrRemoved.leaveGroup(topicCid, removalCursor);
+                  if (mlsMgrRemoved.ownsE2eeGroup(topicCid)) {
+                    mlsMgrRemoved.leaveGroup(topicCid, removalCursor);
+                  }
                 }
               }
             }
@@ -1819,6 +1823,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
             if (Array.isArray(event.topic_cids)) {
               for (const topicCid of event.topic_cids) {
+                if (!mlsMgrRemoved.ownsE2eeGroup(topicCid)) continue;
                 const colonIdx = topicCid.indexOf(':');
                 const topicType = topicCid.substring(0, colonIdx);
                 const topicId = topicCid.substring(colonIdx + 1);
@@ -1967,13 +1972,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           delete channelState.members[event.member.user_id];
 
           const mlsMgrReject = this.getClient().mlsManager;
-          if (
-            event.mls_enabled &&
-            mlsMgrReject?.initialized &&
-            this.cid &&
-            this.type === 'team' &&
-            this.id
-          ) {
+          if (event.mls_enabled && mlsMgrReject?.initialized && this.cid && this.type === 'team' && this.id) {
             const targetUserId = event.member.user_id;
             mlsMgrReject.queuePendingEviction(this.cid, targetUserId).catch((err: unknown) => {
               this.getClient().logger('error', '[MLS Event] Failed to queue pending eviction after invite_rejected', {
@@ -1987,12 +1986,17 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               for (const topicCid of event.topic_cids) {
                 const colonIdx = topicCid.indexOf(':');
                 if (colonIdx <= 0) continue;
+                if (!mlsMgrReject.ownsE2eeGroup(topicCid)) continue;
                 mlsMgrReject.queuePendingEviction(topicCid, targetUserId).catch((err: unknown) => {
-                  this.getClient().logger('error', '[MLS Event] Failed to queue topic pending eviction after invite_rejected', {
-                    err,
-                    cid: topicCid,
-                    user_id: targetUserId,
-                  });
+                  this.getClient().logger(
+                    'error',
+                    '[MLS Event] Failed to queue topic pending eviction after invite_rejected',
+                    {
+                      err,
+                      cid: topicCid,
+                      user_id: targetUserId,
+                    },
+                  );
                 });
               }
             }
@@ -2314,7 +2318,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 content_type: 'standard',
                 user: message.user || getUserInfo(message.user_id, Object.values(this.getClient().state.users)),
                 status: 'received',
-              }) as MessageResponse<ErmisChatGenerics>,
+              } as MessageResponse<ErmisChatGenerics>),
           )
           .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
         this.state.addMessagesSorted(messages, false, true, true, messageSetToAddToIfDoesNotExist);

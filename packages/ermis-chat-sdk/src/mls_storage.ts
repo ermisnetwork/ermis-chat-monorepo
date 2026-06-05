@@ -79,6 +79,11 @@ export interface RemovedSyncCursor {
   event_id: string;
 }
 
+export interface EventCursor {
+  created_at: string;
+  event_id: string;
+}
+
 export interface PendingArchiveUpload {
   cid: string;
   channel_type: string;
@@ -210,6 +215,10 @@ export interface MlsStorageAdapter {
   // ---- Batch Sync Cursors (for unified sync API) ----
   loadAllSyncTimestamps(): Promise<Record<string, string>>;
   saveAllSyncTimestamps(cursors: Record<string, string>): Promise<void>;
+  loadScopeSyncCursor?(scopeCid: string): Promise<EventCursor | null>;
+  saveScopeSyncCursor?(scopeCid: string, cursor: EventCursor): Promise<void>;
+  loadAllScopeSyncCursors?(): Promise<Record<string, EventCursor>>;
+  saveAllScopeSyncCursors?(cursors: Record<string, EventCursor>): Promise<void>;
   loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null>;
   saveRemovedSyncCursor(cursor: RemovedSyncCursor): Promise<void>;
 
@@ -262,9 +271,30 @@ const STORE_DEFERRED_ARCHIVES = 'deferred_archives';
 const STORE_ARCHIVE_ACKS = 'archive_acks';
 const STORE_RESTORE_PROGRESS = 'restore_progress';
 const ARCHIVE_STASH_KEY_META = 'archive_stash_key';
+const LEGACY_SYNC_PREFIX = 'sync:';
+const SCOPE_SYNC_PREFIX = 'scope_sync:';
+const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** localStorage key for device_id — global, per-browser */
 const DEVICE_ID_LS_KEY = 'ermis_device_id';
+
+function eventCursorFromStoredValue(value: unknown): EventCursor | null {
+  if (!value) return null;
+  if (
+    typeof value === 'object' &&
+    typeof (value as EventCursor).created_at === 'string' &&
+    typeof (value as EventCursor).event_id === 'string'
+  ) {
+    return value as EventCursor;
+  }
+  if (typeof value === 'string' && value.length > 0) {
+    return { created_at: value, event_id: ZERO_EVENT_ID };
+  }
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return { created_at: new Date(value).toISOString(), event_id: ZERO_EVENT_ID };
+  }
+  return null;
+}
 
 /**
  * Default MLS storage adapter using browser IndexedDB.
@@ -858,7 +888,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');
       const store = tx.objectStore(STORE_META);
-      store.put(timestamp, `sync:${cid}`);
+      store.put(timestamp, `${LEGACY_SYNC_PREFIX}${cid}`);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -869,7 +899,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     return new Promise<string | null>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readonly');
       const store = tx.objectStore(STORE_META);
-      const request = store.get(`sync:${cid}`);
+      const request = store.get(`${LEGACY_SYNC_PREFIX}${cid}`);
       request.onsuccess = () => resolve((request.result as string) || null);
       request.onerror = () => reject(request.error);
     });
@@ -888,8 +918,8 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
         const cursor = cursorReq.result;
         if (cursor) {
           const key = cursor.key as string;
-          if (key.startsWith('sync:') && key !== 'sync:removed_channels') {
-            const cid = key.slice(5); // Remove 'sync:' prefix
+          if (key.startsWith(LEGACY_SYNC_PREFIX) && key !== 'sync:removed_channels') {
+            const cid = key.slice(LEGACY_SYNC_PREFIX.length);
             cursors[cid] = cursor.value as string;
           }
           cursor.continue();
@@ -901,13 +931,88 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     });
   }
 
+  async loadScopeSyncCursor(scopeCid: string): Promise<EventCursor | null> {
+    const db = await this.openDB();
+    return new Promise<EventCursor | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const scopeReq = store.get(`${SCOPE_SYNC_PREFIX}${scopeCid}`);
+      scopeReq.onsuccess = () => {
+        const scopeCursor = eventCursorFromStoredValue(scopeReq.result);
+        if (scopeCursor) {
+          resolve(scopeCursor);
+          return;
+        }
+
+        const legacyReq = store.get(`${LEGACY_SYNC_PREFIX}${scopeCid}`);
+        legacyReq.onsuccess = () => resolve(eventCursorFromStoredValue(legacyReq.result));
+        legacyReq.onerror = () => reject(legacyReq.error);
+      };
+      scopeReq.onerror = () => reject(scopeReq.error);
+    });
+  }
+
+  async saveScopeSyncCursor(scopeCid: string, cursor: EventCursor): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(cursor, `${SCOPE_SYNC_PREFIX}${scopeCid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadAllScopeSyncCursors(): Promise<Record<string, EventCursor>> {
+    const db = await this.openDB();
+    return new Promise<Record<string, EventCursor>>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const legacyCursors: Record<string, EventCursor> = {};
+      const scopeCursors: Record<string, EventCursor> = {};
+      const cursorReq = store.openCursor();
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (cursor) {
+          const key = cursor.key as string;
+          if (key.startsWith(SCOPE_SYNC_PREFIX)) {
+            const scopeCid = key.slice(SCOPE_SYNC_PREFIX.length);
+            const value = eventCursorFromStoredValue(cursor.value);
+            if (value) scopeCursors[scopeCid] = value;
+          } else if (key.startsWith(LEGACY_SYNC_PREFIX) && key !== 'sync:removed_channels') {
+            const scopeCid = key.slice(LEGACY_SYNC_PREFIX.length);
+            const value = eventCursorFromStoredValue(cursor.value);
+            if (value) legacyCursors[scopeCid] = value;
+          }
+          cursor.continue();
+        } else {
+          resolve({ ...legacyCursors, ...scopeCursors });
+        }
+      };
+      cursorReq.onerror = () => reject(cursorReq.error);
+    });
+  }
+
+  async saveAllScopeSyncCursors(cursors: Record<string, EventCursor>): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      for (const [scopeCid, cursor] of Object.entries(cursors)) {
+        store.put(cursor, `${SCOPE_SYNC_PREFIX}${scopeCid}`);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   async saveAllSyncTimestamps(timestamps: Record<string, string>): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');
       const store = tx.objectStore(STORE_META);
       for (const [cid, ts] of Object.entries(timestamps)) {
-        store.put(ts, `sync:${cid}`);
+        store.put(ts, `${LEGACY_SYNC_PREFIX}${cid}`);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -1203,7 +1308,9 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
 
   async loadIncompleteRestores(userId: string, deviceId: string): Promise<RestoreProgressRecord[]> {
     const statuses: RestoreStatus[] = ['pending', 'running', 'partial', 'failed'];
-    const groups = await Promise.all(statuses.map((status) => this._loadRestoreProgressByDeviceStatus(userId, deviceId, status)));
+    const groups = await Promise.all(
+      statuses.map((status) => this._loadRestoreProgressByDeviceStatus(userId, deviceId, status)),
+    );
     return groups.flat();
   }
 
@@ -1236,8 +1343,9 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       const index = store.index('device_status');
       const request = index.getAll(IDBKeyRange.only([deviceId, status]));
       request.onsuccess = () => {
-        const records = ((request.result as RestoreProgressRecord[]) || [])
-          .filter((record) => record.user_id === userId);
+        const records = ((request.result as RestoreProgressRecord[]) || []).filter(
+          (record) => record.user_id === userId,
+        );
         resolve(records);
       };
       request.onerror = () => reject(request.error);

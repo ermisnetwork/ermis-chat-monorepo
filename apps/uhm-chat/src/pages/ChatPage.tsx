@@ -62,8 +62,10 @@ export function ChatPage() {
   const [isRecoveryGateOpen, setIsRecoveryGateOpen] = useState(false)
   const [recoveryGateDismissed, setRecoveryGateDismissed] = useState(false)
   const [activeRestoreProgress, setActiveRestoreProgress] = useState<RestoreProgressRecord | null>(null)
+  const [activeRestoreProgressCheckedCid, setActiveRestoreProgressCheckedCid] = useState<string | null>(null)
   const activeRestoreEnqueuedCidRef = useRef<string | null>(null)
   const activeRestorePromptedCidRef = useRef<string | null>(null)
+  const activeRestoreProgressRequestRef = useRef(0)
   const {
     isCreateChannelModalOpen,
     closeCreateChannelModal,
@@ -174,13 +176,20 @@ export function ChatPage() {
   }, [activeChannel?.id, activeChannel?.type, setSearchParams, searchParams, hasAttemptedRestore])
 
   const refreshActiveRestoreProgress = useCallback(async () => {
-    if (!activeChannel?.id || !activeChannel.type || activeChannel.data?.mls_enabled !== true) {
+    const requestId = activeRestoreProgressRequestRef.current + 1
+    activeRestoreProgressRequestRef.current = requestId
+    setActiveRestoreProgressCheckedCid(null)
+
+    if (!activeChannel?.id || !activeChannel.type || !activeChannel.cid || activeChannel.data?.mls_enabled !== true) {
       setActiveRestoreProgress(null)
       return
     }
+    const cid = activeChannel.cid
     const progress = await recovery.loadRestoreProgress(activeChannel.type, activeChannel.id)
+    if (activeRestoreProgressRequestRef.current !== requestId) return
     setActiveRestoreProgress(progress)
-  }, [activeChannel?.id, activeChannel?.type, activeChannel?.data?.mls_enabled, recovery])
+    setActiveRestoreProgressCheckedCid(cid)
+  }, [activeChannel?.id, activeChannel?.type, activeChannel?.cid, activeChannel?.data?.mls_enabled, recovery])
 
   useEffect(() => {
     refreshActiveRestoreProgress()
@@ -191,6 +200,7 @@ export function ChatPage() {
     const sub = client.on('e2ee.restore_progress' as any, (event: any) => {
       if (!activeChannel?.cid || event?.cid !== activeChannel.cid) return
       setActiveRestoreProgress(event.restore_progress || null)
+      setActiveRestoreProgressCheckedCid(event.cid)
     })
     return () => sub.unsubscribe()
   }, [client, activeChannel?.cid])
@@ -202,13 +212,14 @@ export function ChatPage() {
       setIsRecoveryGateOpen(false)
       return
     }
-    if (!recoveryGateDismissed) {
+    if (status.hasIncompleteRestore && !recoveryGateDismissed) {
       setIsRecoveryGateOpen(true)
     }
   }, [recovery.recoveryStatus, recoveryGateDismissed])
 
   useEffect(() => {
     if (!activeChannel?.id || activeChannel.data?.mls_enabled !== true) return
+    if (!activeChannel.cid || activeRestoreProgressCheckedCid !== activeChannel.cid) return
 
     if (!activeRestoreProgress) {
       if (recovery.recoveryStatus?.unlocked) {
@@ -218,7 +229,11 @@ export function ChatPage() {
         return
       }
 
-      if (recovery.recoveryStatus?.hasVault && activeRestorePromptedCidRef.current !== activeChannel.cid) {
+      if (
+        !recoveryGateDismissed &&
+        recovery.recoveryStatus?.incompleteChannels.includes(activeChannel.cid) &&
+        activeRestorePromptedCidRef.current !== activeChannel.cid
+      ) {
         activeRestorePromptedCidRef.current = activeChannel.cid || null
         setIsRecoveryGateOpen(true)
       }
@@ -235,11 +250,20 @@ export function ChatPage() {
       return
     }
 
-    if (activeRestorePromptedCidRef.current !== activeRestoreProgress.cid) {
+    if (!recoveryGateDismissed && activeRestorePromptedCidRef.current !== activeRestoreProgress.cid) {
       activeRestorePromptedCidRef.current = activeRestoreProgress.cid
       setIsRecoveryGateOpen(true)
     }
-  }, [activeChannel?.id, activeChannel?.type, activeChannel?.data?.mls_enabled, activeRestoreProgress, recovery])
+  }, [
+    activeChannel?.id,
+    activeChannel?.type,
+    activeChannel?.cid,
+    activeChannel?.data?.mls_enabled,
+    activeRestoreProgress,
+    activeRestoreProgressCheckedCid,
+    recoveryGateDismissed,
+    recovery,
+  ])
 
   // Localized action labels passed to SDK ChannelList/TopicList
   const actionLabels = useMemo(() => ({
