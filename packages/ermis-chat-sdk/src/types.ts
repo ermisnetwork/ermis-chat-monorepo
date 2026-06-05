@@ -60,9 +60,11 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     topics_enabled?: boolean;
     parent_cid?: string;
     is_closed_topic?: boolean;
+    gate?: boolean;
     mls_enabled?: boolean;
     mls_enabled_at?: string;
     mls_epoch?: number;
+    e2ee_group_id?: string;
   };
 
 export type QueryChannelsAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = APIResponse & {
@@ -140,6 +142,7 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     device_id?: string;
     mls_ciphertext?: number[];
     mls_epoch?: number;
+    e2ee_group_id?: string;
     old_texts?: Array<{ text: string; created_at: string }>;
     e2ee_status?: string;
     own_reactions?: ReactionResponse<ErmisChatGenerics>[] | null;
@@ -342,6 +345,8 @@ export type ChannelFilters = {
 export type CreateTopicData = {
   name: string;
   image?: string;
+  gate?: boolean;
+  mls_enabled?: boolean;
   [key: string]: any;
 };
 
@@ -401,6 +406,8 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     name?: string;
     is_pinned?: boolean;
     mls_enabled?: boolean;
+    e2ee_group_id?: string;
+    gate?: boolean;
     /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
     commit?: number[];
     welcome?: number[];

@@ -205,7 +205,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   setBaseURL(baseURL: string) {
     this.baseURL = baseURL;
     this.userBaseURL = this.options.userBaseURL || baseURL + '/uss/v1';
-    console.log("userBaseURL: ", this.options.userBaseURL);
 
     this.wsBaseURL = this.baseURL.replace('http', 'ws').replace(':3030', ':8800');
   }
@@ -960,7 +959,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
           this.mlsManager.leaveGroup(event.cid, rejectTimestamp);
           if (Array.isArray(event.topic_cids)) {
             for (const topicCid of event.topic_cids) {
-              this.mlsManager.leaveGroup(topicCid, rejectTimestamp);
+              if (this.mlsManager.ownsE2eeGroup(topicCid)) {
+                this.mlsManager.leaveGroup(topicCid, rejectTimestamp);
+              }
             }
           }
         }

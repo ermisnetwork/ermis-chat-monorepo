@@ -8,6 +8,7 @@ The official core SDK for Ermis Chat.
 - `channel.leaveChannelE2ee(userId)` self-leaves an E2EE channel by sending `self_remove: true`; this path does not include an MLS commit from the leaving user.
 - `client.mlsManager.setupRecoveryPin(pin)`, `unlockRecoveryVault(pin)`, and `changeRecoveryPin(oldPin, newPin)` manage the PIN recovery vault for epoch archive restore.
 - `client.mlsManager.restoreHistoricalMessages(channelType, channelId, options)` restores accessible historical E2EE ciphertexts from account-owned epoch archives and returns explicit gap entries when archive material is missing.
+- For non-gated E2EE topics, historical restore queries parent archive material by `e2ee_group_id` and routes restored plaintext into each timeline by `ciphertext.cid`.
 - `client.mlsManager.getRecoveryStatus()` reports vault existence, memory-only unlock state, incomplete restore channels, and channels that completed with permanent gaps.
 - `client.mlsManager.getRestoreProgress(channelType, channelId)` returns the per-device restore progress record for channel UI badges and gap banners.
 - Restore progress is persisted per device in IndexedDB so interrupted history restore resumes only missing epochs after the user re-enters their PIN.
@@ -17,11 +18,41 @@ The official core SDK for Ermis Chat.
 - Fresh epoch archives are exported after channel creation and after every fresh epoch. If no recovery vault exists yet, the archive ADK is stashed locally under a device-local non-extractable WebCrypto AES-GCM key and uploaded after PIN setup/vault discovery.
 - Archive failures are best-effort: commit/join/rotate flows keep the MLS epoch change and retain retryable archive work locally.
 - `client.mlsManager.bootstrapKnownE2eeChannels()` scans loaded E2EE channels after `channels.queried`, external-joins missing local groups sequentially, emits `e2ee.bootstrap_progress`, and queues restore after PIN unlock.
+- E2EE non-gated topics inherit the parent `e2ee_group_id`; gated topics keep a topic-owned MLS group.
+- Reconnect catch-up uses `/v1/e2ee/scope_sync` with one `{ created_at, event_id }` cursor per E2EE scope.
 - The SDK dispatches `e2ee.initialized` after MLS manager initialization, allowing app recovery gates to refresh once E2EE is ready.
 - The SDK dispatches `e2ee.restore_progress` after restore progress changes; UI clients can subscribe to refresh status without polling.
 - The SDK dispatches `e2ee.bootstrap_progress` while startup external-join preparation is running; UI clients can show non-blocking secure-restore preparation progress.
 
 ## Progress Log
+
+### 2026-06-05 - Offline Topic Waterfall Ordering
+
+- Goal: fix offline catch-up where messages in newly-created non-gated topics could remain encrypted with `Generation is too old to be processed`.
+- Code changed: `MlsManager` now infers the parent `e2ee_group_id` from `parent_cid + gate=false` when topic channel data has not hydrated `e2ee_group_id`, retries pending snapshots in one scope/global waterfall instead of per-topic batches, and stores mixed-scope decrypt results by each message `cid`.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types` passed.
+
+### 2026-06-05 - Scope Sync Runtime Cleanup
+
+- Goal: stop SDK runtime paths from calling legacy `POST /v1/e2ee/sync`.
+- Code changed: post-join/channel-ready catch-up now uses `E2eeClient.scopeSync()` with composite `{ created_at, event_id }` cursors and persists `scope_sync:{cid}` cursor state. `E2eeClient.syncAll()` remains as a legacy public API wrapper but is no longer used internally by `MlsManager`.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types` passed.
+
+### 2026-06-05 - Topic Archive Restore Routing
+
+- Goal: fix historical restore for inherited E2EE topics so topic messages are decrypted and cached under the topic cid, not only the parent/general cid.
+- Code changed: `MlsManager.restoreHistoricalMessages()` resolves the archive target from `e2ee_group_id`, uses `ciphertext.cid` for plaintext storage and active state updates, and dispatches `e2ee.local_messages_loaded` per restored timeline.
+- Docs changed: SDK README and core topic docs now document restore routing for non-gated E2EE topics.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types` passed.
+
+### 2026-06-05 - Hybrid MLS Topic Scope Sync
+
+- Goal: implement the client side of Bellboy hybrid MLS topic scope sync.
+- Code changed: `E2eeClient.scopeSync()` targets `POST /v1/e2ee/scope_sync`, MLS storage persists composite scope cursors with legacy timestamp fallback, and `MlsManager.sync()` processes scope envelopes in server order.
+- Code changed: E2EE send/update encrypt with `e2ee_group_id`, non-gated topics delegate readiness to the parent group, and topic MLS batch ops skip inherited non-gated topics.
+- Docs changed: core SDK topic docs now describe E2EE inherited topics, gated topic own-group behavior, and scope sync routing.
+- Design decision: `/v1/e2ee/sync` remains in the SDK for legacy single-channel helpers while reconnect recovery moves to the long-term scope sync contract.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types` passed.
 
 ### 2026-05-17 - Production
 
@@ -97,6 +128,27 @@ The official core SDK for Ermis Chat.
 - Code changed: `MlsManager` now listens for `channels.queried`, runs `bootstrapKnownE2eeChannels()` over loaded non-pending E2EE channels sequentially, emits `e2ee.bootstrap_progress`, archives joined epochs, and queues restore for joined channels after PIN unlock.
 - Design decision: startup external join remains sequential to avoid Provider/IndexedDB/WASM races; restore still runs through the existing one-channel queue.
 - Verification: `npm run build:uhm` passed.
+
+### 2026-06-05 - PIN Restore In-Flight Dedupe
+
+- Goal: stop duplicate `epoch_archives/query` calls with identical `{ list_epochs: true }` payloads when PIN unlock starts background restore and the active channel simultaneously asks for restore.
+- Code changed: restore queue enqueue now skips CIDs already in-flight, and `restoreHistoricalMessages()` reuses an in-flight restore promise for the same CID/options.
+- Design decision: background restore for a CID is treated as covering the active restore request for that CID, keeping restore one-channel-at-a-time and avoiding duplicate archive index reads.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, and `yarn workspace uhm-chat build` passed.
+
+### 2026-06-05 - PIN Restore Terminal Progress Dedupe
+
+- Goal: stop reload/PIN unlock and later channel entry from re-querying epoch lists for channels already restored on this device.
+- Code changed: restore enqueue now checks persisted `restore_progress` and skips channels whose status is already `done` or `done_with_gaps`, while still allowing explicit epoch-range restores.
+- Design decision: terminal local restore progress is authoritative for automatic background/active enqueue, so app navigation does not re-open archive index reads after history has been synced locally.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, and `yarn workspace uhm-chat build` passed.
+
+### 2026-06-05 - PIN Restore Status Missing-Progress Detection
+
+- Goal: let apps prompt for PIN on new devices that have known E2EE channels without local restore progress, without prompting again after terminal progress is stored.
+- Code changed: `getRecoveryStatus()` now folds joined known E2EE channels with missing or non-terminal `restore_progress` into `hasIncompleteRestore` / `incompleteChannels`.
+- Design decision: automatic PIN gates should be driven by restore need, not merely by a locked recovery vault.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, and `yarn workspace uhm-chat build` passed.
 
 ## Documentation
 

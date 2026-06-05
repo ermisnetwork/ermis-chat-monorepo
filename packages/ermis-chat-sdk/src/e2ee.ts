@@ -6,7 +6,7 @@
  */
 
 import type { ErmisChat } from './client';
-import type { RemovedSyncCursor } from './mls_storage';
+import type { EventCursor, RemovedSyncCursor } from './mls_storage';
 import type { APIResponse, ExtendableGenerics, DefaultGenerics } from './types';
 
 // ============================================================
@@ -145,6 +145,8 @@ export interface SendE2eeMessageRequest {
     /** Encrypted MLS ciphertext from WASM `group.create_message()` */
     mls_ciphertext: number[];
     mls_epoch: number;
+    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
+    e2ee_group_id?: string;
     mentioned_all?: boolean;
     mentioned_users?: string[];
     parent_id?: string;
@@ -158,6 +160,8 @@ export interface UpdateE2eeMessageRequest {
     /** Encrypted MLS ciphertext from WASM `group.create_message()` */
     mls_ciphertext: number[];
     mls_epoch: number;
+    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
+    e2ee_group_id?: string;
     mentioned_all?: boolean;
     mentioned_users?: string[];
   };
@@ -271,6 +275,9 @@ export interface CiphertextCursor {
 }
 
 export interface HistoricalCiphertext {
+  cid?: string;
+  parent_cid?: string;
+  e2ee_group_id?: string;
   message_id: string;
   mls_ciphertext: number[];
   mls_epoch: number;
@@ -422,7 +429,9 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   async getArchiveSnapshot(channelType: string, channelId: string, hash: string): Promise<MemberSnapshotRecord> {
-    return await this._get(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/snapshot/${hash}`);
+    return await this._get(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/snapshot/${hash}`,
+    );
   }
 
   async queryArchiveCiphertexts(
@@ -506,6 +515,29 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       body.removed_cursor = removedCursor;
     }
     return await this._post(this.baseURL + '/v1/e2ee/sync', body);
+  }
+
+  /**
+   * Scope sync: fetch ordered protocol, application, and metadata events for each E2EE scope.
+   * Non-gated topics inherit their parent scope, so clients keep one composite cursor per scope.
+   */
+  async scopeSync(
+    cursors: Record<string, EventCursor>,
+    limit: number = 100,
+    removedCursor?: RemovedSyncCursor | null,
+  ): Promise<ScopeSyncResponse> {
+    const body: {
+      cursors: Record<string, EventCursor>;
+      limit: number;
+      removed_cursor?: RemovedSyncCursor | null;
+    } = {
+      cursors,
+      limit,
+    };
+    if (removedCursor !== undefined) {
+      body.removed_cursor = removedCursor;
+    }
+    return await this._post(this.baseURL + '/v1/e2ee/scope_sync', body);
   }
 
   // ============================================================
@@ -708,6 +740,26 @@ export interface ChannelSyncResult {
   next_cursor?: string;
 }
 
+export interface ScopeSyncEvent {
+  type: E2eeSyncEvent['type'] | string;
+  /** Canonical channel/timeline that owns the event payload. */
+  cid: string;
+  /** Parent/general channel for topic events. */
+  parent_cid?: string;
+  /** Canonical datastore event id, used with created_at for the composite cursor. */
+  event_id: string;
+  /** Canonical event timestamp used for scope ordering. */
+  created_at: string;
+  /** Raw application/protocol/metadata payload. */
+  data: Record<string, unknown>;
+}
+
+export interface ScopeSyncResult {
+  events: ScopeSyncEvent[];
+  has_more: boolean;
+  next_cursor?: EventCursor;
+}
+
 export interface RemovedChannelSyncData {
   event_id: string;
   cid: string;
@@ -731,6 +783,12 @@ export interface RemovedChannelsSyncResult {
 export interface UnifiedSyncResponse extends APIResponse {
   removed_channels?: RemovedChannelsSyncResult;
   [cid: string]: ChannelSyncResult | RemovedChannelsSyncResult | unknown;
+}
+
+/** Response from POST /v1/e2ee/scope_sync */
+export interface ScopeSyncResponse extends APIResponse {
+  channels: Record<string, ScopeSyncResult>;
+  removed_channels?: RemovedChannelsSyncResult;
 }
 
 // ============================================================
