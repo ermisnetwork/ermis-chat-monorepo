@@ -1,9 +1,9 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
-import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash } from 'lucide-react'
+import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
+import type { Channel as ChannelType, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
+import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, KeyRound, Hash, AlertTriangle } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
@@ -36,6 +36,7 @@ import { UhmTabEmptyState } from '@/features/chat/UhmTabEmptyState'
 import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState'
 import { UhmSignalMessage } from '@/features/chat/UhmSignalMessage'
 import { UserProfileModal } from '@/features/chat/UserProfileModal'
+import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
@@ -44,6 +45,7 @@ export function ChatPage() {
   const { t, i18n } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const { client, activeChannel, setActiveChannel } = useChatClient()
+  const recovery = useRecoveryPin()
   const { status, retryConnection } = useConnectionStatus(client)
   const totalUnreadCount = useTotalUnreadCount()
 
@@ -63,6 +65,14 @@ export function ChatPage() {
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [rotatingKeyCid, setRotatingKeyCid] = useState<string | null>(null)
+  const [isRecoveryPinOpen, setIsRecoveryPinOpen] = useState(false)
+  const [isRecoveryGateOpen, setIsRecoveryGateOpen] = useState(false)
+  const [recoveryGateDismissed, setRecoveryGateDismissed] = useState(false)
+  const [activeRestoreProgress, setActiveRestoreProgress] = useState<RestoreProgressRecord | null>(null)
+  const [activeRestoreProgressCheckedCid, setActiveRestoreProgressCheckedCid] = useState<string | null>(null)
+  const activeRestoreEnqueuedCidRef = useRef<string | null>(null)
+  const activeRestorePromptedCidRef = useRef<string | null>(null)
+  const activeRestoreProgressRequestRef = useRef(0)
   const {
     isCreateChannelModalOpen,
     closeCreateChannelModal,
@@ -199,6 +209,96 @@ export function ChatPage() {
     }
   }, [activeChannel?.id, activeChannel?.type, setSearchParams, searchParams, hasAttemptedRestore])
 
+  const refreshActiveRestoreProgress = useCallback(async () => {
+    const requestId = activeRestoreProgressRequestRef.current + 1
+    activeRestoreProgressRequestRef.current = requestId
+    setActiveRestoreProgressCheckedCid(null)
+
+    if (!activeChannel?.id || !activeChannel.type || !activeChannel.cid || activeChannel.data?.mls_enabled !== true) {
+      setActiveRestoreProgress(null)
+      return
+    }
+    const cid = activeChannel.cid
+    const progress = await recovery.loadRestoreProgress(activeChannel.type, activeChannel.id)
+    if (activeRestoreProgressRequestRef.current !== requestId) return
+    setActiveRestoreProgress(progress)
+    setActiveRestoreProgressCheckedCid(cid)
+  }, [activeChannel?.id, activeChannel?.type, activeChannel?.cid, activeChannel?.data?.mls_enabled, recovery])
+
+  useEffect(() => {
+    refreshActiveRestoreProgress()
+  }, [refreshActiveRestoreProgress, recovery.recoveryStatus])
+
+  useEffect(() => {
+    if (!client?.on) return
+    const sub = client.on('e2ee.restore_progress' as any, (event: any) => {
+      if (!activeChannel?.cid || event?.cid !== activeChannel.cid) return
+      setActiveRestoreProgress(event.restore_progress || null)
+      setActiveRestoreProgressCheckedCid(event.cid)
+    })
+    return () => sub.unsubscribe()
+  }, [client, activeChannel?.cid])
+
+  useEffect(() => {
+    const status = recovery.recoveryStatus
+    if (!status) return
+    if (status.unlocked) {
+      setIsRecoveryGateOpen(false)
+      return
+    }
+    if (status.hasIncompleteRestore && !recoveryGateDismissed) {
+      setIsRecoveryGateOpen(true)
+    }
+  }, [recovery.recoveryStatus, recoveryGateDismissed])
+
+  useEffect(() => {
+    if (!activeChannel?.id || activeChannel.data?.mls_enabled !== true) return
+    if (!activeChannel.cid || activeRestoreProgressCheckedCid !== activeChannel.cid) return
+
+    if (!activeRestoreProgress) {
+      if (recovery.recoveryStatus?.unlocked) {
+        if (activeRestoreEnqueuedCidRef.current === activeChannel.cid) return
+        activeRestoreEnqueuedCidRef.current = activeChannel.cid || null
+        recovery.enqueueRestore(activeChannel.type, activeChannel.id, 'active')
+        return
+      }
+
+      if (
+        !recoveryGateDismissed &&
+        recovery.recoveryStatus?.incompleteChannels.includes(activeChannel.cid) &&
+        activeRestorePromptedCidRef.current !== activeChannel.cid
+      ) {
+        activeRestorePromptedCidRef.current = activeChannel.cid || null
+        setIsRecoveryGateOpen(true)
+      }
+      return
+    }
+
+    const needsRestore = ['pending', 'partial', 'failed'].includes(activeRestoreProgress.status)
+    if (!needsRestore) return
+
+    if (recovery.recoveryStatus?.unlocked) {
+      if (activeRestoreEnqueuedCidRef.current === activeRestoreProgress.cid) return
+      activeRestoreEnqueuedCidRef.current = activeRestoreProgress.cid
+      recovery.enqueueRestore(activeChannel.type, activeChannel.id, 'active')
+      return
+    }
+
+    if (!recoveryGateDismissed && activeRestorePromptedCidRef.current !== activeRestoreProgress.cid) {
+      activeRestorePromptedCidRef.current = activeRestoreProgress.cid
+      setIsRecoveryGateOpen(true)
+    }
+  }, [
+    activeChannel?.id,
+    activeChannel?.type,
+    activeChannel?.cid,
+    activeChannel?.data?.mls_enabled,
+    activeRestoreProgress,
+    activeRestoreProgressCheckedCid,
+    recoveryGateDismissed,
+    recovery,
+  ])
+
   // Localized action labels passed to SDK ChannelList/TopicList
   const actionLabels = useMemo(() => ({
     pinChannel: t('actions.pin_channel'),
@@ -265,6 +365,45 @@ export function ChatPage() {
     durationUnitMin: t('signal_messages.durationUnitMin'),
     durationUnitSec: t('signal_messages.durationUnitSec'),
   }), [t])
+
+  const activeRestoreTotal = useMemo(() => {
+    if (!activeRestoreProgress) return 0
+    const target = activeRestoreProgress.target_epochs?.length || 0
+    const known = new Set([
+      ...activeRestoreProgress.completed_epochs,
+      ...activeRestoreProgress.permanent_gaps.map((gap) => gap.epoch),
+      ...activeRestoreProgress.transient_failures.map((failure) => failure.epoch),
+    ]).size
+    return Math.max(target, known)
+  }, [activeRestoreProgress])
+  const e2eeBootstrapRunning = recovery.recoveryStatus?.e2eeBootstrapRunning === true
+  const e2eeBootstrapCompleted = recovery.recoveryStatus?.e2eeBootstrapCompleted || 0
+  const e2eeBootstrapTotal = recovery.recoveryStatus?.e2eeBootstrapTotal || 0
+
+  const activeRestoreCompleted = activeRestoreProgress?.completed_epochs.length || 0
+  const activeRestoreGaps = activeRestoreProgress?.permanent_gaps || []
+
+  const getRestoreBadge = useCallback((channel: ChannelType): { label: string; tone: 'pending' | 'running' | 'gap' } | null => {
+    const cid = channel.cid
+    if (!cid) return null
+    const progress = activeRestoreProgress?.cid === cid ? activeRestoreProgress : null
+    if (progress?.status === 'running') {
+      const total = progress.target_epochs?.length || activeRestoreTotal
+      return {
+        label: total > 0
+          ? t('recovery_pin.restore_progress_short', { restored: progress.completed_epochs.length, total })
+          : t('recovery_pin.status_restore_running'),
+        tone: 'running',
+      }
+    }
+    if (progress?.status === 'done_with_gaps' || recovery.recoveryStatus?.channelsWithPermanentGaps.includes(cid)) {
+      return { label: t('recovery_pin.status_restore_gaps'), tone: 'gap' }
+    }
+    if (['pending', 'partial', 'failed'].includes(progress?.status || '') || recovery.recoveryStatus?.incompleteChannels.includes(cid)) {
+      return { label: t('recovery_pin.status_restore_pending'), tone: 'pending' }
+    }
+    return null
+  }, [activeRestoreProgress, activeRestoreTotal, recovery.recoveryStatus, t])
 
   const roleLabels = useMemo(() => ({
     owner: t('roles.owner'),
@@ -378,16 +517,17 @@ export function ChatPage() {
       const canRotateKey = isE2ee && !isTopic && ['owner', 'moder'].includes(String(currentUserRole))
       const mlsManager = client.mlsManager
       const rotating = rotatingKeyCid === channel.cid
+      const restoreBadge = isE2ee ? getRestoreBadge(channel) : null
 
       const handleRotateKey = async () => {
         if (!canRotateKey || !mlsManager?.initialized || !channel.cid || rotating) return
         try {
           setRotatingKeyCid(channel.cid)
           const result = await mlsManager.keyRotation(channel.cid)
-          toast.success(t('e2ee.rotate_success', { epoch: result.epoch, defaultValue: `Key rotated. Epoch ${result.epoch}` }))
+          toast.success(t('e2ee.rotate_success', { epoch: result.epoch }))
         } catch (err: any) {
           console.error('[E2EE] Key rotation failed', err)
-          toast.error(err?.message || t('e2ee.rotate_failed', 'Failed to rotate key'))
+          toast.error(err?.message || t('e2ee.rotate_failed'))
         } finally {
           setRotatingKeyCid(null)
         }
@@ -398,20 +538,44 @@ export function ChatPage() {
           {isE2ee && (
             <div
               className="hidden sm:inline-flex items-center gap-1.5 h-7 px-2 rounded-full border border-emerald-200 bg-emerald-50 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
-              title={t('e2ee.enabled', 'End-to-end encrypted')}
+              title={t('e2ee.enabled')}
             >
               <LockKeyhole className="w-3.5 h-3.5" />
-              <span>E2EE</span>
+              <span>{t('e2ee.badge')}</span>
               {typeof mlsManager?.getEpoch === 'function' && !isTopic && (
                 <span className="font-mono opacity-70">{mlsManager.getEpoch(channel.cid) ?? '?'}</span>
               )}
+            </div>
+          )}
+          {isE2ee && (
+            <button
+              className="inline-flex items-center justify-center w-8 h-8 rounded-full text-emerald-600 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+              onClick={() => setIsRecoveryPinOpen(true)}
+              title={t('recovery_pin.open_action')}
+              aria-label={t('recovery_pin.open_action')}
+              disabled={actionDisabled || !mlsManager?.initialized}
+            >
+              <KeyRound className="w-[17px] h-[17px]" />
+            </button>
+          )}
+          {restoreBadge && (
+            <div className={`hidden md:inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold ${
+              restoreBadge.tone === 'gap'
+                ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                : restoreBadge.tone === 'running'
+                  ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300'
+                  : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+            }`}>
+              {restoreBadge.tone === 'gap' && <AlertTriangle className="h-3.5 w-3.5" />}
+              <span>{restoreBadge.label}</span>
             </div>
           )}
           {canRotateKey && (
             <button
               className="inline-flex items-center justify-center w-8 h-8 rounded-full text-amber-600 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
               onClick={handleRotateKey}
-              title={t('e2ee.rotate_key', 'Rotate encryption key')}
+              title={t('e2ee.rotate_key')}
+              aria-label={t('e2ee.rotate_key')}
               disabled={actionDisabled || !mlsManager?.initialized || rotating}
             >
               <RotateCw className={`w-[17px] h-[17px] ${rotating ? 'animate-spin' : ''}`} />
@@ -420,7 +584,8 @@ export function ChatPage() {
           <button
             className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95"
             onClick={toggleChannelInfo}
-            title="Channel info"
+            title={t('chat.info_title_channel')}
+            aria-label={t('chat.info_title_channel')}
             disabled={actionDisabled}
           >
             <Info className="w-[18px] h-[18px]" />
@@ -428,7 +593,7 @@ export function ChatPage() {
         </>
       )
     },
-    [client, rotatingKeyCid, t, toggleChannelInfo],
+    [client, getRestoreBadge, rotatingKeyCid, t, toggleChannelInfo],
   )
 
   const safariCallTooltip = t('safari_call.tooltip', 'Calls are not supported on Safari. Please use Chrome or Firefox.')
@@ -720,6 +885,15 @@ export function ChatPage() {
         {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
         <ConnectionStatusBanner status={status} onRetry={retryConnection} />
 
+        {e2eeBootstrapRunning && e2eeBootstrapTotal > 0 && (
+          <div className="mx-4 mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-[12px] font-semibold text-violet-800 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200">
+            {t('recovery_pin.bootstrap_progress', {
+              completed: e2eeBootstrapCompleted,
+              total: e2eeBootstrapTotal,
+            })}
+          </div>
+        )}
+
         <Channel EmptyStateIndicator={ChannelEmptyState}>
           <ChannelHeader
             title={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? t('chat.topics_general', 'general') : undefined}
@@ -732,6 +906,34 @@ export function ChatPage() {
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
+
+          {activeRestoreGaps.length > 0 && (
+            <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="min-w-0 space-y-1">
+                  <div className="font-semibold">{t('recovery_pin.gap_banner_title')}</div>
+                  <div className="text-[12px] leading-relaxed">
+                    {activeRestoreGaps.slice(0, 3).map((gap) => (
+                      <span key={gap.epoch} className="mr-3 inline-block">
+                        {t('recovery_pin.epoch_label', { epoch: gap.epoch })}: {t(`recovery_pin.gap_reason.${gap.reason || 'unknown'}`)}
+                      </span>
+                    ))}
+                    {activeRestoreGaps.length > 3 && t('recovery_pin.gap_banner_more', { count: activeRestoreGaps.length - 3 })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeRestoreProgress?.status === 'running' && activeRestoreTotal > 0 && (
+            <div className="mx-4 mt-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-[12px] font-semibold text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
+              {t('recovery_pin.restore_progress_detail', {
+                restored: activeRestoreCompleted,
+                total: activeRestoreTotal,
+              })}
+            </div>
+          )}
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
@@ -862,6 +1064,32 @@ export function ChatPage() {
         onClose={() => setProfileUserId(null)}
         userId={profileUserId}
         onSendMessage={handleSendMessageFromProfile}
+      />
+      <UhmRecoveryPinDialog
+        isOpen={isRecoveryPinOpen}
+        onClose={() => setIsRecoveryPinOpen(false)}
+        channel={activeChannel}
+      />
+      <UhmRecoveryPinDialog
+        isOpen={isRecoveryGateOpen}
+        onClose={() => {
+          activeRestorePromptedCidRef.current = activeChannel?.cid || null
+          setRecoveryGateDismissed(true)
+          setIsRecoveryGateOpen(false)
+        }}
+        channel={activeChannel}
+        variant="gate"
+        onSkip={() => {
+          activeRestorePromptedCidRef.current = activeChannel?.cid || null
+          setRecoveryGateDismissed(true)
+          setIsRecoveryGateOpen(false)
+        }}
+        onUnlocked={() => {
+          setRecoveryGateDismissed(false)
+          setIsRecoveryGateOpen(false)
+          recovery.refresh()
+          refreshActiveRestoreProgress()
+        }}
       />
       <GlobalPickers />
     </div>

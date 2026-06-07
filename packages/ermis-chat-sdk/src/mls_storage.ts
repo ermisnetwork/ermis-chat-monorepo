@@ -79,6 +79,94 @@ export interface RemovedSyncCursor {
   event_id: string;
 }
 
+export interface EventCursor {
+  created_at: string;
+  event_id: string;
+}
+
+export interface PendingArchiveUpload {
+  cid: string;
+  channel_type: string;
+  channel_id: string;
+  epoch: number;
+  scope: 'account_owned';
+  upload: unknown;
+  retry_count: number;
+  created_at: number;
+}
+
+export interface PendingDeferredArchive {
+  cid: string;
+  channel_type: string;
+  channel_id: string;
+  epoch: number;
+  scope: 'account_owned';
+  archive_blob_id: string;
+  encrypted_archive: {
+    ciphertext: number[];
+    nonce: number[];
+    aead_aad: number[];
+  };
+  snapshot: {
+    snapshot_bytes: number[];
+    snapshot_hash: string;
+  };
+  encrypted_adk: {
+    ciphertext: number[];
+    nonce: number[];
+  };
+  retry_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export type ArchiveAckStatus = 'uploaded' | 'idempotent' | 'duplicate_cap';
+
+export interface ArchiveAckRecord {
+  cid: string;
+  epoch: number;
+  recovery_key_id: string;
+  status: ArchiveAckStatus;
+  archive_blob_id?: string;
+  updated_at: number;
+}
+
+export type RestoreStatus = 'pending' | 'running' | 'partial' | 'done' | 'done_with_gaps' | 'failed';
+
+export type RestorePermanentGapReason =
+  | 'no_archive'
+  | 'no_matching_wrap'
+  | 'missing_snapshot'
+  | 'expired_restore_window'
+  | 'decrypt_error';
+
+export type RestoreTransientFailureReason = 'network_error' | 'server_error' | 'decrypt_error';
+
+export interface RestoreProgressRecord {
+  device_id: string;
+  cid: string;
+  user_id: string;
+  channel_type: string;
+  channel_id: string;
+  status: RestoreStatus;
+  target_epochs?: number[];
+  completed_epochs: number[];
+  permanent_gaps: Array<{
+    epoch: number;
+    reason: RestorePermanentGapReason;
+    updated_at: number;
+  }>;
+  transient_failures: Array<{
+    epoch: number;
+    reason: RestoreTransientFailureReason;
+    retry_count: number;
+    max_retries: number;
+    updated_at: number;
+  }>;
+  last_checked_at: number;
+  updated_at: number;
+}
+
 /**
  * Platform-agnostic storage adapter for MLS state.
  *
@@ -127,6 +215,10 @@ export interface MlsStorageAdapter {
   // ---- Batch Sync Cursors (for unified sync API) ----
   loadAllSyncTimestamps(): Promise<Record<string, string>>;
   saveAllSyncTimestamps(cursors: Record<string, string>): Promise<void>;
+  loadScopeSyncCursor?(scopeCid: string): Promise<EventCursor | null>;
+  saveScopeSyncCursor?(scopeCid: string, cursor: EventCursor): Promise<void>;
+  loadAllScopeSyncCursors?(): Promise<Record<string, EventCursor>>;
+  saveAllScopeSyncCursors?(cursors: Record<string, EventCursor>): Promise<void>;
   loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null>;
   saveRemovedSyncCursor(cursor: RemovedSyncCursor): Promise<void>;
 
@@ -138,6 +230,27 @@ export interface MlsStorageAdapter {
   // Map: cid → array of user_ids to evict
   loadPendingEvictions(): Promise<Record<string, string[]>>;
   savePendingEvictions(data: Record<string, string[]>): Promise<void>;
+
+  // ---- PIN Epoch Archive recovery ----
+  saveArchiveUpload(upload: PendingArchiveUpload): Promise<void>;
+  loadPendingArchiveUploads(): Promise<PendingArchiveUpload[]>;
+  deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
+  saveDeferredArchive(archive: PendingDeferredArchive): Promise<void>;
+  loadPendingDeferredArchives(): Promise<PendingDeferredArchive[]>;
+  deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
+  saveArchiveAck(record: ArchiveAckRecord): Promise<void>;
+  loadArchiveAck(cid: string, epoch: number, recoveryKeyId: string): Promise<ArchiveAckRecord | null>;
+  saveArchiveStashKey(key: CryptoKey): Promise<void>;
+  loadArchiveStashKey(): Promise<CryptoKey | null>;
+  saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void>;
+  loadRecoveryPublicKey(userId: string): Promise<Uint8Array | null>;
+
+  // ---- Restore Progress (required SDK contract) ----
+  saveRestoreProgress(record: RestoreProgressRecord): Promise<void>;
+  loadRestoreProgress(userId: string, deviceId: string, cid: string): Promise<RestoreProgressRecord | null>;
+  loadIncompleteRestores(userId: string, deviceId: string): Promise<RestoreProgressRecord[]>;
+  loadRestoresWithPermanentGaps(userId: string, deviceId: string): Promise<RestoreProgressRecord[]>;
+  deleteRestoreProgress(userId: string, deviceId: string, cid: string): Promise<void>;
 }
 
 // ============================================================
@@ -147,15 +260,41 @@ export interface MlsStorageAdapter {
 const DB_NAME_PREFIX = 'ermis_mls';
 /** Global DB (no userId) — only used for migrating legacy device_id */
 const DB_NAME_LEGACY = 'ermis_mls';
-const DB_VERSION = 2;
+const DB_VERSION = 5;
 
 const STORE_IDENTITY = 'identity';
 const STORE_MESSAGES = 'messages';
 const STORE_META = 'meta';
 const STORE_GROUPS = 'groups';
+const STORE_ARCHIVE_UPLOADS = 'archive_uploads';
+const STORE_DEFERRED_ARCHIVES = 'deferred_archives';
+const STORE_ARCHIVE_ACKS = 'archive_acks';
+const STORE_RESTORE_PROGRESS = 'restore_progress';
+const ARCHIVE_STASH_KEY_META = 'archive_stash_key';
+const LEGACY_SYNC_PREFIX = 'sync:';
+const SCOPE_SYNC_PREFIX = 'scope_sync:';
+const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** localStorage key for device_id — global, per-browser */
 const DEVICE_ID_LS_KEY = 'ermis_device_id';
+
+function eventCursorFromStoredValue(value: unknown): EventCursor | null {
+  if (!value) return null;
+  if (
+    typeof value === 'object' &&
+    typeof (value as EventCursor).created_at === 'string' &&
+    typeof (value as EventCursor).event_id === 'string'
+  ) {
+    return value as EventCursor;
+  }
+  if (typeof value === 'string' && value.length > 0) {
+    return { created_at: value, event_id: ZERO_EVENT_ID };
+  }
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return { created_at: new Date(value).toISOString(), event_id: ZERO_EVENT_ID };
+  }
+  return null;
+}
 
 /**
  * Default MLS storage adapter using browser IndexedDB.
@@ -224,6 +363,27 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
         if (!db.objectStoreNames.contains(STORE_GROUPS)) {
           db.createObjectStore(STORE_GROUPS);
         }
+
+        if (!db.objectStoreNames.contains(STORE_ARCHIVE_UPLOADS)) {
+          db.createObjectStore(STORE_ARCHIVE_UPLOADS);
+        }
+
+        if (!db.objectStoreNames.contains(STORE_DEFERRED_ARCHIVES)) {
+          db.createObjectStore(STORE_DEFERRED_ARCHIVES);
+        }
+
+        if (!db.objectStoreNames.contains(STORE_ARCHIVE_ACKS)) {
+          db.createObjectStore(STORE_ARCHIVE_ACKS);
+        }
+
+        if (!db.objectStoreNames.contains(STORE_RESTORE_PROGRESS)) {
+          const restoreStore = db.createObjectStore(STORE_RESTORE_PROGRESS, {
+            keyPath: ['device_id', 'cid'],
+          });
+          restoreStore.createIndex('status', 'status', { unique: false });
+          restoreStore.createIndex('device_id', 'device_id', { unique: false });
+          restoreStore.createIndex('device_status', ['device_id', 'status'], { unique: false });
+        }
       };
 
       request.onsuccess = () => resolve(request.result);
@@ -286,6 +446,26 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
         }
         if (!db.objectStoreNames.contains(STORE_GROUPS)) {
           db.createObjectStore(STORE_GROUPS);
+        }
+        if (!db.objectStoreNames.contains(STORE_ARCHIVE_UPLOADS)) {
+          db.createObjectStore(STORE_ARCHIVE_UPLOADS);
+        }
+
+        if (!db.objectStoreNames.contains(STORE_DEFERRED_ARCHIVES)) {
+          db.createObjectStore(STORE_DEFERRED_ARCHIVES);
+        }
+
+        if (!db.objectStoreNames.contains(STORE_ARCHIVE_ACKS)) {
+          db.createObjectStore(STORE_ARCHIVE_ACKS);
+        }
+
+        if (!db.objectStoreNames.contains(STORE_RESTORE_PROGRESS)) {
+          const restoreStore = db.createObjectStore(STORE_RESTORE_PROGRESS, {
+            keyPath: ['device_id', 'cid'],
+          });
+          restoreStore.createIndex('status', 'status', { unique: false });
+          restoreStore.createIndex('device_id', 'device_id', { unique: false });
+          restoreStore.createIndex('device_status', ['device_id', 'status'], { unique: false });
         }
       };
 
@@ -708,7 +888,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');
       const store = tx.objectStore(STORE_META);
-      store.put(timestamp, `sync:${cid}`);
+      store.put(timestamp, `${LEGACY_SYNC_PREFIX}${cid}`);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -719,7 +899,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     return new Promise<string | null>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readonly');
       const store = tx.objectStore(STORE_META);
-      const request = store.get(`sync:${cid}`);
+      const request = store.get(`${LEGACY_SYNC_PREFIX}${cid}`);
       request.onsuccess = () => resolve((request.result as string) || null);
       request.onerror = () => reject(request.error);
     });
@@ -738,8 +918,8 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
         const cursor = cursorReq.result;
         if (cursor) {
           const key = cursor.key as string;
-          if (key.startsWith('sync:') && key !== 'sync:removed_channels') {
-            const cid = key.slice(5); // Remove 'sync:' prefix
+          if (key.startsWith(LEGACY_SYNC_PREFIX) && key !== 'sync:removed_channels') {
+            const cid = key.slice(LEGACY_SYNC_PREFIX.length);
             cursors[cid] = cursor.value as string;
           }
           cursor.continue();
@@ -751,13 +931,88 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     });
   }
 
+  async loadScopeSyncCursor(scopeCid: string): Promise<EventCursor | null> {
+    const db = await this.openDB();
+    return new Promise<EventCursor | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const scopeReq = store.get(`${SCOPE_SYNC_PREFIX}${scopeCid}`);
+      scopeReq.onsuccess = () => {
+        const scopeCursor = eventCursorFromStoredValue(scopeReq.result);
+        if (scopeCursor) {
+          resolve(scopeCursor);
+          return;
+        }
+
+        const legacyReq = store.get(`${LEGACY_SYNC_PREFIX}${scopeCid}`);
+        legacyReq.onsuccess = () => resolve(eventCursorFromStoredValue(legacyReq.result));
+        legacyReq.onerror = () => reject(legacyReq.error);
+      };
+      scopeReq.onerror = () => reject(scopeReq.error);
+    });
+  }
+
+  async saveScopeSyncCursor(scopeCid: string, cursor: EventCursor): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(cursor, `${SCOPE_SYNC_PREFIX}${scopeCid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadAllScopeSyncCursors(): Promise<Record<string, EventCursor>> {
+    const db = await this.openDB();
+    return new Promise<Record<string, EventCursor>>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const legacyCursors: Record<string, EventCursor> = {};
+      const scopeCursors: Record<string, EventCursor> = {};
+      const cursorReq = store.openCursor();
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (cursor) {
+          const key = cursor.key as string;
+          if (key.startsWith(SCOPE_SYNC_PREFIX)) {
+            const scopeCid = key.slice(SCOPE_SYNC_PREFIX.length);
+            const value = eventCursorFromStoredValue(cursor.value);
+            if (value) scopeCursors[scopeCid] = value;
+          } else if (key.startsWith(LEGACY_SYNC_PREFIX) && key !== 'sync:removed_channels') {
+            const scopeCid = key.slice(LEGACY_SYNC_PREFIX.length);
+            const value = eventCursorFromStoredValue(cursor.value);
+            if (value) legacyCursors[scopeCid] = value;
+          }
+          cursor.continue();
+        } else {
+          resolve({ ...legacyCursors, ...scopeCursors });
+        }
+      };
+      cursorReq.onerror = () => reject(cursorReq.error);
+    });
+  }
+
+  async saveAllScopeSyncCursors(cursors: Record<string, EventCursor>): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      for (const [scopeCid, cursor] of Object.entries(cursors)) {
+        store.put(cursor, `${SCOPE_SYNC_PREFIX}${scopeCid}`);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   async saveAllSyncTimestamps(timestamps: Record<string, string>): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');
       const store = tx.objectStore(STORE_META);
       for (const [cid, ts] of Object.entries(timestamps)) {
-        store.put(ts, `sync:${cid}`);
+        store.put(ts, `${LEGACY_SYNC_PREFIX}${cid}`);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -864,6 +1119,236 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // ---- PIN Epoch Archive recovery ----
+
+  async saveArchiveUpload(upload: PendingArchiveUpload): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readwrite');
+      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
+      const archiveBlobId = (upload.upload as any)?.archive_blob_id || 'unknown';
+      store.put(upload, `${upload.cid}:${upload.epoch}:${archiveBlobId}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadPendingArchiveUploads(): Promise<PendingArchiveUpload[]> {
+    const db = await this.openDB();
+    return new Promise<PendingArchiveUpload[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readonly');
+      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
+      const request = store.getAll();
+      request.onsuccess = () => resolve((request.result as PendingArchiveUpload[]) || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readwrite');
+      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
+      if (archiveBlobId) {
+        store.delete(`${cid}:${epoch}:${archiveBlobId}`);
+      } else {
+        const prefix = `${cid}:${epoch}:`;
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (cursor) {
+            if (String(cursor.key).startsWith(prefix)) cursor.delete();
+            cursor.continue();
+          }
+        };
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async saveDeferredArchive(archive: PendingDeferredArchive): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readwrite');
+      const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
+      store.put(archive, `${archive.cid}:${archive.epoch}:${archive.archive_blob_id}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadPendingDeferredArchives(): Promise<PendingDeferredArchive[]> {
+    const db = await this.openDB();
+    return new Promise<PendingDeferredArchive[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readonly');
+      const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
+      const request = store.getAll();
+      request.onsuccess = () => resolve((request.result as PendingDeferredArchive[]) || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readwrite');
+      const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
+      if (archiveBlobId) {
+        store.delete(`${cid}:${epoch}:${archiveBlobId}`);
+      } else {
+        const prefix = `${cid}:${epoch}:`;
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (cursor) {
+            if (String(cursor.key).startsWith(prefix)) cursor.delete();
+            cursor.continue();
+          }
+        };
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async saveArchiveAck(record: ArchiveAckRecord): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readwrite');
+      const store = tx.objectStore(STORE_ARCHIVE_ACKS);
+      store.put(record, `${record.cid}:${record.epoch}:${record.recovery_key_id}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadArchiveAck(cid: string, epoch: number, recoveryKeyId: string): Promise<ArchiveAckRecord | null> {
+    const db = await this.openDB();
+    return new Promise<ArchiveAckRecord | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readonly');
+      const store = tx.objectStore(STORE_ARCHIVE_ACKS);
+      const request = store.get(`${cid}:${epoch}:${recoveryKeyId}`);
+      request.onsuccess = () => resolve((request.result as ArchiveAckRecord) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveArchiveStashKey(key: CryptoKey): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(key, ARCHIVE_STASH_KEY_META);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadArchiveStashKey(): Promise<CryptoKey | null> {
+    const db = await this.openDB();
+    return new Promise<CryptoKey | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const request = store.get(ARCHIVE_STASH_KEY_META);
+      request.onsuccess = () => resolve((request.result as CryptoKey) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(publicKey, `recovery_public_key:${userId}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadRecoveryPublicKey(userId: string): Promise<Uint8Array | null> {
+    const db = await this.openDB();
+    return new Promise<Uint8Array | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const request = store.get(`recovery_public_key:${userId}`);
+      request.onsuccess = () => resolve((request.result as Uint8Array) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveRestoreProgress(record: RestoreProgressRecord): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readwrite');
+      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
+      store.put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadRestoreProgress(userId: string, deviceId: string, cid: string): Promise<RestoreProgressRecord | null> {
+    const db = await this.openDB();
+    return new Promise<RestoreProgressRecord | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readonly');
+      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
+      const request = store.get([deviceId, cid]);
+      request.onsuccess = () => {
+        const record = request.result as RestoreProgressRecord | undefined;
+        resolve(record && record.user_id === userId ? record : null);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async loadIncompleteRestores(userId: string, deviceId: string): Promise<RestoreProgressRecord[]> {
+    const statuses: RestoreStatus[] = ['pending', 'running', 'partial', 'failed'];
+    const groups = await Promise.all(
+      statuses.map((status) => this._loadRestoreProgressByDeviceStatus(userId, deviceId, status)),
+    );
+    return groups.flat();
+  }
+
+  async loadRestoresWithPermanentGaps(userId: string, deviceId: string): Promise<RestoreProgressRecord[]> {
+    return this._loadRestoreProgressByDeviceStatus(userId, deviceId, 'done_with_gaps');
+  }
+
+  async deleteRestoreProgress(userId: string, deviceId: string, cid: string): Promise<void> {
+    const existing = await this.loadRestoreProgress(userId, deviceId, cid);
+    if (!existing) return;
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readwrite');
+      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
+      store.delete([deviceId, cid]);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  private async _loadRestoreProgressByDeviceStatus(
+    userId: string,
+    deviceId: string,
+    status: RestoreStatus,
+  ): Promise<RestoreProgressRecord[]> {
+    const db = await this.openDB();
+    return new Promise<RestoreProgressRecord[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readonly');
+      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
+      const index = store.index('device_status');
+      const request = index.getAll(IDBKeyRange.only([deviceId, status]));
+      request.onsuccess = () => {
+        const records = ((request.result as RestoreProgressRecord[]) || []).filter(
+          (record) => record.user_id === userId,
+        );
+        resolve(records);
+      };
+      request.onerror = () => reject(request.error);
     });
   }
 }

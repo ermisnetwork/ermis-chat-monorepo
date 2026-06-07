@@ -6,7 +6,7 @@
  */
 
 import type { ErmisChat } from './client';
-import type { RemovedSyncCursor } from './mls_storage';
+import type { EventCursor, RemovedSyncCursor } from './mls_storage';
 import type { APIResponse, ExtendableGenerics, DefaultGenerics } from './types';
 
 // ============================================================
@@ -145,6 +145,8 @@ export interface SendE2eeMessageRequest {
     /** Encrypted MLS ciphertext from WASM `group.create_message()` */
     mls_ciphertext: number[];
     mls_epoch: number;
+    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
+    e2ee_group_id?: string;
     mentioned_all?: boolean;
     mentioned_users?: string[];
     parent_id?: string;
@@ -158,9 +160,142 @@ export interface UpdateE2eeMessageRequest {
     /** Encrypted MLS ciphertext from WASM `group.create_message()` */
     mls_ciphertext: number[];
     mls_epoch: number;
+    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
+    e2ee_group_id?: string;
     mentioned_all?: boolean;
     mentioned_users?: string[];
   };
+}
+
+export interface UploadRecoveryVaultRequest {
+  vault_bytes: number[];
+}
+
+export interface RecoveryVaultResponse extends APIResponse {
+  vault_bytes: number[];
+}
+
+export interface RecoveryPublicKeyResponse extends APIResponse {
+  public_key: number[];
+  key_id: string;
+  ciphersuite: number;
+}
+
+export interface UploadEpochArchiveRequest {
+  epoch: number;
+  archive_blob_id: string;
+  idempotency_key: string;
+  scope: 'account_owned';
+  encrypted_archive: {
+    ciphertext: number[];
+    nonce: number[];
+    aead_aad: number[];
+  };
+  snapshot: {
+    snapshot_bytes: number[];
+    snapshot_hash: string;
+  };
+  wraps: Array<{
+    recipient_user_id: string;
+    recipient_recovery_key_id: string;
+    hpke_kem_output: number[];
+    hpke_ciphertext: number[];
+    ciphersuite: number;
+    hpke_info: number[];
+  }>;
+}
+
+export type UploadEpochArchiveReason = 'stored' | 'idempotent' | 'duplicate_cap';
+
+export interface UploadEpochArchiveResponse extends APIResponse {
+  ok: boolean;
+  stored: boolean;
+  reason?: UploadEpochArchiveReason;
+  message?: string;
+}
+
+export interface EpochIndexEntry {
+  epoch: number;
+  scope: string;
+  blob_id: string;
+}
+
+export interface ArchiveBlobRecord {
+  archive_blob_id: string;
+  cid: string;
+  epoch: number;
+  archive_scope: string;
+  exporter_user_id: string;
+  exporter_device_id: string;
+  member_snapshot_hash: string;
+  encrypted_archive_bytes: number[];
+  aead_nonce: number[];
+  aead_aad: number[];
+  created_at: string;
+}
+
+export interface ArchiveKeyWrapRecord {
+  archive_blob_id: string;
+  recipient_user_id: string;
+  recipient_recovery_key_id: string;
+  hpke_kem_output: number[];
+  hpke_ciphertext: number[];
+  ciphersuite: number;
+  hpke_info: number[];
+  epoch: number;
+  created_at: string;
+}
+
+export interface MemberSnapshotRecord {
+  snapshot_hash: string;
+  cid: string;
+  first_seen_epoch: number;
+  last_seen_epoch: number;
+  snapshot_bytes: number[];
+  created_at: string;
+}
+
+export interface QueryEpochArchivesRequest {
+  list_epochs?: boolean;
+  epoch_from?: number;
+  epoch_to?: number;
+  include_snapshots?: boolean;
+  include_wraps?: boolean;
+}
+
+export interface QueryEpochArchivesResponse extends APIResponse {
+  epochs?: EpochIndexEntry[];
+  blobs?: ArchiveBlobRecord[];
+  wraps?: ArchiveKeyWrapRecord[];
+  snapshots?: Record<string, MemberSnapshotRecord>;
+}
+
+export interface CiphertextCursor {
+  last_event_key: string;
+}
+
+export interface HistoricalCiphertext {
+  cid?: string;
+  parent_cid?: string;
+  e2ee_group_id?: string;
+  message_id: string;
+  mls_ciphertext: number[];
+  mls_epoch: number;
+  created_at: string;
+  updated_at?: string;
+  type?: string;
+  user_id?: string;
+  user?: { id: string; [key: string]: unknown };
+  parent_id?: string;
+  quoted_message_id?: string;
+  mentioned_all?: boolean;
+  mentioned_users?: string[];
+}
+
+export interface CiphertextQueryResponse extends APIResponse {
+  ciphertexts: HistoricalCiphertext[];
+  has_more: boolean;
+  next_cursor?: CiphertextCursor;
 }
 
 // ============================================================
@@ -261,6 +396,55 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     });
   }
 
+  // ---- Recovery Vault ----
+
+  async uploadRecoveryVault(data: UploadRecoveryVaultRequest): Promise<APIResponse> {
+    return await this._post(this.baseURL + '/v1/e2ee/recovery/vault', data);
+  }
+
+  async getRecoveryVault(): Promise<RecoveryVaultResponse> {
+    return await this._get(this.baseURL + '/v1/e2ee/recovery/vault');
+  }
+
+  async getRecoveryPublicKey(userId: string): Promise<RecoveryPublicKeyResponse> {
+    return await this._get(this.baseURL + `/v1/e2ee/recovery/public_key/${userId}`);
+  }
+
+  // ---- Epoch Archives ----
+
+  async uploadEpochArchive(
+    channelType: string,
+    channelId: string,
+    data: UploadEpochArchiveRequest,
+  ): Promise<UploadEpochArchiveResponse> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives`, data);
+  }
+
+  async queryEpochArchives(
+    channelType: string,
+    channelId: string,
+    data: QueryEpochArchivesRequest,
+  ): Promise<QueryEpochArchivesResponse> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/query`, data);
+  }
+
+  async getArchiveSnapshot(channelType: string, channelId: string, hash: string): Promise<MemberSnapshotRecord> {
+    return await this._get(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/snapshot/${hash}`,
+    );
+  }
+
+  async queryArchiveCiphertexts(
+    channelType: string,
+    channelId: string,
+    data: { epoch_from: number; epoch_to: number; cursor?: CiphertextCursor; limit?: number },
+  ): Promise<CiphertextQueryResponse> {
+    return await this._post(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/ciphertexts/query`,
+      data,
+    );
+  }
+
   // ---- Enable E2EE ----
 
   /** Upgrade a standard channel to E2EE. Admin or channel Owner only. All members must have accepted their invites. */
@@ -331,6 +515,29 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       body.removed_cursor = removedCursor;
     }
     return await this._post(this.baseURL + '/v1/e2ee/sync', body);
+  }
+
+  /**
+   * Scope sync: fetch ordered protocol, application, and metadata events for each E2EE scope.
+   * Non-gated topics inherit their parent scope, so clients keep one composite cursor per scope.
+   */
+  async scopeSync(
+    cursors: Record<string, EventCursor>,
+    limit: number = 100,
+    removedCursor?: RemovedSyncCursor | null,
+  ): Promise<ScopeSyncResponse> {
+    const body: {
+      cursors: Record<string, EventCursor>;
+      limit: number;
+      removed_cursor?: RemovedSyncCursor | null;
+    } = {
+      cursors,
+      limit,
+    };
+    if (removedCursor !== undefined) {
+      body.removed_cursor = removedCursor;
+    }
+    return await this._post(this.baseURL + '/v1/e2ee/scope_sync', body);
   }
 
   // ============================================================
@@ -533,6 +740,26 @@ export interface ChannelSyncResult {
   next_cursor?: string;
 }
 
+export interface ScopeSyncEvent {
+  type: E2eeSyncEvent['type'] | string;
+  /** Canonical channel/timeline that owns the event payload. */
+  cid: string;
+  /** Parent/general channel for topic events. */
+  parent_cid?: string;
+  /** Canonical datastore event id, used with created_at for the composite cursor. */
+  event_id: string;
+  /** Canonical event timestamp used for scope ordering. */
+  created_at: string;
+  /** Raw application/protocol/metadata payload. */
+  data: Record<string, unknown>;
+}
+
+export interface ScopeSyncResult {
+  events: ScopeSyncEvent[];
+  has_more: boolean;
+  next_cursor?: EventCursor;
+}
+
 export interface RemovedChannelSyncData {
   event_id: string;
   cid: string;
@@ -556,6 +783,12 @@ export interface RemovedChannelsSyncResult {
 export interface UnifiedSyncResponse extends APIResponse {
   removed_channels?: RemovedChannelsSyncResult;
   [cid: string]: ChannelSyncResult | RemovedChannelsSyncResult | unknown;
+}
+
+/** Response from POST /v1/e2ee/scope_sync */
+export interface ScopeSyncResponse extends APIResponse {
+  channels: Record<string, ScopeSyncResult>;
+  removed_channels?: RemovedChannelsSyncResult;
 }
 
 // ============================================================

@@ -17,6 +17,7 @@ Topics can only be used on channels of type `team`. Attempting to use them on `m
 Before you can create topics, the parent channel must have topics enabled. By default, topics might be disabled depending on your application's global configuration.
 
 ### Enable Topics
+
 You can enable topics for a specific channel using the `channel.enableTopics()` method.
 
 ```javascript
@@ -28,6 +29,7 @@ await channel.enableTopics();
 ```
 
 ### Disable Topics
+
 Similarly, topics can be disabled using `channel.disableTopics()`. This action usually hides the topic interface but may not destroy the underlying topic data.
 
 ```javascript
@@ -36,7 +38,7 @@ await channel.disableTopics();
 
 ## Managing Topics
 
-Once topics are enabled, you can manage them just like specialized channels. 
+Once topics are enabled, you can manage them just like specialized channels.
 
 ### Create a Topic
 
@@ -53,6 +55,29 @@ const topicData = {
 const response = await channel.createTopic(topicData);
 const newTopicCid = response.channel.cid;
 ```
+
+### E2EE Topics
+
+When the parent channel is E2EE-enabled, a non-gated topic inherits the parent MLS group. The SDK does not create a separate topic MLS group for this path; encrypted messages are written to the topic timeline but encrypted and decrypted with the parent `e2ee_group_id`.
+
+```javascript
+await parentChannel.createTopic({
+  name: 'design',
+});
+```
+
+Create a gated topic when the topic needs an isolated MLS group and separate protocol stream.
+
+```javascript
+await parentChannel.createTopic({
+  name: 'leadership',
+  gate: true,
+});
+```
+
+The SDK syncs E2EE parent scopes through `/v1/e2ee/scope_sync` with one composite cursor per scope. Sync events are processed in server order, decrypted by `message.e2ee_group_id`, and routed into the local topic or parent timeline by `message.cid`.
+
+PIN archive restore follows the same routing rule: non-gated topic ciphertexts are decrypted with parent archive material and saved into the local topic timeline by `ciphertext.cid`.
 
 ### Edit a Topic
 
@@ -73,6 +98,7 @@ const updatedTopicData = await channel.editTopic(topicCID, updatedData);
 Depending on the conversation flow, you may want to archive or "close" a topic to prevent future messages while preserving the chat history.
 
 ### Close a Topic
+
 A closed topic is typically marked as read-only in the UI.
 
 ```javascript
@@ -80,6 +106,7 @@ await channel.closeTopic(topicCID);
 ```
 
 ### Reopen a Topic
+
 A closed topic can be brought back to an active state using the reopen method.
 
 ```javascript
@@ -132,3 +159,19 @@ channel.on('channel.topic.created', handleTopicCreated);
 // Don't forget to cleanup listeners when components unmount
 // channel.off('channel.topic.created', handleTopicCreated);
 ```
+
+## Progress Log
+
+### 2026-06-05 - Topic Archive Restore Routing
+
+- Goal: restore historical E2EE messages into non-gated topic timelines instead of only the parent/general timeline.
+- Code changed: `MlsManager.restoreHistoricalMessages()` queries archive material by `e2ee_group_id`, uses `ciphertext.cid` as the route cid, stores plaintext per route cid, and dispatches `e2ee.local_messages_loaded` per affected timeline.
+- Docs changed: this topic guide now documents archive restore routing for inherited E2EE topics.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types` passed.
+
+### 2026-06-05 - Production
+
+- Goal: align the SDK topic client with Bellboy's hybrid MLS topic scope sync.
+- Code changed: non-gated E2EE topics inherit the parent `e2ee_group_id`; gated topics keep a topic-owned MLS group.
+- Sync contract: reconnect catch-up uses `/v1/e2ee/scope_sync` and stores one `{ created_at, event_id }` cursor per E2EE scope.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk types` passed.

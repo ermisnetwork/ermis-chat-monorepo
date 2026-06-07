@@ -13,7 +13,27 @@
  */
 
 import { E2eeClient } from './e2ee';
-import type { MlsStorageAdapter, E2eeStoredMessage, PendingE2eeSnapshot, RemovedSyncCursor } from './mls_storage';
+import type {
+  ArchiveBlobRecord,
+  ArchiveKeyWrapRecord,
+  CiphertextCursor,
+  HistoricalCiphertext,
+  QueryEpochArchivesResponse,
+  UploadEpochArchiveRequest,
+} from './e2ee';
+import type {
+  MlsStorageAdapter,
+  EventCursor,
+  E2eeStoredMessage,
+  PendingE2eeSnapshot,
+  RemovedSyncCursor,
+  PendingArchiveUpload,
+  PendingDeferredArchive,
+  RestorePermanentGapReason,
+  RestoreProgressRecord,
+  RestoreStatus,
+  RestoreTransientFailureReason,
+} from './mls_storage';
 import { IndexedDBMlsStorage } from './mls_storage';
 import type { ErmisChat } from './client';
 import type { ExtendableGenerics, DefaultGenerics } from './types';
@@ -32,6 +52,13 @@ function isEpochStaleError(err: any): boolean {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getApiErrorMessage(err: any): string {
   return String(err?.response?.data?.message || err?.message || err || '');
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isVaultMissingError(err: any): boolean {
+  const status = err?.response?.status || err?.status;
+  const msg = getApiErrorMessage(err).toLowerCase();
+  return status === 404 || msg.includes('recovery vault not found');
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +84,18 @@ function compareRfc3339Cursor(a?: string | null, b?: string | null): number {
   return left > right ? 1 : -1;
 }
 
+const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
+
+function compareEventCursor(a?: EventCursor | null, b?: EventCursor | null): number {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  const createdAtCmp = compareRfc3339Cursor(a.created_at, b.created_at);
+  if (createdAtCmp !== 0) return createdAtCmp;
+  if (a.event_id === b.event_id) return 0;
+  return a.event_id > b.event_id ? 1 : -1;
+}
+
 function isRemovedCursorAfter(next: RemovedSyncCursor, current?: RemovedSyncCursor | null): boolean {
   if (!current) return true;
   const removedAtCmp = compareRfc3339Cursor(next.removed_at, current.removed_at);
@@ -73,6 +112,67 @@ function staleGroupInfoError(cid: string): Error & { code: string } {
 }
 
 const KEY_PACKAGE_POOL_TARGET = 100;
+const RESTORE_EPOCH_BATCH_SIZE = 25;
+const RESTORE_EPOCH_MAX_SPAN = 100;
+const RESTORE_DECRYPT_MAX_RETRIES = 3;
+const RESTORE_NETWORK_MAX_RETRIES = 5;
+
+function cidFromParts(channelType: string, channelId: string): string {
+  return `${channelType}:${channelId}`;
+}
+
+function channelPartsFromCid(cid: string): { channelType: string; channelId: string } | null {
+  const colonIdx = cid.indexOf(':');
+  if (colonIdx < 0) return null;
+  return {
+    channelType: cid.substring(0, colonIdx),
+    channelId: cid.substring(colonIdx + 1),
+  };
+}
+
+function splitRestoreEpochBatches(epochs: number[]): number[][] {
+  const batches: number[][] = [];
+  let current: number[] = [];
+  let startEpoch: number | null = null;
+
+  for (const epoch of epochs) {
+    if (current.length === 0) {
+      current = [epoch];
+      startEpoch = epoch;
+      continue;
+    }
+
+    const span = epoch - (startEpoch ?? epoch);
+    if (current.length >= RESTORE_EPOCH_BATCH_SIZE || span > RESTORE_EPOCH_MAX_SPAN) {
+      batches.push(current);
+      current = [epoch];
+      startEpoch = epoch;
+      continue;
+    }
+
+    current.push(epoch);
+  }
+
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+function bytesToHex(bytes: Uint8Array | number[]): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function toEpochBigInt(epoch: number | bigint): bigint {
+  return typeof epoch === 'bigint' ? epoch : BigInt(epoch);
+}
+
+function newArchiveBlobId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `archive-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 // ============================================================
 // Types
@@ -161,12 +261,100 @@ export interface EnsureE2eeChannelResult {
   error?: string;
 }
 
+export type E2eeBootstrapStatus = 'idle' | 'running' | 'done' | 'failed';
+
+export interface E2eeBootstrapProgress {
+  total: number;
+  completed: number;
+  running_cid?: string;
+  failed_cids: string[];
+  status: E2eeBootstrapStatus;
+}
+
+export interface BootstrapKnownE2eeChannelsOptions {
+  source?: 'startup' | 'channels_queried' | 'manual' | string;
+  priorityActiveCid?: string;
+}
+
+export interface BootstrapKnownE2eeChannelsResult extends E2eeBootstrapProgress {
+  results: EnsureE2eeChannelResult[];
+}
+
+export interface RestoredMessage {
+  epoch: number;
+  messageId?: string;
+  plaintext?: E2eePayload;
+  source?: 'archive';
+  createdAt?: string;
+  message?: Record<string, unknown>;
+  synced?: boolean;
+  gap?: boolean;
+  reason?:
+    | 'no_archive'
+    | 'no_matching_wrap'
+    | 'missing_snapshot'
+    | 'expired_restore_window'
+    | 'adk_unwrap_error'
+    | 'decrypt_error';
+}
+
+export interface RecoveryStatus {
+  hasVault: boolean;
+  unlocked: boolean;
+  hasIncompleteRestore: boolean;
+  incompleteChannels: string[];
+  channelsWithPermanentGaps: string[];
+  e2eeBootstrapRunning?: boolean;
+  e2eeBootstrapCompleted?: number;
+  e2eeBootstrapTotal?: number;
+}
+
+interface RestoreQueueEntry {
+  cid: string;
+  channelType: string;
+  channelId: string;
+  priority: 'active' | 'background';
+  options?: { fromEpoch?: number; toEpoch?: number };
+}
+
+interface CurrentArchiveMaterial {
+  cid: string;
+  channelType: string;
+  channelId: string;
+  epochBigInt: bigint;
+  epoch: number;
+  archiveBlobId: string;
+  snapshotHash: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  exported: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  encrypted: any;
+}
+
 interface ChannelProcessResult {
   processedCursor?: string;
   processedEvents: number;
   bufferedMessages: number;
   decrypted: E2eeStoredMessage[];
 }
+
+type ActiveMessageEnvelope = Record<string, unknown> & {
+  id: string;
+  user?: { id: string; [key: string]: unknown };
+  user_id?: string;
+  created_at?: string | Date;
+  updated_at?: string | Date | null;
+  mls_epoch?: number;
+};
+
+type ArchiveMessageEnvelope = Record<string, unknown> & {
+  id: string;
+  user?: { id: string; [key: string]: unknown };
+  user_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  mls_epoch?: number;
+};
 
 // WASM module — loaded dynamically
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -222,6 +410,28 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private _channelReadyLocks: Map<string, Promise<EnsureE2eeChannelResult>> = new Map();
   private _channelReadyUntil: Map<string, number> = new Map();
   private readonly _channelReadyCacheMs = 30_000;
+  private _recoveryPrivateKey: Uint8Array | null = null;
+  private _recoveryPublicKey: Uint8Array | null = null;
+  private _recoveryKeyId: string | null = null;
+  private _recoveryCiphersuite: number | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _wrappedRecoveryKey: any = null;
+  private _recoveryVaultKnown: boolean | null = null;
+  private _recoveryVaultBytes: number[] | null = null;
+  private _recoveryPublicMetadataPromise: Promise<{ vault_bytes: number[] } | null> | null = null;
+  private _archiveStashKey: CryptoKey | null = null;
+  private _archiveStashKeyPromise: Promise<CryptoKey> | null = null;
+  private _restoreQueue: RestoreQueueEntry[] = [];
+  private _restoreQueueRunning = false;
+  private _restoreInflight = new Map<string, Promise<RestoredMessage[]>>();
+  private _bootstrapKnownChannelsPromise: Promise<BootstrapKnownE2eeChannelsResult> | null = null;
+  private _channelBootstrapSub: { unsubscribe?: () => void } | null = null;
+  private _e2eeBootstrapProgress: E2eeBootstrapProgress = {
+    total: 0,
+    completed: 0,
+    failed_cids: [],
+    status: 'idle',
+  };
 
   /**
    * Deferred eviction queue — populated during sync when a MemberLeaved system message
@@ -295,6 +505,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 3. Create E2eeClient
     this.e2eeClient = new E2eeClient<ErmisChatGenerics>(client);
 
+    // Load public recovery metadata before sync so this device can upload
+    // account-owned archives without requiring the user to enter the PIN first.
+    await this._loadRecoveryPublicMetadata().catch((err) => {
+      console.warn('[MLS] Recovery public metadata unavailable during init:', err);
+    });
+
+    // Normalize interrupted restore jobs before status/UI checks.
+    await this._normalizeStaleRestoreProgress();
+
     // 4. Top up this device's server-side KeyPackage pool on every init.
     //    Prefer the latest health.check count when it arrived before MLS init;
     //    only query the count endpoint when no health.check count is cached.
@@ -309,8 +528,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 7. Register this manager on the client so event handlers can access it
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (this.client as any).mlsManager = this;
+    this._registerKnownChannelBootstrapListener();
 
     this.initialized = true;
+    (this.client as any)?.dispatchEvent?.({
+      type: 'e2ee.initialized',
+      user_id: this.userId,
+      device_id: this.deviceId,
+    } as any);
     console.log('[MLS] Manager initialized', {
       userId: this.userId,
       deviceId: this.deviceId,
@@ -452,6 +677,1134 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     }
   }
 
+  // ============================================================
+  // PIN Epoch Archive Recovery
+  // ============================================================
+
+  private async _fetchVault(): Promise<{ vault_bytes: number[] } | null> {
+    try {
+      return await this.e2eeClient!.getRecoveryVault();
+    } catch (err) {
+      if (isVaultMissingError(err)) return null;
+      throw err;
+    }
+  }
+
+  private async _loadRecoveryPublicMetadata(): Promise<{ vault_bytes: number[] } | null> {
+    if (this._recoveryVaultKnown === false) return null;
+    if (
+      this._recoveryVaultKnown === true &&
+      this._recoveryVaultBytes &&
+      this._recoveryPublicKey &&
+      this._recoveryKeyId
+    ) {
+      return { vault_bytes: this._recoveryVaultBytes };
+    }
+
+    if (this._recoveryPublicMetadataPromise) {
+      return this._recoveryPublicMetadataPromise;
+    }
+
+    const loadPromise = (async () => {
+      const vault = await this._fetchVault();
+      this._recoveryVaultKnown = vault !== null;
+      this._recoveryVaultBytes = vault ? [...vault.vault_bytes] : null;
+      if (!vault) return null;
+
+      const wrapped = wasmModule.WrappedRecoveryKey.from_bytes(new Uint8Array(vault.vault_bytes));
+      this._recoveryPublicKey = new Uint8Array(wrapped.public_key);
+      this._recoveryKeyId = wrapped.key_id;
+      this._recoveryCiphersuite = wrapped.ciphersuite;
+      this._wrappedRecoveryKey = wrapped;
+      await this.storage.saveRecoveryPublicKey(this.userId!, this._recoveryPublicKey);
+      await this._flushDeferredArchives();
+      return vault;
+    })();
+
+    this._recoveryPublicMetadataPromise = loadPromise;
+    try {
+      return await loadPromise;
+    } finally {
+      if (this._recoveryPublicMetadataPromise === loadPromise) {
+        this._recoveryPublicMetadataPromise = null;
+      }
+    }
+  }
+
+  async getRecoveryStatus(): Promise<RecoveryStatus> {
+    const vault = await this._loadRecoveryPublicMetadata();
+    const deviceId = this.deviceId || (await this.storage.getDeviceId());
+    const incompleteRecords = await this.storage.loadIncompleteRestores(this.userId!, deviceId);
+    const gapRecords = await this.storage.loadRestoresWithPermanentGaps(this.userId!, deviceId);
+    const incompleteChannels = new Set(incompleteRecords.map((record) => record.cid));
+
+    if (vault !== null) {
+      for (const channel of this._listKnownE2eeChannels()) {
+        if (!this.groups.has(channel.cid) || incompleteChannels.has(channel.cid)) continue;
+        const progress = await this.storage.loadRestoreProgress(this.userId!, deviceId, channel.cid);
+        if (!progress) {
+          incompleteChannels.add(channel.cid);
+          continue;
+        }
+        const status = this._normalizeProgress(progress).status;
+        if (status !== 'done' && status !== 'done_with_gaps') {
+          incompleteChannels.add(channel.cid);
+        }
+      }
+    }
+
+    return {
+      hasVault: vault !== null,
+      unlocked: this._recoveryPrivateKey !== null,
+      hasIncompleteRestore: incompleteChannels.size > 0,
+      incompleteChannels: Array.from(incompleteChannels),
+      channelsWithPermanentGaps: gapRecords.map((record) => record.cid),
+      e2eeBootstrapRunning: this._e2eeBootstrapProgress.status === 'running',
+      e2eeBootstrapCompleted: this._e2eeBootstrapProgress.completed,
+      e2eeBootstrapTotal: this._e2eeBootstrapProgress.total,
+    };
+  }
+
+  clearRecoveryUnlock(): void {
+    this._recoveryPrivateKey = null;
+    this._wrappedRecoveryKey = null;
+  }
+
+  async setupRecoveryPin(pin: string): Promise<void> {
+    if (!/^\d{8,}$/.test(pin)) {
+      throw new Error('PIN must be at least 8 digits');
+    }
+    const keypair = wasmModule.generate_recovery_keypair(this.provider);
+    const wrapped = wasmModule.wrap_recovery_private_key(
+      this.provider,
+      pin,
+      keypair.private_key,
+      keypair.public_key,
+      keypair.key_id,
+      keypair.ciphersuite,
+      600_000,
+    );
+    const vaultBytes = wrapped.to_bytes();
+    await this.e2eeClient!.uploadRecoveryVault({ vault_bytes: Array.from(vaultBytes) });
+    this._recoveryVaultKnown = true;
+    this._recoveryVaultBytes = Array.from(vaultBytes);
+    this._recoveryPublicMetadataPromise = null;
+    this._recoveryPrivateKey = new Uint8Array(keypair.private_key);
+    this._recoveryPublicKey = new Uint8Array(keypair.public_key);
+    this._recoveryKeyId = keypair.key_id;
+    this._recoveryCiphersuite = keypair.ciphersuite;
+    this._wrappedRecoveryKey = wrapped;
+    await this.storage.saveRecoveryPublicKey(this.userId!, this._recoveryPublicKey);
+    await this._flushDeferredArchives();
+    await this._archiveKnownE2eeChannels();
+    await this._enqueueIncompleteRestores();
+  }
+
+  async unlockRecoveryVault(pin: string): Promise<void> {
+    const vault = await this._loadRecoveryPublicMetadata();
+    if (!vault) throw new Error('Recovery vault not found.');
+    const wrapped =
+      this._wrappedRecoveryKey || wasmModule.WrappedRecoveryKey.from_bytes(new Uint8Array(vault.vault_bytes));
+    const privateKey = wasmModule.unwrap_recovery_private_key(this.provider, pin, wrapped);
+    this._recoveryVaultKnown = true;
+    this._recoveryVaultBytes = [...vault.vault_bytes];
+    this._recoveryPrivateKey = new Uint8Array(privateKey);
+    this._recoveryPublicKey = new Uint8Array(wrapped.public_key);
+    this._recoveryKeyId = wrapped.key_id;
+    this._recoveryCiphersuite = wrapped.ciphersuite;
+    this._wrappedRecoveryKey = wrapped;
+    await this.storage.saveRecoveryPublicKey(this.userId!, this._recoveryPublicKey);
+    await this._flushDeferredArchives();
+    await this._archiveKnownE2eeChannels();
+    await this._enqueueIncompleteRestores();
+  }
+
+  async changeRecoveryPin(oldPin: string, newPin: string): Promise<void> {
+    if (!this._wrappedRecoveryKey || !this._recoveryPublicKey || !this._recoveryKeyId || !this._recoveryCiphersuite) {
+      await this.unlockRecoveryVault(oldPin);
+    }
+    const privateKey = wasmModule.unwrap_recovery_private_key(this.provider, oldPin, this._wrappedRecoveryKey);
+    const newWrapped = wasmModule.wrap_recovery_private_key(
+      this.provider,
+      newPin,
+      privateKey,
+      this._recoveryPublicKey,
+      this._recoveryKeyId,
+      this._recoveryCiphersuite,
+      600_000,
+    );
+    await this.e2eeClient!.uploadRecoveryVault({ vault_bytes: Array.from(newWrapped.to_bytes()) });
+    this._wrappedRecoveryKey = newWrapped;
+    this._recoveryPrivateKey = new Uint8Array(privateKey);
+  }
+
+  hasRecoveryKey(): boolean {
+    return !!this._recoveryPublicKey || !!this._wrappedRecoveryKey;
+  }
+
+  async archiveCurrentEpoch(channelType: string, channelId: string): Promise<void> {
+    const cid = cidFromParts(channelType, channelId);
+    const group = this.groups.get(cid);
+    if (!group) return;
+    const epochBigInt = toEpochBigInt(group.epoch());
+    const epoch = Number(epochBigInt);
+
+    if (await this._hasArchiveAcknowledged(cid, epoch)) return;
+    if (await this._hasPendingArchiveWork(cid, epoch)) return;
+
+    const material = this._exportCurrentArchiveMaterial(channelType, channelId, cid, group, epochBigInt, epoch);
+
+    if (!this._recoveryPublicKey || !this._recoveryKeyId) {
+      await this._stashDeferredArchive(material);
+      return;
+    }
+
+    await this._enqueueArchiveUploadFromMaterial(material, new Uint8Array(material.encrypted.adk));
+    await this._drainArchiveUploadQueue();
+  }
+
+  private _exportCurrentArchiveMaterial(
+    channelType: string,
+    channelId: string,
+    cid: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    group: any,
+    epochBigInt: bigint,
+    epoch: number,
+  ): CurrentArchiveMaterial {
+    const exported = group.archive_epoch_v2();
+    const archiveBlobId = newArchiveBlobId();
+    const snapshotHash = bytesToHex(exported.snapshot_hash);
+    const aad = new wasmModule.ArchiveBlobAad(cid, epochBigInt, 'account_owned', archiveBlobId, snapshotHash);
+    const encrypted = wasmModule.encrypt_archive_blob(this.provider, exported.archive_bytes, aad);
+    return { cid, channelType, channelId, epochBigInt, epoch, archiveBlobId, snapshotHash, exported, encrypted };
+  }
+
+  private async _enqueueArchiveUploadFromMaterial(material: CurrentArchiveMaterial, adk: Uint8Array): Promise<void> {
+    if (!this._recoveryPublicKey || !this._recoveryKeyId) {
+      throw new Error('Recovery public key is not available.');
+    }
+    const info = new wasmModule.ArchiveKeyWrapInfo(
+      material.cid,
+      material.epochBigInt,
+      'account_owned',
+      material.archiveBlobId,
+      material.snapshotHash,
+      this._recoveryKeyId,
+    );
+    const wrappedAdk = wasmModule.wrap_archive_data_key(this.provider, adk, this._recoveryPublicKey, info);
+    const upload: UploadEpochArchiveRequest = {
+      epoch: material.epoch,
+      archive_blob_id: material.archiveBlobId,
+      idempotency_key: `${material.epoch}:account_owned:${this.deviceId || 'web'}:${material.archiveBlobId}`,
+      scope: 'account_owned',
+      encrypted_archive: {
+        ciphertext: Array.from(material.encrypted.ciphertext),
+        nonce: Array.from(material.encrypted.nonce),
+        aead_aad: Array.from(material.encrypted.aead_aad),
+      },
+      snapshot: {
+        snapshot_bytes: Array.from(material.exported.snapshot_bytes),
+        snapshot_hash: material.snapshotHash,
+      },
+      wraps: [
+        {
+          recipient_user_id: this.userId!,
+          recipient_recovery_key_id: this._recoveryKeyId,
+          hpke_kem_output: Array.from(wrappedAdk.kem_output),
+          hpke_ciphertext: Array.from(wrappedAdk.ciphertext),
+          ciphersuite: wrappedAdk.ciphersuite,
+          hpke_info: Array.from(wrappedAdk.hpke_info),
+        },
+      ],
+    };
+    await this._enqueueArchiveUpload({
+      cid: material.cid,
+      channel_type: material.channelType,
+      channel_id: material.channelId,
+      epoch: material.epoch,
+      scope: 'account_owned',
+      upload,
+      retry_count: 0,
+      created_at: Date.now(),
+    });
+  }
+
+  private async _stashDeferredArchive(material: CurrentArchiveMaterial): Promise<void> {
+    const encryptedAdk = await this._encryptArchiveStashBytes(new Uint8Array(material.encrypted.adk));
+    const now = Date.now();
+    await this.storage.saveDeferredArchive({
+      cid: material.cid,
+      channel_type: material.channelType,
+      channel_id: material.channelId,
+      epoch: material.epoch,
+      scope: 'account_owned',
+      archive_blob_id: material.archiveBlobId,
+      encrypted_archive: {
+        ciphertext: Array.from(material.encrypted.ciphertext),
+        nonce: Array.from(material.encrypted.nonce),
+        aead_aad: Array.from(material.encrypted.aead_aad),
+      },
+      snapshot: {
+        snapshot_bytes: Array.from(material.exported.snapshot_bytes),
+        snapshot_hash: material.snapshotHash,
+      },
+      encrypted_adk: encryptedAdk,
+      retry_count: 0,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  private async _hasArchiveAcknowledged(cid: string, epoch: number): Promise<boolean> {
+    if (!this._recoveryKeyId) return false;
+    return !!(await this.storage.loadArchiveAck(cid, epoch, this._recoveryKeyId));
+  }
+
+  private async _hasPendingArchiveWork(cid: string, epoch: number): Promise<boolean> {
+    const [uploads, deferred] = await Promise.all([
+      this.storage.loadPendingArchiveUploads(),
+      this.storage.loadPendingDeferredArchives(),
+    ]);
+    return (
+      uploads.some((item) => item.cid === cid && item.epoch === epoch) ||
+      deferred.some((item) => item.cid === cid && item.epoch === epoch)
+    );
+  }
+
+  private _getBrowserCrypto(): Crypto {
+    const cryptoImpl = globalThis.crypto;
+    if (!cryptoImpl?.subtle || !cryptoImpl.getRandomValues) {
+      throw new Error('WebCrypto is required to protect deferred archive material.');
+    }
+    return cryptoImpl;
+  }
+
+  private async _getArchiveStashKey(): Promise<CryptoKey> {
+    if (this._archiveStashKey) return this._archiveStashKey;
+    if (this._archiveStashKeyPromise) return this._archiveStashKeyPromise;
+
+    this._archiveStashKeyPromise = (async () => {
+      const existing = await this.storage.loadArchiveStashKey();
+      if (existing) {
+        this._archiveStashKey = existing;
+        return existing;
+      }
+      const key = await this._getBrowserCrypto().subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+        'encrypt',
+        'decrypt',
+      ]);
+      await this.storage.saveArchiveStashKey(key);
+      this._archiveStashKey = key;
+      return key;
+    })();
+
+    try {
+      return await this._archiveStashKeyPromise;
+    } finally {
+      this._archiveStashKeyPromise = null;
+    }
+  }
+
+  private async _encryptArchiveStashBytes(bytes: Uint8Array): Promise<{ ciphertext: number[]; nonce: number[] }> {
+    const cryptoImpl = this._getBrowserCrypto();
+    const key = await this._getArchiveStashKey();
+    const nonce = new Uint8Array(12);
+    cryptoImpl.getRandomValues(nonce);
+    const plaintext = new Uint8Array(bytes.length);
+    plaintext.set(bytes);
+    const ciphertext = await cryptoImpl.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plaintext.buffer);
+    return { ciphertext: Array.from(new Uint8Array(ciphertext)), nonce: Array.from(nonce) };
+  }
+
+  private async _decryptArchiveStashBytes(encrypted: { ciphertext: number[]; nonce: number[] }): Promise<Uint8Array> {
+    const key = await this._getArchiveStashKey();
+    const plaintext = await this._getBrowserCrypto().subtle.decrypt(
+      { name: 'AES-GCM', iv: new Uint8Array(encrypted.nonce) },
+      key,
+      new Uint8Array(encrypted.ciphertext).buffer,
+    );
+    return new Uint8Array(plaintext);
+  }
+
+  private _listKnownE2eeChannels(): Array<{ cid: string; channelType: string; channelId: string }> {
+    const activeChannels = (this.client as any)?.activeChannels as Record<string, any> | undefined;
+    if (!activeChannels) return [];
+    const seen = new Set<string>();
+    const channels: Array<{ cid: string; channelType: string; channelId: string }> = [];
+    for (const [cid, channel] of Object.entries(activeChannels)) {
+      if (!channel?.id || channel.data?.mls_enabled !== true || seen.has(cid)) continue;
+      if (this._isInactiveInviteRole(this._membershipRoleForChannel(channel))) continue;
+      if (this._resolveChannelE2eeGroupId(cid, channel) !== cid) continue;
+      seen.add(cid);
+      channels.push({ cid, channelType: channel.type, channelId: channel.id });
+    }
+    return channels;
+  }
+
+  private _emitBootstrapProgress(progress: E2eeBootstrapProgress): void {
+    this._e2eeBootstrapProgress = { ...progress, failed_cids: [...progress.failed_cids] };
+    (this.client as any)?.dispatchEvent?.({
+      type: 'e2ee.bootstrap_progress',
+      ...this._e2eeBootstrapProgress,
+    } as any);
+  }
+
+  private _registerKnownChannelBootstrapListener(): void {
+    if (this._channelBootstrapSub || !(this.client as any)?.on) return;
+    this._channelBootstrapSub = (this.client as any).on('channels.queried', () => {
+      void this.bootstrapKnownE2eeChannels({ source: 'channels_queried' });
+    });
+  }
+
+  async bootstrapKnownE2eeChannels(
+    options: BootstrapKnownE2eeChannelsOptions = {},
+  ): Promise<BootstrapKnownE2eeChannelsResult> {
+    if (!this.initialized) {
+      return { ...this._e2eeBootstrapProgress, results: [] };
+    }
+    if (this._bootstrapKnownChannelsPromise) {
+      return this._bootstrapKnownChannelsPromise;
+    }
+
+    const work = (async (): Promise<BootstrapKnownE2eeChannelsResult> => {
+      const knownChannels = this._listKnownE2eeChannels();
+      let channels = knownChannels.filter((channel) => !this.groups.has(channel.cid));
+      if (options.priorityActiveCid) {
+        channels = [
+          ...channels.filter((channel) => channel.cid === options.priorityActiveCid),
+          ...channels.filter((channel) => channel.cid !== options.priorityActiveCid),
+        ];
+      }
+
+      const failedCids: string[] = [];
+      const results: EnsureE2eeChannelResult[] = [];
+      this._emitBootstrapProgress({
+        total: channels.length,
+        completed: 0,
+        failed_cids: failedCids,
+        status: channels.length > 0 ? 'running' : 'done',
+      });
+
+      let completed = 0;
+      for (const channel of channels) {
+        this._emitBootstrapProgress({
+          total: channels.length,
+          completed,
+          running_cid: channel.cid,
+          failed_cids: failedCids,
+          status: 'running',
+        });
+
+        try {
+          const result = await this.ensureChannelReady(channel.channelType, channel.channelId, channel.cid, {
+            source: options.source || 'startup',
+          });
+          results.push(result);
+          if (result.status === 'failed' || result.status === 'stale_group_info') {
+            failedCids.push(channel.cid);
+          } else if (this.groups.has(channel.cid)) {
+            await this.safeArchiveCurrentEpoch(channel.channelType, channel.channelId);
+            if (this._recoveryPrivateKey) {
+              this.enqueueRestore(channel.channelType, channel.channelId, 'background');
+            }
+          }
+        } catch (err) {
+          failedCids.push(channel.cid);
+          results.push({
+            cid: channel.cid,
+            status: 'failed',
+            error: err instanceof Error ? err.message : String(err),
+          });
+          console.warn('[MLS] Known E2EE channel bootstrap failed:', channel.cid, err);
+        } finally {
+          completed += 1;
+          this._emitBootstrapProgress({
+            total: channels.length,
+            completed,
+            failed_cids: failedCids,
+            status: failedCids.length > 0 && completed === channels.length ? 'failed' : 'running',
+          });
+        }
+      }
+
+      const finalStatus: E2eeBootstrapStatus = failedCids.length > 0 ? 'failed' : 'done';
+      const finalProgress: E2eeBootstrapProgress = {
+        total: channels.length,
+        completed,
+        failed_cids: failedCids,
+        status: finalStatus,
+      };
+      this._emitBootstrapProgress(finalProgress);
+      if (this._recoveryPrivateKey) {
+        for (const channel of knownChannels) {
+          if (this.groups.has(channel.cid)) {
+            this.enqueueRestore(channel.channelType, channel.channelId, 'background');
+          }
+        }
+      }
+      return { ...finalProgress, results };
+    })().finally(() => {
+      this._bootstrapKnownChannelsPromise = null;
+    });
+
+    this._bootstrapKnownChannelsPromise = work;
+    return work;
+  }
+
+  private async _archiveKnownE2eeChannels(): Promise<void> {
+    for (const channel of this._listKnownE2eeChannels()) {
+      if (!this.groups.has(channel.cid)) continue;
+      await this.safeArchiveCurrentEpoch(channel.channelType, channel.channelId);
+    }
+  }
+
+  private async archiveCurrentEpochForCid(cid: string): Promise<void> {
+    const parts = channelPartsFromCid(cid);
+    if (!parts) return;
+    await this.archiveCurrentEpoch(parts.channelType, parts.channelId);
+  }
+
+  private async safeArchiveCurrentEpoch(channelType: string, channelId: string): Promise<void> {
+    try {
+      await this.archiveCurrentEpoch(channelType, channelId);
+    } catch (err) {
+      console.warn('[MLS] Archive current epoch failed; continuing MLS flow:', channelType, channelId, err);
+    }
+  }
+
+  private async safeArchiveCurrentEpochForCid(cid: string): Promise<void> {
+    const parts = channelPartsFromCid(cid);
+    if (!parts) return;
+    await this.safeArchiveCurrentEpoch(parts.channelType, parts.channelId);
+  }
+
+  private async _enqueueArchiveUpload(upload: PendingArchiveUpload): Promise<void> {
+    await this.storage.saveArchiveUpload(upload);
+  }
+
+  private async _flushDeferredArchives(): Promise<void> {
+    if (!this._recoveryPublicKey || !this._recoveryKeyId) return;
+    const deferred = await this.storage.loadPendingDeferredArchives();
+    for (const record of deferred) {
+      try {
+        if (await this._hasArchiveAcknowledged(record.cid, record.epoch)) {
+          await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+          continue;
+        }
+
+        const pendingUploads = await this.storage.loadPendingArchiveUploads();
+        const alreadyQueued = pendingUploads.some(
+          (item) =>
+            item.cid === record.cid &&
+            item.epoch === record.epoch &&
+            (item.upload as UploadEpochArchiveRequest)?.archive_blob_id === record.archive_blob_id,
+        );
+        if (alreadyQueued) {
+          await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+          continue;
+        }
+
+        const adk = await this._decryptArchiveStashBytes(record.encrypted_adk);
+        await this._enqueueArchiveUploadFromDeferred(record, adk);
+        await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+      } catch (err) {
+        await this.storage.saveDeferredArchive({
+          ...record,
+          retry_count: record.retry_count + 1,
+          updated_at: Date.now(),
+        });
+        console.warn('[MLS] Deferred archive flush failed; keeping for retry:', record.cid, record.epoch, err);
+      }
+    }
+    await this._drainArchiveUploadQueue();
+  }
+
+  private async _enqueueArchiveUploadFromDeferred(record: PendingDeferredArchive, adk: Uint8Array): Promise<void> {
+    if (!this._recoveryPublicKey || !this._recoveryKeyId) {
+      throw new Error('Recovery public key is not available.');
+    }
+    const epochBigInt = BigInt(record.epoch);
+    const info = new wasmModule.ArchiveKeyWrapInfo(
+      record.cid,
+      epochBigInt,
+      record.scope,
+      record.archive_blob_id,
+      record.snapshot.snapshot_hash,
+      this._recoveryKeyId,
+    );
+    const wrappedAdk = wasmModule.wrap_archive_data_key(this.provider, adk, this._recoveryPublicKey, info);
+    const upload: UploadEpochArchiveRequest = {
+      epoch: record.epoch,
+      archive_blob_id: record.archive_blob_id,
+      idempotency_key: `${record.epoch}:account_owned:${this.deviceId || 'web'}:${record.archive_blob_id}`,
+      scope: record.scope,
+      encrypted_archive: record.encrypted_archive,
+      snapshot: record.snapshot,
+      wraps: [
+        {
+          recipient_user_id: this.userId!,
+          recipient_recovery_key_id: this._recoveryKeyId,
+          hpke_kem_output: Array.from(wrappedAdk.kem_output),
+          hpke_ciphertext: Array.from(wrappedAdk.ciphertext),
+          ciphersuite: wrappedAdk.ciphersuite,
+          hpke_info: Array.from(wrappedAdk.hpke_info),
+        },
+      ],
+    };
+    await this._enqueueArchiveUpload({
+      cid: record.cid,
+      channel_type: record.channel_type,
+      channel_id: record.channel_id,
+      epoch: record.epoch,
+      scope: record.scope,
+      upload,
+      retry_count: record.retry_count,
+      created_at: record.created_at,
+    });
+  }
+
+  private async _markArchiveUploadAcknowledged(
+    item: PendingArchiveUpload,
+    upload: UploadEpochArchiveRequest,
+    reason?: string,
+  ): Promise<void> {
+    const keyId = upload.wraps?.[0]?.recipient_recovery_key_id;
+    if (!keyId) return;
+    const status = reason === 'duplicate_cap' ? 'duplicate_cap' : reason === 'idempotent' ? 'idempotent' : 'uploaded';
+    await this.storage.saveArchiveAck({
+      cid: item.cid,
+      epoch: item.epoch,
+      recovery_key_id: keyId,
+      status,
+      archive_blob_id: upload.archive_blob_id,
+      updated_at: Date.now(),
+    });
+  }
+
+  private async _drainArchiveUploadQueue(): Promise<void> {
+    const pending = await this.storage.loadPendingArchiveUploads();
+    for (const item of pending) {
+      const upload = item.upload as UploadEpochArchiveRequest;
+      try {
+        const response = await this.e2eeClient!.uploadEpochArchive(item.channel_type, item.channel_id, upload);
+        await this.storage.deleteArchiveUpload(item.cid, item.epoch, upload.archive_blob_id);
+        await this._markArchiveUploadAcknowledged(item, upload, response.reason);
+        if (response.stored === false) {
+          console.debug('[MLS] Archive upload acknowledged without storing:', item.cid, item.epoch, response.reason);
+        }
+      } catch (err) {
+        item.retry_count += 1;
+        await this.storage.saveArchiveUpload(item);
+        console.warn('[MLS] Archive upload failed, queued for retry:', item.cid, item.epoch, err);
+      }
+    }
+  }
+
+  private _newRestoreProgressRecord(channelType: string, channelId: string): RestoreProgressRecord {
+    const now = Date.now();
+    return {
+      device_id: this.deviceId!,
+      cid: cidFromParts(channelType, channelId),
+      user_id: this.userId!,
+      channel_type: channelType,
+      channel_id: channelId,
+      status: 'pending',
+      completed_epochs: [],
+      permanent_gaps: [],
+      transient_failures: [],
+      last_checked_at: now,
+      updated_at: now,
+    };
+  }
+
+  private _normalizeProgress(record: RestoreProgressRecord): RestoreProgressRecord {
+    const completed = Array.from(new Set(record.completed_epochs || [])).sort((a, b) => a - b);
+    const permanentByEpoch = new Map<number, RestoreProgressRecord['permanent_gaps'][number]>();
+    for (const gap of record.permanent_gaps || []) permanentByEpoch.set(gap.epoch, gap);
+    const transientByEpoch = new Map<number, RestoreProgressRecord['transient_failures'][number]>();
+    for (const failure of record.transient_failures || []) {
+      if (!permanentByEpoch.has(failure.epoch)) transientByEpoch.set(failure.epoch, failure);
+    }
+    return {
+      ...record,
+      completed_epochs: completed,
+      permanent_gaps: Array.from(permanentByEpoch.values()).sort((a, b) => a.epoch - b.epoch),
+      transient_failures: Array.from(transientByEpoch.values()).sort((a, b) => a.epoch - b.epoch),
+    };
+  }
+
+  private async _loadOrCreateRestoreProgress(channelType: string, channelId: string): Promise<RestoreProgressRecord> {
+    const cid = cidFromParts(channelType, channelId);
+    const existing = await this.storage.loadRestoreProgress(this.userId!, this.deviceId!, cid);
+    return this._normalizeProgress(existing || this._newRestoreProgressRecord(channelType, channelId));
+  }
+
+  private async _saveRestoreProgress(
+    record: RestoreProgressRecord,
+    status?: RestoreStatus,
+  ): Promise<RestoreProgressRecord> {
+    const next = this._normalizeProgress({
+      ...record,
+      status: status || record.status,
+      last_checked_at: Date.now(),
+      updated_at: Date.now(),
+    });
+    await this.storage.saveRestoreProgress(next);
+    this._emitRestoreProgress(next);
+    return next;
+  }
+
+  private _emitRestoreProgress(record: RestoreProgressRecord): void {
+    (this.client as any)?.dispatchEvent?.({
+      type: 'e2ee.restore_progress',
+      cid: record.cid,
+      restore_progress: record,
+      status: record.status,
+      completed_epochs: record.completed_epochs,
+      permanent_gaps: record.permanent_gaps,
+      transient_failures: record.transient_failures,
+    } as any);
+  }
+
+  private _markEpochCompleted(record: RestoreProgressRecord, epoch: number): RestoreProgressRecord {
+    const completed = new Set(record.completed_epochs);
+    completed.add(epoch);
+    return this._normalizeProgress({
+      ...record,
+      completed_epochs: Array.from(completed),
+      permanent_gaps: record.permanent_gaps.filter((gap) => gap.epoch !== epoch),
+      transient_failures: record.transient_failures.filter((failure) => failure.epoch !== epoch),
+    });
+  }
+
+  private _addPermanentGap(
+    record: RestoreProgressRecord,
+    epoch: number,
+    reason: RestorePermanentGapReason,
+  ): RestoreProgressRecord {
+    return this._normalizeProgress({
+      ...record,
+      completed_epochs: record.completed_epochs.filter((completed) => completed !== epoch),
+      permanent_gaps: [
+        ...record.permanent_gaps.filter((gap) => gap.epoch !== epoch),
+        { epoch, reason, updated_at: Date.now() },
+      ],
+      transient_failures: record.transient_failures.filter((failure) => failure.epoch !== epoch),
+    });
+  }
+
+  private _addTransientFailure(
+    record: RestoreProgressRecord,
+    epoch: number,
+    reason: RestoreTransientFailureReason,
+  ): RestoreProgressRecord {
+    const existing = record.transient_failures.find((failure) => failure.epoch === epoch);
+    const maxRetries = reason === 'decrypt_error' ? RESTORE_DECRYPT_MAX_RETRIES : RESTORE_NETWORK_MAX_RETRIES;
+    const retryCount = (existing?.retry_count || 0) + 1;
+    if (retryCount >= maxRetries && reason === 'decrypt_error') {
+      return this._addPermanentGap(record, epoch, 'decrypt_error');
+    }
+    return this._normalizeProgress({
+      ...record,
+      completed_epochs: record.completed_epochs.filter((completed) => completed !== epoch),
+      transient_failures: [
+        ...record.transient_failures.filter((failure) => failure.epoch !== epoch),
+        { epoch, reason, retry_count: retryCount, max_retries: maxRetries, updated_at: Date.now() },
+      ],
+    });
+  }
+
+  private _finalRestoreStatus(record: RestoreProgressRecord): RestoreStatus {
+    const retryable = record.transient_failures.some((failure) => failure.retry_count < failure.max_retries);
+    if (retryable) return 'failed';
+    if (record.transient_failures.length > 0) return 'done_with_gaps';
+    return record.permanent_gaps.length > 0 ? 'done_with_gaps' : 'done';
+  }
+
+  private async _normalizeStaleRestoreProgress(): Promise<void> {
+    if (!this.userId || !this.deviceId || !this.storage) return;
+    const running = await this.storage.loadIncompleteRestores(this.userId, this.deviceId);
+    await Promise.all(
+      running
+        .filter((record) => record.status === 'running')
+        .map((record) => this._saveRestoreProgress(record, 'partial')),
+    );
+  }
+
+  async getRestoreProgress(channelType: string, channelId: string): Promise<RestoreProgressRecord | null> {
+    if (!this.userId || !this.deviceId) return null;
+    const cid = cidFromParts(channelType, channelId);
+    const record = await this.storage.loadRestoreProgress(this.userId, this.deviceId, cid);
+    return record ? this._normalizeProgress(record) : null;
+  }
+
+  private _restoreRequestKey(cid: string, options?: { fromEpoch?: number; toEpoch?: number }): string {
+    return `${cid}:${options?.fromEpoch ?? ''}:${options?.toEpoch ?? ''}`;
+  }
+
+  private _hasInflightRestoreForCid(cid: string): boolean {
+    const prefix = `${cid}:`;
+    for (const key of this._restoreInflight.keys()) {
+      if (key.startsWith(prefix)) return true;
+    }
+    return false;
+  }
+
+  private async _shouldSkipRestoreEnqueue(
+    cid: string,
+    options?: { fromEpoch?: number; toEpoch?: number },
+  ): Promise<boolean> {
+    if (options?.fromEpoch !== undefined || options?.toEpoch !== undefined) return false;
+    if (this._hasInflightRestoreForCid(cid)) return true;
+    if (!this.userId || !this.deviceId) return false;
+
+    try {
+      const record = await this.storage.loadRestoreProgress(this.userId, this.deviceId, cid);
+      if (!record) return false;
+      const status = this._normalizeProgress(record).status;
+      return status === 'done' || status === 'done_with_gaps';
+    } catch (err) {
+      console.warn('[MLS] Restore progress check failed before enqueue:', cid, err);
+      return false;
+    }
+  }
+
+  private async _enqueueRestoreIfNeeded(entry: RestoreQueueEntry): Promise<void> {
+    if (this._hasInflightRestoreForCid(entry.cid)) return;
+    if (await this._shouldSkipRestoreEnqueue(entry.cid, entry.options)) return;
+    if (this._hasInflightRestoreForCid(entry.cid)) return;
+
+    this._restoreQueue = this._restoreQueue.filter((queued) => queued.cid !== entry.cid);
+    if (entry.priority === 'active') this._restoreQueue.unshift(entry);
+    else this._restoreQueue.push(entry);
+    void this._drainRestoreQueue();
+  }
+
+  enqueueRestore(
+    channelType: string,
+    channelId: string,
+    priority: 'active' | 'background' = 'background',
+    options?: { fromEpoch?: number; toEpoch?: number },
+  ): void {
+    const cid = cidFromParts(channelType, channelId);
+    void this._enqueueRestoreIfNeeded({ cid, channelType, channelId, priority, options });
+  }
+
+  private async _enqueueIncompleteRestores(): Promise<void> {
+    await this.bootstrapKnownE2eeChannels({ source: 'manual' });
+    const records = await this.storage.loadIncompleteRestores(this.userId!, this.deviceId!);
+    const queued = new Set<string>();
+    for (const record of records) {
+      if (record.status === 'done' || record.status === 'done_with_gaps') continue;
+      if (!this.groups.has(record.cid)) continue;
+      queued.add(record.cid);
+      await this._enqueueRestoreIfNeeded({
+        cid: record.cid,
+        channelType: record.channel_type,
+        channelId: record.channel_id,
+        priority: 'background',
+      });
+    }
+
+    for (const channel of this._listKnownE2eeChannels()) {
+      if (queued.has(channel.cid)) continue;
+      if (!this.groups.has(channel.cid)) continue;
+      await this._enqueueRestoreIfNeeded({
+        cid: channel.cid,
+        channelType: channel.channelType,
+        channelId: channel.channelId,
+        priority: 'background',
+      });
+    }
+  }
+
+  private async _drainRestoreQueue(): Promise<void> {
+    if (this._restoreQueueRunning) return;
+    this._restoreQueueRunning = true;
+    try {
+      while (this._restoreQueue.length > 0) {
+        const entry = this._restoreQueue.shift()!;
+        try {
+          await this.restoreHistoricalMessages(entry.channelType, entry.channelId, entry.options);
+        } catch (err) {
+          console.warn('[MLS] Restore queue entry failed:', entry.cid, err);
+          if (!this._recoveryPrivateKey) break;
+        }
+      }
+    } finally {
+      this._restoreQueueRunning = false;
+    }
+  }
+
+  async restoreHistoricalMessages(
+    channelType: string,
+    channelId: string,
+    options?: { fromEpoch?: number; toEpoch?: number },
+  ): Promise<RestoredMessage[]> {
+    if (!this._recoveryPrivateKey) {
+      throw new Error('Recovery vault not unlocked.');
+    }
+    const requestedCid = cidFromParts(channelType, channelId);
+    const restoreKey = this._restoreRequestKey(requestedCid, options);
+    const existingRestore = this._restoreInflight.get(restoreKey);
+    if (existingRestore) {
+      return existingRestore;
+    }
+
+    const restorePromise = this._restoreHistoricalMessagesInternal(channelType, channelId, options);
+    this._restoreInflight.set(restoreKey, restorePromise);
+    try {
+      return await restorePromise;
+    } finally {
+      if (this._restoreInflight.get(restoreKey) === restorePromise) {
+        this._restoreInflight.delete(restoreKey);
+      }
+    }
+  }
+
+  private async _restoreHistoricalMessagesInternal(
+    channelType: string,
+    channelId: string,
+    options?: { fromEpoch?: number; toEpoch?: number },
+  ): Promise<RestoredMessage[]> {
+    if (!this._recoveryPrivateKey) {
+      throw new Error('Recovery vault not unlocked.');
+    }
+    const requestedCid = cidFromParts(channelType, channelId);
+    const requestedChannel = this._getActiveChannel(requestedCid);
+    const archiveCid = this._resolveChannelE2eeGroupId(requestedCid, requestedChannel);
+    const archiveParts = channelPartsFromCid(archiveCid) || { channelType, channelId };
+    const restoreSingleInheritedTimeline = requestedCid !== archiveCid;
+    let progress = await this._loadOrCreateRestoreProgress(channelType, channelId);
+    const epochListResponse = await this.e2eeClient!.queryEpochArchives(
+      archiveParts.channelType,
+      archiveParts.channelId,
+      {
+        list_epochs: true,
+      },
+    );
+    const serverEpochs = Array.from(new Set((epochListResponse.epochs || []).map((entry) => entry.epoch)))
+      .filter(
+        (epoch) =>
+          (options?.fromEpoch === undefined || epoch >= options.fromEpoch) &&
+          (options?.toEpoch === undefined || epoch <= options.toEpoch),
+      )
+      .sort((a, b) => a - b);
+    const completedEpochs = new Set(progress.completed_epochs);
+    const permanentGapEpochs = new Set(progress.permanent_gaps.map((gap) => gap.epoch));
+    const retryableEpochs = new Set(
+      progress.transient_failures
+        .filter((failure) => failure.retry_count < failure.max_retries)
+        .map((failure) => failure.epoch),
+    );
+    const targetEpochs = serverEpochs
+      .filter((epoch) => {
+        if (completedEpochs.has(epoch) || permanentGapEpochs.has(epoch)) return false;
+        return true;
+      })
+      .concat(
+        Array.from(retryableEpochs).filter(
+          (epoch) => serverEpochs.includes(epoch) && !completedEpochs.has(epoch) && !permanentGapEpochs.has(epoch),
+        ),
+      )
+      .filter((epoch, index, all) => all.indexOf(epoch) === index)
+      .sort((a, b) => a - b);
+
+    if (targetEpochs.length === 0) {
+      progress = await this._saveRestoreProgress(progress, this._finalRestoreStatus(progress));
+      return [];
+    }
+    progress = await this._saveRestoreProgress({ ...progress, target_epochs: targetEpochs }, 'running');
+
+    const restored: RestoredMessage[] = [];
+    const restoredMessagesForStateByCid = new Map<string, Record<string, unknown>[]>();
+    const activeEnvelopesByCid = new Map<string, Map<string, ActiveMessageEnvelope>>();
+    const getActiveEnvelopes = (routeCid: string): Map<string, ActiveMessageEnvelope> => {
+      let activeEnvelopes = activeEnvelopesByCid.get(routeCid);
+      if (!activeEnvelopes) {
+        activeEnvelopes = this._collectActiveChannelEnvelopes(routeCid);
+        activeEnvelopesByCid.set(routeCid, activeEnvelopes);
+      }
+      return activeEnvelopes;
+    };
+    const decoder = new TextDecoder();
+    for (const epochBatch of splitRestoreEpochBatches(targetEpochs)) {
+      const epochFrom = Math.min(...epochBatch);
+      const epochTo = Math.max(...epochBatch);
+      let material: QueryEpochArchivesResponse;
+      const allCiphertexts: HistoricalCiphertext[] = [];
+      try {
+        material = await this.e2eeClient!.queryEpochArchives(archiveParts.channelType, archiveParts.channelId, {
+          epoch_from: epochFrom,
+          epoch_to: epochTo,
+          include_snapshots: true,
+          include_wraps: true,
+        });
+
+        let cursor: CiphertextCursor | undefined;
+        do {
+          const batch = await this.e2eeClient!.queryArchiveCiphertexts(
+            archiveParts.channelType,
+            archiveParts.channelId,
+            {
+              epoch_from: epochFrom,
+              epoch_to: epochTo,
+              cursor,
+              limit: 500,
+            },
+          );
+          allCiphertexts.push(
+            ...(restoreSingleInheritedTimeline
+              ? batch.ciphertexts.filter((ciphertext) => (ciphertext.cid || archiveCid) === requestedCid)
+              : batch.ciphertexts),
+          );
+          cursor = batch.has_more ? batch.next_cursor : undefined;
+        } while (cursor);
+      } catch (err) {
+        const reason: RestoreTransientFailureReason =
+          (err as any)?.response?.status >= 500 ? 'server_error' : 'network_error';
+        for (const epoch of epochBatch) {
+          progress = this._addTransientFailure(progress, epoch, reason);
+        }
+        await this._saveRestoreProgress(progress, this._finalRestoreStatus(progress));
+        throw err;
+      }
+
+      const byEpoch = new Map<number, HistoricalCiphertext[]>();
+      for (const ciphertext of allCiphertexts) {
+        if (!byEpoch.has(ciphertext.mls_epoch)) byEpoch.set(ciphertext.mls_epoch, []);
+        byEpoch.get(ciphertext.mls_epoch)!.push(ciphertext);
+      }
+
+      const wrapsByBlobId = new Map<string, ArchiveKeyWrapRecord>();
+      for (const wrap of material.wraps || []) {
+        wrapsByBlobId.set(wrap.archive_blob_id, wrap);
+      }
+
+      for (const epoch of epochBatch) {
+        const blobs = (material.blobs || []).filter((blob) => blob.epoch === epoch);
+        if (blobs.length === 0) {
+          restored.push({ epoch, gap: true, reason: 'no_archive' });
+          progress = this._addPermanentGap(progress, epoch, 'no_archive');
+          progress = await this._saveRestoreProgress(progress, 'running');
+          continue;
+        }
+
+        let archiveBytes: Uint8Array | null = null;
+        let matchedBlob: ArchiveBlobRecord | null = null;
+        for (const blob of blobs) {
+          const wrap = wrapsByBlobId.get(blob.archive_blob_id);
+          if (!wrap) continue;
+          try {
+            const adk = wasmModule.unwrap_archive_data_key_from_parts(
+              this.provider,
+              this._recoveryPrivateKey,
+              new Uint8Array(wrap.hpke_kem_output),
+              new Uint8Array(wrap.hpke_ciphertext),
+              new Uint8Array(wrap.hpke_info),
+            );
+            archiveBytes = wasmModule.decrypt_archive_blob(
+              this.provider,
+              adk,
+              new Uint8Array(blob.encrypted_archive_bytes),
+              new Uint8Array(blob.aead_nonce),
+              new Uint8Array(blob.aead_aad),
+            );
+            matchedBlob = blob;
+            break;
+          } catch (_) {
+            continue;
+          }
+        }
+
+        if (!archiveBytes || !matchedBlob) {
+          restored.push({ epoch, gap: true, reason: 'no_matching_wrap' });
+          progress = this._addPermanentGap(progress, epoch, 'no_matching_wrap');
+          progress = await this._saveRestoreProgress(progress, 'running');
+          continue;
+        }
+        const snapshot = material.snapshots?.[matchedBlob.member_snapshot_hash];
+        if (!snapshot) {
+          restored.push({ epoch, gap: true, reason: 'missing_snapshot' });
+          progress = this._addPermanentGap(progress, epoch, 'missing_snapshot');
+          progress = await this._saveRestoreProgress(progress, 'running');
+          continue;
+        }
+
+        let epochHadDecryptError = false;
+        for (const ciphertext of byEpoch.get(epoch) || []) {
+          try {
+            const archivedMessage = wasmModule.decrypt_with_epoch_archive_v2(
+              this.provider,
+              archiveBytes,
+              new Uint8Array(snapshot.snapshot_bytes),
+              new Uint8Array(ciphertext.mls_ciphertext),
+              true,
+              0,
+            );
+            const raw = decoder.decode(archivedMessage.content);
+            const parsed = JSON.parse(raw);
+            const payload: E2eePayload = parsed && typeof parsed.text === 'string' ? parsed : { text: raw };
+            const routeCid = ciphertext.cid || requestedCid;
+            const activeEnvelope = getActiveEnvelopes(routeCid).get(ciphertext.message_id);
+            const envelope = this._buildArchiveMessageEnvelope(routeCid, ciphertext, activeEnvelope, archivedMessage);
+            const existingMessage = await this.storage.loadE2eeMessage(ciphertext.message_id);
+            const storedMessage = {
+              ...this._storedFromPayload(routeCid, payload, envelope, existingMessage),
+              isRestored: true,
+              restoredFrom: 'epoch_archive',
+              archiveBlobId: matchedBlob.archive_blob_id,
+              restoredAt: Date.now(),
+              restoredEpoch: epoch,
+            };
+            await this.storage.saveE2eeMessage(storedMessage);
+            this._decryptedMsgIds.add(this._messageVersionKey(envelope));
+
+            const fullMessage = this._buildFullMessage(storedMessage, envelope);
+            const existing = restoredMessagesForStateByCid.get(routeCid) || [];
+            existing.push(fullMessage);
+            restoredMessagesForStateByCid.set(routeCid, existing);
+            restored.push({
+              epoch,
+              messageId: ciphertext.message_id,
+              plaintext: payload,
+              source: 'archive',
+              createdAt: ciphertext.created_at,
+              message: fullMessage,
+              synced: true,
+            });
+          } catch (_) {
+            epochHadDecryptError = true;
+            restored.push({ epoch, messageId: ciphertext.message_id, gap: true, reason: 'decrypt_error' });
+          }
+        }
+
+        if (epochHadDecryptError) {
+          progress = this._addTransientFailure(progress, epoch, 'decrypt_error');
+        } else {
+          progress = this._markEpochCompleted(progress, epoch);
+        }
+        progress = await this._saveRestoreProgress(progress, 'running');
+      }
+    }
+
+    progress = await this._saveRestoreProgress(progress, this._finalRestoreStatus(progress));
+
+    for (const [routeCid, restoredMessagesForState] of restoredMessagesForStateByCid) {
+      if (restoredMessagesForState.length === 0) continue;
+      const activeChannel = this.client?.activeChannels?.[routeCid];
+      activeChannel?.state?.addMessagesSorted(restoredMessagesForState as any[], false, true, true, 'current');
+      this.client?.dispatchEvent({
+        type: 'e2ee.local_messages_loaded' as any,
+        cid: routeCid,
+        messages: restoredMessagesForState,
+      } as any);
+    }
+
+    return restored;
+  }
+
   /**
    * Convert a timestamp value to milliseconds.
    * Handles: ISO 8601 string, numeric string, or number.
@@ -485,6 +1838,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   private _nowCursor(): string {
     return new Date().toISOString();
+  }
+
+  private _nowEventCursor(): EventCursor {
+    return { created_at: this._nowCursor(), event_id: ZERO_EVENT_ID };
   }
 
   private _toCursorString(value?: string | number | Date | null): string {
@@ -533,9 +1890,111 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     if (mlsEnabledAt) candidates.push(this._initialSyncCursor(mlsEnabledAt));
 
     if (candidates.length === 0) return this._nowCursor();
-    return candidates.reduce((latest, cursor) =>
-      compareRfc3339Cursor(latest, cursor) >= 0 ? latest : cursor,
-    );
+    return candidates.reduce((latest, cursor) => (compareRfc3339Cursor(latest, cursor) >= 0 ? latest : cursor));
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _membershipBoundedEventCursor(channel: any, savedCursor?: EventCursor | null): EventCursor {
+    const boundedCreatedAt = this._membershipBoundedCursor(channel, savedCursor?.created_at);
+    if (savedCursor && compareRfc3339Cursor(boundedCreatedAt, savedCursor.created_at) === 0) {
+      return savedCursor;
+    }
+    return { created_at: boundedCreatedAt, event_id: ZERO_EVENT_ID };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _resolveChannelE2eeGroupId(cid: string, channel?: any): string {
+    const data = channel?.data || channel?.channel || channel || {};
+    if (typeof data.e2ee_group_id === 'string' && data.e2ee_group_id.length > 0) {
+      return data.e2ee_group_id;
+    }
+    if (typeof data.mls_cid === 'string' && data.mls_cid.length > 0) {
+      return data.mls_cid;
+    }
+    if (
+      data.mls_enabled === true &&
+      typeof data.parent_cid === 'string' &&
+      data.parent_cid.length > 0 &&
+      data.gate !== true
+    ) {
+      return data.parent_cid;
+    }
+    return cid;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _resolveMessageE2eeGroupId(message: any, fallbackCid: string): string {
+    if (typeof message?.e2ee_group_id === 'string' && message.e2ee_group_id.length > 0) {
+      return message.e2ee_group_id;
+    }
+    if (typeof message?.mls_cid === 'string' && message.mls_cid.length > 0) {
+      return message.mls_cid;
+    }
+    const routeCid = message?.cid || fallbackCid;
+    const channel = this._getActiveChannel(routeCid);
+    const channelGroupId = this._resolveChannelE2eeGroupId(routeCid, channel);
+    return channelGroupId !== routeCid ? channelGroupId : fallbackCid;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _eventRouteCid(event: any, fallbackCid: string): string {
+    return event?.cid || event?.data?.cid || event?.data?.message?.cid || fallbackCid;
+  }
+
+  private _eventCursorFromEnvelope(event: any, fallbackCreatedAt?: string): EventCursor {
+    return {
+      created_at: event?.created_at || this._getEventCreatedAt(event) || fallbackCreatedAt || this._nowCursor(),
+      event_id: event?.event_id || event?.data?.event_id || event?.data?.id || ZERO_EVENT_ID,
+    };
+  }
+
+  private _topicOwnsE2eeGroup(topicCid: string): boolean {
+    const topic = this._getActiveChannel(topicCid);
+    if (topic?.data?.mls_enabled === false) return false;
+    if (this._resolveChannelE2eeGroupId(topicCid, topic) !== topicCid) return false;
+    return this.groups.has(topicCid);
+  }
+
+  private async _loadAllScopeSyncCursors(): Promise<Record<string, EventCursor>> {
+    if (this.storage.loadAllScopeSyncCursors) {
+      return this.storage.loadAllScopeSyncCursors();
+    }
+
+    const timestamps = await this.storage.loadAllSyncTimestamps();
+    const cursors: Record<string, EventCursor> = {};
+    for (const [cid, createdAt] of Object.entries(timestamps)) {
+      cursors[cid] = { created_at: createdAt, event_id: ZERO_EVENT_ID };
+    }
+    return cursors;
+  }
+
+  private async _saveAllScopeSyncCursors(cursors: Record<string, EventCursor>): Promise<void> {
+    if (this.storage.saveAllScopeSyncCursors) {
+      await this.storage.saveAllScopeSyncCursors(cursors);
+      return;
+    }
+
+    const timestamps: Record<string, string> = {};
+    for (const [cid, cursor] of Object.entries(cursors)) {
+      timestamps[cid] = cursor.created_at;
+    }
+    await this.storage.saveAllSyncTimestamps(timestamps);
+  }
+
+  private async _loadScopeSyncCursor(cid: string): Promise<EventCursor | null> {
+    if (this.storage.loadScopeSyncCursor) {
+      return this.storage.loadScopeSyncCursor(cid);
+    }
+    const timestamp = await this.storage.loadSyncTimestamp(cid);
+    return timestamp ? { created_at: timestamp, event_id: ZERO_EVENT_ID } : null;
+  }
+
+  private async _saveScopeSyncCursor(cid: string, cursor: EventCursor): Promise<void> {
+    if (this.storage.saveScopeSyncCursor) {
+      await this.storage.saveScopeSyncCursor(cid, cursor);
+      return;
+    }
+    await this.storage.saveSyncTimestamp(cid, cursor.created_at);
   }
 
   private _startSyncGate(): void {
@@ -649,9 +2108,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (!message.message_id) continue;
       byVersion.set(message.version, message);
     }
-    return Array.from(byVersion.values()).sort((a, b) =>
-      compareRfc3339Cursor(a.received_cursor, b.received_cursor),
-    );
+    return Array.from(byVersion.values()).sort((a, b) => compareRfc3339Cursor(a.received_cursor, b.received_cursor));
   }
 
   private async _savePendingSnapshots(cid: string, messages: PendingE2eeSnapshot[]): Promise<void> {
@@ -764,18 +2221,18 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         console.warn('[MLS] Failed to load persisted evictions:', err);
       }
 
-      // Step 2: Sync all groups via unified API
-      const savedCursors = await this.storage.loadAllSyncTimestamps();
+      // Step 2: Sync all MLS scopes via scope_sync.
+      const savedCursors = await this._loadAllScopeSyncCursors();
       let removedCursor = await this.storage.loadRemovedSyncCursor();
       const groupCids = Array.from(this.groups.keys());
 
       // Build cursor map bounded by the current membership. On re-invite this
       // prevents replaying protocol events from the old membership.
-      const syncCursors: Record<string, string> = {};
+      const syncCursors: Record<string, EventCursor> = {};
       for (const cid of groupCids) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const channel = (this.client as any)?.activeChannels?.[cid];
-        syncCursors[cid] = this._membershipBoundedCursor(channel, savedCursors[cid]);
+        syncCursors[cid] = this._membershipBoundedEventCursor(channel, savedCursors[cid]);
       }
 
       if (Object.keys(syncCursors).length === 0) {
@@ -787,7 +2244,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       let hasMore = true;
       while (hasMore) {
         hasMore = false;
-        const response = await this.e2eeClient!.syncAll(syncCursors, 100, removedCursor ?? undefined);
+        const response = await this.e2eeClient!.scopeSync(syncCursors, 100, removedCursor ?? null);
 
         const removedChannels = response.removed_channels;
         if (removedChannels?.events?.length) {
@@ -795,7 +2252,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             await this._processRemovedChannelTombstone(tombstone);
           }
         }
-        if (removedChannels?.next_cursor !== undefined && isRemovedCursorAfter(removedChannels.next_cursor, removedCursor)) {
+        if (
+          removedChannels?.next_cursor !== undefined &&
+          isRemovedCursorAfter(removedChannels.next_cursor, removedCursor)
+        ) {
           removedCursor = removedChannels.next_cursor;
           await this.storage.saveRemovedSyncCursor(removedCursor);
         }
@@ -803,23 +2263,18 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           hasMore = true;
         }
 
-        for (const [cid, result] of Object.entries(response)) {
-          if (cid === 'removed_channels') continue;
-          // Skip non-ChannelSyncResult entries (e.g. "duration" from APIResponse)
-          if (!result || typeof result !== 'object' || !('events' in result)) continue;
-
-          const channelResult = result as { events: any[]; has_more: boolean; next_cursor?: string };
-          if (!channelResult.events || channelResult.events.length === 0) {
-            const flushed = await this._flushPendingE2eeSnapshots(cid);
-            const currentCursor = syncCursors[cid] ?? this._nowCursor();
+        for (const [scopeCid, channelResult] of Object.entries(response.channels || {})) {
+          if (!channelResult?.events || channelResult.events.length === 0) {
+            const flushed = await this._flushPendingE2eeSnapshots(scopeCid);
+            const currentCursor = syncCursors[scopeCid] ?? this._nowEventCursor();
             this._emitSyncState(
               this._makeSyncState(
-                cid,
+                scopeCid,
                 channelResult.has_more ? 'syncing' : 'ready',
-                currentCursor,
-                currentCursor,
+                currentCursor.created_at,
+                currentCursor.created_at,
                 {
-                  server_next_cursor: channelResult.next_cursor,
+                  server_next_cursor: channelResult.next_cursor?.created_at,
                   has_more: channelResult.has_more,
                   needs_retry: channelResult.has_more,
                   processed_events: 0,
@@ -827,35 +2282,44 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                 },
               ),
             );
+            if (channelResult.has_more) {
+              hasMore = true;
+            }
             continue;
           }
 
-          const startedCursor = syncCursors[cid] ?? this._nowCursor();
-          const processResult = await this._processChannelEvents(cid, channelResult.events, startedCursor);
-          const fallbackNextCursor = this._getEventCreatedAt(channelResult.events[channelResult.events.length - 1]);
+          const startedCursor = syncCursors[scopeCid] ?? this._nowEventCursor();
+          const processResult = await this._processChannelEvents(
+            scopeCid,
+            channelResult.events,
+            startedCursor.created_at,
+          );
+          const fallbackNextCursor = this._eventCursorFromEnvelope(
+            channelResult.events[channelResult.events.length - 1],
+            startedCursor.created_at,
+          );
           const serverNextCursor = channelResult.next_cursor ?? fallbackNextCursor;
-          const processedCursor = processResult.processedCursor ?? startedCursor;
-          const cursorLagged = serverNextCursor !== undefined && compareRfc3339Cursor(processedCursor, serverNextCursor) < 0;
+          const processedCursor = processResult.processedCursor ?? startedCursor.created_at;
+          const processedEventCursor: EventCursor = {
+            created_at: processedCursor,
+            event_id: serverNextCursor.event_id,
+          };
+          const cursorLagged = compareEventCursor(processedEventCursor, serverNextCursor) < 0;
           const retryNeeded = channelResult.has_more || cursorLagged;
-          const durableCursor = this._getDurableSyncCursor({
-            processedCursor,
-            serverNextCursor,
-            hasMore: channelResult.has_more,
-            bufferedMessages: processResult.bufferedMessages,
-          });
+          const durableCursor = cursorLagged ? processedEventCursor : serverNextCursor;
 
-          if (compareRfc3339Cursor(durableCursor, startedCursor) > 0) {
-            syncCursors[cid] = durableCursor;
+          if (compareEventCursor(durableCursor, startedCursor) > 0) {
+            syncCursors[scopeCid] = durableCursor;
           }
 
           this._emitSyncState(
             this._makeSyncState(
-              cid,
+              scopeCid,
               cursorLagged ? 'needs_retry' : channelResult.has_more ? 'syncing' : 'ready',
-              startedCursor,
+              startedCursor.created_at,
               processedCursor,
               {
-                server_next_cursor: serverNextCursor,
+                server_next_cursor: serverNextCursor.created_at,
                 has_more: channelResult.has_more,
                 needs_retry: retryNeeded,
                 processed_events: processResult.processedEvents,
@@ -870,11 +2334,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         }
       }
 
-      const cursorsToSave: Record<string, string> = {};
-      for (const [cid, cursor] of Object.entries(syncCursors)) {
-        cursorsToSave[cid] = cursor;
-      }
-      await this.storage.saveAllSyncTimestamps(cursorsToSave);
+      await this._saveAllScopeSyncCursors(syncCursors);
       await this._persistProvider();
 
       console.log(`[MLS] Sync complete. Groups: ${this.groups.size}`);
@@ -891,7 +2351,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (activeChannels) {
         const missingCids: Array<{ cid: string; type: string; id: string }> = [];
         for (const [cid, channel] of Object.entries(activeChannels)) {
-          if (channel?.data?.mls_enabled && !this.groups.has(cid)) {
+          if (
+            channel?.data?.mls_enabled &&
+            this._resolveChannelE2eeGroupId(cid, channel) === cid &&
+            !this.groups.has(cid)
+          ) {
             missingCids.push({ cid, type: channel.type, id: channel.id });
           }
         }
@@ -901,7 +2365,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           // External join sequentially to avoid race conditions on Provider snapshot
           for (const { cid, type, id } of missingCids) {
             try {
-              const result = await this.ensureChannelReady(type, id, cid, { source: 'startup' });
+              const result = await this.syncNewChannel(type, id, cid);
               console.log('[MLS] Multi-device ensure completed:', cid, result.status);
             } catch (err) {
               console.warn('[MLS] Multi-device external join failed:', cid, err);
@@ -957,27 +2421,50 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     events: any[],
     startedCursor = this._nowCursor(),
   ): Promise<ChannelProcessResult> {
+    const scopeCid = cid;
     const decryptedMessages: E2eeStoredMessage[] = [];
     const pendingMlsMessages: PendingE2eeSnapshot[] = [];
     let processedEvents = 0;
     let lastSafeCursor = startedCursor;
+    const pendingCids = new Set<string>([scopeCid]);
+
+    const savePendingByRouteCid = async () => {
+      const byRouteCid = new Map<string, PendingE2eeSnapshot[]>();
+      for (const snapshot of pendingMlsMessages) {
+        const routeCid = snapshot.cid || scopeCid;
+        const existing = byRouteCid.get(routeCid) || [];
+        existing.push(snapshot);
+        byRouteCid.set(routeCid, existing);
+      }
+      for (const pendingCid of pendingCids) {
+        await this._savePendingSnapshots(pendingCid, byRouteCid.get(pendingCid) || []);
+      }
+    };
 
     const retryPendingMessages = async () => {
       if (pendingMlsMessages.length === 0) return;
-      const retryBatch = pendingMlsMessages.splice(0, pendingMlsMessages.length);
-      const { decrypted, buffered } = await this.decryptApplicationMessages(
-        cid,
-        retryBatch.map((snapshot) => snapshot.message as any),
-      );
+      const retryBatch = pendingMlsMessages
+        .splice(0, pendingMlsMessages.length)
+        .sort((a, b) => compareRfc3339Cursor(a.received_cursor, b.received_cursor));
+      const retryMessages = retryBatch.map((snapshot) => ({
+        ...(snapshot.message as any),
+        cid: snapshot.cid || (snapshot.message as any)?.cid || scopeCid,
+      }));
+      const { decrypted, buffered } = await this.decryptApplicationMessages(scopeCid, retryMessages);
       decryptedMessages.push(...decrypted);
       const bufferedVersions = new Set(buffered.map((message: any) => this._pendingSnapshotVersion(message)));
       pendingMlsMessages.push(...retryBatch.filter((snapshot) => bufferedVersions.has(snapshot.version)));
-      await this._savePendingSnapshots(cid, pendingMlsMessages);
+      await savePendingByRouteCid();
     };
 
-    const restoredPending = await this._flushPendingE2eeSnapshots(cid);
-    decryptedMessages.push(...restoredPending.decrypted);
-    pendingMlsMessages.push(...restoredPending.pending);
+    for (const event of events) {
+      pendingCids.add(this._eventRouteCid(event, scopeCid));
+    }
+    for (const pendingCid of pendingCids) {
+      pendingMlsMessages.push(...(await this.storage.loadPendingE2eeSnapshots(pendingCid)));
+    }
+    pendingMlsMessages.splice(0, pendingMlsMessages.length, ...this._dedupePendingSnapshots(pendingMlsMessages));
+    await retryPendingMessages();
 
     for (const event of events) {
       const eventCreatedAt = this._getEventCreatedAt(event);
@@ -985,6 +2472,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // Sync response uses event.type as sole discriminator: "protocol" | "application"
       // Data is always nested in event.data
       const eventType = event.type;
+      const routeCid = this._eventRouteCid(event, scopeCid);
+      const protocolCid = event?.cid || scopeCid;
 
       switch (eventType) {
         case 'protocol': {
@@ -994,12 +2483,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           switch (typeField) {
             case 'welcome': {
               const targetUserIds = (protoMsg.target_user_ids as string[]) || [];
-              if (targetUserIds.includes(this.userId!) && !this.groups.has(cid)) {
+              if (targetUserIds.includes(this.userId!) && !this.groups.has(protocolCid)) {
                 try {
                   await this.joinGroup(protoMsg.welcome as Uint8Array, protoMsg.ratchet_tree as Uint8Array | undefined);
                 } catch (err) {
                   if (this._isMissingKeyPackageError(err)) {
-                    console.warn('[MLS] Skipping stale welcome with no local KeyPackage:', cid, err);
+                    console.warn('[MLS] Skipping stale welcome with no local KeyPackage:', protocolCid, err);
                     break;
                   }
                   throw err;
@@ -1015,12 +2504,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                 protoUserId === this.userId && !!protoDeviceId && protoDeviceId === this.deviceId;
 
               if (isOwnDeviceCommit) {
-                console.log(`[MLS] Skipping own ${typeField} (already merged):`, cid);
+                console.log(`[MLS] Skipping own ${typeField} (already merged):`, protocolCid);
                 break;
               }
 
-              if (!this.groups.has(cid)) {
-                console.log(`[MLS] Skipping ${typeField} before local group exists:`, cid);
+              if (!this.groups.has(protocolCid)) {
+                console.log(`[MLS] Skipping ${typeField} before local group exists:`, protocolCid);
                 break;
               }
 
@@ -1029,19 +2518,19 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
               // Do NOT call group.process_message() — for ExternalCommit, OpenMLS
               // returns an AEAD error (not epoch mismatch) which corrupts ratchet state.
               const commitEventEpoch: number = protoMsg.epoch ?? -1;
-              const currentGroup = this.groups.get(cid);
+              const currentGroup = this.groups.get(protocolCid);
               if (currentGroup && commitEventEpoch >= 0) {
                 const groupEpoch = Number(currentGroup.epoch());
                 if (groupEpoch >= commitEventEpoch) {
                   console.log(
                     `[MLS] processCommit: commit at epoch ${commitEventEpoch} already applied (group at ${groupEpoch}), skipping:`,
-                    cid,
+                    protocolCid,
                   );
                   break;
                 }
               }
               const commit = protoMsg.commit;
-              await this.processCommit(cid, commit as Uint8Array, commitEventEpoch);
+              await this.processCommit(protocolCid, commit as Uint8Array, commitEventEpoch);
               break;
             }
           }
@@ -1057,21 +2546,22 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             // MLS encrypted message — decrypt at its actual timeline position.
             // If epoch state is not ready yet, persist it and let the durable cursor
             // advance. Pending snapshots are retried after later commits advance the group.
-            const { decrypted, buffered } = await this.decryptApplicationMessages(cid, [msg]);
+            const groupCid = this._resolveMessageE2eeGroupId(msg, scopeCid);
+            const { decrypted, buffered } = await this.decryptApplicationMessages(routeCid, [msg], groupCid);
             decryptedMessages.push(...decrypted);
             if (buffered.length > 0) {
               pendingMlsMessages.push(
                 ...buffered.map((bufferedMessage: any) =>
-                  this._toPendingSnapshot(cid, 'application', bufferedMessage, eventCursor, eventCreatedAt),
+                  this._toPendingSnapshot(routeCid, 'application', bufferedMessage, eventCursor, eventCreatedAt),
                 ),
               );
-              await this._savePendingSnapshots(cid, pendingMlsMessages);
+              await savePendingByRouteCid();
             }
           } else {
             // Standard/system message — save directly, no decryption needed
             await this.storage.saveE2eeMessage({
               id: msg.id,
-              cid,
+              cid: routeCid,
               content_type: 'standard',
               text: msg.text || '',
               user_id: msg.user?.id || '',
@@ -1096,11 +2586,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             ) {
               const leftUserId = msgText.split(' ')[1];
               if (leftUserId && leftUserId !== this.userId) {
-                const activeChannel = this._getActiveChannel(cid);
+                const e2eeGroupId = this._resolveChannelE2eeGroupId(routeCid, this._getActiveChannel(routeCid));
+                const activeChannel = this._getActiveChannel(routeCid) || this._getActiveChannel(e2eeGroupId);
                 if (!activeChannel || !this.isDesignatedEvictor(activeChannel)) {
                   continue;
                 }
-                const group = this.groups.get(cid);
+                const group = this.groups.get(e2eeGroupId);
                 if (group) {
                   // Check C still has leaf nodes (another evictor may have already removed them)
                   try {
@@ -1108,10 +2599,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                     if (leafNodes && leafNodes.length > 0) {
                       // Queue the eviction to be bundled into the next commit action
                       // (add/remove/rotate).
-                      const queue = this._pendingEvictions.get(cid) ?? new Set<string>();
+                      const queue = this._pendingEvictions.get(e2eeGroupId) ?? new Set<string>();
                       queue.add(leftUserId);
-                      this._pendingEvictions.set(cid, queue);
-                      console.log('[MLS] Queued eviction (offline recovery) for', leftUserId, 'in', cid);
+                      this._pendingEvictions.set(e2eeGroupId, queue);
+                      console.log('[MLS] Queued eviction (offline recovery) for', leftUserId, 'in', e2eeGroupId);
                       // Persist immediately so the queue survives a crash/reconnect
                       // even after the sync cursor has advanced past this SystemMessage.
                       this._persistPendingEvictions().catch(console.warn);
@@ -1130,20 +2621,25 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           const rejectedUserId = rejectData.member?.user_id;
           if (!rejectedUserId) break;
 
-          const activeChannel = this._getActiveChannel(cid);
+          const eventGroupId = this._resolveChannelE2eeGroupId(routeCid, this._getActiveChannel(routeCid));
+          const activeChannel = this._getActiveChannel(routeCid) || this._getActiveChannel(eventGroupId);
           if (activeChannel?.state?.members) {
             delete activeChannel.state.members[rejectedUserId];
           }
 
           if (rejectedUserId === this.userId) {
-            this.leaveGroup(cid, eventCreatedAt);
+            this.leaveGroup(eventGroupId, eventCreatedAt);
             for (const topicCid of rejectData.topic_cids ?? []) {
-              this.leaveGroup(topicCid, eventCreatedAt);
+              if (this._topicOwnsE2eeGroup(topicCid)) {
+                this.leaveGroup(topicCid, eventCreatedAt);
+              }
             }
           } else if (rejectData.mls_enabled) {
-            await this.queuePendingEviction(cid, rejectedUserId);
+            await this.queuePendingEviction(eventGroupId, rejectedUserId);
             for (const topicCid of rejectData.topic_cids ?? []) {
-              await this.queuePendingEviction(topicCid, rejectedUserId);
+              if (this._topicOwnsE2eeGroup(topicCid)) {
+                await this.queuePendingEviction(topicCid, rejectedUserId);
+              }
             }
           }
           break;
@@ -1161,15 +2657,18 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           // Keep active channel member state in sync when offline catch-up includes
           // a member removal metadata event from event:{cid}.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const activeChannel = this._getActiveChannel(cid);
+          const eventGroupId = this._resolveChannelE2eeGroupId(routeCid, this._getActiveChannel(routeCid));
+          const activeChannel = this._getActiveChannel(routeCid) || this._getActiveChannel(eventGroupId);
           if (activeChannel?.state?.members) {
             delete activeChannel.state.members[removedUserId];
           }
 
           if (removedUserId === this.userId) {
-            this.leaveGroup(cid, eventCreatedAt);
+            this.leaveGroup(eventGroupId, eventCreatedAt);
             for (const topicCid of removeData.topic_cids ?? []) {
-              this.leaveGroup(topicCid, eventCreatedAt);
+              if (this._topicOwnsE2eeGroup(topicCid)) {
+                this.leaveGroup(topicCid, eventCreatedAt);
+              }
             }
             continue;
           }
@@ -1184,16 +2683,16 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             continue;
           }
 
-          const group = this.groups.get(cid);
+          const group = this.groups.get(eventGroupId);
           if (group) {
             try {
               const leafNodes = group.members_by_user_id(removedUserId);
               if (leafNodes && leafNodes.length > 0) {
-                const queue = this._pendingEvictions.get(cid) ?? new Set<string>();
+                const queue = this._pendingEvictions.get(eventGroupId) ?? new Set<string>();
                 queue.add(removedUserId);
-                this._pendingEvictions.set(cid, queue);
+                this._pendingEvictions.set(eventGroupId, queue);
                 await this._persistPendingEvictions();
-                console.log('[MLS] Queued eviction from member_removed sync for', removedUserId, 'in', cid);
+                console.log('[MLS] Queued eviction from member_removed sync for', removedUserId, 'in', eventGroupId);
               }
             } catch (_err) {
               // members_by_user_id may fail if group is in invalid state — safe to ignore
@@ -1209,7 +2708,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
           // 1. Update in-memory channel state (if channel is active and has the message)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const activeChannel = (this.client as any)?.activeChannels?.[cid];
+          const activeChannel = (this.client as any)?.activeChannels?.[routeCid];
           if (activeChannel?.state?.messageSets) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             activeChannel.state.messageSets.forEach((messageSet: any) => {
@@ -1249,7 +2748,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
           // 1. Remove from in-memory channel state
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const activeChannel = (this.client as any)?.activeChannels?.[cid];
+          const activeChannel = (this.client as any)?.activeChannels?.[routeCid];
           if (activeChannel?.state) {
             activeChannel.state.removeMessage({ id: deletedMessageId });
             // Also remove from pinned messages if applicable
@@ -1268,7 +2767,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           (this.client as any)?.dispatchEvent?.({
             type: 'message.deleted' as any,
             message: { id: deletedMessageId },
-            cid,
+            cid: routeCid,
           });
 
           console.log('[MLS] Sync: message deleted:', deletedMessageId);
@@ -1290,15 +2789,20 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                 ...updatedMessage,
                 updated_at: updatedMessage.updated_at || updateData.created_at,
               };
-              const { decrypted, buffered } = await this.decryptApplicationMessages(cid, [versionedMessage]);
+              const groupCid = this._resolveMessageE2eeGroupId(versionedMessage, scopeCid);
+              const { decrypted, buffered } = await this.decryptApplicationMessages(
+                routeCid,
+                [versionedMessage],
+                groupCid,
+              );
               if (buffered.length > 0) {
                 updateBuffered = true;
                 pendingMlsMessages.push(
                   ...buffered.map((bufferedMessage: any) =>
-                    this._toPendingSnapshot(cid, 'message_updated', bufferedMessage, eventCursor, eventCreatedAt),
+                    this._toPendingSnapshot(routeCid, 'message_updated', bufferedMessage, eventCursor, eventCreatedAt),
                   ),
                 );
-                await this._savePendingSnapshots(cid, pendingMlsMessages);
+                await savePendingByRouteCid();
               }
               if (decrypted[0]) {
                 messageForState = this._buildFullMessage(decrypted[0], updatedMessage);
@@ -1326,7 +2830,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
           // 1. Update in-memory channel state
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const activeChannel = (this.client as any)?.activeChannels?.[cid];
+          const activeChannel = (this.client as any)?.activeChannels?.[routeCid];
           if (activeChannel?.state) {
             activeChannel.state.addMessageSorted(messageForState, false, false);
           }
@@ -1336,7 +2840,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           (this.client as any)?.dispatchEvent?.({
             type: 'message.updated' as any,
             message: messageForState,
-            cid,
+            cid: routeCid,
           });
 
           console.log('[MLS] Sync: message updated:', updatedMessage.id);
@@ -1349,7 +2853,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           if (!pinnedMessage) continue;
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const activeChannel = (this.client as any)?.activeChannels?.[cid];
+          const activeChannel = (this.client as any)?.activeChannels?.[routeCid];
           if (activeChannel?.state) {
             if (pinData.action === 'message.pinned') {
               activeChannel.state.addPinnedMessage(pinnedMessage);
@@ -1382,10 +2886,17 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // Patch channel.state.messages in-memory: replace encrypted MLS messages
     // with their decrypted content so the UI can re-render without refetching.
     if (decryptedMessages.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const activeChannel = (this.client as any)?.activeChannels?.[cid];
-      if (activeChannel?.state?.messages) {
-        const decryptedById = new Map(decryptedMessages.map((d) => [d.id, d]));
+      const decryptedByCid = new Map<string, E2eeStoredMessage[]>();
+      for (const message of decryptedMessages) {
+        const existing = decryptedByCid.get(message.cid) || [];
+        existing.push(message);
+        decryptedByCid.set(message.cid, existing);
+      }
+      for (const [routeCid, messages] of decryptedByCid) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const activeChannel = (this.client as any)?.activeChannels?.[routeCid];
+        if (!activeChannel?.state?.messages) continue;
+        const decryptedById = new Map(messages.map((d) => [d.id, d]));
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         activeChannel.state.messageSets?.forEach((messageSet: any) => {
           for (let i = 0; i < messageSet.messages.length; i++) {
@@ -1414,24 +2925,24 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     };
   }
 
-  private async _syncChannelFromCursor(cid: string, since: string, limit = 100): Promise<E2eeSyncState> {
+  private async _syncChannelFromCursor(cid: string, since: EventCursor, limit = 100): Promise<E2eeSyncState> {
     let cursor = since;
-    let finalState = this._makeSyncState(cid, 'ready', since, since);
+    let finalState = this._makeSyncState(cid, 'ready', since.created_at, since.created_at);
 
     while (true) {
       const startedCursor = cursor;
-      const response = await this.e2eeClient!.syncAll({ [cid]: startedCursor }, limit);
-      const result = response[cid] as { events?: any[]; has_more?: boolean; next_cursor?: string } | undefined;
+      const response = await this.e2eeClient!.scopeSync({ [cid]: startedCursor }, limit);
+      const result = response.channels?.[cid];
 
       if (!result?.events || result.events.length === 0) {
         const flushed = await this._flushPendingE2eeSnapshots(cid);
         finalState = this._makeSyncState(
           cid,
           result?.has_more ? 'needs_retry' : 'ready',
-          startedCursor,
-          startedCursor,
+          startedCursor.created_at,
+          startedCursor.created_at,
           {
-            server_next_cursor: result?.next_cursor,
+            server_next_cursor: result?.next_cursor?.created_at,
             has_more: !!result?.has_more,
             needs_retry: !!result?.has_more,
             buffered_messages: flushed.pending.length,
@@ -1441,27 +2952,28 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         return finalState;
       }
 
-      const processResult = await this._processChannelEvents(cid, result.events, startedCursor);
-      const fallbackNextCursor = this._getEventCreatedAt(result.events[result.events.length - 1]);
+      const processResult = await this._processChannelEvents(cid, result.events, startedCursor.created_at);
+      const fallbackNextCursor = this._eventCursorFromEnvelope(
+        result.events[result.events.length - 1],
+        startedCursor.created_at,
+      );
       const serverNextCursor = result.next_cursor ?? fallbackNextCursor;
-      const processedCursor = processResult.processedCursor ?? startedCursor;
-      const cursorLagged =
-        serverNextCursor !== undefined && compareRfc3339Cursor(processedCursor, serverNextCursor) < 0;
+      const processedCursor = processResult.processedCursor ?? startedCursor.created_at;
+      const processedEventCursor: EventCursor = {
+        created_at: processedCursor,
+        event_id: serverNextCursor.event_id,
+      };
+      const cursorLagged = compareEventCursor(processedEventCursor, serverNextCursor) < 0;
       const blocked = cursorLagged;
-      const durableCursor = this._getDurableSyncCursor({
-        processedCursor,
-        serverNextCursor,
-        hasMore: !!result.has_more,
-        bufferedMessages: processResult.bufferedMessages,
-      });
+      const durableCursor = cursorLagged ? processedEventCursor : serverNextCursor;
 
       finalState = this._makeSyncState(
         cid,
         blocked ? 'needs_retry' : result.has_more ? 'syncing' : 'ready',
-        startedCursor,
+        startedCursor.created_at,
         processedCursor,
         {
-          server_next_cursor: serverNextCursor,
+          server_next_cursor: serverNextCursor.created_at,
           has_more: !!result.has_more,
           needs_retry: !!result.has_more || blocked,
           processed_events: processResult.processedEvents,
@@ -1470,9 +2982,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       );
       this._emitSyncState(finalState);
 
-      if (compareRfc3339Cursor(durableCursor, startedCursor) > 0) {
+      if (compareEventCursor(durableCursor, startedCursor) > 0) {
         cursor = durableCursor;
-        await this.storage.saveSyncTimestamp(cid, durableCursor);
+        await this._saveScopeSyncCursor(cid, durableCursor);
         await this._persistProvider();
       }
 
@@ -1488,7 +3000,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   /**
    * Sync a new E2EE channel that doesn't have a local group yet.
-   * Uses unified sync API with a single-channel cursor.
+   * Uses scope sync with a single scope cursor.
    */
   async syncNewChannel(channelType: string, channelId: string, cid: string): Promise<EnsureE2eeChannelResult> {
     if (this.groups.has(cid)) {
@@ -1497,8 +3009,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const channel = (this.client as any)?.activeChannels?.[cid];
-    const savedTs = await this.storage.loadSyncTimestamp(cid);
-    const since = this._membershipBoundedCursor(channel, savedTs);
+    const savedCursor = await this._loadScopeSyncCursor(cid);
+    const since = this._membershipBoundedEventCursor(channel, savedCursor);
 
     const syncState = await this._syncChannelFromCursor(cid, since, 100);
 
@@ -1518,7 +3030,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       } catch (err) {
         console.warn('[MLS] External join fallback failed:', cid, err);
         if ((err as any)?.code === 'stale_group_info') {
-          const state = this._makeSyncState(cid, 'stale_group_info', since, syncState.processed_cursor, {
+          const state = this._makeSyncState(cid, 'stale_group_info', since.created_at, syncState.processed_cursor, {
             needs_retry: true,
             error: (err as Error).message,
           });
@@ -1557,8 +3069,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const channel = (this.client as any)?.activeChannels?.[cid];
-    const savedTs = await this.storage.loadSyncTimestamp(cid);
-    const since = this._membershipBoundedCursor(channel, savedTs);
+    const savedCursor = await this._loadScopeSyncCursor(cid);
+    const since = this._membershipBoundedEventCursor(channel, savedCursor);
 
     const syncState = await this._syncChannelFromCursor(cid, since, 100);
 
@@ -1600,6 +3112,24 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         return { cid, status: 'skipped', error: 'channel is not E2EE enabled' };
       }
 
+      const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, channel);
+      if (e2eeGroupId !== cid) {
+        const groupParts = channelPartsFromCid(e2eeGroupId);
+        if (!groupParts) {
+          return { cid, status: 'failed', error: `invalid e2ee_group_id: ${e2eeGroupId}` };
+        }
+        const result = await this.ensureChannelReady(groupParts.channelType, groupParts.channelId, e2eeGroupId, {
+          source: _options.source || 'inherited_topic',
+        });
+        return {
+          cid,
+          status: result.status,
+          epoch: this.getEpoch(e2eeGroupId),
+          sync_state: result.sync_state,
+          error: result.error,
+        };
+      }
+
       if (!this.groups.has(cid)) {
         const result = await this.syncNewChannel(channelType, channelId, cid);
         if (
@@ -1621,10 +3151,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // Local group exists, but the cursor can still be behind. Run a bounded
       // catch-up sync and let the returned state tell UI whether another retry
       // is needed.
-      const savedTs = await this.storage.loadSyncTimestamp(cid);
+      const savedCursorRecord = await this._loadScopeSyncCursor(cid);
       const memberCreatedAt = this._getMembershipCreatedAt(channel);
       const membershipCursor = memberCreatedAt ? this._initialSyncCursor(memberCreatedAt) : undefined;
-      const savedCursor = savedTs ? this._toCursorString(savedTs) : undefined;
+      const savedCursor = savedCursorRecord?.created_at;
 
       if (
         source === 'invite_accepted' &&
@@ -1649,7 +3179,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         return result;
       }
 
-      const since = this._membershipBoundedCursor(channel, savedTs);
+      const since = this._membershipBoundedEventCursor(channel, savedCursorRecord);
       const syncState = await this._syncChannelFromCursor(cid, since, 100);
       const result: EnsureE2eeChannelResult = {
         cid,
@@ -1683,6 +3213,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getGroup(cid: string): any | null {
     return this.groups.get(cid) || null;
+  }
+
+  ownsE2eeGroup(cid: string): boolean {
+    return this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid)) === cid && this.groups.has(cid);
   }
 
   /**
@@ -1729,6 +3263,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this.groups.set(cid, group);
     await this._saveGroup(cid);
     await this._persistProvider();
+    await this.safeArchiveCurrentEpochForCid(cid);
     console.log('[MLS] Joined group via Welcome:', cid);
     return group;
   }
@@ -1814,6 +3349,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 6. Merge pending commit locally (only after server OK)
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
+    await this.safeArchiveCurrentEpoch(channelType, channelId);
 
     console.log('[MLS] E2EE enabled for channel:', cid, 'epoch:', Number(group.epoch()));
     return result;
@@ -2167,10 +3703,89 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // Server OK → merge pending commit locally
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
+    await this.safeArchiveCurrentEpoch(channelType, channelId);
     await this._cleanupEvictedGhosts(cid, ghostsToRemove);
 
     console.log('[MLS] Added', newUserIds.length, 'users to:', cid, 'epoch:', Number(group.epoch()));
     return { epoch: Number(group.epoch()) };
+  }
+
+  // ============================================================
+  /**
+   * Drain the deferred eviction queue built during sync.
+   * Runs after the sync loop so epoch is fully up-to-date before we commit.
+   *
+   * Retry strategy:
+   * - `epoch_stale`: handled automatically inside `evictMember` (clear + sync + retry once)
+   * - Other failures: logged and skipped — next reconnect sync will re-queue from SystemMessage
+   */
+  private async _drainPendingEvictions(): Promise<void> {
+    if (this._pendingEvictions.size === 0) return;
+
+    const pendingEvictions = new Map(this._pendingEvictions);
+
+    for (const [cid, userIds] of pendingEvictions) {
+      const colonIdx = cid.indexOf(':');
+      const channelType = cid.substring(0, colonIdx);
+      const channelId = cid.substring(colonIdx + 1);
+      const group = this.groups.get(cid);
+      const activeChannel = this._getActiveChannel(cid);
+
+      if (!activeChannel) {
+        continue;
+      }
+
+      if (!this.isDesignatedEvictor(activeChannel)) {
+        console.log('[MLS] _drainPendingEvictions: keep queued for', cid, '— this client is not designated evictor');
+        continue;
+      }
+
+      if (!group) continue;
+
+      const ghostsToRemove = await this._collectPendingGhosts(cid, Array.from(userIds));
+      if (ghostsToRemove.length === 0) continue;
+
+      try {
+        this._requireCompositeCommitMethods(group);
+        const commitBundle = group.commit_member_removals(this.provider, this.identity, ghostsToRemove);
+        const groupInfoBytes = commitBundle.group_info;
+        if (!groupInfoBytes || groupInfoBytes.length === 0) {
+          group.clear_pending_commit(this.provider);
+          await this._persistProvider();
+          throw new Error('[MLS] _drainPendingEvictions: commitBundle.group_info is empty');
+        }
+
+        await this.e2eeClient!.commitEviction(channelType, channelId, {
+          target_user_ids: ghostsToRemove,
+          commit: Array.from(commitBundle.commit),
+          epoch: Number(group.epoch()),
+          group_info: Array.from(groupInfoBytes),
+        });
+
+        group.merge_pending_commit(this.provider);
+        await this._persistProvider();
+        await this._cleanupEvictedGhosts(cid, ghostsToRemove);
+      } catch (err) {
+        group.clear_pending_commit(this.provider);
+        await this._persistProvider();
+        const activeTarget = getActiveTargetFromCommitEvictionError(err);
+        if (activeTarget) {
+          await this.sync();
+          await this._dropActivePendingEvictions(cid, [activeTarget]);
+          console.warn(
+            '[MLS] _drainPendingEvictions: target active again, dropped from retry list:',
+            cid,
+            activeTarget,
+          );
+          continue;
+        }
+        if (isEpochStaleError(err)) {
+          await this.sync();
+          await this._dropActivePendingEvictions(cid, ghostsToRemove);
+        }
+        console.warn('[MLS] _drainPendingEvictions: composite commit failed, queue kept for retry:', cid, err);
+      }
+    }
   }
 
   /** Snapshot current queue and write to IndexedDB. */
@@ -2241,7 +3856,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // already-consumed Welcome and fail with "No matching key package".
     this._persistProvider().catch(console.warn);
     this.storage.deleteGroup?.(cid).catch?.(console.warn);
-    this.storage.saveSyncTimestamp(cid, removedCursor).catch(console.warn);
+    this._saveScopeSyncCursor(cid, { created_at: removedCursor, event_id: ZERO_EVENT_ID }).catch(console.warn);
     this._savePendingSnapshots(cid, []).catch(console.warn);
   }
 
@@ -2505,6 +4120,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 4. Server OK → merge
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
+    await this.safeArchiveCurrentEpoch(channelType, channelId);
     // 5. Queue cleanup AFTER confirmed merge.
     await this._cleanupEvictedGhosts(cid, allRemoveIds);
     console.log('[MLS] Evicted', targetUserId, 'from:', cid, 'epoch:', Number(group.epoch()));
@@ -2578,6 +4194,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // 6. Upload GroupInfo AFTER merge — this is the only correct timing for external join.
       //    The joiner's N+1 state is now fully committed, so export_group_info() is valid.
       await this._uploadGroupInfo(channelType, channelId, group);
+      await this.safeArchiveCurrentEpoch(channelType, channelId);
 
       console.log('[MLS] External join completed for:', cid, 'epoch:', Number(group.epoch()));
       return { epoch: Number(group.epoch()), status: 'joined_external' };
@@ -2650,6 +4267,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // 6. Persist state
     await this._saveGroup(cid);
     await this._persistProvider();
+    await this.safeArchiveCurrentEpoch(channelType, channelId);
 
     console.log('[MLS] Key rotation completed for:', cid, 'epoch:', Number(group.epoch()));
     return { epoch: Number(group.epoch()) };
@@ -2824,6 +4442,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       console.log('[MLS] Commit processed for:', cid, 'epoch:', Number(group.epoch()));
       await this._persistProvider();
+      await this.safeArchiveCurrentEpochForCid(cid);
 
       // Post-commit queue hygiene: remove users that were evicted by this commit.
       // When another admin's commit removes a ghost, our local queue still has
@@ -2927,6 +4546,70 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return typeof fallbackType === 'string' && fallbackType ? fallbackType : 'regular';
   }
 
+  private _dateishToIso(value: unknown): string | undefined {
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'string' && value) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return new Date(value).toISOString();
+    return undefined;
+  }
+
+  private _collectActiveChannelEnvelopes(cid: string): Map<string, ActiveMessageEnvelope> {
+    const activeChannel = this.client?.activeChannels?.[cid];
+    const messageSets = (activeChannel?.state?.messageSets || []) as Array<{ messages?: ActiveMessageEnvelope[] }>;
+    const pinnedMessages = (activeChannel?.state?.pinnedMessages || []) as ActiveMessageEnvelope[];
+    const messages = [...messageSets.flatMap((set) => set.messages || []), ...pinnedMessages];
+    const envelopes = new Map<string, ActiveMessageEnvelope>();
+    for (const message of messages) {
+      if (message?.id) envelopes.set(message.id, message);
+    }
+    return envelopes;
+  }
+
+  private _buildArchiveMessageEnvelope(
+    cid: string,
+    ciphertext: HistoricalCiphertext,
+    activeEnvelope: ActiveMessageEnvelope | undefined,
+    archivedMessage: {
+      epoch?: bigint;
+      generation?: number;
+      own_message?: boolean;
+      sender_index?: number;
+    },
+  ): ArchiveMessageEnvelope {
+    const fallbackUserId =
+      activeEnvelope?.user?.id ||
+      activeEnvelope?.user_id ||
+      ciphertext.user?.id ||
+      ciphertext.user_id ||
+      (archivedMessage.own_message ? this.userId || undefined : undefined);
+    const fallbackUser =
+      activeEnvelope?.user ||
+      ciphertext.user ||
+      (fallbackUserId ? this.client?.state?.users?.[fallbackUserId] || { id: fallbackUserId } : undefined);
+    const createdAt =
+      this._dateishToIso(activeEnvelope?.created_at) ||
+      this._dateishToIso(ciphertext.created_at) ||
+      new Date().toISOString();
+    const updatedAt = this._dateishToIso(activeEnvelope?.updated_at) || this._dateishToIso(ciphertext.updated_at);
+
+    return {
+      ...(activeEnvelope || {}),
+      ...ciphertext,
+      id: ciphertext.message_id,
+      cid,
+      user: fallbackUser,
+      user_id: fallbackUserId,
+      created_at: createdAt,
+      updated_at: updatedAt,
+      mls_epoch: ciphertext.mls_epoch,
+      mls_ciphertext: new Uint8Array(ciphertext.mls_ciphertext),
+      archive_epoch: archivedMessage.epoch !== undefined ? Number(archivedMessage.epoch) : ciphertext.mls_epoch,
+      archive_generation: archivedMessage.generation,
+      archive_own_message: archivedMessage.own_message,
+      archive_sender_index: archivedMessage.sender_index,
+    };
+  }
+
   private _storedFromPayload(
     cid: string,
     payload: E2eePayload,
@@ -2967,6 +4650,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       created_at?: string;
       updated_at?: string;
       mls_epoch?: number;
+      e2ee_group_id?: string;
       [key: string]: unknown;
     },
   ): Promise<Record<string, unknown> | null> {
@@ -2996,12 +4680,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       created_at?: string;
       updated_at?: string;
       mls_epoch?: number;
+      e2ee_group_id?: string;
       [key: string]: unknown;
     },
   ): Promise<Record<string, unknown> | null> {
     const ciphertext = message.mls_ciphertext;
     if (!ciphertext) return null;
     const versionKey = this._messageVersionKey(message);
+    const routeCid = (typeof message.cid === 'string' && message.cid) || cid;
+    const groupCid = this._resolveMessageE2eeGroupId(message, cid);
 
     // CRITICAL: If MLS sync is in progress (reconnecting from background),
     // do NOT attempt decryption — it would race with the waterfall decrypt
@@ -3055,15 +4742,16 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       return this._buildFullMessage(existing, message);
     }
 
-    const group = this.groups.get(cid);
+    const group = this.groups.get(groupCid);
     if (!group) {
-      console.warn('[MLS] processE2eeMessage: no group for', cid);
+      console.warn('[MLS] processE2eeMessage: no group for', groupCid);
       return null;
     }
 
     console.log('[MLS] processE2eeMessage:', {
       msgId: message.id,
-      cid,
+      cid: routeCid,
+      groupCid,
       groupEpoch: Number(group.epoch()),
       msgEpoch: message.mls_epoch,
       senderId: message.user?.id,
@@ -3072,7 +4760,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     try {
       // Ensure ciphertext is Uint8Array (WS may deliver as regular array)
       const ctBytes = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext as any);
-      const { payload, messageType } = this.decryptMessage(cid, ctBytes);
+      const { payload, messageType } = this.decryptMessage(groupCid, ctBytes);
 
       // Mark as decrypted IMMEDIATELY after process_message succeeds —
       // before any async IndexedDB writes. This is the in-memory dedup
@@ -3081,7 +4769,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       if (messageType === 0) {
         const existingMessage = await this.storage.loadE2eeMessage(message.id);
-        const storedMsg = this._storedFromPayload(cid, payload, message, existingMessage);
+        const storedMsg = this._storedFromPayload(routeCid, payload, message, existingMessage);
 
         await this.storage.saveE2eeMessage(storedMsg);
 
@@ -3113,7 +4801,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       // Epoch mismatch or other recoverable error — log and return null.
       // channel.ts will dispatch 'failed' → UI shows "Encrypted message".
-      console.error('[MLS] Failed to decrypt message:', cid, {
+      console.error('[MLS] Failed to decrypt message:', routeCid, {
         msgId: message.id,
         groupEpoch: Number(group.epoch()),
         msgEpoch: message.mls_epoch,
@@ -3224,18 +4912,22 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // Strip encrypted fields — only envelope metadata goes to server
     const { attachments: _a, sticker_url: _s, poll_type: _pt, poll_choice_counts: _pc, ...envelopeOptions } = options;
 
-    if (!this.getGroup(cid)) {
-      const ready = await this.ensureChannelReady(channelType, channelId, cid, { source: 'send' });
-      if (!this.getGroup(cid)) {
-        throw new Error(`[MLS] No group for cid: ${cid}; ensureChannelReady status=${ready.status}`);
+    const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
+    if (!this.getGroup(e2eeGroupId)) {
+      const groupParts = channelPartsFromCid(e2eeGroupId);
+      const ready = groupParts
+        ? await this.ensureChannelReady(groupParts.channelType, groupParts.channelId, e2eeGroupId, { source: 'send' })
+        : await this.ensureChannelReady(channelType, channelId, e2eeGroupId, { source: 'send' });
+      if (!this.getGroup(e2eeGroupId)) {
+        throw new Error(`[MLS] No group for cid: ${e2eeGroupId}; ensureChannelReady status=${ready.status}`);
       }
     }
 
     // Encrypt and send with epoch-stale retry:
     // After enableE2ee or when offline, other members may commit (external_join,
     // key rotation) advancing the server epoch. Sync group state and retry once.
-    let ciphertext = this.encryptMessage(cid, payload);
-    let group = this.getGroup(cid)!;
+    let ciphertext = this.encryptMessage(e2eeGroupId, payload);
+    let group = this.getGroup(e2eeGroupId)!;
     let response: any;
     try {
       response = await this.e2eeClient!.sendMessage(channelType, channelId, {
@@ -3243,6 +4935,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           id: messageId,
           mls_ciphertext: Array.from(ciphertext),
           mls_epoch: Number(group.epoch()),
+          e2ee_group_id: e2eeGroupId,
           ...envelopeOptions,
         },
       });
@@ -3251,13 +4944,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         console.warn('[MLS] sendMessage: epoch_stale — syncing group and retrying...');
         await this.sync();
         // Re-encrypt with updated epoch after sync
-        ciphertext = this.encryptMessage(cid, payload);
-        group = this.getGroup(cid)!;
+        ciphertext = this.encryptMessage(e2eeGroupId, payload);
+        group = this.getGroup(e2eeGroupId)!;
         response = await this.e2eeClient!.sendMessage(channelType, channelId, {
           message: {
             id: messageId,
             mls_ciphertext: Array.from(ciphertext),
             mls_epoch: Number(group.epoch()),
+            e2ee_group_id: e2eeGroupId,
             ...envelopeOptions,
           },
         });
@@ -3355,14 +5049,26 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     const { attachments: _a, sticker_url: _s, poll_type: _pt, poll_choice_counts: _pc, ...envelopeOptions } = options;
 
-    let ciphertext = this.encryptMessage(cid, payload);
-    let group = this.getGroup(cid)!;
+    const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
+    if (!this.getGroup(e2eeGroupId)) {
+      const groupParts = channelPartsFromCid(e2eeGroupId);
+      const ready = groupParts
+        ? await this.ensureChannelReady(groupParts.channelType, groupParts.channelId, e2eeGroupId, { source: 'edit' })
+        : await this.ensureChannelReady(channelType, channelId, e2eeGroupId, { source: 'edit' });
+      if (!this.getGroup(e2eeGroupId)) {
+        throw new Error(`[MLS] No group for cid: ${e2eeGroupId}; ensureChannelReady status=${ready.status}`);
+      }
+    }
+
+    let ciphertext = this.encryptMessage(e2eeGroupId, payload);
+    let group = this.getGroup(e2eeGroupId)!;
     let response: any;
     try {
       response = await this.e2eeClient!.updateMessage(channelType, channelId, messageId, {
         message: {
           mls_ciphertext: Array.from(ciphertext),
           mls_epoch: Number(group.epoch()),
+          e2ee_group_id: e2eeGroupId,
           ...envelopeOptions,
         },
       });
@@ -3371,12 +5077,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (isEpochStaleError(err)) {
         console.warn('[MLS] updateMessage: epoch_stale — syncing group and retrying...');
         await this.sync();
-        ciphertext = this.encryptMessage(cid, payload);
-        group = this.getGroup(cid)!;
+        ciphertext = this.encryptMessage(e2eeGroupId, payload);
+        group = this.getGroup(e2eeGroupId)!;
         response = await this.e2eeClient!.updateMessage(channelType, channelId, messageId, {
           message: {
             mls_ciphertext: Array.from(ciphertext),
             mls_epoch: Number(group.epoch()),
+            e2ee_group_id: e2eeGroupId,
             ...envelopeOptions,
           },
         });
@@ -3449,14 +5156,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     encryptedMessages: Array<{
       id: string;
       mls_ciphertext?: Uint8Array;
+      e2ee_group_id?: string;
       user?: { id: string };
       created_at: string;
       [key: string]: unknown;
     }>,
+    e2eeGroupId?: string,
   ): Promise<WaterfallResult> {
-    const group = this.groups.get(cid);
-    if (!group) return { decrypted: [], buffered: encryptedMessages };
-
     const decrypted: E2eeStoredMessage[] = [];
     const buffered: unknown[] = [];
 
@@ -3467,6 +5173,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     for (const msg of sorted) {
       if (!msg.mls_ciphertext) continue;
+      const routeCid = (typeof msg.cid === 'string' && msg.cid) || cid;
+      const groupCid = this._resolveMessageE2eeGroupId(msg, e2eeGroupId || cid);
+      const group = this.groups.get(groupCid);
+      if (!group) {
+        buffered.push(msg);
+        continue;
+      }
 
       // Skip messages already decrypted & stored for this version (MLS forward secrecy:
       // keys are consumed after first use, re-decrypting would fail)
@@ -3477,7 +5190,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
 
       try {
-        const { payload, messageType } = this.decryptMessage(cid, msg.mls_ciphertext);
+        const { payload, messageType } = this.decryptMessage(groupCid, msg.mls_ciphertext);
 
         // Mark as decrypted IMMEDIATELY after process_message succeeds —
         // before async IndexedDB write. This prevents the race where WS
@@ -3486,7 +5199,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
         if (messageType === 0) {
           const fallback = await this.storage.loadE2eeMessage(msg.id);
-          const decryptedMsg = this._storedFromPayload(cid, payload, msg, fallback);
+          const decryptedMsg = this._storedFromPayload(routeCid, payload, msg, fallback);
           await this.storage.saveE2eeMessage(decryptedMsg);
           decrypted.push(decryptedMsg);
         }
@@ -3506,7 +5219,16 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       await this._persistProvider();
     }
 
-    console.log('[MLS] Waterfall decrypt:', cid, 'decrypted:', decrypted.length, 'buffered:', buffered.length);
+    console.log(
+      '[MLS] Waterfall decrypt:',
+      cid,
+      'group:',
+      e2eeGroupId || cid,
+      'decrypted:',
+      decrypted.length,
+      'buffered:',
+      buffered.length,
+    );
     return { decrypted, buffered };
   }
 
@@ -3557,6 +5279,28 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this.deviceId = null;
     this.e2eeClient = null;
     this.client = null;
+    this._recoveryPrivateKey = null;
+    this._recoveryPublicKey = null;
+    this._recoveryKeyId = null;
+    this._recoveryCiphersuite = null;
+    this._wrappedRecoveryKey = null;
+    this._recoveryVaultKnown = null;
+    this._recoveryVaultBytes = null;
+    this._recoveryPublicMetadataPromise = null;
+    this._archiveStashKey = null;
+    this._archiveStashKeyPromise = null;
+    this._restoreQueue = [];
+    this._restoreQueueRunning = false;
+    this._restoreInflight.clear();
+    this._bootstrapKnownChannelsPromise = null;
+    this._channelBootstrapSub?.unsubscribe?.();
+    this._channelBootstrapSub = null;
+    this._e2eeBootstrapProgress = {
+      total: 0,
+      completed: 0,
+      failed_cids: [],
+      status: 'idle',
+    };
     this._decryptedMsgIds.clear();
     this._pendingEvictions.clear();
     this._syncing = false;
@@ -3660,10 +5404,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     newUserIds: string[],
   ): Promise<{ results: Array<{ topic_cid: string; success: boolean; error?: string; epoch?: number }> }> {
     if (!this.initialized) throw new Error('[MLS] Not initialized');
-    if (topicCids.length === 0) return { results: [] };
+    const ownGroupTopicCids = topicCids.filter((topicCid) => this._topicOwnsE2eeGroup(topicCid));
+    if (ownGroupTopicCids.length === 0) return { results: [] };
 
     // 1. Fetch KPs for new users — need N KPs per device (N = number of topics)
-    const countPerDevice = topicCids.length;
+    const countPerDevice = ownGroupTopicCids.length;
     const { members } = await this.e2eeClient!.getKeyPackagesByUserIds(newUserIds, countPerDevice);
 
     // 2. Build per-device KP queue: deviceId → [kp1, kp2, ..., kpN]
@@ -3684,8 +5429,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const processedCids: string[] = [];
     const topicGhostsByCid = new Map<string, string[]>();
 
-    for (let i = 0; i < topicCids.length; i++) {
-      const topicCid = topicCids[i];
+    for (let i = 0; i < ownGroupTopicCids.length; i++) {
+      const topicCid = ownGroupTopicCids[i];
       const group = this.groups.get(topicCid);
       if (!group) {
         console.warn('[MLS] batchAddMembersToTopics: no group for', topicCid, '— skipping');
@@ -3778,6 +5523,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     }
 
     await this._persistProvider();
+    for (const result of response.results) {
+      if (result.success) {
+        await this.safeArchiveCurrentEpochForCid(result.topic_cid);
+      }
+    }
     return response;
   }
 
@@ -3796,7 +5546,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     topicCids: string[],
   ): Promise<{ results: Array<{ topic_cid: string; success: boolean; error?: string; epoch?: number }> }> {
     if (!this.initialized) throw new Error('[MLS] Not initialized');
-    if (topicCids.length === 0) return { results: [] };
+    const ownGroupTopicCids = topicCids.filter(
+      (topicCid) => this._resolveChannelE2eeGroupId(topicCid, this._getActiveChannel(topicCid)) === topicCid,
+    );
+    if (ownGroupTopicCids.length === 0) return { results: [] };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const topicBundles: any[] = [];
@@ -3804,7 +5557,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const pendingGroups = new Map<string, any>();
 
     // 1. Sequential: fetch GroupInfo + external join for each topic
-    for (const topicCid of topicCids) {
+    for (const topicCid of ownGroupTopicCids) {
       try {
         // Extract channelType/channelId from topic CID
         const colonIdx = topicCid.indexOf(':');
@@ -3872,7 +5625,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         await this._uploadGroupInfo('topic', topicChannelId, group);
 
         // Save cursor
-        await this.storage.saveSyncTimestamp(result.topic_cid, this._nowCursor());
+        await this._saveScopeSyncCursor(result.topic_cid, this._nowEventCursor());
 
         console.log('[MLS] batchExternalJoin: joined', result.topic_cid, 'epoch:', result.epoch);
       } else {
@@ -3886,6 +5639,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     }
 
     await this._persistProvider();
+    for (const result of response.results) {
+      if (result.success) {
+        await this.safeArchiveCurrentEpochForCid(result.topic_cid);
+      }
+    }
     return response;
   }
 }

@@ -1,9 +1,42 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
+ * Validate raw key package bytes without constructing a KeyPackage object.
+ *
+ * Performs full validation: TLS deserialization, signature verification,
+ * protocol version check, lifetime check, init_key ≠ encryption_key.
+ *
+ * # Arguments
+ * * `bytes` - TLS-serialized KeyPackage bytes (from server API)
+ *
+ * # Returns
+ * `true` if the KeyPackage is valid, `false` otherwise.
+ *
+ * # Example
+ * ```javascript
+ * const isValid = validate_key_package_bytes(kpBytes);
+ * if (!isValid) console.warn("Invalid KeyPackage!");
+ * ```
+ */
+export function validate_key_package_bytes(bytes: Uint8Array): boolean;
+export function generate_recovery_keypair(provider: Provider): RecoveryKeypair;
+export function decrypt_archive_blob(provider: Provider, adk: Uint8Array, ciphertext: Uint8Array, nonce: Uint8Array, aead_aad: Uint8Array): Uint8Array;
+export function encrypt_archive_blob(provider: Provider, archive_bytes: Uint8Array, aad: ArchiveBlobAad): EncryptedArchiveBlob;
+export function unwrap_archive_data_key_from_parts(provider: Provider, recovery_private_key: Uint8Array, kem_output: Uint8Array, ciphertext: Uint8Array, hpke_info: Uint8Array): Uint8Array;
+export function wrap_archive_data_key(provider: Provider, adk: Uint8Array, recipient_recovery_public_key: Uint8Array, info: ArchiveKeyWrapInfo): HpkeWrappedArchiveDataKey;
+export function wrap_recovery_private_key(provider: Provider, pin: string, private_key: Uint8Array, public_key: Uint8Array, key_id: string, ciphersuite: number, iterations: number): WrappedRecoveryKey;
+export function unwrap_archive_data_key(provider: Provider, recovery_private_key: Uint8Array, wrapped: HpkeWrappedArchiveDataKey): Uint8Array;
+export function unwrap_recovery_private_key(provider: Provider, pin: string, wrapped: WrappedRecoveryKey): Uint8Array;
+/**
  * Test function to verify the module is working
  */
 export function greet(): void;
+/**
+ * Initialize the WASM module
+ *
+ * Call this once at startup to set up panic hooks for better error messages.
+ */
+export function init(): void;
 /**
  * Compute the deterministic channel_id for E2EE Messaging (DM) channels.
  *
@@ -27,30 +60,19 @@ export function greet(): void;
  */
 export function hash_channel_id(project_id: string, user_ids: string[]): string;
 /**
- * Initialize the WASM module
- *
- * Call this once at startup to set up panic hooks for better error messages.
+ * Decrypt and verify an MLS private message using a V2 archive + snapshot.
  */
-export function init(): void;
+export function decrypt_with_epoch_archive_v2(provider: Provider, archive: Uint8Array, snapshot: Uint8Array, ciphertext: Uint8Array, allow_own_messages: boolean, max_forward_distance: number): ArchivedMessage;
 /**
- * Validate raw key package bytes without constructing a KeyPackage object.
- *
- * Performs full validation: TLS deserialization, signature verification,
- * protocol version check, lifetime check, init_key ≠ encryption_key.
- *
- * # Arguments
- * * `bytes` - TLS-serialized KeyPackage bytes (from server API)
- *
- * # Returns
- * `true` if the KeyPackage is valid, `false` otherwise.
- *
- * # Example
- * ```javascript
- * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) console.warn("Invalid KeyPackage!");
- * ```
+ * Decrypt sender data using an archived epoch without consuming the message ratchet.
  */
-export function validate_key_package_bytes(bytes: Uint8Array): boolean;
+export function peek_sender_data_from_archive(provider: Provider, archive: Uint8Array, ciphertext: Uint8Array): ArchivedSenderData;
+/**
+ * Decrypt and verify an MLS private message using archived epoch state.
+ *
+ * `max_forward_distance` uses `0` as "use archive default".
+ */
+export function decrypt_with_epoch_archive(provider: Provider, archive: Uint8Array, ciphertext: Uint8Array, allow_own_messages: boolean, max_forward_distance: number): ArchivedMessage;
 /**
  * Type of processed message
  */
@@ -128,6 +150,74 @@ export class AddMessages {
   readonly welcome: Uint8Array;
   readonly proposal: Uint8Array;
 }
+export class ArchiveBlobAad {
+  free(): void;
+  constructor(cid: string, epoch: bigint, scope: string, blob_id: string, snapshot_hash: string);
+  to_bytes(): Uint8Array;
+}
+export class ArchiveKeyWrapInfo {
+  free(): void;
+  constructor(channel_id: string, epoch: bigint, scope: string, blob_id: string, snapshot_hash: string, recipient_key_id: string);
+  to_bytes(): Uint8Array;
+}
+/**
+ * Application plaintext recovered from an archived epoch.
+ */
+export class ArchivedMessage {
+  private constructor();
+  free(): void;
+  /**
+   * Get the sender ratchet generation.
+   */
+  readonly generation: number;
+  /**
+   * Whether this message was sent by the archive owner's own leaf.
+   */
+  readonly own_message: boolean;
+  /**
+   * Get the sender's leaf index.
+   */
+  readonly sender_index: number;
+  /**
+   * Get the additional authenticated data.
+   */
+  readonly aad: Uint8Array;
+  /**
+   * Get the MLS epoch.
+   */
+  readonly epoch: bigint;
+  /**
+   * Get the decrypted application content.
+   */
+  readonly content: Uint8Array;
+}
+/**
+ * Sender data decoded from an archived epoch.
+ */
+export class ArchivedSenderData {
+  private constructor();
+  free(): void;
+  /**
+   * Get the sender ratchet generation.
+   */
+  readonly generation: number;
+  /**
+   * Whether this message was sent by the archive owner's own leaf.
+   */
+  readonly own_message: boolean;
+  /**
+   * Get the MLS content type.
+   */
+  readonly content_type: string;
+  /**
+   * Get the sender's leaf index.
+   */
+  readonly sender_index: number;
+  /**
+   * Get the MLS epoch.
+   */
+  readonly epoch: bigint;
+}
 /**
  * Bundle containing commit message and optional welcome
  */
@@ -159,6 +249,21 @@ export class CommitBundle {
    */
   readonly welcome: Uint8Array | undefined;
 }
+export class EncryptedArchiveBlob {
+  private constructor();
+  free(): void;
+  readonly ciphertext: Uint8Array;
+  readonly adk: Uint8Array;
+  readonly nonce: Uint8Array;
+  readonly aead_aad: Uint8Array;
+}
+export class ExportedEpochArchiveV2 {
+  private constructor();
+  free(): void;
+  readonly archive_bytes: Uint8Array;
+  readonly snapshot_hash: Uint8Array;
+  readonly snapshot_bytes: Uint8Array;
+}
 /**
  * Result of an external join (self-join with GroupInfo)
  */
@@ -181,6 +286,81 @@ export class Group {
   private constructor();
   free(): void;
   /**
+   * Create a new group (legacy API, uses group_id string directly)
+   */
+  static create_new(provider: Provider, founder: Identity, group_id: string): Group;
+  /**
+   * Persist the group's current state to the Provider's storage.
+   *
+   * MUST be called after processing application messages (decrypt) to save
+   * the updated ratchet/secret tree state. Without this, a Provider restore
+   * (e.g., on page reload) will load stale ratchet state, causing
+   * SecretReuseError for messages that were already decrypted.
+   */
+  save_state(provider: Provider): void;
+  /**
+   * Delete this group's persisted OpenMLS state from the Provider storage.
+   *
+   * Use when the local user leaves or is removed from a channel. This clears
+   * the old MLS group state so a later re-add with the same CID can join from
+   * a fresh Welcome without colliding with stale provider records.
+   */
+  delete_state(provider: Provider): void;
+  /**
+   * Join a group via External Commit
+   *
+   * This allows a user to join a group without needing a Welcome message,
+   * using only the GroupInfo.
+   *
+   * # Arguments
+   * * `provider` - Crypto provider
+   * * `identity` - Identity of the joiner
+   * * `group_info` - Serialized GroupInfo bytes
+   * * `ratchet_tree` - Optional ratchet tree
+   *
+   * # Returns
+   * ExternalJoinResult containing the joined group and commit message to broadcast
+   */
+  static join_external(provider: Provider, identity: Identity, group_info: Uint8Array, ratchet_tree?: RatchetTree | null): ExternalJoinResult;
+  /**
+   * Create a new group with a CID from Ermis
+   *
+   * # Arguments
+   * * `provider` - Crypto provider
+   * * `founder` - Identity of the group creator
+   * * `cid` - Channel ID from Ermis (e.g., "team:channel_abc123")
+   *
+   * # Example
+   * ```javascript
+   * const group = Group.create_with_cid(provider, identity, "team:my_channel");
+   * ```
+   */
+  static create_with_cid(provider: Provider, founder: Identity, cid: string): Group;
+  /**
+   * Join a group using a Welcome message
+   *
+   * # Arguments
+   * * `provider` - Crypto provider
+   * * `welcome` - Serialized Welcome message bytes
+   * * `ratchet_tree` - Optional ratchet tree (if not embedded in welcome)
+   */
+  static join_with_welcome(provider: Provider, welcome: Uint8Array, ratchet_tree?: RatchetTree | null): Group;
+  /**
+   * Join a group using a Welcome (legacy API)
+   */
+  static join(provider: Provider, welcome: Uint8Array, ratchet_tree: RatchetTree): Group;
+  /**
+   * Load a group from the Provider's storage by CID
+   *
+   * After restoring a Provider from bytes (IndexedDB), call this to reopen
+   * a group that was previously created or joined.
+   *
+   * # Arguments
+   * * `provider` - Crypto provider (restored from bytes)
+   * * `cid` - Channel ID (e.g., "team:channel_abc123")
+   */
+  static load(provider: Provider, cid: string): Group;
+  /**
    * Export a secret key derived from the group state
    *
    * Useful for deriving encryption keys for media streams, etc.
@@ -196,6 +376,10 @@ export class Group {
    * Get the local member's leaf index
    */
   own_leaf_index(): number;
+  /**
+   * Export V2 archive bytes plus canonical member snapshot.
+   */
+  archive_epoch_v2(): ExportedEpochArchiveV2;
   /**
    * Export group info for external commits
    *
@@ -223,6 +407,14 @@ export class Group {
    */
   export_ratchet_tree(): RatchetTree;
   /**
+   * Export the current epoch archive for historical message recovery.
+   *
+   * The returned bytes contain MLS secret material. Applications must encrypt
+   * them with their PIN/vault key before uploading or persisting outside the
+   * local device.
+   */
+  archive_current_epoch(): Uint8Array;
+  /**
    * Get the CID (group_id as string)
    *
    * This returns the original cid string used to create the group,
@@ -243,6 +435,89 @@ export class Group {
    * Get the raw group_id bytes
    */
   group_id(): Uint8Array;
+  /**
+   * Add members and commit immediately (convenience method)
+   *
+   * Use this when you want to add members without batching.
+   * For batch operations, use `propose_add_member` + `commit_pending_proposals`.
+   */
+  add_members(provider: Provider, sender: Identity, new_members: KeyPackage[]): CommitBundle;
+  /**
+   * Remove ALL devices of a user by user_id and commit immediately
+   *
+   * A user with N devices will have N leaf nodes in the group.
+   * This method finds all of them and removes them in a single commit.
+   */
+  remove_user(provider: Provider, sender: Identity, user_id: string): CommitBundle;
+  /**
+   * Key rotation with immediate commit (convenience method)
+   */
+  self_update(provider: Provider, sender: Identity): CommitBundle;
+  /**
+   * Remove multiple users (all their devices) and commit immediately
+   *
+   * Each user_id may have multiple leaf nodes (devices).
+   * This method finds ALL leaf nodes for ALL specified users
+   * and removes them in a single commit.
+   */
+  remove_users(provider: Provider, sender: Identity, user_ids: string[]): CommitBundle;
+  /**
+   * Remove members and commit immediately (convenience method)
+   */
+  remove_members(provider: Provider, sender: Identity, member_indices: Uint32Array): CommitBundle;
+  /**
+   * Discard the pending commit (rollback)
+   */
+  clear_pending_commit(provider: Provider): void;
+  /**
+   * Create one inline commit containing removals, adds, and/or a self-update.
+   *
+   * This API uses `commit_builder().consume_proposal_store(false)` so the
+   * resulting commit contains only the changes requested by this call. The
+   * remove/add proposals are owned by the commit and encoded by value, which
+   * avoids receivers depending on standalone proposal messages being delivered
+   * before the commit.
+   */
+  commit_group_changes(provider: Provider, sender: Identity, remove_user_ids: string[], add_members: KeyPackage[], force_self_update: boolean): CommitBundle;
+  /**
+   * Merge the pending commit after DS confirmation
+   */
+  merge_pending_commit(provider: Provider): void;
+  /**
+   * Create one inline commit that removes one or more members.
+   */
+  commit_member_removals(provider: Provider, sender: Identity, remove_user_ids: string[]): CommitBundle;
+  /**
+   * Combined propose and commit for adding a single member
+   * This is kept for backwards compatibility with demo code
+   */
+  propose_and_commit_add(provider: Provider, sender: Identity, new_member: KeyPackage): AddMessages;
+  /**
+   * Commit all pending proposals
+   *
+   * This creates a commit message that includes all queued proposals.
+   * Use `merge_pending_commit` after the DS confirms the commit.
+   */
+  commit_pending_proposals(provider: Provider, sender: Identity): CommitBundle;
+  /**
+   * Create one inline commit that removes stale members and adds new members.
+   *
+   * This is an intent-specific wrapper for SDK callsites. It intentionally
+   * shares the implementation of `commit_group_changes` so duplicate
+   * add/remove validation cannot drift.
+   */
+  commit_member_add_with_removals(provider: Provider, sender: Identity, remove_user_ids: string[], add_members: KeyPackage[]): CommitBundle;
+  /**
+   * Create one inline commit that removes stale members and rotates the sender leaf.
+   */
+  commit_self_update_with_removals(provider: Provider, sender: Identity, remove_user_ids: string[]): CommitBundle;
+  /**
+   * Add a user with multiple devices and commit immediately
+   *
+   * Each KeyPackage represents one device of the same user.
+   * All devices are added in a single commit.
+   */
+  add_user(provider: Provider, sender: Identity, device_key_packages: KeyPackage[]): CommitBundle;
   /**
    * Leave the group by creating a self-remove proposal
    *
@@ -353,162 +628,16 @@ export class Group {
    * * `aad` - Bytes to use as AAD (typically JSON-serialized metadata)
    */
   set_aad(aad: Uint8Array): void;
-  /**
-   * Create a new group (legacy API, uses group_id string directly)
-   */
-  static create_new(provider: Provider, founder: Identity, group_id: string): Group;
-  /**
-   * Persist the group's current state to the Provider's storage.
-   *
-   * MUST be called after processing application messages (decrypt) to save
-   * the updated ratchet/secret tree state. Without this, a Provider restore
-   * (e.g., on page reload) will load stale ratchet state, causing
-   * SecretReuseError for messages that were already decrypted.
-   */
-  save_state(provider: Provider): void;
-  /**
-   * Delete this group's persisted OpenMLS state from the Provider storage.
-   *
-   * Use when the local user leaves or is removed from a channel. This clears
-   * the old MLS group state so a later re-add with the same CID can join from
-   * a fresh Welcome without colliding with stale provider records.
-   */
-  delete_state(provider: Provider): void;
-  /**
-   * Join a group via External Commit
-   *
-   * This allows a user to join a group without needing a Welcome message,
-   * using only the GroupInfo.
-   *
-   * # Arguments
-   * * `provider` - Crypto provider
-   * * `identity` - Identity of the joiner
-   * * `group_info` - Serialized GroupInfo bytes
-   * * `ratchet_tree` - Optional ratchet tree
-   *
-   * # Returns
-   * ExternalJoinResult containing the joined group and commit message to broadcast
-   */
-  static join_external(provider: Provider, identity: Identity, group_info: Uint8Array, ratchet_tree?: RatchetTree | null): ExternalJoinResult;
-  /**
-   * Create a new group with a CID from Ermis
-   *
-   * # Arguments
-   * * `provider` - Crypto provider
-   * * `founder` - Identity of the group creator
-   * * `cid` - Channel ID from Ermis (e.g., "team:channel_abc123")
-   *
-   * # Example
-   * ```javascript
-   * const group = Group.create_with_cid(provider, identity, "team:my_channel");
-   * ```
-   */
-  static create_with_cid(provider: Provider, founder: Identity, cid: string): Group;
-  /**
-   * Join a group using a Welcome message
-   *
-   * # Arguments
-   * * `provider` - Crypto provider
-   * * `welcome` - Serialized Welcome message bytes
-   * * `ratchet_tree` - Optional ratchet tree (if not embedded in welcome)
-   */
-  static join_with_welcome(provider: Provider, welcome: Uint8Array, ratchet_tree?: RatchetTree | null): Group;
-  /**
-   * Join a group using a Welcome (legacy API)
-   */
-  static join(provider: Provider, welcome: Uint8Array, ratchet_tree: RatchetTree): Group;
-  /**
-   * Load a group from the Provider's storage by CID
-   *
-   * After restoring a Provider from bytes (IndexedDB), call this to reopen
-   * a group that was previously created or joined.
-   *
-   * # Arguments
-   * * `provider` - Crypto provider (restored from bytes)
-   * * `cid` - Channel ID (e.g., "team:channel_abc123")
-   */
-  static load(provider: Provider, cid: string): Group;
-  /**
-   * Add members and commit immediately (convenience method)
-   *
-   * Use this when you want to add members without batching.
-   * For batch operations, use `propose_add_member` + `commit_pending_proposals`.
-   */
-  add_members(provider: Provider, sender: Identity, new_members: KeyPackage[]): CommitBundle;
-  /**
-   * Remove ALL devices of a user by user_id and commit immediately
-   *
-   * A user with N devices will have N leaf nodes in the group.
-   * This method finds all of them and removes them in a single commit.
-   */
-  remove_user(provider: Provider, sender: Identity, user_id: string): CommitBundle;
-  /**
-   * Key rotation with immediate commit (convenience method)
-   */
-  self_update(provider: Provider, sender: Identity): CommitBundle;
-  /**
-   * Remove multiple users (all their devices) and commit immediately
-   *
-   * Each user_id may have multiple leaf nodes (devices).
-   * This method finds ALL leaf nodes for ALL specified users
-   * and removes them in a single commit.
-   */
-  remove_users(provider: Provider, sender: Identity, user_ids: string[]): CommitBundle;
-  /**
-   * Remove members and commit immediately (convenience method)
-   */
-  remove_members(provider: Provider, sender: Identity, member_indices: Uint32Array): CommitBundle;
-  /**
-   * Discard the pending commit (rollback)
-   */
-  clear_pending_commit(provider: Provider): void;
-  /**
-   * Create one inline commit containing removals, adds, and/or a self-update.
-   *
-   * This POC API intentionally uses `commit_builder().consume_proposal_store(false)` so the
-   * resulting commit contains only the changes requested by this call. The remove/add proposals
-   * are owned by the commit and encoded by value, which avoids receivers depending on standalone
-   * proposal messages being delivered before the commit.
-   */
-  commit_group_changes(provider: Provider, sender: Identity, remove_user_ids: string[], add_members: KeyPackage[], force_self_update: boolean): CommitBundle;
-  /**
-   * Merge the pending commit after DS confirmation
-   */
-  merge_pending_commit(provider: Provider): void;
-  /**
-   * Create one inline commit that removes one or more members.
-   */
-  commit_member_removals(provider: Provider, sender: Identity, remove_user_ids: string[]): CommitBundle;
-  /**
-   * Combined propose and commit for adding a single member
-   * This is kept for backwards compatibility with demo code
-   */
-  propose_and_commit_add(provider: Provider, sender: Identity, new_member: KeyPackage): AddMessages;
-  /**
-   * Commit all pending proposals
-   *
-   * This creates a commit message that includes all queued proposals.
-   * Use `merge_pending_commit` after the DS confirms the commit.
-   */
-  commit_pending_proposals(provider: Provider, sender: Identity): CommitBundle;
-  /**
-   * Create one inline commit that removes stale members and adds new members.
-   *
-   * This is an intent-specific wrapper for SDK callsites. It intentionally shares the
-   * implementation of `commit_group_changes` so duplicate add/remove validation cannot drift.
-   */
-  commit_member_add_with_removals(provider: Provider, sender: Identity, remove_user_ids: string[], add_members: KeyPackage[]): CommitBundle;
-  /**
-   * Create one inline commit that removes stale members and rotates the sender leaf.
-   */
-  commit_self_update_with_removals(provider: Provider, sender: Identity, remove_user_ids: string[]): CommitBundle;
-  /**
-   * Add a user with multiple devices and commit immediately
-   *
-   * Each KeyPackage represents one device of the same user.
-   * All devices are added in a single commit.
-   */
-  add_user(provider: Provider, sender: Identity, device_key_packages: KeyPackage[]): CommitBundle;
+}
+export class HpkeWrappedArchiveDataKey {
+  private constructor();
+  free(): void;
+  static from_bytes(bytes: Uint8Array): HpkeWrappedArchiveDataKey;
+  to_bytes(): Uint8Array;
+  readonly ciphertext: Uint8Array;
+  readonly kem_output: Uint8Array;
+  readonly ciphersuite: number;
+  readonly hpke_info: Uint8Array;
 }
 /**
  * Represents a user's MLS identity with credentials and signing keys
@@ -704,23 +833,67 @@ export class RatchetTree {
    */
   to_bytes(): Uint8Array;
 }
+export class RecoveryKeypair {
+  private constructor();
+  free(): void;
+  readonly public_key: Uint8Array;
+  readonly ciphersuite: number;
+  readonly private_key: Uint8Array;
+  readonly key_id: string;
+}
+export class WrappedRecoveryKey {
+  private constructor();
+  free(): void;
+  static from_bytes(bytes: Uint8Array): WrappedRecoveryKey;
+  to_bytes(): Uint8Array;
+  readonly public_key: Uint8Array;
+  readonly ciphersuite: number;
+  readonly key_id: string;
+}
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
+  readonly __wbg_addmessages_free: (a: number, b: number) => void;
+  readonly __wbg_commitbundle_free: (a: number, b: number) => void;
+  readonly __wbg_exportedepocharchivev2_free: (a: number, b: number) => void;
+  readonly __wbg_externaljoinresult_free: (a: number, b: number) => void;
+  readonly __wbg_group_free: (a: number, b: number) => void;
   readonly __wbg_identity_free: (a: number, b: number) => void;
   readonly __wbg_keypackage_free: (a: number, b: number) => void;
   readonly __wbg_memberinfo_free: (a: number, b: number) => void;
-  readonly __wbg_mlserror_free: (a: number, b: number) => void;
-  readonly __wbg_processedmessage_free: (a: number, b: number) => void;
   readonly __wbg_proposalmessage_free: (a: number, b: number) => void;
-  readonly __wbg_provider_free: (a: number, b: number) => void;
-  readonly __wbg_ratchettree_free: (a: number, b: number) => void;
+  readonly addmessages_commit: (a: number) => any;
+  readonly addmessages_group_info: (a: number) => [number, number];
+  readonly addmessages_proposal: (a: number) => any;
+  readonly addmessages_welcome: (a: number) => any;
+  readonly commitbundle_commit: (a: number) => [number, number];
+  readonly commitbundle_commit_as_uint8array: (a: number) => any;
+  readonly commitbundle_group_info: (a: number) => [number, number];
+  readonly commitbundle_has_welcome: (a: number) => number;
+  readonly commitbundle_welcome: (a: number) => [number, number];
+  readonly commitbundle_welcome_as_uint8array: (a: number) => any;
+  readonly exportedepocharchivev2_archive_bytes: (a: number) => [number, number];
+  readonly exportedepocharchivev2_snapshot_bytes: (a: number) => [number, number];
+  readonly exportedepocharchivev2_snapshot_hash: (a: number) => [number, number];
+  readonly externaljoinresult_commit: (a: number) => [number, number];
+  readonly externaljoinresult_group: (a: number) => number;
+  readonly group_add_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_archive_current_epoch: (a: number) => [number, number, number, number];
+  readonly group_archive_epoch_v2: (a: number) => [number, number, number];
   readonly group_cid: (a: number) => [number, number, number, number];
+  readonly group_clear_pending_commit: (a: number, b: number) => [number, number];
   readonly group_clear_pending_proposals: (a: number, b: number) => [number, number];
-  readonly group_create_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
-  readonly group_create_message_with_aad: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+  readonly group_commit_group_changes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
+  readonly group_commit_member_add_with_removals: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+  readonly group_commit_member_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_commit_pending_proposals: (a: number, b: number, c: number) => [number, number, number];
+  readonly group_commit_self_update_with_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_create_new: (a: number, b: number, c: number, d: number) => number;
+  readonly group_create_with_cid: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_delete_state: (a: number, b: number) => [number, number];
   readonly group_epoch: (a: number) => bigint;
   readonly group_export_group_info: (a: number, b: number, c: number, d: number) => [number, number, number, number];
   readonly group_export_key: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
@@ -728,22 +901,29 @@ export interface InitOutput {
   readonly group_group_id: (a: number) => [number, number];
   readonly group_has_pending_commit: (a: number) => number;
   readonly group_is_operational: (a: number) => number;
+  readonly group_join: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_join_external: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_join_with_welcome: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_leave_group: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly group_load: (a: number, b: number, c: number) => [number, number, number];
   readonly group_member_by_user_id: (a: number, b: number, c: number) => number;
   readonly group_members: (a: number) => [number, number];
   readonly group_members_by_user_id: (a: number, b: number, c: number) => [number, number];
+  readonly group_merge_pending_commit: (a: number, b: number) => [number, number];
   readonly group_own_leaf_index: (a: number) => number;
   readonly group_pending_proposals_count: (a: number) => number;
-  readonly group_process_message: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_process_message_raw: (a: number, b: number, c: number, d: number) => [number, number, number, number];
   readonly group_propose_add_member: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_propose_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+  readonly group_propose_and_commit_add: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_propose_remove_member: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_propose_remove_member_by_user_id: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
   readonly group_propose_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
   readonly group_propose_self_update: (a: number, b: number, c: number) => [number, number, number];
-  readonly group_set_aad: (a: number, b: number, c: number) => void;
-  readonly hash_channel_id: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly group_remove_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_remove_users: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_save_state: (a: number, b: number) => [number, number];
+  readonly group_self_update: (a: number, b: number, c: number) => [number, number, number];
   readonly identity_from_bytes: (a: number, b: number, c: number) => [number, number, number];
   readonly identity_key_package: (a: number, b: number) => number;
   readonly identity_key_packages: (a: number, b: number, c: number) => [number, number];
@@ -757,66 +937,91 @@ export interface InitOutput {
   readonly memberinfo_index: (a: number) => number;
   readonly memberinfo_signature_key: (a: number) => [number, number];
   readonly memberinfo_user_id: (a: number) => [number, number];
-  readonly mlserror_code: (a: number) => number;
-  readonly mlserror_message: (a: number) => [number, number];
-  readonly mlserror_new: (a: number, b: number, c: number) => number;
+  readonly proposalmessage_bytes: (a: number) => [number, number];
+  readonly proposalmessage_bytes_as_uint8array: (a: number) => any;
+  readonly proposalmessage_proposal_ref: (a: number) => [number, number];
+  readonly validate_key_package_bytes: (a: number, b: number) => number;
+  readonly __wbg_archiveblobaad_free: (a: number, b: number) => void;
+  readonly __wbg_archivedmessage_free: (a: number, b: number) => void;
+  readonly __wbg_archivedsenderdata_free: (a: number, b: number) => void;
+  readonly __wbg_archivekeywrapinfo_free: (a: number, b: number) => void;
+  readonly __wbg_encryptedarchiveblob_free: (a: number, b: number) => void;
+  readonly __wbg_hpkewrappedarchivedatakey_free: (a: number, b: number) => void;
+  readonly __wbg_processedmessage_free: (a: number, b: number) => void;
+  readonly __wbg_provider_free: (a: number, b: number) => void;
+  readonly __wbg_recoverykeypair_free: (a: number, b: number) => void;
+  readonly __wbg_wrappedrecoverykey_free: (a: number, b: number) => void;
+  readonly archiveblobaad_new: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+  readonly archiveblobaad_to_bytes: (a: number) => [number, number, number, number];
+  readonly archivedmessage_aad: (a: number) => [number, number];
+  readonly archivedmessage_content: (a: number) => [number, number];
+  readonly archivedmessage_epoch: (a: number) => bigint;
+  readonly archivedmessage_generation: (a: number) => number;
+  readonly archivedmessage_own_message: (a: number) => number;
+  readonly archivedmessage_sender_index: (a: number) => number;
+  readonly archivedsenderdata_content_type: (a: number) => [number, number];
+  readonly archivedsenderdata_generation: (a: number) => number;
+  readonly archivedsenderdata_own_message: (a: number) => number;
+  readonly archivedsenderdata_sender_index: (a: number) => number;
+  readonly archivekeywrapinfo_new: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
+  readonly archivekeywrapinfo_to_bytes: (a: number) => [number, number, number, number];
+  readonly decrypt_archive_blob: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+  readonly decrypt_with_epoch_archive: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+  readonly decrypt_with_epoch_archive_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
+  readonly encrypt_archive_blob: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly encryptedarchiveblob_adk: (a: number) => [number, number];
+  readonly encryptedarchiveblob_aead_aad: (a: number) => [number, number];
+  readonly encryptedarchiveblob_ciphertext: (a: number) => [number, number];
+  readonly encryptedarchiveblob_nonce: (a: number) => [number, number];
+  readonly generate_recovery_keypair: (a: number) => [number, number, number];
+  readonly group_create_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+  readonly group_create_message_with_aad: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+  readonly group_process_message: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_process_message_raw: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly group_set_aad: (a: number, b: number, c: number) => void;
+  readonly hash_channel_id: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly hpkewrappedarchivedatakey_ciphersuite: (a: number) => number;
+  readonly hpkewrappedarchivedatakey_ciphertext: (a: number) => [number, number];
+  readonly hpkewrappedarchivedatakey_from_bytes: (a: number, b: number) => [number, number, number];
+  readonly hpkewrappedarchivedatakey_hpke_info: (a: number) => [number, number];
+  readonly hpkewrappedarchivedatakey_kem_output: (a: number) => [number, number];
+  readonly hpkewrappedarchivedatakey_to_bytes: (a: number) => [number, number, number, number];
+  readonly peek_sender_data_from_archive: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
   readonly processedmessage_aad: (a: number) => [number, number];
   readonly processedmessage_content: (a: number) => [number, number];
-  readonly processedmessage_epoch: (a: number) => bigint;
   readonly processedmessage_is_application_message: (a: number) => number;
   readonly processedmessage_is_commit: (a: number) => number;
   readonly processedmessage_is_proposal: (a: number) => number;
   readonly processedmessage_message_type: (a: number) => number;
-  readonly processedmessage_sender_index: (a: number) => number;
-  readonly proposalmessage_bytes: (a: number) => [number, number];
-  readonly proposalmessage_bytes_as_uint8array: (a: number) => any;
-  readonly proposalmessage_proposal_ref: (a: number) => [number, number];
   readonly provider_from_bytes: (a: number, b: number) => [number, number, number];
   readonly provider_new: () => number;
   readonly provider_to_bytes: (a: number) => [number, number, number, number];
+  readonly recoverykeypair_key_id: (a: number) => [number, number];
+  readonly recoverykeypair_private_key: (a: number) => [number, number];
+  readonly recoverykeypair_public_key: (a: number) => [number, number];
+  readonly unwrap_archive_data_key: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly unwrap_archive_data_key_from_parts: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+  readonly unwrap_recovery_private_key: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly wrap_archive_data_key: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+  readonly wrap_recovery_private_key: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number];
+  readonly wrappedrecoverykey_ciphersuite: (a: number) => number;
+  readonly wrappedrecoverykey_from_bytes: (a: number, b: number) => [number, number, number];
+  readonly wrappedrecoverykey_key_id: (a: number) => [number, number];
+  readonly wrappedrecoverykey_public_key: (a: number) => [number, number];
+  readonly wrappedrecoverykey_to_bytes: (a: number) => [number, number, number, number];
+  readonly init: () => void;
+  readonly recoverykeypair_ciphersuite: (a: number) => number;
+  readonly greet: () => void;
+  readonly archivedsenderdata_epoch: (a: number) => bigint;
+  readonly processedmessage_epoch: (a: number) => bigint;
+  readonly processedmessage_sender_index: (a: number) => number;
+  readonly __wbg_ratchettree_free: (a: number, b: number) => void;
   readonly ratchettree_from_bytes: (a: number, b: number) => [number, number, number];
   readonly ratchettree_to_bytes: (a: number) => [number, number];
-  readonly validate_key_package_bytes: (a: number, b: number) => number;
-  readonly init: () => void;
-  readonly greet: () => void;
-  readonly __wbg_addmessages_free: (a: number, b: number) => void;
-  readonly __wbg_commitbundle_free: (a: number, b: number) => void;
-  readonly __wbg_externaljoinresult_free: (a: number, b: number) => void;
-  readonly __wbg_group_free: (a: number, b: number) => void;
-  readonly addmessages_commit: (a: number) => any;
-  readonly addmessages_group_info: (a: number) => [number, number];
-  readonly addmessages_proposal: (a: number) => any;
-  readonly addmessages_welcome: (a: number) => any;
-  readonly commitbundle_commit: (a: number) => [number, number];
-  readonly commitbundle_commit_as_uint8array: (a: number) => any;
-  readonly commitbundle_group_info: (a: number) => [number, number];
-  readonly commitbundle_has_welcome: (a: number) => number;
-  readonly commitbundle_welcome: (a: number) => [number, number];
-  readonly commitbundle_welcome_as_uint8array: (a: number) => any;
-  readonly externaljoinresult_commit: (a: number) => [number, number];
-  readonly externaljoinresult_group: (a: number) => number;
-  readonly group_add_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_clear_pending_commit: (a: number, b: number) => [number, number];
-  readonly group_commit_group_changes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
-  readonly group_commit_member_add_with_removals: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
-  readonly group_commit_member_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_commit_pending_proposals: (a: number, b: number, c: number) => [number, number, number];
-  readonly group_commit_self_update_with_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_create_new: (a: number, b: number, c: number, d: number) => number;
-  readonly group_create_with_cid: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_delete_state: (a: number, b: number) => [number, number];
-  readonly group_join: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_join_external: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_join_with_welcome: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_load: (a: number, b: number, c: number) => [number, number, number];
-  readonly group_merge_pending_commit: (a: number, b: number) => [number, number];
-  readonly group_propose_and_commit_add: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_remove_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_remove_users: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_save_state: (a: number, b: number) => [number, number];
-  readonly group_self_update: (a: number, b: number, c: number) => [number, number, number];
+  readonly __wbg_mlserror_free: (a: number, b: number) => void;
+  readonly mlserror_code: (a: number) => number;
+  readonly mlserror_message: (a: number) => [number, number];
+  readonly mlserror_new: (a: number, b: number, c: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;
   readonly __externref_table_alloc: () => number;
   readonly __wbindgen_export_2: WebAssembly.Table;
