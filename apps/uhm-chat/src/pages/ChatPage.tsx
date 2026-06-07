@@ -47,6 +47,13 @@ export function ChatPage() {
   const { status, retryConnection } = useConnectionStatus(client)
   const totalUnreadCount = useTotalUnreadCount()
 
+  // Directly update browser tab title with unread count (more reliable than Helmet)
+  useEffect(() => {
+    document.title = totalUnreadCount > 0
+      ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) Uhm Chat`
+      : 'Uhm Chat'
+  }, [totalUnreadCount])
+
   const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
   const [isSearchMode, setIsSearchMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
