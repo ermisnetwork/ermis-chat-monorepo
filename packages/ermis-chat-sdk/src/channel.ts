@@ -568,8 +568,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return await this.getClient().delete(this._channelURL());
   }
 
-  async truncate() {
-    return await this.getClient().delete(this._channelURL() + '/truncate');
+  async truncate(options?: { for_me?: boolean }) {
+    const qs = options?.for_me ? '?for_me=true' : '';
+    return await this.getClient().delete(this._channelURL() + '/truncate' + qs);
   }
 
   async blockUser() {
@@ -1807,7 +1808,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           channelState.addMessageSorted(event.message, false, false);
         }
         break;
-      case 'channel.truncate': {
+      case 'channel.truncate':
+      case 'channel.truncate_for_me': {
         const truncateDate = event.channel?.created_at || event.created_at;
         if (truncateDate) {
           const truncatedAt = +new Date(truncateDate);
