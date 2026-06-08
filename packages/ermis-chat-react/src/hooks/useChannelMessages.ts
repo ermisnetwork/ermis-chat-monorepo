@@ -254,7 +254,7 @@ export function useChannelMessages({
         setTimeout(() => scrollToBottom(false), 150);
         setTimeout(() => scrollToBottom(false), 300);
       } else if (wasAtBottom) {
-        scheduleScrollToBottom(true);
+        scheduleScrollToBottom(true, true);
       }
     };
 
@@ -332,8 +332,11 @@ export function useChannelMessages({
 
     const handleE2eeDecrypted = (event: any) => {
       if (!event?.message?.id || event.cid !== activeChannel.cid) return;
+      const wasAtBottom = isAtBottomRef.current;
       mergeDecryptedMessages([event.message]);
-      scheduleScrollToBottom(false);
+      if (wasAtBottom) {
+        scheduleScrollToBottom(false, true);
+      }
     };
 
     const handleE2eeRefresh = (event: any) => {

@@ -60,7 +60,7 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const isSticker = isStickerMessage(message);
     const isPinned = isPinnedFlag;
 
-    const isDeleted = message.type === 'deleted' || message.display_type === 'deleted';
+    const isDeleted = message.display_type === 'deleted';
 
     const canEdit = !isPreviewMode && !isSystem && !isSignal && !isSticker && isOwnMessage && !isDeleted;
 

@@ -1810,7 +1810,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         break;
       case 'channel.truncate':
       case 'channel.truncate_for_me': {
-        const truncateDate = event.channel?.created_at || event.created_at;
+        const truncateDate = (event.channel as any)?.truncated_at || event.created_at;
         if (truncateDate) {
           const truncatedAt = +new Date(truncateDate);
 
@@ -2396,9 +2396,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       }
 
       const userId = storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
-      const enrichedUser = getUserInfo(userId, Object.values(this.getClient().state.users))
-        || storedMessage.user
-        || message.user;
+      const stateUsers = Object.values(this.getClient().state.users);
+      const stateUser = stateUsers.find((u: any) => u.id === userId);
+      const enrichedUser = stateUser || message.user || storedMessage.user || getUserInfo(userId, stateUsers);
 
       hydrated.push({
         ...message,
