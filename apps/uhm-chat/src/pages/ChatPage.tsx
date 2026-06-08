@@ -460,10 +460,12 @@ export function ChatPage() {
   const handleTruncateChannel = useCallback(async (channel: ChannelType) => {
     try {
       await channel.truncate()
+      toast.success(t('chat.history_cleared', 'History cleared'));
     } catch (err) {
       console.error('Failed to truncate channel', err)
+      toast.error('Failed to clear history');
     }
-  }, [])
+  }, [t])
 
   const toggleChannelInfo = useCallback(() => {
     setHasOpenedInfo(true)

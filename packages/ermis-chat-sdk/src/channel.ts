@@ -570,7 +570,33 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
   async truncate(options?: { for_me?: boolean }) {
     const qs = options?.for_me ? '?for_me=true' : '';
-    return await this.getClient().delete(this._channelURL() + '/truncate' + qs);
+    const response = await this.getClient().delete(this._channelURL() + '/chat' + qs);
+    
+    // Dispatch local event so UI clears immediately
+    const truncateDate = (response as any)?.channel?.truncated_at || new Date().toISOString();
+    
+    // Unconditionally clear local state
+    this.state.clearMessages();
+    if (this.data) {
+      (this.data as any).truncated_at = truncateDate;
+    }
+
+    const eventType = options?.for_me ? 'channel.truncate_for_me' : 'channel.truncate';
+    
+    const syntheticEvent = {
+      type: eventType,
+      channel: (response as any)?.channel || this.data,
+      created_at: truncateDate,
+      cid: this.cid,
+      channel_type: this.type,
+      channel_id: this.id,
+    } as any;
+
+    this._handleChannelEvent(syntheticEvent);
+    this._callChannelListeners(syntheticEvent);
+    this.getClient().dispatchEvent(syntheticEvent);
+    
+    return response;
   }
 
   async blockUser() {
@@ -1812,16 +1838,20 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       case 'channel.truncate_for_me': {
         const truncateDate = (event.channel as any)?.truncated_at || event.created_at;
         if (truncateDate) {
-          const truncatedAt = +new Date(truncateDate);
+          const truncatedAt = new Date(truncateDate).getTime();
 
           channelState.messageSets.forEach((messageSet, messageSetIndex) => {
-            messageSet.messages.forEach(({ created_at: createdAt, id }) => {
-              if (truncatedAt > +createdAt) channelState.removeMessage({ id, messageSetIndex });
+            const messagesToProcess = [...messageSet.messages];
+            messagesToProcess.forEach(({ created_at: createdAt, id }) => {
+              const msgCreatedAt = new Date(createdAt || '').getTime();
+              if (truncatedAt >= msgCreatedAt) channelState.removeMessage({ id, messageSetIndex });
             });
           });
 
-          channelState.pinnedMessages.forEach(({ id, created_at: createdAt }) => {
-            if (truncatedAt > +createdAt)
+          const pinnedMessagesToProcess = [...channelState.pinnedMessages];
+          pinnedMessagesToProcess.forEach(({ id, created_at: createdAt }) => {
+            const msgCreatedAt = new Date(createdAt || '').getTime();
+            if (truncatedAt >= msgCreatedAt)
               channelState.removePinnedMessage({ id } as MessageResponse<ErmisChatGenerics>);
           });
         } else {

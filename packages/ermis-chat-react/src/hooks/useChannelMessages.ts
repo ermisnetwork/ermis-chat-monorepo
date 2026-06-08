@@ -258,7 +258,7 @@ export function useChannelMessages({
       }
     };
 
-    const handleMessageChange = (_event: Event) => {
+    const handleMessageChange = (event: Event) => {
       syncMessagesWithE2eeCache();
     };
 
@@ -359,13 +359,16 @@ export function useChannelMessages({
     const sub8 = activeChannel.on('reaction.new', handleMessageChange);
     const sub9 = activeChannel.on('reaction.deleted', handleMessageChange);
     const sub10 = activeChannel.on('member.unblocked', handleUnblocked);
-    const sub11 = eventClient.on('notification.invite_accepted', refreshAfterOwnInviteMembership);
-    const sub12 = eventClient.on('member.joined', refreshAfterOwnInviteMembership);
-    const sub13 = eventClient.on('connection.recovered', handleRecovery);
-    const sub14 = eventClient.on('e2ee.message_decrypted' as any, handleE2eeDecrypted);
-    const sub15 = eventClient.on('e2ee.post_join_sync' as any, handleE2eeRefresh);
-    const sub16 = eventClient.on('e2ee.channel_ready' as any, handleE2eeRefresh);
-    const sub17 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
+    const sub11 = activeChannel.on('channel.truncate', handleMessageChange);
+    const sub12 = activeChannel.on('channel.truncate_for_me', handleMessageChange);
+    
+    const sub13 = eventClient.on('notification.invite_accepted', refreshAfterOwnInviteMembership);
+    const sub14 = eventClient.on('member.joined', refreshAfterOwnInviteMembership);
+    const sub15 = eventClient.on('connection.recovered', handleRecovery);
+    const sub16 = eventClient.on('e2ee.message_decrypted' as any, handleE2eeDecrypted);
+    const sub17 = eventClient.on('e2ee.post_join_sync' as any, handleE2eeRefresh);
+    const sub18 = eventClient.on('e2ee.channel_ready' as any, handleE2eeRefresh);
+    const sub19 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
 
     return () => {
       sub1.unsubscribe();
@@ -385,6 +388,8 @@ export function useChannelMessages({
       sub15.unsubscribe();
       sub16.unsubscribe();
       sub17.unsubscribe();
+      sub18.unsubscribe();
+      sub19.unsubscribe();
     };
   }, [activeChannel, scrollToBottom, scheduleScrollToBottom, syncMessages, setMessages, onChannelSwitch, setReadState]);
 }
