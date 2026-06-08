@@ -246,7 +246,7 @@ export function ChatPage() {
       setIsRecoveryGateOpen(false)
       return
     }
-    if (status.hasIncompleteRestore && !recoveryGateDismissed) {
+    if ((!status.hasVault || status.hasIncompleteRestore) && !recoveryGateDismissed) {
       setIsRecoveryGateOpen(true)
     }
   }, [recovery.recoveryStatus, recoveryGateDismissed])
