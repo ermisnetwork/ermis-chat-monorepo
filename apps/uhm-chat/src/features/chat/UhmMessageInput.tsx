@@ -79,19 +79,21 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const cancelRecording = () => {
+  const cancelRecording = useCallback(() => {
     if (recorderRef.current) {
       recorderRef.current.close();
       recorderRef.current = null;
     }
-    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    setRecordedUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
     setIsRecording(false);
     setRecordingTime(0);
     setIsUploadingVoice(false);
     setRecordedBlob(null);
-    setRecordedUrl(null);
     if (timerRef.current) clearInterval(timerRef.current);
-  };
+  }, []);
 
   const sendVoiceMessage = async () => {
     if (!recordedBlob || !activeChannel) return;
