@@ -265,6 +265,12 @@ export function useChannelMessages({
     const handleMessageRead = (_event: Event) => {
       // SDK already updated channel.state.read — sync into React state
       setReadState({ ...activeChannel.state.read });
+      // Read receipt avatars appear below the last message, increasing content
+      // height. Auto-scroll so the user doesn't have to manually scroll down
+      // to see the "seen" indicator.
+      if (isAtBottomRef.current) {
+        setTimeout(() => scrollToBottom(false), 100);
+      }
     };
 
     const handleUnblocked = (event: Event) => {

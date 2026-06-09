@@ -40,9 +40,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   const activeChannel = activeChannelRaw;
   const activeChannelCidRef = useRef<string | null>(null);
 
-  // In-memory draft storage — Map<cid, innerHTML>
+  // In-memory draft storage — Map<cid, { html: string; files: any[] }>
   // O(1) lookup/insert/delete, bounded by number of visited channels per session
-  const draftsRef = useRef<Map<string, string>>(new Map());
+  const draftsRef = useRef<Map<string, { html: string; files: any[] }>>(new Map());
 
   const setActiveChannel = useCallback((channel: Channel | null) => {
     const newCid = channel?.cid || null;
@@ -63,17 +63,17 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     }
   }, [activeChannel]);
 
-  /** Save a draft message (innerHTML) for a specific channel */
-  const setDraft = useCallback((cid: string, html: string) => {
-    if (html && html.trim()) {
-      draftsRef.current.set(cid, html);
+  /** Save a draft message (innerHTML and files) for a specific channel */
+  const setDraft = useCallback((cid: string, draft: { html: string; files: any[] }) => {
+    if ((draft.html && draft.html.trim()) || (draft.files && draft.files.length > 0)) {
+      draftsRef.current.set(cid, draft);
     } else {
       draftsRef.current.delete(cid);
     }
   }, []);
 
   /** Retrieve the saved draft for a specific channel */
-  const getDraft = useCallback((cid: string): string | undefined => {
+  const getDraft = useCallback((cid: string): { html: string; files: any[] } | undefined => {
     return draftsRef.current.get(cid);
   }, []);
 

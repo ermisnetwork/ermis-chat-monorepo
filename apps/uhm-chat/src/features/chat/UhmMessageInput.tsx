@@ -170,6 +170,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     handleFilesSelected, handleRemoveFile, handleAttachClick, cleanupFiles,
   } = useFileUpload({ activeChannel, editableRef, setHasContent });
 
+  const filesRef = useRef(files);
+  filesRef.current = files;
+
   const { isDragging } = useDragAndDrop(
     handleFilesSelected,
     !canSendMessage || !!editingMessage || !!quotedMessage
@@ -218,7 +221,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     onSend: () => {
       // Clear draft after successful send
       if (activeChannel?.cid) {
-        setDraft(activeChannel.cid, '');
+        setDraft(activeChannel.cid, { html: '', files: [] });
       }
     },
     onBeforeSend: async (text: string) => {
@@ -340,13 +343,20 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     }
   }, [activeChannel, quotedMessage, editingMessage]);
 
-  // Draft save/restore on channel switch
+  // Draft save/restore + cleanup on channel switch
   useEffect(() => {
     // Save draft from PREVIOUS channel before switching
     if (prevChannelCidRef.current && editableRef.current) {
       const currentHtml = editableRef.current.innerHTML;
-      setDraft(prevChannelCidRef.current, currentHtml);
+      setDraft(prevChannelCidRef.current, { html: currentHtml, files: filesRef.current });
     }
+
+    // Clear attachments, mentions, pickers, and recording from previous channel
+    resetMentions();
+    closePickers();
+    cancelRecording();
+    // Do not revoke Object URLs here since we save files in drafts and need previews when returning
+    setFiles([]);
 
     // Restore draft for NEW channel
     const newCid = activeChannel?.cid || null;
@@ -355,8 +365,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     if (newCid && editableRef.current) {
       const draft = getDraft(newCid);
       if (draft) {
-        editableRef.current.innerHTML = draft;
-        setHasContent(!!editableRef.current.textContent?.trim());
+        editableRef.current.innerHTML = draft.html;
+        setFiles(draft.files || []);
+        setHasContent(!!editableRef.current.textContent?.trim() || !!(draft.files && draft.files.length));
         // Move cursor to end of restored draft
         const sel = window.getSelection();
         const range = document.createRange();
@@ -366,13 +377,20 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         sel?.addRange(range);
       } else {
         editableRef.current.innerHTML = '';
+        setFiles([]);
         setHasContent(false);
       }
     } else {
       if (editableRef.current) editableRef.current.innerHTML = '';
+      setFiles([]);
       setHasContent(false);
     }
-  }, [activeChannel, setDraft, getDraft]);
+
+    // Stop typing indicator on channel switch
+    return () => {
+      activeChannel?.stopTyping();
+    };
+  }, [activeChannel, setDraft, getDraft, cancelRecording, closePickers, resetMentions, setFiles]);
 
   useEffect(() => {
     if (editingMessage && editableRef.current) {

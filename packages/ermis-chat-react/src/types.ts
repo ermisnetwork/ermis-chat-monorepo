@@ -56,10 +56,10 @@ export type ChatContextValue = {
   setJumpToMessageId: (id: string | null) => void;
   /** Indicates whether the direct call feature is enabled */
   enableCall?: boolean;
-  /** Save a draft message (innerHTML) for a specific channel */
-  setDraft: (cid: string, html: string) => void;
+  /** Save a draft message (innerHTML and files) for a specific channel */
+  setDraft: (cid: string, draft: { html: string; files: any[] }) => void;
   /** Retrieve the saved draft for a specific channel */
-  getDraft: (cid: string) => string | undefined;
+  getDraft: (cid: string) => { html: string; files: any[] } | undefined;
   /** Clear all saved drafts (e.g. on logout) */
   clearAllDrafts: () => void;
 };
@@ -1119,6 +1119,8 @@ export type FilePreviewItem = {
   previewUrl?: string;
   /** Upload status */
   status: 'pending' | 'uploading' | 'done' | 'error';
+  /** Upload progress percentage (0-100) */
+  progress?: number;
   /** Error message if upload failed */
   error?: string;
   /** URL returned after successful upload */

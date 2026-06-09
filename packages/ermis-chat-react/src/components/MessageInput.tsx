@@ -210,7 +210,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     }
     // Clear draft after successful send
     if (activeChannel?.cid) {
-      setDraft(activeChannel.cid, '');
+      setDraft(activeChannel.cid, { html: '', files: [] });
     }
     onSend?.(text);
   }, [isSlowModeApplied, memberMessageCooldown, onSend, activeChannel, setDraft]);
@@ -228,6 +228,9 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     files, setFiles, fileInputRef,
     handleFilesSelected, handleRemoveFile, handleAttachClick, cleanupFiles,
   } = useFileUpload({ activeChannel, editableRef, setHasContent });
+
+  const filesRef = useRef(files);
+  filesRef.current = files;
 
   const { isDragging } = useDragAndDrop(
     handleFilesSelected,
@@ -347,17 +350,13 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     // Save draft from PREVIOUS channel before switching
     if (prevChannelCidRef.current && editableRef.current) {
       const currentHtml = editableRef.current.innerHTML;
-      setDraft(prevChannelCidRef.current, currentHtml);
+      setDraft(prevChannelCidRef.current, { html: currentHtml, files: filesRef.current });
     }
 
     reset();
     handleEmojiClose();
-    setFiles((prev) => {
-      prev.forEach((f) => {
-        if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
-      });
-      return [];
-    });
+    // Do not revoke Object URLs here since we save files in drafts and need previews when returning
+    setFiles([]);
 
     // Restore draft for NEW channel
     const newCid = activeChannel?.cid || null;
@@ -366,15 +365,18 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
     if (newCid && editableRef.current) {
       const draft = getDraft(newCid);
       if (draft) {
-        editableRef.current.innerHTML = draft;
-        setHasContent(!!editableRef.current.textContent?.trim());
+        editableRef.current.innerHTML = draft.html;
+        setFiles(draft.files || []);
+        setHasContent(!!editableRef.current.textContent?.trim() || !!(draft.files && draft.files.length));
         moveCaretToEnd(editableRef.current);
       } else {
         editableRef.current.innerHTML = '';
+        setFiles([]);
         setHasContent(false);
       }
     } else {
       if (editableRef.current) editableRef.current.innerHTML = '';
+      setFiles([]);
       setHasContent(false);
     }
 

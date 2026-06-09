@@ -40,7 +40,9 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
         fileToUpload.name,
         fileToUpload.type || 'application/octet-stream',
         (progress) => {
-          // You could update progress here if you extend FilePreviewItem to have a progress field
+          setFiles((prev) =>
+            prev.map((f) => (f.id === item.id ? { ...f, progress: progress.percentage } : f))
+          );
         }
       );
       const uploadedUrl = response.file;
