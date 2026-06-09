@@ -1176,6 +1176,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
 
+    // Ensure all members' user info are loaded in state.users
+    await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
     const users = Object.values(this.getClient().state.users);
     state.channel.members = enrichWithUserInfo(state.channel.members, users);
     state.channel.name =
@@ -1221,6 +1223,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       messages: { limit, id_lt: message_id },
     });
 
+    // Ensure user info for message authors is loaded
+    const messageMemberStubs = (state.messages || [])
+      .filter((m: any) => m.user_id || m.user?.id)
+      .map((m: any) => ({ user: { id: m.user?.id || m.user_id } }));
+    await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubs);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
     state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
@@ -1253,6 +1260,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       messages: { limit, id_gt: message_id },
     });
 
+    // Ensure user info for message authors is loaded
+    const messageMemberStubsGt = (state.messages || [])
+      .filter((m: any) => m.user_id || m.user?.id)
+      .map((m: any) => ({ user: { id: m.user?.id || m.user_id } }));
+    await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubsGt);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
     state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
@@ -1285,6 +1297,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       messages: { limit, id_around: message_id },
     });
 
+    // Ensure user info for message authors is loaded
+    const messageMemberStubsAround = (state.messages || [])
+      .filter((m: any) => m.user_id || m.user?.id)
+      .map((m: any) => ({ user: { id: m.user?.id || m.user_id } }));
+    await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubsAround);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
     state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
@@ -1657,14 +1674,23 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const isThreadMessage = !!event.message.parent_id;
 
           const existUser = users.find((user) => user.id === event.user?.id);
-          if (!existUser) {
+          // Also fetch if user exists but has no proper name (e.g. name is hex wallet address)
+          const userHasProperName = existUser && existUser.name && existUser.name !== existUser.id;
+          if (!existUser || !userHasProperName) {
             if (event.user?.id) {
               try {
                 const resUser = await this.getClient().queryUser(event.user.id);
-                users.push(resUser);
+                if (existUser) {
+                  // Update existing entry in the local array
+                  Object.assign(existUser, resUser);
+                } else {
+                  users.push(resUser);
+                }
               } catch (err) {
                 this._client.logger('warn', 'Failed to query user for new message, using event user fallback', { err });
-                users.push(event.user as any);
+                if (!existUser) {
+                  users.push(event.user as any);
+                }
               }
             }
           }
