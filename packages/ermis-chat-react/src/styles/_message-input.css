@@ -320,6 +320,14 @@
   justify-content: center;
 }
 
+.ermis-files-preview__progress {
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  z-index: 2;
+}
+
 .ermis-files-preview__spinner {
   width: 20px;
   height: 20px;
