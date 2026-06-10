@@ -1,6 +1,7 @@
 import { ChannelState } from './channel_state';
 import { normalizeFileName, isVideoFile, buildAttachmentPayload } from './attachment_utils';
 import type { VoiceRecordingMeta } from './attachment_utils';
+import { encodeMlsChannelFields } from './e2ee_bytes';
 import {
   enrichWithUserInfo,
   ensureMembersUserInfoLoaded,
@@ -115,6 +116,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const data = { ...(this._data as any) };
     delete data.messages;
     return Object.keys(data).length > 0 ? data : undefined;
+  }
+
+  private _encodeE2eeChannelPayload<T extends Record<string, unknown>>(payload: T): T {
+    const encoded = encodeMlsChannelFields(payload) as Record<string, unknown>;
+    if (encoded.data && typeof encoded.data === 'object') {
+      encoded.data = encodeMlsChannelFields(encoded.data as Record<string, unknown>);
+    }
+    return encoded as T;
   }
 
   /**
@@ -371,13 +380,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void,
   ): Promise<{ file: string }> {
     // 1. Request presigned URL
-    const presignResp = await this.getClient().post<{ attachment_id: string; upload_url: string; expires_in_secs: number }>(
-      `${this._channelURL()}/file/presign`,
-      {
-        file_name: name,
-        content_type: contentType,
-      },
-    );
+    const presignResp = await this.getClient().post<{
+      attachment_id: string;
+      upload_url: string;
+      expires_in_secs: number;
+    }>(`${this._channelURL()}/file/presign`, {
+      file_name: name,
+      content_type: contentType,
+    });
 
     // 2. Upload directly to storage (R2/S3)
     await new Promise<void>((resolve, reject) => {
@@ -415,14 +425,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     });
 
     // 3. Confirm upload
-    const confirmResp = await this.getClient().post<{ file: string }>(
-      `${this._channelURL()}/file/confirm`,
-      {
-        attachment_id: presignResp.attachment_id,
-        file_name: name,
-        content_type: contentType,
-      },
-    );
+    const confirmResp = await this.getClient().post<{ file: string }>(`${this._channelURL()}/file/confirm`, {
+      attachment_id: presignResp.attachment_id,
+      file_name: name,
+      content_type: contentType,
+    });
 
     return confirmResp;
   }
@@ -571,10 +578,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async truncate(options?: { for_me?: boolean }) {
     const qs = options?.for_me ? '?for_me=true' : '';
     const response = await this.getClient().delete(this._channelURL() + '/chat' + qs);
-    
+
     // Dispatch local event so UI clears immediately
     const truncateDate = (response as any)?.channel?.truncated_at || new Date().toISOString();
-    
+
     // Unconditionally clear local state
     this.state.clearMessages();
     if (this.data) {
@@ -582,7 +589,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
 
     const eventType = options?.for_me ? 'channel.truncate_for_me' : 'channel.truncate';
-    
+
     const syntheticEvent = {
       type: eventType,
       channel: (response as any)?.channel || this.data,
@@ -595,7 +602,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this._handleChannelEvent(syntheticEvent);
     this._callChannelListeners(syntheticEvent);
     this.getClient().dispatchEvent(syntheticEvent);
-    
+
     return response;
   }
 
@@ -805,7 +812,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async _update(payload: Object) {
-    const data = await this.getClient().post<UpdateChannelAPIResponse<ErmisChatGenerics>>(this._channelURL(), payload);
+    const data = await this.getClient().post<UpdateChannelAPIResponse<ErmisChatGenerics>>(
+      this._channelURL(),
+      this._encodeE2eeChannelPayload(payload as Record<string, unknown>),
+    );
     this.data = { ...this.data, ...data.channel };
     return data;
   }
@@ -1046,7 +1056,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       }
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this._encodeE2eeChannelPayload(payload),
+    );
 
     return state;
   }
@@ -1081,7 +1094,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       payload.data = dataPayload;
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this._encodeE2eeChannelPayload(payload),
+    );
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
     const users = Object.values(this.getClient().state.users);
@@ -1174,7 +1190,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       payload.data = dataPayload;
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this._encodeE2eeChannelPayload(payload),
+    );
 
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
@@ -1337,7 +1356,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async getThumbBlobVideo(file: File): Promise<Blob | null> {
     return new Promise((resolve) => {
       let timeoutId: number | null = null;
-      
+
       const cleanup = () => {
         if (timeoutId) clearTimeout(timeoutId);
         if (videoPlayer.src) URL.revokeObjectURL(videoPlayer.src);
@@ -2051,16 +2070,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const mlsMgrReaction = this.getClient().mlsManager;
           const isE2eeReaction = (this.data as any)?.mls_enabled;
           if (isE2eeReaction && mlsMgrReaction?.initialized && event.message?.id) {
-            mlsMgrReaction.storage.loadE2eeMessage(event.message.id).then((local: any) => {
-              if (!local) return;
-              mlsMgrReaction.storage.saveE2eeMessage({
-                ...local,
-                latest_reactions: event.message?.latest_reactions,
-                reaction_counts: event.message?.reaction_counts,
+            mlsMgrReaction.storage
+              .loadE2eeMessage(event.message.id)
+              .then((local: any) => {
+                if (!local) return;
+                mlsMgrReaction.storage.saveE2eeMessage({
+                  ...local,
+                  latest_reactions: event.message?.latest_reactions,
+                  reaction_counts: event.message?.reaction_counts,
+                });
+              })
+              .catch((err: unknown) => {
+                this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.new', { err });
               });
-            }).catch((err: unknown) => {
-              this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.new', { err });
-            });
           }
         }
         break;
@@ -2088,16 +2110,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const mlsMgrReactionDel = this.getClient().mlsManager;
           const isE2eeReactionDel = (this.data as any)?.mls_enabled;
           if (isE2eeReactionDel && mlsMgrReactionDel?.initialized && event.message?.id) {
-            mlsMgrReactionDel.storage.loadE2eeMessage(event.message.id).then((local: any) => {
-              if (!local) return;
-              mlsMgrReactionDel.storage.saveE2eeMessage({
-                ...local,
-                latest_reactions: event.message?.latest_reactions,
-                reaction_counts: event.message?.reaction_counts,
+            mlsMgrReactionDel.storage
+              .loadE2eeMessage(event.message.id)
+              .then((local: any) => {
+                if (!local) return;
+                mlsMgrReactionDel.storage.saveE2eeMessage({
+                  ...local,
+                  latest_reactions: event.message?.latest_reactions,
+                  reaction_counts: event.message?.reaction_counts,
+                });
+              })
+              .catch((err: unknown) => {
+                this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.deleted', { err });
               });
-            }).catch((err: unknown) => {
-              this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.deleted', { err });
-            });
           }
         }
         break;
@@ -2111,7 +2136,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               const resUser = await this.getClient().queryUser(event.member?.user_id);
               users.push(resUser);
             } catch (err) {
-              this._client.logger('warn', 'Failed to query user for member joined, using event member fallback', { err });
+              this._client.logger('warn', 'Failed to query user for member joined, using event member fallback', {
+                err,
+              });
               if (event.member?.user) users.push(event.member.user as any);
             }
           }
@@ -2410,14 +2437,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         ? storage.loadE2eeMessages
           ? await storage.loadE2eeMessages(lookupIds).catch(() => new Map<string, any>())
           : new Map(
-              (
-                await Promise.all(
-                  Array.from(new Set(lookupIds)).map((id) => storage.loadE2eeMessage(id).catch(() => null)),
-                )
+            (
+              await Promise.all(
+                Array.from(new Set(lookupIds)).map((id) => storage.loadE2eeMessage(id).catch(() => null)),
               )
-                .filter(Boolean)
-                .map((message: any) => [message.id, message]),
             )
+              .filter(Boolean)
+              .map((message: any) => [message.id, message]),
+          )
         : new Map<string, any>();
     const currentMessages = this.state.messageSets?.flatMap((set) => set.messages) || [];
     const currentMessagesById = new Map(currentMessages.map((message: any) => [message.id, message]));
@@ -2502,12 +2529,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         const messages = storedMessages
           .map(
             (message: any) =>
-              ({
-                ...message,
-                content_type: 'standard',
-                user: message.user || getUserInfo(message.user_id, Object.values(this.getClient().state.users)),
-                status: 'received',
-              } as MessageResponse<ErmisChatGenerics>),
+            ({
+              ...message,
+              content_type: 'standard',
+              user: message.user || getUserInfo(message.user_id, Object.values(this.getClient().state.users)),
+              status: 'received',
+            } as MessageResponse<ErmisChatGenerics>),
           )
           .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
         this.state.addMessagesSorted(messages, false, true, true, messageSetToAddToIfDoesNotExist);

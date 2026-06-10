@@ -140,7 +140,7 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     latest_reactions?: ReactionResponse<ErmisChatGenerics>[];
     mentioned_users?: string[];
     device_id?: string;
-    mls_ciphertext?: number[];
+    mls_ciphertext?: Uint8Array;
     mls_epoch?: number;
     e2ee_group_id?: string;
     old_texts?: Array<{ text: string; created_at: string }>;
@@ -299,9 +299,10 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
     type?: 'commit' | 'welcome' | 'external_commit' | 'proposal' | string;
     type_field?: string;
     cid?: string;
-    commit?: number[];
-    welcome?: number[];
-    ratchet_tree?: number[];
+    commit?: Uint8Array;
+    welcome?: Uint8Array;
+    ratchet_tree?: Uint8Array;
+    proposal?: Uint8Array;
     epoch?: number;
     target_user_ids?: string[];
     device_id?: string;
@@ -409,27 +410,27 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     e2ee_group_id?: string;
     gate?: boolean;
     /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
-    commit?: number[];
-    welcome?: number[];
-    ratchet_tree?: number[];
-    group_info?: number[];
+    commit?: Uint8Array;
+    welcome?: Uint8Array;
+    ratchet_tree?: Uint8Array;
+    group_info?: Uint8Array;
     epoch?: number;
   };
 
 /** MLS protocol fields required for E2EE add_members operations. */
 export type E2EEAddMembersOptions = {
-  commit: number[];
-  welcome: number[];
-  ratchet_tree: number[];
+  commit: Uint8Array;
+  welcome: Uint8Array;
+  ratchet_tree: Uint8Array;
   epoch: number;
-  group_info: number[];
+  group_info: Uint8Array;
 };
 
 /** MLS protocol fields required for E2EE remove_members operations. */
 export type E2EERemoveMembersOptions = {
-  commit: number[];
+  commit: Uint8Array;
   epoch: number;
-  group_info: number[];
+  group_info: Uint8Array;
 };
 
 export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {

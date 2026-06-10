@@ -11,6 +11,9 @@ When making changes to the `packages/ermis-chat-sdk` codebase, abide by the foll
 - **Singleton Pattern:** The `ErmisChat` class must be instantiated via `ErmisChat.getInstance()`. Do not call the constructor directly.
 - **Generics:** All client classes use `<ErmisChatGenerics extends ExtendableGenerics>` to ensure extensibility. Make sure added methods propagate these generics correctly.
 
+## Design Review Gate
+- For architecture, API contract, storage, E2EE/MLS, performance, migration, rollout, or high-blast-radius changes, use `$technical-design-challenger` before implementation. Surface independent tradeoffs, failure modes, compatibility risks, and production gates instead of simply following the preferred option.
+
 ## API & Networking
 - **Axios:** All REST API communication is done via `this.doAxiosRequest()`. Do not use `fetch` or bare `axios` instances.
 - **FormData:** Use `addFileToFormData` utility when handling file uploads.

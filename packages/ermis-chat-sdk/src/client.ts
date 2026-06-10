@@ -8,6 +8,7 @@ import WebSocket from 'isomorphic-ws';
 import { Channel } from './channel';
 import { ClientState } from './client_state';
 import { StableWSConnection } from './connection';
+import { normalizeE2eeEventBytes } from './e2ee_bytes';
 import { IndexedDBMlsStorage } from './mls_storage';
 
 import { TokenManager } from './token_manager';
@@ -701,22 +702,24 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         const result = channel._handleChannelEvent(event);
         if (result && typeof (result as any).then === 'function') {
           // Async path: defer listeners until state mutations complete
-          (result as Promise<void>).then(() => {
-            this._callClientListeners(event);
-            if (channel) {
-              channel._callChannelListeners(event);
-            }
-            postListenerCallbacks.forEach((c) => c());
-          }).catch((err) => {
-            this.logger('error', 'client:_handleChannelEvent() failed', { err, event });
-            // Even if state mutation failed partially, we must still notify listeners
-            // otherwise UI gets permanently stuck and misses the event.
-            this._callClientListeners(event);
-            if (channel) {
-              channel._callChannelListeners(event);
-            }
-            postListenerCallbacks.forEach((c) => c());
-          });
+          (result as Promise<void>)
+            .then(() => {
+              this._callClientListeners(event);
+              if (channel) {
+                channel._callChannelListeners(event);
+              }
+              postListenerCallbacks.forEach((c) => c());
+            })
+            .catch((err) => {
+              this.logger('error', 'client:_handleChannelEvent() failed', { err, event });
+              // Even if state mutation failed partially, we must still notify listeners
+              // otherwise UI gets permanently stuck and misses the event.
+              this._callClientListeners(event);
+              if (channel) {
+                channel._callChannelListeners(event);
+              }
+              postListenerCallbacks.forEach((c) => c());
+            });
           return;
         }
       }
@@ -793,7 +796,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   handleEvent = (messageEvent: WebSocket.MessageEvent) => {
     // dispatch the event to the channel listeners
     const jsonString = messageEvent.data as string;
-    const event = JSON.parse(jsonString) as Event<ErmisChatGenerics>;
+    const event = normalizeE2eeEventBytes(JSON.parse(jsonString) as Event<ErmisChatGenerics>);
     this.dispatchEvent(event);
   };
 

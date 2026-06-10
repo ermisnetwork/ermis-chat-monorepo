@@ -13,6 +13,7 @@
  * - Sync timestamps
  */
 
+import { normalizeRequiredBytes } from './e2ee_bytes';
 import { randomId } from './utils';
 import MiniSearch from 'minisearch';
 
@@ -103,17 +104,17 @@ export interface PendingDeferredArchive {
   scope: 'account_owned';
   archive_blob_id: string;
   encrypted_archive: {
-    ciphertext: number[];
-    nonce: number[];
-    aead_aad: number[];
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
+    aead_aad: Uint8Array;
   };
   snapshot: {
-    snapshot_bytes: number[];
+    snapshot_bytes: Uint8Array;
     snapshot_hash: string;
   };
   encrypted_adk: {
-    ciphertext: number[];
-    nonce: number[];
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
   };
   retry_count: number;
   created_at: number;
@@ -277,6 +278,25 @@ const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** localStorage key for device_id — global, per-browser */
 const DEVICE_ID_LS_KEY = 'ermis_device_id';
+
+function normalizeDeferredArchiveRecord(record: PendingDeferredArchive): PendingDeferredArchive {
+  return {
+    ...record,
+    encrypted_archive: {
+      ciphertext: normalizeRequiredBytes(record.encrypted_archive.ciphertext, 'encrypted_archive.ciphertext'),
+      nonce: normalizeRequiredBytes(record.encrypted_archive.nonce, 'encrypted_archive.nonce'),
+      aead_aad: normalizeRequiredBytes(record.encrypted_archive.aead_aad, 'encrypted_archive.aead_aad'),
+    },
+    snapshot: {
+      ...record.snapshot,
+      snapshot_bytes: normalizeRequiredBytes(record.snapshot.snapshot_bytes, 'snapshot.snapshot_bytes'),
+    },
+    encrypted_adk: {
+      ciphertext: normalizeRequiredBytes(record.encrypted_adk.ciphertext, 'encrypted_adk.ciphertext'),
+      nonce: normalizeRequiredBytes(record.encrypted_adk.nonce, 'encrypted_adk.nonce'),
+    },
+  };
+}
 
 function eventCursorFromStoredValue(value: unknown): EventCursor | null {
   if (!value) return null;
@@ -1187,7 +1207,8 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readonly');
       const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
       const request = store.getAll();
-      request.onsuccess = () => resolve((request.result as PendingDeferredArchive[]) || []);
+      request.onsuccess = () =>
+        resolve(((request.result as PendingDeferredArchive[]) || []).map(normalizeDeferredArchiveRecord));
       request.onerror = () => reject(request.error);
     });
   }

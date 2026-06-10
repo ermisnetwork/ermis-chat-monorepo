@@ -417,8 +417,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _wrappedRecoveryKey: any = null;
   private _recoveryVaultKnown: boolean | null = null;
-  private _recoveryVaultBytes: number[] | null = null;
-  private _recoveryPublicMetadataPromise: Promise<{ vault_bytes: number[] } | null> | null = null;
+  private _recoveryVaultBytes: Uint8Array | null = null;
+  private _recoveryPublicMetadataPromise: Promise<{ vault_bytes: Uint8Array } | null> | null = null;
   private _archiveStashKey: CryptoKey | null = null;
   private _archiveStashKeyPromise: Promise<CryptoKey> | null = null;
   private _restoreQueue: RestoreQueueEntry[] = [];
@@ -617,7 +617,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       try {
         const kps = this.identity.key_packages(this.provider, uploadCount);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const serialized = kps.map((kp: any) => Array.from(kp.to_bytes()));
+        const serialized = kps.map((kp: any) => kp.to_bytes());
         await this.e2eeClient!.uploadKeyPackages({ key_packages: serialized });
         await this._persistProvider();
         console.log(`[MLS] Uploaded ${uploadCount} key packages`);
@@ -681,7 +681,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // PIN Epoch Archive Recovery
   // ============================================================
 
-  private async _fetchVault(): Promise<{ vault_bytes: number[] } | null> {
+  private async _fetchVault(): Promise<{ vault_bytes: Uint8Array } | null> {
     try {
       return await this.e2eeClient!.getRecoveryVault();
     } catch (err) {
@@ -690,7 +690,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     }
   }
 
-  private async _loadRecoveryPublicMetadata(): Promise<{ vault_bytes: number[] } | null> {
+  private async _loadRecoveryPublicMetadata(): Promise<{ vault_bytes: Uint8Array } | null> {
     if (this._recoveryVaultKnown === false) return null;
     if (
       this._recoveryVaultKnown === true &&
@@ -708,7 +708,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const loadPromise = (async () => {
       const vault = await this._fetchVault();
       this._recoveryVaultKnown = vault !== null;
-      this._recoveryVaultBytes = vault ? [...vault.vault_bytes] : null;
+      this._recoveryVaultBytes = vault ? vault.vault_bytes : null;
       if (!vault) return null;
 
       const wrapped = wasmModule.WrappedRecoveryKey.from_bytes(new Uint8Array(vault.vault_bytes));
@@ -785,9 +785,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       600_000,
     );
     const vaultBytes = wrapped.to_bytes();
-    await this.e2eeClient!.uploadRecoveryVault({ vault_bytes: Array.from(vaultBytes) });
+    await this.e2eeClient!.uploadRecoveryVault({ vault_bytes: vaultBytes });
     this._recoveryVaultKnown = true;
-    this._recoveryVaultBytes = Array.from(vaultBytes);
+    this._recoveryVaultBytes = vaultBytes;
     this._recoveryPublicMetadataPromise = null;
     this._recoveryPrivateKey = new Uint8Array(keypair.private_key);
     this._recoveryPublicKey = new Uint8Array(keypair.public_key);
@@ -807,7 +807,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       this._wrappedRecoveryKey || wasmModule.WrappedRecoveryKey.from_bytes(new Uint8Array(vault.vault_bytes));
     const privateKey = wasmModule.unwrap_recovery_private_key(this.provider, pin, wrapped);
     this._recoveryVaultKnown = true;
-    this._recoveryVaultBytes = [...vault.vault_bytes];
+    this._recoveryVaultBytes = vault.vault_bytes;
     this._recoveryPrivateKey = new Uint8Array(privateKey);
     this._recoveryPublicKey = new Uint8Array(wrapped.public_key);
     this._recoveryKeyId = wrapped.key_id;
@@ -833,7 +833,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       this._recoveryCiphersuite,
       600_000,
     );
-    await this.e2eeClient!.uploadRecoveryVault({ vault_bytes: Array.from(newWrapped.to_bytes()) });
+    await this.e2eeClient!.uploadRecoveryVault({ vault_bytes: newWrapped.to_bytes() });
     this._wrappedRecoveryKey = newWrapped;
     this._recoveryPrivateKey = new Uint8Array(privateKey);
   }
@@ -899,22 +899,22 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       idempotency_key: `${material.epoch}:account_owned:${this.deviceId || 'web'}:${material.archiveBlobId}`,
       scope: 'account_owned',
       encrypted_archive: {
-        ciphertext: Array.from(material.encrypted.ciphertext),
-        nonce: Array.from(material.encrypted.nonce),
-        aead_aad: Array.from(material.encrypted.aead_aad),
+        ciphertext: material.encrypted.ciphertext,
+        nonce: material.encrypted.nonce,
+        aead_aad: material.encrypted.aead_aad,
       },
       snapshot: {
-        snapshot_bytes: Array.from(material.exported.snapshot_bytes),
+        snapshot_bytes: material.exported.snapshot_bytes,
         snapshot_hash: material.snapshotHash,
       },
       wraps: [
         {
           recipient_user_id: this.userId!,
           recipient_recovery_key_id: this._recoveryKeyId,
-          hpke_kem_output: Array.from(wrappedAdk.kem_output),
-          hpke_ciphertext: Array.from(wrappedAdk.ciphertext),
+          hpke_kem_output: wrappedAdk.kem_output,
+          hpke_ciphertext: wrappedAdk.ciphertext,
           ciphersuite: wrappedAdk.ciphersuite,
-          hpke_info: Array.from(wrappedAdk.hpke_info),
+          hpke_info: wrappedAdk.hpke_info,
         },
       ],
     };
@@ -941,12 +941,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       scope: 'account_owned',
       archive_blob_id: material.archiveBlobId,
       encrypted_archive: {
-        ciphertext: Array.from(material.encrypted.ciphertext),
-        nonce: Array.from(material.encrypted.nonce),
-        aead_aad: Array.from(material.encrypted.aead_aad),
+        ciphertext: material.encrypted.ciphertext,
+        nonce: material.encrypted.nonce,
+        aead_aad: material.encrypted.aead_aad,
       },
       snapshot: {
-        snapshot_bytes: Array.from(material.exported.snapshot_bytes),
+        snapshot_bytes: material.exported.snapshot_bytes,
         snapshot_hash: material.snapshotHash,
       },
       encrypted_adk: encryptedAdk,
@@ -1006,7 +1006,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     }
   }
 
-  private async _encryptArchiveStashBytes(bytes: Uint8Array): Promise<{ ciphertext: number[]; nonce: number[] }> {
+  private async _encryptArchiveStashBytes(bytes: Uint8Array): Promise<{ ciphertext: Uint8Array; nonce: Uint8Array }> {
     const cryptoImpl = this._getBrowserCrypto();
     const key = await this._getArchiveStashKey();
     const nonce = new Uint8Array(12);
@@ -1014,16 +1014,17 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const plaintext = new Uint8Array(bytes.length);
     plaintext.set(bytes);
     const ciphertext = await cryptoImpl.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plaintext.buffer);
-    return { ciphertext: Array.from(new Uint8Array(ciphertext)), nonce: Array.from(nonce) };
+    return { ciphertext: new Uint8Array(ciphertext), nonce };
   }
 
-  private async _decryptArchiveStashBytes(encrypted: { ciphertext: number[]; nonce: number[] }): Promise<Uint8Array> {
+  private async _decryptArchiveStashBytes(encrypted: {
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
+  }): Promise<Uint8Array> {
     const key = await this._getArchiveStashKey();
-    const plaintext = await this._getBrowserCrypto().subtle.decrypt(
-      { name: 'AES-GCM', iv: new Uint8Array(encrypted.nonce) },
-      key,
-      new Uint8Array(encrypted.ciphertext).buffer,
-    );
+    const nonce = new Uint8Array(encrypted.nonce);
+    const ciphertext = new Uint8Array(encrypted.ciphertext);
+    const plaintext = await this._getBrowserCrypto().subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, ciphertext);
     return new Uint8Array(plaintext);
   }
 
@@ -1245,10 +1246,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         {
           recipient_user_id: this.userId!,
           recipient_recovery_key_id: this._recoveryKeyId,
-          hpke_kem_output: Array.from(wrappedAdk.kem_output),
-          hpke_ciphertext: Array.from(wrappedAdk.ciphertext),
+          hpke_kem_output: wrappedAdk.kem_output,
+          hpke_ciphertext: wrappedAdk.ciphertext,
           ciphersuite: wrappedAdk.ciphersuite,
-          hpke_info: Array.from(wrappedAdk.hpke_info),
+          hpke_info: wrappedAdk.hpke_info,
         },
       ],
     };
@@ -3332,11 +3333,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     let result;
     try {
       result = await this.e2eeClient!.enableE2ee(channelType, channelId, {
-        welcome: Array.from(commitBundle.welcome),
-        ratchet_tree: Array.from(ratchetTree.to_bytes()),
+        welcome: commitBundle.welcome,
+        ratchet_tree: ratchetTree.to_bytes(),
         // Send current pre-merge epoch. Server will store epoch+1 (post-commit).
         epoch: Number(group.epoch()),
-        group_info: Array.from(exportedGIEnable),
+        group_info: exportedGIEnable,
       });
     } catch (err) {
       // Server rejected (e.g. concurrent enable, epoch_stale) → clear pending commit
@@ -3385,9 +3386,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     cid: string | null,
     allMemberUserIds: string[],
   ): Promise<{
-    welcome: number[];
-    ratchet_tree: number[];
-    group_info: number[];
+    welcome: Uint8Array;
+    ratchet_tree: Uint8Array;
+    group_info: Uint8Array;
     epoch: number;
     channel_id?: string;
     cid: string;
@@ -3471,16 +3472,16 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     console.log('[MLS] createE2eeChannel: bundle ready for cid:', cid, 'epoch:', Number(group.epoch()));
 
     const result: {
-      welcome: number[];
-      ratchet_tree: number[];
-      group_info: number[];
+      welcome: Uint8Array;
+      ratchet_tree: Uint8Array;
+      group_info: Uint8Array;
       epoch: number;
       channel_id?: string;
       cid: string;
     } = {
-      welcome: allKeyPackages.length > 0 ? Array.from(commitBundle.welcome as Uint8Array) : [],
-      ratchet_tree: Array.from(ratchetTree.to_bytes() as Uint8Array),
-      group_info: Array.from(exportedGI as Uint8Array),
+      welcome: allKeyPackages.length > 0 ? (commitBundle.welcome as Uint8Array) : new Uint8Array(0),
+      ratchet_tree: ratchetTree.to_bytes() as Uint8Array,
+      group_info: exportedGI as Uint8Array,
       epoch: premergeEpoch,
       cid,
     };
@@ -3679,11 +3680,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         throw new Error(`[MLS] No active channel found for cid: ${cid}`);
       }
       await channel.addMembersE2ee(newUserIds, {
-        commit: Array.from(commitBundle.commit),
-        welcome: Array.from(commitBundle.welcome),
-        ratchet_tree: Array.from(ratchetTree.to_bytes()),
+        commit: commitBundle.commit,
+        welcome: commitBundle.welcome,
+        ratchet_tree: ratchetTree.to_bytes(),
         epoch: Number(group.epoch()),
-        group_info: Array.from(exportedGIAdd),
+        group_info: exportedGIAdd,
       });
     } catch (err) {
       if (isEpochStaleError(err) && !isRetry) {
@@ -3757,9 +3758,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
         await this.e2eeClient!.commitEviction(channelType, channelId, {
           target_user_ids: ghostsToRemove,
-          commit: Array.from(commitBundle.commit),
+          commit: commitBundle.commit,
           epoch: Number(group.epoch()),
-          group_info: Array.from(groupInfoBytes),
+          group_info: groupInfoBytes,
         });
 
         group.merge_pending_commit(this.provider);
@@ -4072,9 +4073,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         if (!this.e2eeClient) throw new Error('[MLS] e2eeClient not initialized');
         await this.e2eeClient.commitEviction(channelType, channelId, {
           target_user_ids: allRemoveIds,
-          commit: Array.from(commitBundle.commit),
+          commit: commitBundle.commit,
           epoch: Number(group.epoch()),
-          group_info: Array.from(groupInfoBytes),
+          group_info: groupInfoBytes,
         });
       } else {
         // Admin kick — target still in channel.
@@ -4085,9 +4086,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           throw new Error(`[MLS] No active channel found for cid: ${cid}`);
         }
         await channel.removeMembersE2ee([targetUserId], {
-          commit: Array.from(commitBundle.commit),
+          commit: commitBundle.commit,
           epoch: Number(group.epoch()),
-          group_info: Array.from(groupInfoBytes),
+          group_info: groupInfoBytes,
         });
       }
     } catch (err) {
@@ -4167,7 +4168,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // is required before GroupInfo can be correctly exported.
       try {
         await this.e2eeClient!.externalJoin(channelType, channelId, {
-          commit: Array.from(result.commit),
+          commit: result.commit,
           // group.epoch() = N+1 (OpenMLS auto-stages the pending commit).
           // Server external_join_handler expects post-merge epoch and handles CAS internally.
           epoch: Number(group.epoch()),
@@ -4236,12 +4237,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       await this._persistProvider();
       throw new Error('[MLS] keyRotation: bundle.group_info is empty — cannot proceed');
     }
-    const groupInfoForRequest = Array.from(groupInfoBytes as Uint8Array);
+    const groupInfoForRequest = groupInfoBytes as Uint8Array;
 
     // 4. Send commit to server FIRST
     try {
       await this.e2eeClient!.keyRotation(channelType, channelId, {
-        commit: Array.from(bundle.commit),
+        commit: bundle.commit,
         epoch: Number(group.epoch()),
         group_info: groupInfoForRequest,
       });
@@ -4297,7 +4298,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         return;
       }
       await this.e2eeClient!.uploadGroupInfo(channelType, channelId, {
-        group_info: Array.from(groupInfoBytes),
+        group_info: groupInfoBytes,
         epoch: Number(group.epoch()),
       });
       console.log('[MLS] GroupInfo uploaded for:', channelType, channelId, 'epoch:', Number(group.epoch()));
@@ -4933,7 +4934,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       response = await this.e2eeClient!.sendMessage(channelType, channelId, {
         message: {
           id: messageId,
-          mls_ciphertext: Array.from(ciphertext),
+          mls_ciphertext: ciphertext,
           mls_epoch: Number(group.epoch()),
           e2ee_group_id: e2eeGroupId,
           ...envelopeOptions,
@@ -4949,7 +4950,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         response = await this.e2eeClient!.sendMessage(channelType, channelId, {
           message: {
             id: messageId,
-            mls_ciphertext: Array.from(ciphertext),
+            mls_ciphertext: ciphertext,
             mls_epoch: Number(group.epoch()),
             e2ee_group_id: e2eeGroupId,
             ...envelopeOptions,
@@ -5066,7 +5067,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     try {
       response = await this.e2eeClient!.updateMessage(channelType, channelId, messageId, {
         message: {
-          mls_ciphertext: Array.from(ciphertext),
+          mls_ciphertext: ciphertext,
           mls_epoch: Number(group.epoch()),
           e2ee_group_id: e2eeGroupId,
           ...envelopeOptions,
@@ -5081,7 +5082,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         group = this.getGroup(e2eeGroupId)!;
         response = await this.e2eeClient!.updateMessage(channelType, channelId, messageId, {
           message: {
-            mls_ciphertext: Array.from(ciphertext),
+            mls_ciphertext: ciphertext,
             mls_epoch: Number(group.epoch()),
             e2ee_group_id: e2eeGroupId,
             ...envelopeOptions,
@@ -5332,7 +5333,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   async createE2eeTopic(
     topicCid: string,
     parentMemberUserIds: string[],
-  ): Promise<{ commit: number[]; welcome: number[]; ratchet_tree: number[]; group_info: number[]; epoch: number }> {
+  ): Promise<{
+    commit: Uint8Array;
+    welcome: Uint8Array;
+    ratchet_tree: Uint8Array;
+    group_info: Uint8Array;
+    epoch: number;
+  }> {
     if (!this.initialized) throw new Error('[MLS] Not initialized');
 
     // 1. Create MLS group (solo — just creator, epoch 0)
@@ -5377,10 +5384,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     console.log('[MLS] createE2eeTopic: bundle ready for:', topicCid, 'epoch:', Number(group.epoch()));
 
     return {
-      commit: Array.from(commitBundle.commit),
-      welcome: allKeyPackages.length > 0 ? Array.from(commitBundle.welcome) : [],
-      ratchet_tree: Array.from(ratchetTree.to_bytes()),
-      group_info: Array.from(exportedGI),
+      commit: commitBundle.commit,
+      welcome: allKeyPackages.length > 0 ? commitBundle.welcome : new Uint8Array(0),
+      ratchet_tree: ratchetTree.to_bytes(),
+      group_info: exportedGI,
       epoch: premergeEpoch,
     };
   }
@@ -5471,10 +5478,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
         topicBundles.push({
           topic_cid: topicCid,
-          commit: Array.from(commitBundle.commit),
-          welcome: Array.from(commitBundle.welcome),
-          ratchet_tree: Array.from(ratchetTree.to_bytes()),
-          group_info: Array.from(groupInfo),
+          commit: commitBundle.commit,
+          welcome: commitBundle.welcome,
+          ratchet_tree: ratchetTree.to_bytes(),
+          group_info: groupInfo,
           epoch: Number(group.epoch()),
         });
         processedCids.push(topicCid);
@@ -5577,7 +5584,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         pendingGroups.set(topicCid, group);
         topicBundles.push({
           topic_cid: topicCid,
-          commit: Array.from(result.commit),
+          commit: result.commit,
           epoch: Number(group.epoch()),
           // group_info is uploaded separately after merge
         });
