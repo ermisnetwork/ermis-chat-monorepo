@@ -1336,6 +1336,21 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
   async getThumbBlobVideo(file: File): Promise<Blob | null> {
     return new Promise((resolve) => {
+      let timeoutId: number | null = null;
+      
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (videoPlayer.src) URL.revokeObjectURL(videoPlayer.src);
+        videoPlayer.remove();
+      };
+
+      // Đặt timeout 5 giây, nếu không lấy được ảnh thì bỏ qua để không treo upload
+      timeoutId = window.setTimeout(() => {
+        console.warn('Timeout extracting video thumbnail. Skipping.');
+        cleanup();
+        resolve(null);
+      }, 5000);
+
       const videoPlayer = document.createElement('video');
       videoPlayer.src = URL.createObjectURL(file);
       videoPlayer.crossOrigin = 'anonymous';
@@ -1345,11 +1360,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       let attempts = 0;
       const maxAttempts = 5;
       const seekInterval = 1.0; // Nhảy mỗi lần 1 giây nếu gặp ảnh đen
-
-      const cleanup = () => {
-        URL.revokeObjectURL(videoPlayer.src);
-        videoPlayer.remove();
-      };
 
       videoPlayer.addEventListener('error', () => {
         console.error('Error when loading video file.');
