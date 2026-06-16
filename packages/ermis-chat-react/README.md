@@ -5,6 +5,7 @@ The official React UI components for Ermis Chat.
 ## E2EE UI Support
 
 - `CreateChannelModal` supports E2EE direct/group creation when `client.mlsManager` is initialized.
+- `CreateChannelModal` accepts `e2eeRecoveryPolicy`, defaulting to `member_assisted`, and sends it with new E2EE direct/group creation payloads.
 - Channel info actions can enable E2EE for an existing standard channel when the viewer is the owner and MLS is initialized.
 - Channel message lists listen for `e2ee.message_decrypted` and refresh decrypted message content from the SDK MLS storage.
 - Recovery PIN helpers expose vault state, unlocked PIN change, `repairEncryptedChannel()` for Channel Info repair, lower-level archive repair, restore progress loading, and queue enqueueing for app-level PIN gates.
@@ -15,6 +16,13 @@ The official React UI components for Ermis Chat.
 - Custom Channel Info action components receive the current `channel`, allowing selected-timeline repair UI without relying on global active-channel state.
 
 ## Progress Log
+
+### 2026-06-16 - E2EE Recovery Policy Create Flow
+
+- Goal: expose Bellboy recovery policy selection to React create-channel consumers.
+- Code changed: `CreateChannelModalProps` now includes `e2eeRecoveryPolicy`, and `CreateChannelModal` sends `data.e2ee_recovery_policy` when creating E2EE direct/group channels.
+- Design decision: the default remains `member_assisted`; apps that need strict self-owned recovery can pass `self_owned_only` without changing the MLS bundle flow.
+- Verification: `npm run build:react` passed.
 
 ### 2026-05-17 - Production
 

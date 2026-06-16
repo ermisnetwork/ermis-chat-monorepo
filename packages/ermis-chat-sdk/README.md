@@ -24,6 +24,7 @@ The official core SDK for Ermis Chat.
 - Recovery vault lookup is cached and in-flight de-duplicated inside `MlsManager`; repeated recovery status refreshes read local vault state instead of repeatedly calling `GET /recovery/vault`.
 - Fresh epoch archives are exported after channel creation and after every fresh epoch. If no recovery vault exists yet, the archive ADK is stashed locally under a device-local non-extractable WebCrypto AES-GCM key and uploaded after PIN setup/vault discovery.
 - Archive failures are best-effort: commit/join/rotate flows keep the MLS epoch change and retain retryable archive work locally.
+- New E2EE channel creation can pass `data.e2ee_recovery_policy` as `member_assisted` or `self_owned_only`. The default server/client behavior remains `member_assisted`.
 - `client.mlsManager.bootstrapKnownE2eeChannels()` scans loaded E2EE channels after `channels.queried`, external-joins missing local groups sequentially, emits `e2ee.bootstrap_progress`, and queues restore after PIN unlock.
 - E2EE non-gated topics inherit the parent `e2ee_group_id`; gated topics keep a topic-owned MLS group.
 - Reconnect catch-up uses `/v1/e2ee/scope_sync` with one `{ created_at, event_id }` cursor per E2EE scope.
@@ -32,6 +33,13 @@ The official core SDK for Ermis Chat.
 - The SDK dispatches `e2ee.bootstrap_progress` while startup external-join preparation is running; UI clients can show non-blocking secure-restore preparation progress.
 
 ## Progress Log
+
+### 2026-06-16 - E2EE Recovery Policy Client Contract
+
+- Goal: wire Bellboy `e2ee_recovery_policy` through the SDK-facing channel data contract.
+- Code changed: `ChannelData`, `ChannelResponse`, and `CreateTopicData` now expose `E2eeRecoveryPolicy = 'member_assisted' | 'self_owned_only'`, allowing E2EE create flows to choose member-assisted or self-owned-only recovery coverage.
+- Design decision: SDK only transports the policy; Bellboy remains the source of truth for validation, immutability, inherited topic behavior, and sponsored upload rejection.
+- Verification: `npm run build:sdk` passed.
 
 ### 2026-06-05 - Offline Topic Waterfall Ordering
 

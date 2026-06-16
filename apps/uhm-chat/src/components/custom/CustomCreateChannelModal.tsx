@@ -244,6 +244,7 @@ export function CustomCreateChannelModal({ isOpen, onClose }: { isOpen: boolean,
       e2eeLabel={t('e2ee.toggle_label', 'End-to-end encrypted')}
       e2eeDescription={t('e2ee.toggle_description', 'Messages and attachments are encrypted for channel members.')}
       e2eeUnavailableLabel={t('e2ee.unavailable', 'E2EE is unavailable until MLS is initialized.')}
+      e2eeRecoveryPolicy="member_assisted"
       TabsComponent={CustomTabsComponent}
       FooterComponent={CustomFooterComponent}
       GroupFieldsComponent={CustomGroupFieldsComponent}

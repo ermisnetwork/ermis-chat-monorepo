@@ -6,6 +6,7 @@ import type {
   ChannelFilters,
   ChannelSort,
   ChannelQueryOptions,
+  E2eeRecoveryPolicy,
   UserCallInfo,
   SystemMessageTranslations,
   SignalMessageTranslations,
@@ -1797,6 +1798,8 @@ export type CreateChannelModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: (channel: any) => void; // Uses 'any' or 'Channel' based on context
+  /** Recovery coverage policy for newly created E2EE channels. Defaults to member_assisted. */
+  e2eeRecoveryPolicy?: E2eeRecoveryPolicy;
 
   /** Override visual components */
   AvatarComponent?: React.ComponentType<AvatarProps>;

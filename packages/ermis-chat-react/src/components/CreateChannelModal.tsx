@@ -58,6 +58,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   e2eeLabel = 'End-to-end encrypted',
   e2eeDescription = 'Only channel members can read encrypted messages.',
   e2eeUnavailableLabel = 'E2EE is unavailable on this device.',
+  e2eeRecoveryPolicy = 'member_assisted',
   TabsComponent,
   FooterComponent,
   GroupFieldsComponent,
@@ -165,6 +166,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           const bundle = await mlsManager.createE2eeChannel('messaging', null, null, members);
           Object.assign(payload, {
             mls_enabled: true,
+            e2ee_recovery_policy: e2eeRecoveryPolicy,
             channel_id: bundle.channel_id,
             ...bundle,
           });
@@ -213,6 +215,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           const bundle = await mlsManager.createE2eeChannel('team', channelId, cid, memberIds);
           Object.assign(payload, {
             mls_enabled: true,
+            e2ee_recovery_policy: e2eeRecoveryPolicy,
             ...bundle,
           });
           createdChannel = client.channel('team', channelId, payload);
@@ -257,6 +260,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
     isPublic,
     description,
     e2eeEnabled,
+    e2eeRecoveryPolicy,
     e2eeUnavailableLabel,
     onSuccess,
     onClose,
