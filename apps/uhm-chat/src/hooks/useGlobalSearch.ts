@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react'
 import type { ErmisChat, Channel } from '@ermis-network/ermis-chat-sdk'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -64,7 +64,8 @@ export function useGlobalSearch(
   client: ErmisChat | null | undefined,
   searchTerm: string,
 ): UseGlobalSearchReturn {
-  const term = searchTerm.trim().toLowerCase()
+  const deferredSearchTerm = useDeferredValue(searchTerm)
+  const term = deferredSearchTerm.trim().toLowerCase()
   const currentUserId = client?.userID
 
   // ── API result states ──────────────────────────────────────────
@@ -81,12 +82,13 @@ export function useGlobalSearch(
   const myChannels = useMemo(() => {
     if (!client || !term) return []
     const normalizedTerm = normalizeSearchText(term)
+    const searchWords = normalizedTerm.split(/\\s+/).filter(Boolean)
 
     const results: Channel[] = []
     for (const ch of Object.values(client.activeChannels)) {
       if (ch.type === 'topic') continue
       const name = normalizeSearchText((ch.data?.name as string) || '')
-      if (name.startsWith(normalizedTerm)) {
+      if (searchWords.every(word => name.includes(word))) {
         results.push(ch)
         if (results.length >= 50) break
       }
@@ -99,6 +101,7 @@ export function useGlobalSearch(
     if (!client || !term) return []
     const results: TopicResult[] = []
     const normalizedTerm = normalizeSearchText(term)
+    const searchWords = normalizedTerm.split(/\\s+/).filter(Boolean)
 
     for (const ch of Object.values(client.activeChannels)) {
       if (
@@ -113,7 +116,7 @@ export function useGlobalSearch(
 
       for (const topic of ch.state.topics as Channel[]) {
         const topicName = normalizeSearchText((topic.data?.name as string) || '')
-        if (topicName.startsWith(normalizedTerm)) {
+        if (searchWords.every(word => topicName.includes(word))) {
           results.push({ topic, parentName, parentImage })
           if (results.length >= 50) break
         }
