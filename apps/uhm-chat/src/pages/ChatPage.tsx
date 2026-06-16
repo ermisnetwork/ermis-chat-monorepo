@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, KeyRound, Hash, AlertTriangle } from 'lucide-react'
+import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash, AlertTriangle } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
@@ -65,7 +65,6 @@ export function ChatPage() {
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [rotatingKeyCid, setRotatingKeyCid] = useState<string | null>(null)
-  const [isRecoveryPinOpen, setIsRecoveryPinOpen] = useState(false)
   const [isRecoveryGateOpen, setIsRecoveryGateOpen] = useState(false)
   const [recoveryGateDismissed, setRecoveryGateDismissed] = useState(false)
   const [activeRestoreProgress, setActiveRestoreProgress] = useState<RestoreProgressRecord | null>(null)
@@ -549,17 +548,6 @@ export function ChatPage() {
               )}
             </div>
           )}
-          {isE2ee && (
-            <button
-              className="inline-flex items-center justify-center w-8 h-8 rounded-full text-emerald-600 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
-              onClick={() => setIsRecoveryPinOpen(true)}
-              title={t('recovery_pin.open_action')}
-              aria-label={t('recovery_pin.open_action')}
-              disabled={actionDisabled || !mlsManager?.initialized}
-            >
-              <KeyRound className="w-[17px] h-[17px]" />
-            </button>
-          )}
           {restoreBadge && (
             <div className={`hidden md:inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold ${
               restoreBadge.tone === 'gap'
@@ -965,6 +953,8 @@ export function ChatPage() {
             collapseLabel={t('overlays.collapse')}
             unpinLabel={t('overlays.unpin')}
             stickerLabel={t('overlays.sticker')}
+            attachmentLabel={t('chat.preview_attachment', 'Attachment')}
+            unavailableMessageLabel={t('chat.message_unavailable', 'Message unavailable')}
             typingIndicatorLabel={(users) => {
               const names = users.map((u) => u.name || u.id);
               if (names.length === 1) {
@@ -1068,18 +1058,12 @@ export function ChatPage() {
         onSendMessage={handleSendMessageFromProfile}
       />
       <UhmRecoveryPinDialog
-        isOpen={isRecoveryPinOpen}
-        onClose={() => setIsRecoveryPinOpen(false)}
-        channel={activeChannel}
-      />
-      <UhmRecoveryPinDialog
         isOpen={isRecoveryGateOpen}
         onClose={() => {
           activeRestorePromptedCidRef.current = activeChannel?.cid || null
           setRecoveryGateDismissed(true)
           setIsRecoveryGateOpen(false)
         }}
-        channel={activeChannel}
         variant="gate"
         onSkip={() => {
           activeRestorePromptedCidRef.current = activeChannel?.cid || null

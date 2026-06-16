@@ -175,10 +175,25 @@ export interface UpdateE2eeMessageRequest {
 
 export interface UploadRecoveryVaultRequest {
   vault_bytes: Uint8Array;
+  expected_revision?: number;
+}
+
+export interface UploadRecoveryVaultResponse extends APIResponse {
+  status: 'created' | 'updated' | 'conflict';
+  revision: number;
 }
 
 export interface RecoveryVaultResponse extends APIResponse {
   vault_bytes: Uint8Array;
+  revision: number;
+  recovery_key_id: string;
+  ciphersuite: number;
+  vault_format_version: number;
+  kdf_metadata: {
+    name: string;
+    iterations: number;
+  };
+  updated_at: string;
 }
 
 export interface RecoveryPublicKeyResponse extends APIResponse {
@@ -191,7 +206,8 @@ export interface UploadEpochArchiveRequest {
   epoch: number;
   archive_blob_id: string;
   idempotency_key: string;
-  scope: 'account_owned';
+  scope: 'account_owned' | 'group_sponsored';
+  recipient_set_hash?: string;
   encrypted_archive: {
     ciphertext: Uint8Array;
     nonce: Uint8Array;
@@ -211,13 +227,27 @@ export interface UploadEpochArchiveRequest {
   }>;
 }
 
-export type UploadEpochArchiveReason = 'stored' | 'idempotent' | 'duplicate_cap';
+export type UploadEpochArchiveReason = 'stored' | 'idempotent' | 'duplicate_cap' | 'recipient_set_stale';
 
 export interface UploadEpochArchiveResponse extends APIResponse {
-  ok: boolean;
-  stored: boolean;
-  reason?: UploadEpochArchiveReason;
+  status: 'stored' | 'duplicate' | 'rejected';
+  reason_code: UploadEpochArchiveReason;
   message?: string;
+}
+
+export interface SponsoredArchiveRecipient {
+  user_id: string;
+  recovery_key_id: string;
+  ciphersuite: number;
+  public_key: Uint8Array;
+  public_key_hash: string;
+}
+
+export interface QuerySponsoredArchiveRecipientsResponse extends APIResponse {
+  recipient_set_hash?: string;
+  recipients: SponsoredArchiveRecipient[];
+  matching_candidate_exists: boolean;
+  reason?: 'no_recovery_recipients' | 'recipient_limit';
 }
 
 export interface EpochIndexEntry {
@@ -274,6 +304,19 @@ export interface QueryEpochArchivesResponse extends APIResponse {
   blobs?: ArchiveBlobRecord[];
   wraps?: ArchiveKeyWrapRecord[];
   snapshots?: Record<string, MemberSnapshotRecord>;
+}
+
+export interface ListArchiveAvailabilityResponse extends APIResponse {
+  epochs: EpochIndexEntry[];
+  has_more: boolean;
+  next_cursor?: string;
+}
+
+export interface QueryArchiveMaterialRequest {
+  epoch_from: number;
+  epoch_to: number;
+  include_snapshots?: boolean;
+  include_wraps?: boolean;
 }
 
 export interface CiphertextCursor {
@@ -335,6 +378,11 @@ type RawQueryEpochArchivesResponse = Omit<QueryEpochArchivesResponse, 'blobs' | 
   blobs?: RawArchiveBlobRecord[];
   wraps?: RawArchiveKeyWrapRecord[];
   snapshots?: Record<string, RawMemberSnapshotRecord>;
+};
+
+type RawSponsoredArchiveRecipient = Omit<SponsoredArchiveRecipient, 'public_key'> & { public_key: unknown };
+type RawQuerySponsoredArchiveRecipientsResponse = Omit<QuerySponsoredArchiveRecipientsResponse, 'recipients'> & {
+  recipients: RawSponsoredArchiveRecipient[];
 };
 type RawHistoricalCiphertext = Omit<HistoricalCiphertext, 'mls_ciphertext'> & { mls_ciphertext: Base64Bytes };
 type RawCiphertextQueryResponse = Omit<CiphertextQueryResponse, 'ciphertexts'> & {
@@ -592,9 +640,10 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   // ---- Recovery Vault ----
 
-  async uploadRecoveryVault(data: UploadRecoveryVaultRequest): Promise<APIResponse> {
-    return await this._post(this.baseURL + '/v1/e2ee/recovery/vault', {
+  async uploadRecoveryVault(data: UploadRecoveryVaultRequest): Promise<UploadRecoveryVaultResponse> {
+    return await this._post<UploadRecoveryVaultResponse>(this.baseURL + '/v1/e2ee/recovery/vault', {
       vault_bytes: encodeBytesField(data.vault_bytes, 'vault_bytes'),
+      ...(data.expected_revision !== undefined ? { expected_revision: data.expected_revision } : {}),
     });
   }
 
@@ -621,6 +670,24 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     );
   }
 
+  async querySponsoredArchiveRecipients(
+    channelType: string,
+    channelId: string,
+    epoch: number,
+  ): Promise<QuerySponsoredArchiveRecipientsResponse> {
+    const raw = await this._post<RawQuerySponsoredArchiveRecipientsResponse>(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/recipients/query`,
+      { epoch },
+    );
+    return {
+      ...raw,
+      recipients: raw.recipients.map((recipient) => ({
+        ...recipient,
+        public_key: decodeBytesField(recipient.public_key, 'recipient.public_key'),
+      })),
+    };
+  }
+
   async queryEpochArchives(
     channelType: string,
     channelId: string,
@@ -628,6 +695,38 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   ): Promise<QueryEpochArchivesResponse> {
     const raw = await this._post<RawQueryEpochArchivesResponse>(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/query`,
+      data,
+    );
+    return {
+      ...raw,
+      blobs: raw.blobs?.map(decodeArchiveBlob),
+      wraps: raw.wraps?.map(decodeArchiveKeyWrap),
+      snapshots: raw.snapshots
+        ? Object.fromEntries(
+            Object.entries(raw.snapshots).map(([hash, snapshot]) => [hash, decodeMemberSnapshot(snapshot)]),
+          )
+        : undefined,
+    };
+  }
+
+  async listArchiveAvailability(
+    channelType: string,
+    channelId: string,
+    data: { cursor?: string; limit?: number } = {},
+  ): Promise<ListArchiveAvailabilityResponse> {
+    return await this._post<ListArchiveAvailabilityResponse>(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/availability/query`,
+      data,
+    );
+  }
+
+  async queryArchiveMaterial(
+    channelType: string,
+    channelId: string,
+    data: QueryArchiveMaterialRequest,
+  ): Promise<QueryEpochArchivesResponse> {
+    const raw = await this._post<RawQueryEpochArchivesResponse>(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/material/query`,
       data,
     );
     return {

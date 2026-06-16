@@ -721,6 +721,10 @@ export type MessageListProps = {
   typingIndicatorLabel?: (users: Array<{ id: string; name?: string }>) => string;
   /** I18n Label for deleted display messages (display_type === 'deleted') */
   deletedMessageLabel?: string;
+  /** I18n Label for attachment-only previews */
+  attachmentLabel?: string;
+  /** I18n Label for messages whose contents are unavailable */
+  unavailableMessageLabel?: string;
   /** Custom translation templates for system messages */
   systemMessageTranslations?: SystemMessageTranslations;
   /** Custom translation templates for signal (call) messages */
@@ -823,6 +827,12 @@ export type MessageItemProps = {
   editedLabel?: string;
   /** I18n Label for deleted display messages (display_type === 'deleted') */
   deletedMessageLabel?: React.ReactNode;
+  /** I18n Label for attachment-only previews */
+  attachmentLabel?: string;
+  /** I18n Label for messages whose contents are unavailable */
+  unavailableMessageLabel?: string;
+  /** I18n Label for sticker message previews */
+  stickerLabel?: string;
   /** Custom translation templates for system messages */
   systemMessageTranslations?: SystemMessageTranslations;
   /** Custom translation templates for signal (call) messages */
@@ -1015,6 +1025,8 @@ export type PinnedMessageItemProps = {
   AvatarComponent: React.ComponentType<AvatarProps>;
   unpinLabel?: string;
   stickerLabel?: string;
+  attachmentLabel?: string;
+  unavailableMessageLabel?: string;
 };
 
 export type PinnedMessagesProps = {
@@ -1034,6 +1046,8 @@ export type PinnedMessagesProps = {
   collapseLabel?: string;
   unpinLabel?: string;
   stickerLabel?: string;
+  attachmentLabel?: string;
+  unavailableMessageLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -1045,11 +1059,25 @@ export type QuotedMessagePreviewProps = {
     id: string;
     text?: string;
     user?: { id?: string; name?: string };
+    attachments?: Attachment[];
+    content_type?: string;
+    mls_ciphertext?: unknown;
+    e2ee_status?: string;
+    sticker_url?: string;
+    type?: string;
+    mentioned_users?: string[];
+    mentioned_all?: boolean;
   };
   /** Whether the parent message is from the current user */
   isOwnMessage: boolean;
   /** Callback when the quote box is clicked */
   onClick: (messageId: string) => void;
+  /** I18n Label for attachment-only quoted messages */
+  attachmentLabel?: string;
+  /** I18n Label for quoted messages whose contents are unavailable */
+  unavailableMessageLabel?: string;
+  /** I18n Label for sticker quoted messages */
+  stickerLabel?: string;
 };
 
 /* ----------------------------------------------------------
@@ -1289,6 +1317,7 @@ export type ChannelInfoCoverProps = {
 };
 
 export type ChannelInfoActionsProps = {
+  channel?: Channel;
   onSearchClick?: () => void;
   onSettingsClick?: () => void;
   onLeaveChannel?: () => void;

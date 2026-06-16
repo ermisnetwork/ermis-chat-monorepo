@@ -10,17 +10,17 @@ API contract chi tiết nằm ở [e2ee_api_reference.md](./e2ee_api_reference.m
 
 ## Tra Cứu Nhanh
 
-| Keyword | Việc cần làm | Link |
-|---|---|---|
-| `wasm` | Publish/load `openmls_wasm_bg.wasm` | Init E2EE |
-| `IndexedDB` | Default `IndexedDBMlsStorage` per user | Storage |
-| `X-Device-ID` | SDK tự lấy từ storage/localStorage | Init E2EE |
-| `createE2eeChannel` | Tạo DM/team E2EE từ đầu | Create channel |
-| `enableE2ee` | Upgrade channel standard -> E2EE | Enable channel |
-| `sendMessage` | SDK route sang `/v1/e2ee/.../message` | Messaging |
-| `editMessage` | Latest encrypted snapshot | Edit message |
-| `sync` | Login/reconnect/offline catch-up | Sync |
-| `reaction` | Patch local cache từ WS/sync | Metadata |
+| Keyword             | Việc cần làm                           | Link           |
+| ------------------- | -------------------------------------- | -------------- |
+| `wasm`              | Publish/load `openmls_wasm_bg.wasm`    | Init E2EE      |
+| `IndexedDB`         | Default `IndexedDBMlsStorage` per user | Storage        |
+| `X-Device-ID`       | SDK tự lấy từ storage/localStorage     | Init E2EE      |
+| `createE2eeChannel` | Tạo DM/team E2EE từ đầu                | Create channel |
+| `enableE2ee`        | Upgrade channel standard -> E2EE       | Enable channel |
+| `sendMessage`       | SDK route sang `/v1/e2ee/.../message`  | Messaging      |
+| `editMessage`       | Latest encrypted snapshot              | Edit message   |
+| `sync`              | Login/reconnect/offline catch-up       | Sync           |
+| `reaction`          | Patch local cache từ WS/sync           | Metadata       |
 
 ## Nội Dung Chính
 
@@ -55,15 +55,16 @@ Frontend app phải đảm bảo file WASM được serve public path đúng. N�
 
 SDK default storage:
 
-| Data | Web storage | Notes |
-|---|---|---|
-| `device_id` | `localStorage` key `ermis_device_id` | Global per browser; SDK injects `X-Device-ID`. |
-| identity bytes | IndexedDB `identity` store | Keyed by `userId:deviceId`. |
-| provider state | IndexedDB `meta` store | Web provider is in-memory; persist after commits/decrypt. |
-| group marker | IndexedDB `groups` store | `cid -> marker`. |
-| decrypted messages | IndexedDB `messages` store | UI hydration/search source. |
-| sync cursors | IndexedDB `meta` store | Per cid RFC3339 timestamp cursor. |
-| pending snapshots/evictions | IndexedDB `meta` store | Retry after reconnect. |
+| Data                        | Web storage                          | Notes                                                       |
+| --------------------------- | ------------------------------------ | ----------------------------------------------------------- |
+| `device_id`                 | `localStorage` key `ermis_device_id` | Global per browser; SDK injects `X-Device-ID`.              |
+| identity bytes              | IndexedDB `identity` store           | Keyed by `userId:deviceId`.                                 |
+| provider state              | IndexedDB `meta` store               | Web provider is in-memory; persist after commits/decrypt.   |
+| group marker                | IndexedDB `groups` store             | `cid -> marker`.                                            |
+| decrypted messages          | IndexedDB `messages` store           | UI hydration/search source.                                 |
+| sync cursors                | IndexedDB `meta` store               | Per cid composite cursor `{ created_at, event_id }`.        |
+| pending snapshots/evictions | IndexedDB `meta` store               | Retry after reconnect.                                      |
+| channel repair state        | IndexedDB `meta` store               | Per MLS scope replay/reset checkpoint and soft repair lock. |
 
 Không xóa IndexedDB khi logout cùng user nếu muốn restore E2EE state nhanh. Khi switch user, SDK dùng DB scoped theo user id để tránh contaminate state.
 
@@ -347,7 +348,43 @@ client.on('connection.recovered', () => {
 });
 ```
 
-Sync handler must process events per cid sequentially, persist decrypted messages/provider state, then save `next_cursor`.
+Sync handler must process events per cid sequentially and commit cursor only after the durable local state is safe:
+
+- Use the exact processed event cursor `{ created_at, event_id }`; do not combine the processed timestamp with the server batch `next_cursor.event_id`.
+- If a protocol commit fails before the event is safely processed, stop the page and emit `needs_retry`; the cursor must not advance past that event.
+- If an application message decrypt fails after its encrypted snapshot/repair issue is persisted, the cursor may advance; manual repair can retry that message later without replaying the whole epoch.
+- Persist provider bytes before or in the same IndexedDB transaction as the cursor. Default `IndexedDBMlsStorage.saveMlsSyncCheckpoint()` writes provider bytes, scope cursors, pending snapshots, and repair state in one `meta` transaction.
+
+### Repair encrypted conversation
+
+Channel Info should expose one user-facing `Repair` action for E2EE channels:
+
+```ts
+const result = await client.mlsManager.repairEncryptedChannel(channel.type, channel.id, {
+  mode: 'replay',
+});
+
+if (result.requiresPin) {
+  // Open the chat-history PIN dialog, then call Repair again after unlock.
+}
+
+if (result.resetAvailable) {
+  // Show the advanced action only after replay failed:
+  // mode: 'reset_local_state'
+}
+```
+
+`replay` reprocesses events from the last safe cursor or membership-bounded cursor, flushes pending encrypted snapshots, then runs chat-history archive repair when the PIN is unlocked. It does not re-decrypt message versions already available in local plaintext. If the local MLS epoch is lower than the epoch of known failed messages, the SDK treats the saved sync cursor as untrusted and replays from the membership/MLS-enabled boundary. If the local state is still behind after replay, the SDK still tries archive repair before exposing reset, because archive material may recover existing unavailable messages even though it cannot advance the live MLS group state.
+
+When archive epoch listing returns no matching epoch for persisted repair issues, manual repair marks those issue versions as `no_archive`. This means there is no chat-history backup material for those messages yet; resetting local encrypted state may still fix future/live decryption by external-joining the latest MLS state, but it cannot recover messages whose archive material does not exist.
+
+`reset_local_state` is a manual fallback after replay fails repeatedly. It deletes only the local MLS group state for the selected MLS scope, external-joins the latest state, keeps already-rendered plaintext messages and repair issues, archives the new epoch, then retries chat-history repair if the PIN is available. For non-gated topics, reset is applied to the parent MLS scope while repair results remain filtered to the selected topic timeline.
+
+Repair now runs archive-first. It then replays protocol state, flushes pending ciphertext, and performs a final archive recheck. The advanced reset action is based only on protocol replay failure; missing archive material or an exhausted archive candidate does not justify reset.
+
+Epoch transitions persist a scope-independent encrypted checkpoint before the next application event. Account-owned and group-sponsored uploads are materialized independently in the background. Do not trigger arbitrary archive export from Repair, PIN unlock, or bootstrap because late exports may have consumed sender generations.
+
+For staged rollout, pass `enableSponsoredArchives: false` to `MlsManager.initialize()`. This disables sponsored upload for the client session while account-owned recovery remains active.
 
 ### Reaction/delete/pin metadata
 

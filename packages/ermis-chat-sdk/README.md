@@ -6,12 +6,19 @@ The official core SDK for Ermis Chat.
 
 - `channel.removeMembersE2ee(members, e2eeOptions)` removes other members from an E2EE channel with an MLS commit and sends `self_remove: false`.
 - `channel.leaveChannelE2ee(userId)` self-leaves an E2EE channel by sending `self_remove: true`; this path does not include an MLS commit from the leaving user.
-- `client.mlsManager.setupRecoveryPin(pin)`, `unlockRecoveryVault(pin)`, and `changeRecoveryPin(oldPin, newPin)` manage the PIN recovery vault for epoch archive restore.
+- `client.mlsManager.setupRecoveryPin(pin)`, `unlockRecoveryVault(pin)`, `changeUnlockedRecoveryPin(newPin)`, and the compatibility `changeRecoveryPin(oldPin, newPin)` manage the PIN recovery vault. PIN verification and rewrap remain client-side.
 - `client.mlsManager.restoreHistoricalMessages(channelType, channelId, options)` restores accessible historical E2EE ciphertexts from account-owned epoch archives and returns explicit gap entries when archive material is missing.
+- `client.mlsManager.repairEncryptedChannel(channelType, channelId, { mode: 'replay' })` is the user-facing Channel Info repair API. It replays from the last safe sync cursor, flushes pending encrypted snapshots, and runs chat-history repair if the PIN is unlocked.
+- `client.mlsManager.repairEncryptedChannel(channelType, channelId, { mode: 'reset_local_state' })` is an advanced manual fallback after replay failure. It reloads the local MLS state through external join while keeping decrypted message cache and repair issues.
+- `client.mlsManager.repairRecoveryChannel(channelType, channelId, { mode })` repairs persisted failed message versions with `failed_only` or rechecks the selected timeline with `recheck_channel`.
+- Sync cursors are stored as `{ created_at, event_id }`; the SDK commits the cursor that was actually processed, not the server batch cursor, and IndexedDB checkpoints provider bytes plus cursor in one meta transaction when available.
+- During encrypted-state repair, a local group epoch lower than known failed message epochs makes the saved sync cursor untrusted; replay starts from the membership/MLS-enabled boundary, then archive repair is attempted before reset availability is returned if the device is still behind.
+- During manual repair, archive epoch listings with no matching epoch mark the affected message-level issues as `no_archive` instead of leaving stale `decrypt_error` reasons.
 - For non-gated E2EE topics, historical restore queries parent archive material by `e2ee_group_id` and routes restored plaintext into each timeline by `ciphertext.cid`.
 - `client.mlsManager.getRecoveryStatus()` reports vault existence, memory-only unlock state, incomplete restore channels, and channels that completed with permanent gaps.
 - `client.mlsManager.getRestoreProgress(channelType, channelId)` returns the per-device restore progress record for channel UI badges and gap banners.
 - Restore progress is persisted per device in IndexedDB so interrupted history restore resumes only missing epochs after the user re-enters their PIN.
+- Message-level `repair_issues` share that existing progress record, so new failures in completed epochs are not hidden and no IndexedDB version bump is required.
 - Restore runs sequentially by channel and fetches target epochs in bounded batches/ranges before saving progress per epoch.
 - The SDK loads recovery public metadata during MLS initialization, so devices can upload account-owned archives while still locked and only require PIN entry for private-key restore.
 - Recovery vault lookup is cached and in-flight de-duplicated inside `MlsManager`; repeated recovery status refreshes read local vault state instead of repeatedly calling `GET /recovery/vault`.
@@ -69,7 +76,8 @@ The official core SDK for Ermis Chat.
 
 - Goal: add web/WASM-first PIN epoch archive restore orchestration.
 - Code changed: E2EE client recovery/archive endpoints, IndexedDB archive upload queue, recovery public key cache, `MlsManager` PIN setup/unlock/change, archive upload, and historical restore by `archive_blob_id`.
-- Design decision: V1 is account-owned, PIN-only, no recovery key rotation, and returns gap entries for missing archive/wrap/snapshot/decrypt cases.
+- Historical design decision: the initial V1 was account-owned and PIN-only. The current recovery flow keeps account-owned compatibility and adds independently materialized `group_sponsored` coverage from epoch-start checkpoints; recovery key rotation is still unsupported.
+- Rollout: initialize `MlsManager` with `{ enableSponsoredArchives: false }` to disable sponsored coverage for that client session while retaining account-owned recovery.
 - Verification: `npm run types` passed for this package.
 
 ### 2026-05-22 - PIN Epoch Archive V1 BigInt Fix
@@ -89,7 +97,7 @@ The official core SDK for Ermis Chat.
 
 - Goal: add production restore UX state and archive upload dedup handling.
 - Code changed: archive upload responses now include `stored/reason`, upload queues drain on `stored=false`, `MlsManager` exposes `getRecoveryStatus()` and a restore queue, and IndexedDB stores per-device `restore_progress`.
-- Design decision: recovery private keys remain memory-only; `done_with_gaps` is terminal and does not prompt for PIN again.
+- Design decision: recovery private keys remain memory-only; `done_with_gaps` stops automatic restore prompts, while explicit manual repair may recheck non-terminal issues.
 - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, `yarn workspace @ermis-network/ermis-chat-react build`, and `yarn workspace uhm-chat build` passed.
 
 ### 2026-06-01 - PIN Restore Queue Batching and Progress Events
@@ -149,6 +157,43 @@ The official core SDK for Ermis Chat.
 - Code changed: `getRecoveryStatus()` now folds joined known E2EE channels with missing or non-terminal `restore_progress` into `hasIncompleteRestore` / `incompleteChannels`.
 - Design decision: automatic PIN gates should be driven by restore need, not merely by a locked recovery vault.
 - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, and `yarn workspace uhm-chat build` passed.
+
+### 2026-06-13 - Message-Level Recovery Repair
+
+- Goal: stop epoch-wide restore counts from reporting already available messages as newly restored and provide explicit repair actions for failed encrypted messages.
+- Code changed: restore progress now carries `RepairIssue` records keyed by message version; realtime, sync, pending snapshots, and archive restore update the same issue state.
+- Code changed: `repairRecoveryChannel()` supports failed-only retry and selected-timeline recheck, filters inherited topics by their own CID, and skips message versions already covered by local plaintext.
+- Code changed: `changeUnlockedRecoveryPin(newPin)` rewraps the in-memory recovery key after unlock while `changeRecoveryPin(oldPin, newPin)` remains compatible and validates the old PIN through WASM unwrap.
+- Design decision: `completed_epochs` remains compatibility metadata, `done_with_gaps` prevents automatic loops but not manual repair, and issue fields use the existing restore-progress store.
+- Verification: `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed 5 regression tests; `npm run build:sdk`, `npm run build:react`, and `yarn workspace uhm-chat build` passed.
+
+### 2026-06-13 - Safe Cursor and Encrypted State Repair
+
+- Goal: prevent scope sync from skipping events when processing stops mid-batch and add a recovery path for devices whose local MLS state falls behind the server.
+- Code changed: channel sync now carries `processed_event_cursor` through `_processChannelEvents()`, and both batch sync plus per-channel sync use the exact processed `event_id` instead of borrowing `serverNextCursor.event_id`.
+- Code changed: default IndexedDB storage now persists `ChannelRepairState`, a 60s soft repair lock, and optional `saveMlsSyncCheckpoint()` for provider bytes plus scope cursor in one `meta` transaction.
+- Code changed: `repairEncryptedChannel()` adds replay and manual reset modes; replay gates realtime decrypt/protocol processing for that scope, and reset rolls back provider/group state if external join fails.
+- Code changed: replay now detects local epoch drift from repair issues/pending snapshots, ignores potentially over-advanced saved cursors, attempts archive repair, and returns reset availability when replay cannot bring the local epoch up to the failed message epoch.
+- Code changed: manual repair now marks message-level issues as `no_archive` when archive epoch listing has no matching material, so UI details distinguish missing backup material from decrypt failure.
+- Design decision: message decrypt failures can advance the cursor only after pending snapshots/repair issues are durable; protocol commit failures stop the page and surface retry/reset instead of advancing.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
+
+### 2026-06-14 - Archive-First Repair and Group-Sponsored Coverage
+
+- Repair now tries available archives before protocol replay, flushes pending ciphertext after replay, then performs a final archive recheck. Missing archives do not expose local-state reset.
+- Restore issues use canonical `cid + message_id + normalized version` identity without epoch. `forward_secrecy_consumed` remains blocked/recoverable because an alternate archive can still decrypt it.
+- Archive restore prefers group-sponsored candidates and lazily tries alternate blobs per failed message before marking it unavailable.
+- Epoch transitions capture one scope-independent checkpoint encrypted by the device-local non-extractable key. Account-owned and sponsored blobs are materialized separately because their AAD/wrap info bind scope.
+- Archive ACK and pending checks are scope-aware. Sponsored capability gracefully disables for the session against old Bellboy versions.
+- PIN unlock force-rechecks accepted E2EE timelines once per unlock session, and self invite acceptance triggers archive recheck.
+- Verification: SDK build and 9 recovery-repair regression tests pass.
+
+### 2026-06-15 - Archive API V2 and Vault Revision
+
+- `e2ee.ts` exposes cursor-paginated archive availability and bounded material queries. Keep V1 discovery during Bellboy manifest/recipient backfill; switch recovery orchestration to V2 only after server rollout confirms coverage.
+- Vault responses carry `revision`; PIN changes send `expected_revision` so concurrent devices cannot silently overwrite recovery metadata.
+- Upload queues consume structured `{ status, reason_code }` results. A failed manifest may retry the same idempotency key, while an expired reservation requires a new upload identity.
+- Group-sponsored upload remains feature-detected and falls back to account-owned coverage when an older Bellboy returns unsupported endpoint/scope responses.
 
 ## Documentation
 

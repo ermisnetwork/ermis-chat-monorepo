@@ -7,11 +7,12 @@ The official React UI components for Ermis Chat.
 - `CreateChannelModal` supports E2EE direct/group creation when `client.mlsManager` is initialized.
 - Channel info actions can enable E2EE for an existing standard channel when the viewer is the owner and MLS is initialized.
 - Channel message lists listen for `e2ee.message_decrypted` and refresh decrypted message content from the SDK MLS storage.
-- Recovery PIN helpers expose recovery status, per-channel restore progress loading, and queue enqueueing for app-level PIN gates.
+- Recovery PIN helpers expose vault state, unlocked PIN change, `repairEncryptedChannel()` for Channel Info repair, lower-level archive repair, restore progress loading, and queue enqueueing for app-level PIN gates.
 - `useRecoveryPin()` refreshes after MLS initialization and restore progress events, including apps that mount recovery UI before `client.mlsManager` is attached.
 - `CreateChannelModal` asks the SDK to archive the initial E2EE epoch after server channel creation succeeds, but does not fail channel creation if archive upload/stash is temporarily unavailable.
 - Channel info add/remove member actions use MLS member commits for E2EE channels and never fall back to standard `removeMembers` while MLS is required. Self-leave calls `channel.leaveChannelE2ee`, sending `self_remove: true` so the remaining designated MLS member can commit the eviction.
 - Consumers can customize E2EE toggle rendering through `E2eeToggleComponent` and receive E2EE status/key-rotation props in channel info cover/actions components.
+- Custom Channel Info action components receive the current `channel`, allowing selected-timeline repair UI without relying on global active-channel state.
 
 ## Progress Log
 
@@ -55,6 +56,34 @@ The official React UI components for Ermis Chat.
 - Goal: keep E2EE room creation usable even if local deferred archive encryption or archive upload fails.
 - Code changed: `CreateChannelModal` now fires the post-create initial archive hook as best-effort and logs failures without rejecting the channel creation flow.
 - Verification: `npm run build:uhm` passed.
+
+### 2026-06-13 - Account PIN and Channel Repair APIs
+
+- Goal: let apps move PIN management to account settings and expose message-level encrypted-history repair in Channel Info.
+- Code changed: `useRecoveryPin()` now exposes `changeUnlockedRecoveryPin()` and `repairRecoveryChannel()`, and reports `ready` only when the recovery vault is actually unlocked.
+- Code changed: custom `ChannelInfoActions` receive the selected channel for correct topic/timeline repair.
+- Design decision: locked vault UI must not expose change PIN; repair callers can choose failed-only retry or full selected-channel recheck.
+- UX decision: consuming apps should normally present one Repair action. Uhm Chat uses full selected-channel recheck internally and keeps retry-mode terminology out of the user interface.
+- UX decision: the repair card is conversation-oriented, uses a neutral secondary action, and expands result metrics plus remaining issue details inline from a detail row.
+- Verification: `npm run build:react`, `yarn workspace uhm-chat build`, and targeted Uhm ESLint for the new PIN/repair components passed.
+
+### 2026-06-13 - Encrypted State Repair Hook
+
+- Goal: expose the SDK safe-cursor replay/reset repair API to React apps without forcing users to pick retry modes.
+- Code changed: `useRecoveryPin()` now exposes `repairEncryptedChannel(channelType, channelId, { mode })` and returns the SDK result with `requiresPin`, `resetAvailable`, processed counts, and message repair summary.
+- Design decision: apps should call replay from the primary Repair button. If `requiresPin` is true, open the PIN dialog and resume repair after unlock; if `resetAvailable` is true, show the advanced reset action with a warning.
+- Verification: `npm run build:react` and `yarn workspace uhm-chat build` passed.
+
+### 2026-06-14 - Archive-First Repair Semantics
+
+- `repairEncryptedChannel()` keeps the same React contract, but the SDK now tries PIN archive recovery before protocol replay and only exposes reset after protocol replay failure.
+- Missing archive material remains a normal unavailable-history result and must not show the reset warning.
+- PIN unlock automatically rechecks accepted E2EE timelines once per unlock session.
+
+### 2026-06-15 - Vault Revision and V2 Rollout
+
+- `useRecoveryPin()` keeps the account PIN flow unchanged while the SDK enforces Bellboy vault revisions internally.
+- Repair UI must remain compatible with V1 archive discovery until Bellboy completes manifest/recipient backfill; V2 availability is a transport/storage optimization and does not introduce a second user-facing repair mode.
 
 ## Documentation
 

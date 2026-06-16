@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
-import { isStickerMessage } from '../messageTypeUtils';
+import {
+  ATTACHMENT_TYPES,
+  isImageAttachment,
+  isLinkPreviewAttachment,
+  isStickerMessage,
+  isVideoAttachment,
+  isVoiceRecordingAttachment,
+} from '../messageTypeUtils';
 import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import type { PinnedMessageItemProps, PinnedMessagesProps } from '../types';
@@ -17,6 +24,8 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   AvatarComponent,
   unpinLabel = 'Unpin message',
   stickerLabel = 'Sticker',
+  attachmentLabel = 'Attachment',
+  unavailableMessageLabel = 'Message unavailable',
 }) => {
   const { activeChannel } = useChatClient();
   const userName = message.user?.name || message.user_id || 'Unknown';
@@ -30,9 +39,22 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   let previewText = message.text || '';
   const isSticker = isStickerMessage(message);
 
-  if (!previewText && hasAttachments) {
+  const isUnavailable =
+    !previewText &&
+    ((message as any).content_type === 'mls' ||
+      Boolean((message as any).mls_ciphertext) ||
+      (message as any).e2ee_status === 'failed' ||
+      (message as any).e2ee_status === 'decrypting');
+
+  if (isUnavailable) {
+    previewText = unavailableMessageLabel;
+  } else if (!previewText && hasAttachments) {
     const firstAttach = message.attachments![0];
-    previewText = firstAttach.title || `${firstAttach.type || 'file'}`;
+    previewText =
+      (isLinkPreviewAttachment(firstAttach) && firstAttach.title) ||
+      firstAttach.title ||
+      firstAttach.file_name ||
+      attachmentLabel;
   } else if (isSticker) {
     previewText = stickerLabel;
   }
@@ -44,11 +66,13 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
 
   // Attachment icon prefix
   let attachIcon = '';
-  if (hasAttachments) {
-    const type = message.attachments![0].type;
-    if (type === 'image') attachIcon = '📷 ';
-    else if (type === 'video') attachIcon = '🎥 ';
-    else if (type === 'audio') attachIcon = '🎵 ';
+  if (!isUnavailable && hasAttachments) {
+    const firstAttach = message.attachments![0];
+    if (isImageAttachment(firstAttach)) attachIcon = '📷 ';
+    else if (isVideoAttachment(firstAttach)) attachIcon = '🎥 ';
+    else if (isVoiceRecordingAttachment(firstAttach) || firstAttach.type === ATTACHMENT_TYPES.AUDIO) {
+      attachIcon = '🎵 ';
+    }
     else attachIcon = '📄 ';
   } else if (isSticker) {
     attachIcon = '😀 ';
@@ -64,7 +88,7 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
       <AvatarComponent image={userAvatar} name={userName} size={38} />
       <div className="ermis-pinned-messages__item-content">
         <span className="ermis-pinned-messages__item-user">{userName}</span>
-        <span className="ermis-pinned-messages__item-text">{attachIcon}{previewText || 'Attachment'}</span>
+        <span className="ermis-pinned-messages__item-text">{attachIcon}{previewText || unavailableMessageLabel}</span>
       </div>
       <button
         className="ermis-pinned-messages__unpin-btn"
@@ -96,6 +120,8 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
   collapseLabel = 'Collapse',
   unpinLabel = 'Unpin message',
   stickerLabel = 'Sticker',
+  attachmentLabel = 'Attachment',
+  unavailableMessageLabel = 'Message unavailable',
 }) => {
   const { activeChannel, client, messages } = useChatClient();
   const [expanded, setExpanded] = useState(false);
@@ -168,6 +194,8 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
             AvatarComponent={AvatarComponent}
             unpinLabel={unpinLabel}
             stickerLabel={stickerLabel}
+            attachmentLabel={attachmentLabel}
+            unavailableMessageLabel={unavailableMessageLabel}
           />
         ))}
       </div>

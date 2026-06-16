@@ -73,6 +73,9 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   forwardedLabel = 'Forwarded',
   editedLabel = 'Edited',
   deletedMessageLabel = 'This message was deleted',
+  attachmentLabel = 'Attachment',
+  unavailableMessageLabel = 'Message unavailable',
+  stickerLabel = 'Sticker',
   systemMessageTranslations,
   signalMessageTranslations,
   onMentionClick,
@@ -205,6 +208,9 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
             quotedMessage={quotedMessage}
             isOwnMessage={isOwnMessage}
             onClick={onClickQuote}
+            attachmentLabel={attachmentLabel}
+            unavailableMessageLabel={unavailableMessageLabel}
+            stickerLabel={stickerLabel}
           />
         )}
         <div className="ermis-message-list__bubble-wrapper">

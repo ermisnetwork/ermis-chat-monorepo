@@ -85,12 +85,38 @@ export interface EventCursor {
   event_id: string;
 }
 
+export type ChannelRepairStatus = 'healthy' | 'replaying' | 'replay_failed' | 'reset_available' | 'resetting';
+
+export interface ChannelRepairState {
+  scope_cid: string;
+  status: ChannelRepairStatus;
+  fail_count: number;
+  last_safe_cursor?: EventCursor;
+  last_attempted_cursor?: EventCursor;
+  last_committed_cursor?: EventCursor;
+  local_epoch?: number;
+  max_observed_epoch?: number;
+  last_error?: string;
+  updated_at: number;
+}
+
+export interface MlsSyncCheckpoint {
+  user_id: string;
+  device_id: string;
+  provider_bytes: Uint8Array;
+  scope_cursors?: Record<string, EventCursor>;
+  pending_snapshots?: Record<string, PendingE2eeSnapshot[]>;
+  repair_states?: ChannelRepairState[];
+}
+
+export type ArchiveScope = 'account_owned' | 'group_sponsored';
+
 export interface PendingArchiveUpload {
   cid: string;
   channel_type: string;
   channel_id: string;
   epoch: number;
-  scope: 'account_owned';
+  scope: ArchiveScope;
   upload: unknown;
   retry_count: number;
   created_at: number;
@@ -126,9 +152,37 @@ export type ArchiveAckStatus = 'uploaded' | 'idempotent' | 'duplicate_cap';
 export interface ArchiveAckRecord {
   cid: string;
   epoch: number;
-  recovery_key_id: string;
+  scope: ArchiveScope;
+  coverage_key: string;
+  recovery_key_id?: string;
+  recipient_set_hash?: string;
   status: ArchiveAckStatus;
   archive_blob_id?: string;
+  updated_at: number;
+}
+
+export type ArchiveMaterializationStatus = 'pending' | 'uploaded' | 'terminal' | 'unsupported';
+
+export interface EpochArchiveCheckpoint {
+  scope_cid: string;
+  channel_type: string;
+  channel_id: string;
+  epoch: number;
+  encrypted_archive_bytes: {
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
+  };
+  snapshot: {
+    snapshot_bytes: Uint8Array;
+    snapshot_hash: string;
+  };
+  sponsor_role: 'primary' | 'backup';
+  primary_user_id?: string;
+  sponsored_rewrap_count?: number;
+  materialization: Partial<Record<ArchiveScope, ArchiveMaterializationStatus>>;
+  coverage_degraded?: boolean;
+  last_error?: string;
+  captured_at: number;
   updated_at: number;
 }
 
@@ -142,6 +196,30 @@ export type RestorePermanentGapReason =
   | 'decrypt_error';
 
 export type RestoreTransientFailureReason = 'network_error' | 'server_error' | 'decrypt_error';
+
+export type RepairIssueReason =
+  | RestorePermanentGapReason
+  | RestoreTransientFailureReason
+  | 'forward_secrecy_consumed'
+  | 'missing_local_snapshot'
+  | 'legacy_epoch_failure';
+
+export type RepairIssueStatus = 'retryable' | 'blocked' | 'terminal';
+
+export interface RepairIssue {
+  cid: string;
+  message_id: string;
+  message_version: string;
+  mls_epoch?: number;
+  encrypted_message?: Record<string, unknown>;
+  created_at?: string;
+  reason: RepairIssueReason;
+  status: RepairIssueStatus;
+  retry_count: number;
+  max_retries: number;
+  last_attempt_at?: number;
+  updated_at: number;
+}
 
 export interface RestoreProgressRecord {
   device_id: string;
@@ -164,6 +242,7 @@ export interface RestoreProgressRecord {
     max_retries: number;
     updated_at: number;
   }>;
+  repair_issues?: RepairIssue[];
   last_checked_at: number;
   updated_at: number;
 }
@@ -220,6 +299,12 @@ export interface MlsStorageAdapter {
   saveScopeSyncCursor?(scopeCid: string, cursor: EventCursor): Promise<void>;
   loadAllScopeSyncCursors?(): Promise<Record<string, EventCursor>>;
   saveAllScopeSyncCursors?(cursors: Record<string, EventCursor>): Promise<void>;
+  loadChannelRepairState?(scopeCid: string): Promise<ChannelRepairState | null>;
+  saveChannelRepairState?(state: ChannelRepairState): Promise<void>;
+  deleteChannelRepairState?(scopeCid: string): Promise<void>;
+  saveMlsSyncCheckpoint?(checkpoint: MlsSyncCheckpoint): Promise<void>;
+  tryAcquireRepairLock?(scopeCid: string, ownerId: string, ttlMs: number): Promise<boolean>;
+  releaseRepairLock?(scopeCid: string, ownerId: string): Promise<void>;
   loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null>;
   saveRemovedSyncCursor(cursor: RemovedSyncCursor): Promise<void>;
 
@@ -240,7 +325,11 @@ export interface MlsStorageAdapter {
   loadPendingDeferredArchives(): Promise<PendingDeferredArchive[]>;
   deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
   saveArchiveAck(record: ArchiveAckRecord): Promise<void>;
-  loadArchiveAck(cid: string, epoch: number, recoveryKeyId: string): Promise<ArchiveAckRecord | null>;
+  loadArchiveAck(cid: string, epoch: number, scope: ArchiveScope, coverageKey: string): Promise<ArchiveAckRecord | null>;
+  saveEpochArchiveCheckpoint(checkpoint: EpochArchiveCheckpoint): Promise<void>;
+  loadEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<EpochArchiveCheckpoint | null>;
+  loadEpochArchiveCheckpoints(): Promise<EpochArchiveCheckpoint[]>;
+  deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<void>;
   saveArchiveStashKey(key: CryptoKey): Promise<void>;
   loadArchiveStashKey(): Promise<CryptoKey | null>;
   saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void>;
@@ -274,6 +363,9 @@ const STORE_RESTORE_PROGRESS = 'restore_progress';
 const ARCHIVE_STASH_KEY_META = 'archive_stash_key';
 const LEGACY_SYNC_PREFIX = 'sync:';
 const SCOPE_SYNC_PREFIX = 'scope_sync:';
+const CHANNEL_REPAIR_PREFIX = 'channel_repair:';
+const CHANNEL_REPAIR_LOCK_PREFIX = 'channel_repair_lock:';
+const EPOCH_ARCHIVE_CHECKPOINT_PREFIX = 'epoch_archive_checkpoint:';
 const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** localStorage key for device_id — global, per-browser */
@@ -294,6 +386,20 @@ function normalizeDeferredArchiveRecord(record: PendingDeferredArchive): Pending
     encrypted_adk: {
       ciphertext: normalizeRequiredBytes(record.encrypted_adk.ciphertext, 'encrypted_adk.ciphertext'),
       nonce: normalizeRequiredBytes(record.encrypted_adk.nonce, 'encrypted_adk.nonce'),
+    },
+  };
+}
+
+function normalizeEpochArchiveCheckpoint(record: EpochArchiveCheckpoint): EpochArchiveCheckpoint {
+  return {
+    ...record,
+    encrypted_archive_bytes: {
+      ciphertext: normalizeRequiredBytes(record.encrypted_archive_bytes.ciphertext, 'encrypted_archive_bytes.ciphertext'),
+      nonce: normalizeRequiredBytes(record.encrypted_archive_bytes.nonce, 'encrypted_archive_bytes.nonce'),
+    },
+    snapshot: {
+      ...record.snapshot,
+      snapshot_bytes: normalizeRequiredBytes(record.snapshot.snapshot_bytes, 'snapshot.snapshot_bytes'),
     },
   };
 }
@@ -1026,6 +1132,114 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     });
   }
 
+  async loadChannelRepairState(scopeCid: string): Promise<ChannelRepairState | null> {
+    const db = await this.openDB();
+    return new Promise<ChannelRepairState | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const request = store.get(`${CHANNEL_REPAIR_PREFIX}${scopeCid}`);
+      request.onsuccess = () => resolve((request.result as ChannelRepairState) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveChannelRepairState(state: ChannelRepairState): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(state, `${CHANNEL_REPAIR_PREFIX}${state.scope_cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async deleteChannelRepairState(scopeCid: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.delete(`${CHANNEL_REPAIR_PREFIX}${scopeCid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async saveMlsSyncCheckpoint(checkpoint: MlsSyncCheckpoint): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+
+      store.put(checkpoint.provider_bytes, `provider:${checkpoint.user_id}:${checkpoint.device_id}`);
+
+      for (const [scopeCid, cursor] of Object.entries(checkpoint.scope_cursors || {})) {
+        store.put(cursor, `${SCOPE_SYNC_PREFIX}${scopeCid}`);
+      }
+
+      for (const [cid, snapshots] of Object.entries(checkpoint.pending_snapshots || {})) {
+        const key = `pending_e2ee_snapshots:${cid}`;
+        if (snapshots.length === 0) {
+          store.delete(key);
+        } else {
+          store.put(snapshots, key);
+        }
+      }
+
+      for (const state of checkpoint.repair_states || []) {
+        store.put(state, `${CHANNEL_REPAIR_PREFIX}${state.scope_cid}`);
+      }
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async tryAcquireRepairLock(scopeCid: string, ownerId: string, ttlMs: number): Promise<boolean> {
+    const db = await this.openDB();
+    return new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      const key = `${CHANNEL_REPAIR_LOCK_PREFIX}${scopeCid}`;
+      const request = store.get(key);
+      let acquired = false;
+
+      request.onsuccess = () => {
+        const now = Date.now();
+        const current = request.result as { owner_id?: string; expires_at?: number } | undefined;
+        if (current?.owner_id && current.expires_at && current.expires_at > now && current.owner_id !== ownerId) {
+          acquired = false;
+          return;
+        }
+        acquired = true;
+        store.put({ scope_cid: scopeCid, owner_id: ownerId, expires_at: now + ttlMs, updated_at: now }, key);
+      };
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve(acquired);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async releaseRepairLock(scopeCid: string, ownerId: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      const key = `${CHANNEL_REPAIR_LOCK_PREFIX}${scopeCid}`;
+      const request = store.get(key);
+
+      request.onsuccess = () => {
+        const current = request.result as { owner_id?: string } | undefined;
+        if (!current || current.owner_id === ownerId) {
+          store.delete(key);
+        }
+      };
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   async saveAllSyncTimestamps(timestamps: Record<string, string>): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -1241,20 +1455,101 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readwrite');
       const store = tx.objectStore(STORE_ARCHIVE_ACKS);
-      store.put(record, `${record.cid}:${record.epoch}:${record.recovery_key_id}`);
+      store.put(record, `${record.cid}:${record.epoch}:${record.scope}:${record.coverage_key}`);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  async loadArchiveAck(cid: string, epoch: number, recoveryKeyId: string): Promise<ArchiveAckRecord | null> {
+  async loadArchiveAck(
+    cid: string,
+    epoch: number,
+    scope: ArchiveScope,
+    coverageKey: string,
+  ): Promise<ArchiveAckRecord | null> {
     const db = await this.openDB();
     return new Promise<ArchiveAckRecord | null>((resolve, reject) => {
       const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readonly');
       const store = tx.objectStore(STORE_ARCHIVE_ACKS);
-      const request = store.get(`${cid}:${epoch}:${recoveryKeyId}`);
-      request.onsuccess = () => resolve((request.result as ArchiveAckRecord) || null);
+      const request = store.get(`${cid}:${epoch}:${scope}:${coverageKey}`);
+      request.onsuccess = () => {
+        if (request.result || scope !== 'account_owned') {
+          resolve((request.result as ArchiveAckRecord) || null);
+          return;
+        }
+        const legacyRequest = store.get(`${cid}:${epoch}:${coverageKey}`);
+        legacyRequest.onsuccess = () => {
+          const legacy = legacyRequest.result as ArchiveAckRecord | undefined;
+          resolve(
+            legacy
+              ? {
+                  ...legacy,
+                  scope: 'account_owned',
+                  coverage_key: coverageKey,
+                  recovery_key_id: legacy.recovery_key_id || coverageKey,
+                }
+              : null,
+          );
+        };
+        legacyRequest.onerror = () => reject(legacyRequest.error);
+      };
       request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveEpochArchiveCheckpoint(checkpoint: EpochArchiveCheckpoint): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).put(
+        checkpoint,
+        `${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${checkpoint.scope_cid}:${checkpoint.epoch}`,
+      );
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<EpochArchiveCheckpoint | null> {
+    const db = await this.openDB();
+    return new Promise<EpochArchiveCheckpoint | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const request = tx.objectStore(STORE_META).get(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
+      request.onsuccess = () =>
+        resolve(request.result ? normalizeEpochArchiveCheckpoint(request.result as EpochArchiveCheckpoint) : null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async loadEpochArchiveCheckpoints(): Promise<EpochArchiveCheckpoint[]> {
+    const db = await this.openDB();
+    return new Promise<EpochArchiveCheckpoint[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const checkpoints: EpochArchiveCheckpoint[] = [];
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(checkpoints);
+          return;
+        }
+        if (String(cursor.key).startsWith(EPOCH_ARCHIVE_CHECKPOINT_PREFIX)) {
+          checkpoints.push(normalizeEpochArchiveCheckpoint(cursor.value as EpochArchiveCheckpoint));
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).delete(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 

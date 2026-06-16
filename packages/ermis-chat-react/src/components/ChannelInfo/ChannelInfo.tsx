@@ -603,6 +603,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
           <>
             {!isPreviewMode && (
               <ActionsComponent
+                channel={channel}
                 onSearchClick={() => setShowSearchPanel(true)}
                 onSettingsClick={() => setShowSettingsPanel(true)}
                 onLeaveChannel={handleLeaveChannel}

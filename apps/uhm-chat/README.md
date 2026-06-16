@@ -8,14 +8,33 @@
 - E2EE direct/group creation uses the SDK MLS bundle flow. Group E2EE channels are always private.
 - Existing standard channels can be upgraded from Channel Info by the owner when MLS is initialized.
 - E2EE topics inherit encryption from the parent channel. Key rotation is exposed on parent E2EE channels for owners/moderators.
-- PIN Epoch Archive V1 is exposed from E2EE channel headers. Users can create/unlock/change a recovery PIN and restore historical messages by epoch range.
-- If this device has no recovery vault or has a locked vault that may need history restore/archive flush, uhm-chat shows a soft PIN popup after login/app entry; setup/unlock starts the SDK background restore queue.
+- Chat history PIN lives in the account menu. Users can set up, unlock, and change the PIN there; Channel Info repair only asks for the PIN when it is needed to continue.
+- E2EE Channel Info exposes one conversation repair card. The app replays encrypted state for the selected conversation, restores any available history, asks for PIN only when needed, and keeps retry modes plus message-level diagnostics out of the primary UI.
+- If replay cannot recover this device, Channel Info reveals the advanced reset action that reloads encrypted state on this device while keeping already shown messages.
+- If this device has no PIN or has a locked PIN that may need history restore, uhm-chat shows a soft PIN popup after login/app entry; setup/unlock starts the SDK background restore queue.
 - After the channel list loads, the SDK prepares all loaded E2EE channels in the background with sequential external join and reports progress through a compact secure-restore banner.
 - Active E2EE channels show restore progress/gap state from local `restore_progress` records without creating fake messages.
 - SDK and app work now uses this monorepo as the source of truth: `packages/ermis-chat-sdk` and `apps/uhm-chat`.
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-06-13 - production
+
+- Goal: align Recovery PIN and conversation repair content with a WhatsApp-style chat-history flow.
+- Code changed: `UhmRecoveryPinDialog` now has a repair context so Channel Info repair asks for PIN with simple continue/setup copy instead of account/vault wording.
+- Code changed: English and Vietnamese recovery/repair copy now talks about chat history, this device, and restoration; archive/epoch/vault terms are kept out of normal UI and only technical fields remain inside the explicit details section.
+- Docs changed: this README now records the account-menu PIN entry point, one-button conversation repair, and simplified content direction.
+- Design decision: keep the user-facing flow focused on “restore available chat history”; message-level counts and crypto details stay behind the detail row.
+- Verification: `jq empty apps/uhm-chat/src/locales/en.json apps/uhm-chat/src/locales/vi.json`, targeted `yarn workspace uhm-chat exec eslint`, and `yarn workspace uhm-chat build` passed.
+
+### 2026-06-13 - production
+
+- Goal: wire Channel Info Repair to SDK safe-cursor replay/reset instead of calling archive recheck directly.
+- Code changed: `UhmChannelInfoActions` now calls `repairEncryptedChannel(..., { mode: 'replay' })`, opens the PIN dialog only when the SDK returns `requiresPin`, and shows `Reset encrypted state on this device` only when `resetAvailable` is returned.
+- Code changed: EN/VI copy adds reset status, reset warning, and PIN-required repair text while keeping the primary card conversation-focused.
+- Design decision: users see one normal Repair button. The app handles replay, pending snapshots, and archive repair internally; reset remains an advanced fallback after replay fails.
+- Verification: `yarn workspace uhm-chat build` passed; targeted ESLint for `UhmChannelInfoActions.tsx` passed with locale JSON ignored by repo config.
 
 ### 2026-05-22 - production
 
@@ -130,6 +149,13 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## E2EE Recovery Notes
+
+- The single Channel Info `Repair` action now runs archive-first recovery, safe-cursor replay, pending ciphertext flush, and a final archive recheck.
+- `Reset encrypted state on this device` appears only after protocol replay fails, not merely because some history has no archive.
+- PIN unlock automatically rechecks accepted encrypted conversations once per unlock session.
+- Bellboy V2 archive availability is rolled out behind server backfill; this does not change the PIN or one-button Repair UX.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
@@ -168,15 +194,15 @@ export default defineConfig([
       // other options...
     },
   },
-])
+]);
 ```
 
 You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
 
 ```js
 // eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+import reactX from 'eslint-plugin-react-x';
+import reactDom from 'eslint-plugin-react-dom';
 
 export default defineConfig([
   globalIgnores(['dist']),
@@ -197,5 +223,5 @@ export default defineConfig([
       // other options...
     },
   },
-])
+]);
 ```

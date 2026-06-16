@@ -2169,8 +2169,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           ) {
             mlsMgrAccept
               .ensureChannelReady(this.type, this.id, this.cid, { source: 'invite_accepted' })
+              .then(async () => {
+                if (!mlsMgrAccept.isRecoveryVaultUnlocked()) return;
+                await mlsMgrAccept.repairRecoveryChannel(this.type, this.id, { mode: 'recheck_channel' });
+              })
               .catch((err: unknown) => {
-                this.getClient().logger('error', '[MLS Event] Failed to ensure channel after invite_accepted', {
+                this.getClient().logger('error', '[MLS Event] Failed to prepare recovery after invite_accepted', {
                   err,
                   cid: this.cid,
                 });
@@ -2327,6 +2331,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       case 'protocol': {
         const mlsMgrProto = this.getClient().mlsManager;
         if (!mlsMgrProto?.initialized || !this.cid) break;
+
+        if (mlsMgrProto.isScopeRepairing(this.cid)) {
+          mlsMgrProto.requestScopeSyncAfterRepair(this.cid);
+          break;
+        }
 
         const protoMsg = (event as any).protocol_data || (event as any).message || event;
         const protoType = protoMsg.type || protoMsg.type_field;

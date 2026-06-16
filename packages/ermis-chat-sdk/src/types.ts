@@ -522,6 +522,7 @@ export type MessageSetType = 'latest' | 'current' | 'new';
 
 export type APIErrorResponse = {
   code: number;
+  ermis_code?: number;
   duration: string;
   message: string;
   more_info: string;

@@ -154,6 +154,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   collapseLabel,
   unpinLabel,
   stickerLabel,
+  attachmentLabel = 'Attachment',
+  unavailableMessageLabel = 'Message unavailable',
   typingIndicatorLabel,
   deletedMessageLabel = 'This message was deleted',
   systemMessageTranslations,
@@ -477,6 +479,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             MessageActionsBoxComponent={MessageActionsBoxComponent}
             MessageReactionsComponent={MessageReactionsComponent}
             deletedMessageLabel={deletedMessageLabel}
+            attachmentLabel={attachmentLabel}
+            unavailableMessageLabel={unavailableMessageLabel}
+            stickerLabel={stickerLabel}
             systemMessageTranslations={systemMessageTranslations}
             signalMessageTranslations={signalMessageTranslations}
             onMentionClick={onMentionClick}
@@ -597,6 +602,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             collapseLabel={collapseLabel}
             unpinLabel={unpinLabel}
             stickerLabel={stickerLabel}
+            attachmentLabel={attachmentLabel}
+            unavailableMessageLabel={unavailableMessageLabel}
           />
         )}
 
