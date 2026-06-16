@@ -6085,6 +6085,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     envelope: { id: string; user?: { id: string }; created_at?: string; updated_at?: string; [key: string]: unknown },
     fallback?: E2eeStoredMessage | null,
   ): E2eeStoredMessage {
+    const userId = envelope.user?.id || fallback?.user_id || '';
+    const stateUser = userId ? this.client?.state?.users?.[userId] : undefined;
     return {
       id: envelope.id,
       cid,
@@ -6097,8 +6099,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       latest_poll_choices: payload.latest_poll_choices || fallback?.latest_poll_choices,
       old_texts: payload.old_texts || fallback?.old_texts,
       is_edited: !!(payload.old_texts?.length || fallback?.old_texts?.length),
-      user_id: envelope.user?.id || fallback?.user_id || '',
-      user: envelope.user ? { ...envelope.user } : fallback?.user,
+      user_id: userId,
+      user: stateUser || (envelope.user ? { ...envelope.user } : fallback?.user),
       created_at: fallback?.created_at || envelope.created_at || new Date().toISOString(),
       updated_at: (envelope.updated_at as string | undefined) || envelope.created_at || fallback?.updated_at,
       type: this._messageTypeForPayload(payload, fallback?.type || (envelope as any).type),
@@ -6335,11 +6337,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _buildFullMessage(stored: E2eeStoredMessage, envelope: Record<string, any>): Record<string, any> {
+    const userId = stored.user_id || (stored.user as any)?.id || envelope.user?.id || envelope.user_id || '';
+    const stateUser = userId ? this.client?.state?.users?.[userId] : undefined;
     return {
       // Core identity (from envelope)
       id: stored.id,
       cid: stored.cid,
-      user: stored.user || envelope.user,
+      user_id: userId,
+      user: stateUser || stored.user || envelope.user,
       type: stored.type || envelope.type || 'regular',
       created_at: stored.created_at,
       // Decrypted Standard content

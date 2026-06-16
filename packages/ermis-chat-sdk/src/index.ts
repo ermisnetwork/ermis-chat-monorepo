@@ -12,6 +12,7 @@ export * from './e2ee';
 export * from './mls_storage';
 export * from './mls_manager';
 export * from './openmls';
+export * from './user_cache';
 export { chatCodes, logChatPromiseExecution, formatMessage, createForwardMessagePayload } from './utils';
 export { parseSystemMessage } from './system_message';
 export type { SystemMessageTranslations } from './system_message';

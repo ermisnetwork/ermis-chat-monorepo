@@ -337,11 +337,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       });
       const stored = await mlsMgr.storage?.loadE2eeMessage(oldMessageID).catch(() => null);
       if (stored) {
+        const stateUser = stored.user_id ? this.getClient().state.users[stored.user_id] : undefined;
         this.state.addMessageSorted(
           {
             ...stored,
             content_type: 'standard',
-            user: stored.user || this.getClient().user,
+            user: stateUser || stored.user || this.getClient().user,
           } as MessageResponse<ErmisChatGenerics>,
           false,
           false,
@@ -748,8 +749,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       return null;
     }
 
+    const stateUsers = Object.values(this.getClient().state.users);
     const messages = response?.search_result?.messages.map((message: any) => {
-      const user = getUserInfo(message.user_id, Object.values(this.getClient().state.users)) || message.user;
+      const user =
+        this.getClient().state.users[message.user_id] || message.user || getUserInfo(message.user_id, stateUsers);
       return { ...message, user };
     });
 
@@ -766,12 +769,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const matches = await mlsManager.storage.searchE2eeMessagesByCid(this.cid, search_term, 100);
     if (!matches || matches.length === 0) return null;
 
+    const stateUsers = Object.values(this.getClient().state.users);
+    const messages = matches.slice(offset, offset + 25).map((message: any) => {
+      const user =
+        this.getClient().state.users[message.user_id] || message.user || getUserInfo(message.user_id, stateUsers);
+      return { ...message, user };
+    });
+
     return {
       total: matches.length,
-      messages: matches.slice(offset, offset + 25).map((message: any) => {
-        const user = getUserInfo(message.user_id, Object.values(this.getClient().state.users)) || message.user;
-        return { ...message, user };
-      }),
+      messages,
     };
   }
 
@@ -2497,9 +2504,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         continue;
       }
 
-      const userId = storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
+      const userId =
+        storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
       const stateUsers = Object.values(this.getClient().state.users);
-      const stateUser = stateUsers.find((u: any) => u.id === userId);
+      const stateUser = this.getClient().state.users[userId];
       const enrichedUser = stateUser || message.user || storedMessage.user || getUserInfo(userId, stateUsers);
 
       hydrated.push({
@@ -2535,16 +2543,17 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       .getE2eeMessages(this.cid, limit)
       .then((storedMessages: any[]) => {
         if (!storedMessages.length) return;
+        const stateUsers = Object.values(this.getClient().state.users);
         const messages = storedMessages
-          .map(
-            (message: any) =>
-            ({
+          .map((message: any) => {
+            const stateUser = this.getClient().state.users[message.user_id];
+            return {
               ...message,
               content_type: 'standard',
-              user: message.user || getUserInfo(message.user_id, Object.values(this.getClient().state.users)),
+              user: stateUser || message.user || getUserInfo(message.user_id, stateUsers),
               status: 'received',
-            } as MessageResponse<ErmisChatGenerics>),
-          )
+            } as MessageResponse<ErmisChatGenerics>;
+          })
           .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
         this.state.addMessagesSorted(messages, false, true, true, messageSetToAddToIfDoesNotExist);
         this.getClient().dispatchEvent({

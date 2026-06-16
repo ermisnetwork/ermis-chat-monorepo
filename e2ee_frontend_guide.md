@@ -62,6 +62,7 @@ SDK default storage:
 | provider state              | IndexedDB `meta` store               | Web provider is in-memory; persist after commits/decrypt.   |
 | group marker                | IndexedDB `groups` store             | `cid -> marker`.                                            |
 | decrypted messages          | IndexedDB `messages` store           | UI hydration/search source.                                 |
+| user profiles               | IndexedDB user cache                 | Hydrates `client.state.users` before restore rendering.     |
 | sync cursors                | IndexedDB `meta` store               | Per cid composite cursor `{ created_at, event_id }`.        |
 | pending snapshots/evictions | IndexedDB `meta` store               | Retry after reconnect.                                      |
 | channel repair state        | IndexedDB `meta` store               | Per MLS scope replay/reset checkpoint and soft repair lock. |
@@ -167,6 +168,8 @@ Expected behavior:
 - SDK sends `mls_ciphertext` + `mls_epoch` to `/v1/e2ee/.../message`.
 - SDK stores own plaintext snapshot locally because own ciphertext may not be decrypted again.
 - UI renders local plaintext immediately, then reconciles WS envelope by message id.
+- Own-device sends must clear the optimistic `sending` status after the send promise resolves or when the local plaintext cache confirms the message, because the own-device `message.new` event can arrive before local cache persistence finishes.
+- Restored/local plaintext messages should resolve sender display data from `client.state.users` first, then the stored message user object, then the raw user id. This keeps history restored from IndexedDB aligned with the profile cache refreshed by `/users` or `/users/batch`.
 
 ### Receive and hydrate messages
 
@@ -453,3 +456,8 @@ Pagination/query response should be reconciled with local plaintext cache by mes
 - [e2ee_client_flows.md](./e2ee_client_flows.md) — sequence diagrams.
 - [e2ee_events.md](./e2ee_events.md) — realtime and sync payloads.
 - [e2ee_mobile_guide.md](./e2ee_mobile_guide.md) — mobile differences.
+
+## Progress / Change Log
+
+- 2026-06-16, production: Fixed E2EE own-message reconciliation in `packages/ermis-chat-react/src/hooks/useMessageSend.ts` and `packages/ermis-chat-react/src/hooks/useChannelMessages.ts` so successful sends do not remain visually pending when own-device WS events race local plaintext persistence. No API, SQL, or Postman artifacts changed; this is a client-side state merge fix.
+- 2026-06-16, production: Added SDK IndexedDB user profile cache and restore-time user enrichment in `packages/ermis-chat-sdk/src/user_cache.ts`, `client.ts`, `channel.ts`, and `mls_manager.ts`. Goal: after fresh login + PIN restore, cached/API-refreshed user profiles populate `client.state.users` and E2EE local history no longer renders raw user IDs when a profile exists. No SQL or Postman artifacts changed because the fix reuses existing user APIs.

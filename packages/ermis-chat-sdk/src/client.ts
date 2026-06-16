@@ -10,6 +10,7 @@ import { ClientState } from './client_state';
 import { StableWSConnection } from './connection';
 import { normalizeE2eeEventBytes } from './e2ee_bytes';
 import { IndexedDBMlsStorage } from './mls_storage';
+import { IndexedDBUserCache } from './user_cache';
 
 import { TokenManager } from './token_manager';
 
@@ -115,6 +116,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   /** MLS Manager instance set by MlsManager.initialize() for E2EE event handling. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mlsManager?: any;
+  private userCache?: IndexedDBUserCache<ErmisChatGenerics>;
+  private userCacheKey?: string;
+  private userCacheSyncPromise: Promise<UsersResponse<ErmisChatGenerics> | void> | null = null;
 
   private eventSource: EventSourcePolyfill | null = null;
 
@@ -315,14 +319,18 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     // we generate the client id client side
     this.userID = connectionUser.id;
+    await this._hydrateUserCacheFromStorage();
 
     const setTokenPromise = this._setToken(connectionUser, connectionToken);
     this._setUser(connectionUser);
-    this.state.updateUser({
-      id: connectionUser.id,
-      name: connectionUser?.name || connectionUser.id,
-      avatar: connectionUser?.avatar || '',
-    });
+    this._upsertUser(
+      {
+        id: connectionUser.id,
+        name: connectionUser?.name || connectionUser.id,
+        avatar: connectionUser?.avatar || '',
+      } as UserResponse<ErmisChatGenerics>,
+      { updateReferences: false },
+    );
 
     const wsPromise = this.openConnection();
 
@@ -334,12 +342,14 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       const result = await this.setUserPromise;
       // Call SSE after successful connect
       await this.connectToSSE();
+      this._scheduleUserCacheSync();
 
       // Automatically fetch full profile asynchronously and dispatch event
       this.queryUser(connectionUser.id)
         .then((fullProfile) => {
-          this.user = { ...this.user, ...fullProfile };
-          this.state.updateUser(this.user);
+          const mergedUser = { ...(this.user || connectionUser), ...fullProfile } as UserResponse<ErmisChatGenerics>;
+          this.user = mergedUser;
+          this._upsertUser(mergedUser, { updateReferences: true });
           this.dispatchEvent({
             type: 'user.updated',
             me: this.user,
@@ -364,6 +374,106 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   _setUser(user: UserResponse<ErmisChatGenerics>) {
     this.user = { ...user };
     this.userID = user.id;
+  }
+
+  private _getUserCache(): IndexedDBUserCache<ErmisChatGenerics> | null {
+    if (!this.browser || !this.userID) return null;
+    const key = `${this.projectId}:${this.userID}`;
+    if (!this.userCache || this.userCacheKey !== key) {
+      this.userCache = new IndexedDBUserCache<ErmisChatGenerics>(this.projectId, this.userID);
+      this.userCacheKey = key;
+    }
+    return this.userCache;
+  }
+
+  private _persistUsersToCache(users: Array<UserResponse<ErmisChatGenerics>>): void {
+    const cache = this._getUserCache();
+    const validUsers = users.filter((user) => user?.id);
+    if (!cache || validUsers.length === 0) return;
+
+    cache.saveUsers(validUsers).catch((err) => {
+      this.logger('warn', 'client:userCache - failed to persist users', { err });
+    });
+  }
+
+  private _shouldRefreshUserReferences(
+    existing: UserResponse<ErmisChatGenerics> | undefined,
+    incoming: UserResponse<ErmisChatGenerics>,
+  ): boolean {
+    if (!existing) return true;
+    return (
+      existing.name !== incoming.name ||
+      existing.avatar !== incoming.avatar ||
+      existing.about_me !== incoming.about_me ||
+      existing.email !== incoming.email ||
+      existing.phone !== incoming.phone
+    );
+  }
+
+  private _upsertUsers(
+    users: Array<UserResponse<ErmisChatGenerics>>,
+    options: { persist?: boolean; updateReferences?: boolean } = {},
+  ): void {
+    const { persist = true, updateReferences = true } = options;
+    const validUsers = users.filter((user) => user?.id);
+    if (validUsers.length === 0) return;
+    const usersNeedingReferenceUpdate = updateReferences
+      ? validUsers.filter((user) => this._shouldRefreshUserReferences(this.state.users[user.id], user))
+      : [];
+
+    this.state.updateUsers(validUsers);
+    if (persist) {
+      this._persistUsersToCache(validUsers);
+    }
+
+    for (const user of validUsers) {
+      if (this.user?.id === user.id) {
+        this.user = { ...this.user, ...user };
+      }
+    }
+
+    for (const user of usersNeedingReferenceUpdate) {
+      const updatedUser = this.state.users[user.id] || user;
+      this._updateMemberWatcherReferences(updatedUser);
+      this._updateUserMessageReferences(updatedUser);
+    }
+
+    if (usersNeedingReferenceUpdate.length > 0) {
+      this.dispatchEvent({
+        type: 'users.updated' as any,
+        users: usersNeedingReferenceUpdate,
+      } as any);
+    }
+  }
+
+  private _upsertUser(
+    user: UserResponse<ErmisChatGenerics>,
+    options: { persist?: boolean; updateReferences?: boolean } = {},
+  ): void {
+    this._upsertUsers([user], options);
+  }
+
+  private async _hydrateUserCacheFromStorage(): Promise<void> {
+    const cache = this._getUserCache();
+    if (!cache) return;
+
+    try {
+      const cachedUsers = await cache.loadUsers();
+      this._upsertUsers(cachedUsers, { persist: false, updateReferences: false });
+    } catch (err) {
+      this.logger('warn', 'client:userCache - failed to hydrate users from IndexedDB', { err });
+    }
+  }
+
+  private _scheduleUserCacheSync(): void {
+    if (!this.browser || this.userCacheSyncPromise) return;
+    this.userCacheSyncPromise = this.syncUserCache('10000', 1)
+      .catch((err) => {
+        this.logger('warn', 'client:userCache - failed to sync users', { err });
+      })
+      .finally(() => {
+        this.userCacheSyncPromise = null;
+      });
   }
 
   closeConnection = async (timeout?: number) => {
@@ -421,6 +531,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       this.mlsManager = undefined;
     }
     this.deviceId = undefined;
+    this.userCache = undefined;
+    this.userCacheKey = undefined;
+    this.userCacheSyncPromise = null;
 
     // remove the user specific fields
     delete this.user;
@@ -1251,17 +1364,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         }
 
         // 2. Update Client State
-        this.state.updateUser(userInfo);
-
-        const minimalUserInfo = {
-          id: userInfo.id,
-          name: userInfo.name || userInfo.id,
-          avatar: userInfo.avatar || '',
-        };
-
-        // 3. Update references and trigger re-renders
-        this._updateMemberWatcherReferences(minimalUserInfo);
-        this._updateUserMessageReferences(minimalUserInfo);
+        this._upsertUser(userInfo);
 
         if (onCallBack) {
           onCallBack(data);
@@ -1302,61 +1405,74 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
   }
 
-  async queryUsers(page_size?: string, page?: number): Promise<UsersResponse> {
-    const defaultOptions = {
-      presence: false,
-    };
-
+  async queryUsers(page_size?: string, page?: number): Promise<UsersResponse<ErmisChatGenerics>> {
     // Make sure we wait for the connect promise if there is a pending one
     await this.wsPromise;
+    const userIDAtRequest = this.userID;
 
     let project_id = this.projectId;
     // Return a list of users
-    const data = await this.get<UsersResponse>(this.userBaseURL + '/users', {
+    const data = await this.get<UsersResponse<ErmisChatGenerics>>(this.userBaseURL + '/users', {
       project_id,
       page,
       page_size,
     });
 
-    this.state.updateUsers(data.data);
+    if (userIDAtRequest && this.userID === userIDAtRequest) {
+      this._upsertUsers(data.data);
+    }
 
     return data;
   }
 
+  async syncUserCache(page_size = '10000', page = 1): Promise<UsersResponse<ErmisChatGenerics>> {
+    return await this.queryUsers(page_size, page);
+  }
+
   async queryUser(user_id: string): Promise<UserResponse<ErmisChatGenerics>> {
+    const userIDAtRequest = this.userID;
     const project_id = this.projectId;
 
     const userResponse = await this.get<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/' + user_id, {
       project_id,
     });
 
-    this.state.updateUser(userResponse);
+    if (userIDAtRequest && this.userID === userIDAtRequest) {
+      this._upsertUser(userResponse);
+    }
     return userResponse;
   }
 
   async getBatchUsers(users: string[], page?: number, page_size?: number) {
+    const userIDAtRequest = this.userID;
     let project_id = this.projectId;
 
-    const usersRepsonse = await this.post<UsersResponse>(
+    const usersRepsonse = await this.post<UsersResponse<ErmisChatGenerics>>(
       this.userBaseURL + '/users/batch?page=1&page_size=10000',
       { users, project_id },
       { page, page_size },
     );
 
-    this.state.updateUsers(usersRepsonse.data);
+    if (userIDAtRequest && this.userID === userIDAtRequest) {
+      this._upsertUsers(usersRepsonse.data);
+    }
 
     return usersRepsonse.data || [];
   }
 
-  async searchUsers(page: number, page_size: number, name?: string): Promise<UsersResponse> {
+  async searchUsers(page: number, page_size: number, name?: string): Promise<UsersResponse<ErmisChatGenerics>> {
     let project_id = this.projectId;
 
-    const usersResponse = await this.post<UsersResponse>(this.userBaseURL + '/users/search', undefined, {
-      page,
-      page_size,
-      name,
-      project_id,
-    });
+    const usersResponse = await this.post<UsersResponse<ErmisChatGenerics>>(
+      this.userBaseURL + '/users/search',
+      undefined,
+      {
+        page,
+        page_size,
+        name,
+        project_id,
+      },
+    );
 
     // this.state.updateUsers(usersResponse.data);
 
@@ -1413,16 +1529,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     if (this.user) {
       this.user.avatar = response.avatar;
       const new_user = { ...this.user, avatar: response.avatar };
-      this.state.updateUser(new_user);
-
-      const userInfo = {
-        id: this.user.id,
-        name: this.user.name ? this.user.name : this.user.id,
-        avatar: this.user?.avatar || '',
-      };
-
-      this._updateMemberWatcherReferences(userInfo);
-      this._updateUserMessageReferences(userInfo);
+      this._upsertUser(new_user);
 
       this.dispatchEvent({
         type: 'user.updated',
@@ -1435,18 +1542,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   async updateProfile(updates: Partial<UserResponse<ErmisChatGenerics>>) {
     let response = await this.patch<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/update', updates);
     this.user = response;
-    this.state.updateUser(response);
+    this._upsertUser(response);
 
     if (this.user) {
-      const userInfo = {
-        id: this.user.id,
-        name: this.user.name ? this.user.name : this.user.id,
-        avatar: this.user?.avatar || '',
-      };
-
-      this._updateMemberWatcherReferences(userInfo);
-      this._updateUserMessageReferences(userInfo);
-
       this.dispatchEvent({
         type: 'user.updated',
         me: this.user,

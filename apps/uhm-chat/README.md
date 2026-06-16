@@ -6,7 +6,7 @@
 - E2EE controls stay disabled when `client.mlsManager` is not initialized; standard chat continues to work.
 - uhm-chat waits for `connectUser()` and MLS initialization before mounting the chat shell, preventing first-login channel queries with an unset auth token.
 - E2EE direct/group creation uses the SDK MLS bundle flow. Group E2EE channels are always private.
-- New E2EE direct/group channels use `e2ee_recovery_policy=member_assisted` by default, allowing group-sponsored history recovery when Bellboy policy/config permits it.
+- New E2EE direct/group channels default to Standard recovery (`e2ee_recovery_policy=member_assisted`) and can be created with Strict recovery (`self_owned_only`) from the create-channel modal.
 - Existing standard channels can be upgraded from Channel Info by the owner when MLS is initialized.
 - E2EE topics inherit encryption from the parent channel. Key rotation is exposed on parent E2EE channels for owners/moderators.
 - Chat history PIN lives in the account menu. Users can set up, unlock, and change the PIN there; Channel Info repair only asks for the PIN when it is needed to continue.
@@ -23,8 +23,9 @@
 ### 2026-06-16 - production
 
 - Goal: make the E2EE recovery policy explicit in the Uhm create-channel flow.
-- Code changed: `CustomCreateChannelModal` now passes `e2eeRecoveryPolicy="member_assisted"` to the React create modal.
-- Design decision: Uhm keeps the current member-assisted recovery UX by default. A future UI selector can switch this prop to `self_owned_only` for stricter self-owned recovery channels.
+- Code changed: `CustomCreateChannelModal` now defaults to Standard recovery (`member_assisted`) and shows a compact Standard/Strict recovery selector when E2EE is enabled.
+- UI copy: `Standard recovery: members can help preserve encrypted history; only your PIN can unlock it.` and `Strict recovery: history can only be recovered from archives created by your own devices; some history may be unavailable if all your devices were offline.`
+- Design decision: Uhm keeps member-assisted recovery as the default while making the stricter self-owned policy selectable before channel creation.
 - Verification: `yarn workspace uhm-chat build` passed.
 
 ### 2026-06-13 - production

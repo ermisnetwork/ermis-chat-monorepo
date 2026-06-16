@@ -130,16 +130,15 @@ export function useChannelMessages({
           content_type: hasPlaintext
             ? normalized.content_type || current.content_type || 'standard'
             : normalized.content_type || current.content_type,
-          status: current.status === 'sending' ? current.status : null,
+          status: normalized.status ?? (hasPlaintext ? 'received' : current.status ?? null),
         });
       }
 
-      return Array.from(byId.values())
-        .sort((a: any, b: any) => {
-          const aTime = new Date(a.created_at || 0).getTime();
-          const bTime = new Date(b.created_at || 0).getTime();
-          return aTime - bTime;
-        });
+      return Array.from(byId.values()).sort((a: any, b: any) => {
+        const aTime = new Date(a.created_at || 0).getTime();
+        const bTime = new Date(b.created_at || 0).getTime();
+        return aTime - bTime;
+      });
     };
 
     const mergeDecryptedMessages = (decryptedMessages: any[]) => {
@@ -367,7 +366,7 @@ export function useChannelMessages({
     const sub10 = activeChannel.on('member.unblocked', handleUnblocked);
     const sub11 = activeChannel.on('channel.truncate', handleMessageChange);
     const sub12 = activeChannel.on('channel.truncate_for_me', handleMessageChange);
-    
+
     const sub13 = eventClient.on('notification.invite_accepted', refreshAfterOwnInviteMembership);
     const sub14 = eventClient.on('member.joined', refreshAfterOwnInviteMembership);
     const sub15 = eventClient.on('connection.recovered', handleRecovery);

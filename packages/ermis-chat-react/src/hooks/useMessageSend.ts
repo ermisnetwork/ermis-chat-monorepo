@@ -130,11 +130,17 @@ export function useMessageSend({
       // --- 2. DELEGATE TO WEBSOCKET ---
       // The API call runs in background. We do not block the UI for resolution.
       // Message lists will automatically update when the backend blasts the `message.new` WS event.
-      sendPromise.catch((err: Error) => {
-        console.error('Failed to send message over API:', err);
-        // Sync React to render the SDK's internal 'status: failed' UI state
-        syncMessages();
-      });
+      sendPromise
+        .then(() => {
+          // E2EE own-device WS events may arrive before the SDK replaces the
+          // optimistic message with the confirmed local plaintext snapshot.
+          syncMessages();
+        })
+        .catch((err: Error) => {
+          console.error('Failed to send message over API:', err);
+          // Sync React to render the SDK's internal 'status: failed' UI state
+          syncMessages();
+        });
     } catch (err) {
       console.error('Failed to process message send:', err);
     } finally {

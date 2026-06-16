@@ -28,6 +28,17 @@ const userDetail = await chatClient.queryUser('user-xyz');
 const users = await chatClient.getBatchUsers(['user-1', 'user-2']);
 ```
 
+### Persistent User Profile Cache
+
+In browser runtimes, the SDK stores profiles returned by `queryUser`, `queryUsers`, `getBatchUsers`, SSE profile updates, and current-user profile edits in IndexedDB. On the next `connectUser`, cached profiles hydrate `client.state.users` before channel or E2EE restore rendering, then the SDK refreshes the first large users page in the background so new users and changed avatars/names replace stale cache entries.
+
+```typescript
+// Optional manual refresh. connectUser already schedules this in the background.
+await chatClient.syncUserCache('10000', 1);
+```
+
+Message, member, watcher, and read-state rendering should treat `client.state.users[userId]` as the preferred profile source, then fall back to the user object carried by a message/member payload, and only then fall back to the raw user id.
+
 ## Contacts
 
 Ermis maintains contact relationship structures. You can query contacts to fetch users interacting frequently or explicitly marked by blocklist rules:
@@ -48,7 +59,7 @@ Use `updateProfile` for near-instant updates to the user's name or bio. This met
 
 ```typescript
 // Updates text fields asynchronously and hydrates the local user state
-await chatClient.updateProfile({ 
+await chatClient.updateProfile({
   name: 'New User Name', 
   about_me: 'My updated about me...' 
 });

@@ -4,7 +4,30 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CreateChannelModal } from '@ermis-network/ermis-chat-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
+type E2eeRecoveryPolicy = 'member_assisted' | 'self_owned_only'
+
+const E2EE_RECOVERY_POLICY_OPTIONS: Array<{
+  value: E2eeRecoveryPolicy
+  label: string
+  title: string
+  description: string
+}> = [
+  {
+    value: 'member_assisted',
+    label: 'Standard',
+    title: 'Standard recovery',
+    description: 'members can help preserve encrypted history; only your PIN can unlock it.',
+  },
+  {
+    value: 'self_owned_only',
+    label: 'Strict',
+    title: 'Strict recovery',
+    description: 'history can only be recovered from archives created by your own devices; some history may be unavailable if all your devices were offline.',
+  },
+]
 
 const CustomUserItemComponent = ({ user, selected, disabled, mode, onToggle, AvatarComponent }: any) => {
   const handleClick = () => {
@@ -144,7 +167,7 @@ const CustomFooterComponent = ({
 const CustomGroupFieldsComponent = ({
   name, onNameChange, description, onDescriptionChange, isPublic, onPublicChange, disabled,
   groupNameLabel, groupNamePlaceholder, groupDescriptionLabel, groupDescriptionPlaceholder, groupPublicLabel,
-  e2eeEnabled, onE2eeChange, e2eeLabel, e2eeDescription, e2eeDisabled
+  e2eeEnabled, onE2eeChange, e2eeLabel, e2eeDescription, e2eeDisabled, E2eeToggleComponent = E2eeToggle
 }: any) => {
   return (
     <div className="space-y-4 mb-4">
@@ -185,7 +208,7 @@ const CustomGroupFieldsComponent = ({
           <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${isPublic ? 'translate-x-4' : 'translate-x-0'}`} />
         </button>
       </div>
-      <E2eeToggle
+      <E2eeToggleComponent
         enabled={Boolean(e2eeEnabled)}
         onChange={(enabled: boolean) => onE2eeChange?.(enabled)}
         disabled={disabled || e2eeDisabled}
@@ -220,6 +243,76 @@ const E2eeToggle = ({ enabled, onChange, disabled, label, description }: any) =>
 
 export function CustomCreateChannelModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
   const { t } = useTranslation()
+  const [e2eeRecoveryPolicy, setE2eeRecoveryPolicy] = useState<E2eeRecoveryPolicy>('member_assisted')
+
+  useEffect(() => {
+    if (!isOpen) {
+      setE2eeRecoveryPolicy('member_assisted')
+    }
+  }, [isOpen])
+
+  const E2eeToggleWithRecoveryPolicy = ({ enabled, onChange, disabled, label, description }: any) => (
+    <div className="space-y-3">
+      <E2eeToggle
+        enabled={enabled}
+        onChange={onChange}
+        disabled={disabled}
+        label={label}
+        description={description}
+      />
+      {enabled && (
+        <div
+          role="radiogroup"
+          aria-label="Encrypted history recovery"
+          className="rounded-lg border border-zinc-200 bg-zinc-50/70 px-3 py-2 dark:border-[#3a3555] dark:bg-[#1f1d2d]"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Recovery
+            </span>
+            <div className="ml-auto inline-flex rounded-full bg-zinc-200/70 p-0.5 dark:bg-[#2a2640]">
+              {E2EE_RECOVERY_POLICY_OPTIONS.map((option) => {
+                const selected = e2eeRecoveryPolicy === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={disabled}
+                    onClick={() => setE2eeRecoveryPolicy(option.value)}
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                      selected
+                        ? 'bg-white text-emerald-700 shadow-sm dark:bg-[#3a3555] dark:text-emerald-300'
+                        : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          {(() => {
+            const selectedOption = E2EE_RECOVERY_POLICY_OPTIONS.find((option) => option.value === e2eeRecoveryPolicy) || E2EE_RECOVERY_POLICY_OPTIONS[0]
+            return (
+              <p className="mt-2 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+                <span className="font-medium text-zinc-700 dark:text-zinc-200">{selectedOption.title}: </span>
+                {selectedOption.description}
+              </p>
+            )
+          })()}
+        </div>
+      )}
+    </div>
+  )
+
+  const GroupFieldsWithRecoveryPolicy = (props: any) => (
+    <CustomGroupFieldsComponent
+      {...props}
+      E2eeToggleComponent={E2eeToggleWithRecoveryPolicy}
+    />
+  )
 
   return (
     <CreateChannelModal
@@ -244,11 +337,11 @@ export function CustomCreateChannelModal({ isOpen, onClose }: { isOpen: boolean,
       e2eeLabel={t('e2ee.toggle_label', 'End-to-end encrypted')}
       e2eeDescription={t('e2ee.toggle_description', 'Messages and attachments are encrypted for channel members.')}
       e2eeUnavailableLabel={t('e2ee.unavailable', 'E2EE is unavailable until MLS is initialized.')}
-      e2eeRecoveryPolicy="member_assisted"
+      e2eeRecoveryPolicy={e2eeRecoveryPolicy}
       TabsComponent={CustomTabsComponent}
       FooterComponent={CustomFooterComponent}
-      GroupFieldsComponent={CustomGroupFieldsComponent}
-      E2eeToggleComponent={E2eeToggle}
+      GroupFieldsComponent={GroupFieldsWithRecoveryPolicy}
+      E2eeToggleComponent={E2eeToggleWithRecoveryPolicy}
       SearchInputComponent={CustomSearchInputComponent}
       SelectedBoxComponent={CustomSelectedBoxComponent}
       UserItemComponent={CustomUserItemComponent}
