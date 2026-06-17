@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   useChatClient,
@@ -8,6 +8,7 @@ import {
   isPendingMember,
   isSkippedMember,
   hasTopicsEnabled,
+  useChannelListUpdates,
 } from '@ermis-network/ermis-chat-react'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
 
@@ -47,66 +48,18 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
   // Counter to force re-render when topic messages arrive
   const [, setUpdateTick] = useState(0)
 
-  // Gather all non-topic channels from activeChannels
-  const computeChannels = useCallback(() => {
-    if (!client) return []
-    const result: Channel[] = []
-    for (const cid in client.activeChannels) {
-      const ch = client.activeChannels[cid]
-
-      // Skip topic channels — they are sub-channels, not top-level
-      if (isTopicChannel(ch)) continue
-
-      // Skip channels where user is banned, pending, or skipped
-      const ms = ch.state?.membership
-      if (ms?.banned) continue
-      if (isPendingMember(ms?.channel_role as string)) continue
-      if (isSkippedMember(ms?.channel_role as string)) continue
-
-      result.push(ch)
-    }
-    // Sort: pinned first, then by last message time descending
-    result.sort((a, b) => {
-      const aPinned = a.data?.is_pinned === true ? 1 : 0
-      const bPinned = b.data?.is_pinned === true ? 1 : 0
-      if (aPinned !== bPinned) return bPinned - aPinned
-      
-      const getChannelTime = (ch: Channel) => {
-        const lastMsg = ch.state?.latestMessages?.slice(-1)[0];
-        if (lastMsg?.created_at) return new Date(lastMsg.created_at).getTime();
-        if (ch.data?.last_message_at) return new Date(ch.data.last_message_at as string | Date).getTime();
-        if (ch.data?.created_at) return new Date(ch.data.created_at as string | Date).getTime();
-        return 0;
-      };
-
-      return getChannelTime(b) - getChannelTime(a)
-    })
-    return result
-  }, [client])
-
-  useEffect(() => {
-    setChannels(computeChannels())
-  }, [computeChannels])
-
-  // Listen for channel events to refresh the list
+  // Query channels exactly like the main ChannelList on initial load
   useEffect(() => {
     if (!client) return
+    client.queryChannels(
+      { type: ['messaging', 'team'], include_hidden_messages: true } as any,
+      [],
+      { message_limit: 1 }
+    ).then(setChannels).catch(console.error)
+  }, [client])
 
-    const refresh = () => setChannels(computeChannels())
-
-    const events = [
-      'channels.queried',
-      'channel.updated',
-      'channel.created',
-      'channel.deleted',
-      'notification.added_to_channel',
-      'member.removed',
-      'message.new',
-    ]
-
-    const subs = events.map((e) => client.on(e, refresh))
-    return () => subs.forEach((s) => s.unsubscribe())
-  }, [client, computeChannels])
+  // Use the exact same hook as the main ChannelList to keep the array sorted identically
+  useChannelListUpdates(channels, setChannels)
 
   // Subscribe to topic-level events so unread badges update in real-time
   useEffect(() => {
@@ -128,7 +81,30 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
     return () => subs.forEach((s) => s.unsubscribe())
   }, [client, channels])
 
-  if (channels.length === 0) return null
+  // Extract displayChannels exactly like ChannelList does
+  const displayChannels = useMemo(() => {
+    const pinned: Channel[] = [];
+    const regular: Channel[] = [];
+
+    channels.forEach(ch => {
+      if (isTopicChannel(ch)) return;
+
+      const ms = ch.state?.membership as Record<string, unknown> | undefined;
+      if (ms?.banned) return;
+      if (isPendingMember(ms?.channel_role as string)) return;
+      if (isSkippedMember(ms?.channel_role as string)) return;
+
+      if (ch.data?.is_pinned) {
+        pinned.push(ch);
+      } else {
+        regular.push(ch);
+      }
+    });
+
+    return [...pinned, ...regular];
+  }, [channels]);
+
+  if (displayChannels.length === 0) return null
 
   const activeCid = activeTeamChannel.cid
 
@@ -136,7 +112,7 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
     <Tooltip.Provider delayDuration={300}>
       <div className="w-[66px] shrink-0 flex flex-col items-center gap-2.5 py-2.5 border-r border-zinc-200/50 dark:border-zinc-800/50 bg-zinc-50/80 dark:bg-[#141220]/60 overflow-y-auto overflow-x-hidden no-scrollbar">
 
-        {channels.map((ch) => {
+        {displayChannels.map((ch) => {
           const isActive = ch.cid === activeCid
           const isGroup = isGroupChannel(ch)
           const name = (ch.data?.name || ch.cid) as string
