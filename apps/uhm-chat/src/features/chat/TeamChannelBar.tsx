@@ -67,12 +67,19 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
     }
     // Sort: pinned first, then by last message time descending
     result.sort((a, b) => {
-      const aPinned = a.data?.pinned ? 1 : 0
-      const bPinned = b.data?.pinned ? 1 : 0
+      const aPinned = a.data?.is_pinned === true ? 1 : 0
+      const bPinned = b.data?.is_pinned === true ? 1 : 0
       if (aPinned !== bPinned) return bPinned - aPinned
-      const aTime = a.state?.last_message_at ? new Date(a.state.last_message_at as unknown as string).getTime() : 0
-      const bTime = b.state?.last_message_at ? new Date(b.state.last_message_at as unknown as string).getTime() : 0
-      return bTime - aTime
+      
+      const getChannelTime = (ch: Channel) => {
+        const lastMsg = ch.state?.latestMessages?.slice(-1)[0];
+        if (lastMsg?.created_at) return new Date(lastMsg.created_at).getTime();
+        if (ch.data?.last_message_at) return new Date(ch.data.last_message_at as string | Date).getTime();
+        if (ch.data?.created_at) return new Date(ch.data.created_at as string | Date).getTime();
+        return 0;
+      };
+
+      return getChannelTime(b) - getChannelTime(a)
     })
     return result
   }, [client])
