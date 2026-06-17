@@ -12,39 +12,55 @@
  * - Epoch-stale retry (server rejects stale commits → clear + sync + retry)
  */
 
-import { E2eeClient } from './e2ee';
+import { E2eeClient } from './api';
+import { IndexedDBMlsStorage } from './storage';
 import type {
   ArchiveBlobRecord,
   ArchiveKeyWrapRecord,
-  CiphertextCursor,
-  HistoricalCiphertext,
-  QueryEpochArchivesResponse,
-  RecoveryVaultResponse,
-  UploadEpochArchiveRequest,
-} from './e2ee';
-import type {
-  MlsStorageAdapter,
   ArchiveScope,
-  EventCursor,
+  BootstrapKnownE2eeChannelsOptions,
+  BootstrapKnownE2eeChannelsResult,
   ChannelRepairState,
+  CiphertextCursor,
+  DecryptResult,
+  E2eeBootstrapProgress,
+  E2eeBootstrapStatus,
+  E2eePayload,
   E2eeStoredMessage,
-  PendingE2eeSnapshot,
-  RemovedSyncCursor,
+  E2eeSyncState,
+  E2eeSyncStatus,
+  EncryptedChannelRepairMode,
+  EncryptedChannelRepairResult,
+  EpochArchiveCheckpoint,
+  EnsureE2eeChannelResult,
+  EventCursor,
+  HistoricalCiphertext,
+  MlsManagerOptions,
+  MlsStorageAdapter,
   PendingArchiveUpload,
   PendingDeferredArchive,
-  EpochArchiveCheckpoint,
+  PendingE2eeSnapshot,
+  QueryEpochArchivesResponse,
+  RecoveryStatus,
+  RecoveryVaultResponse,
+  RemovedSyncCursor,
   RepairIssue,
   RepairIssueReason,
   RepairIssueStatus,
+  RepairMessageResult,
+  RepairMode,
+  RepairResult,
   RestorePermanentGapReason,
   RestoreProgressRecord,
   RestoreStatus,
   RestoreTransientFailureReason,
-} from './mls_storage';
-import { IndexedDBMlsStorage } from './mls_storage';
-import type { ErmisChat } from './client';
-import type { ExtendableGenerics, DefaultGenerics } from './types';
-import { sdkLog } from './logger';
+  RestoredMessage,
+  UploadEpochArchiveRequest,
+  WaterfallResult,
+} from './types';
+import type { ErmisChat } from '../client';
+import type { ExtendableGenerics, DefaultGenerics, E2eeRecoveryPolicy } from '../types';
+import { sdkLog } from '../logger';
 
 // ============================================================
 // Epoch-stale error detection
@@ -198,182 +214,6 @@ function newArchiveBlobId(): string {
     return crypto.randomUUID();
   }
   return `archive-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-// ============================================================
-// Types
-// ============================================================
-
-export interface MlsManagerOptions {
-  /** Custom storage adapter. Defaults to IndexedDBMlsStorage. */
-  storage?: MlsStorageAdapter;
-  /** Path to the openmls WASM binary. Defaults to '/openmls_wasm_bg.wasm'. */
-  wasmPath?: string;
-  /**
-   * Pre-loaded WASM module. If provided, skips dynamic import.
-   * Consumer should do: `import * as wasm from '@ermis-network/ermis-chat-sdk/src/wasm/openmls_wasm.js'`
-   * then `await wasm.default('/openmls_wasm_bg.wasm'); wasm.init();`
-   * and pass `wasmModule: wasm`.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  wasmModule?: any;
-  /** Disable group-sponsored epoch archives for a staged rollout. Account-owned recovery remains enabled. */
-  enableSponsoredArchives?: boolean;
-}
-
-/**
- * Structured payload encrypted inside mls_ciphertext.
- * Mirrors bellboy's MessageContent::Standard — the ENTIRE Standard
- * content variant is serialized to JSON, encrypted, and stored as
- * the opaque ciphertext blob. Server only sees envelope metadata.
- */
-export interface E2eePayload {
-  /** Message text */
-  text: string;
-  /** File/image/video attachments metadata */
-  attachments?: unknown[];
-  /** Sticker URL */
-  sticker_url?: string;
-  /** Poll type: 'single' | 'multiple' */
-  poll_type?: string;
-  /** Poll choices vote counts */
-  poll_choice_counts?: Record<string, number>;
-  /** Latest poll choices */
-  latest_poll_choices?: unknown[];
-  /** E2EE edit history, encrypted inside the latest message snapshot */
-  old_texts?: Array<{ text: string; created_at: string }>;
-}
-
-export interface DecryptResult {
-  /** Parsed E2EE payload — full MessageContent::Standard */
-  payload: E2eePayload;
-  messageType: number;
-  senderIndex: number;
-  epoch: number;
-}
-
-export interface WaterfallResult {
-  decrypted: E2eeStoredMessage[];
-  buffered: unknown[];
-}
-
-export type E2eeSyncStatus =
-  | 'idle'
-  | 'syncing'
-  | 'needs_retry'
-  | 'ready'
-  | 'joined_welcome'
-  | 'joined_external'
-  | 'stale_group_info'
-  | 'skipped'
-  | 'failed';
-
-export interface E2eeSyncState {
-  cid: string;
-  status: E2eeSyncStatus;
-  started_cursor: string;
-  processed_cursor: string;
-  server_next_cursor?: string;
-  started_event_cursor?: EventCursor;
-  processed_event_cursor?: EventCursor;
-  server_next_event_cursor?: EventCursor;
-  has_more: boolean;
-  needs_retry: boolean;
-  processed_events: number;
-  buffered_messages: number;
-  max_observed_epoch?: number;
-  error?: string;
-}
-
-export interface EnsureE2eeChannelResult {
-  cid: string;
-  status: E2eeSyncStatus;
-  epoch?: number;
-  sync_state?: E2eeSyncState;
-  error?: string;
-}
-
-export type E2eeBootstrapStatus = 'idle' | 'running' | 'done' | 'failed';
-
-export interface E2eeBootstrapProgress {
-  total: number;
-  completed: number;
-  running_cid?: string;
-  failed_cids: string[];
-  status: E2eeBootstrapStatus;
-}
-
-export interface BootstrapKnownE2eeChannelsOptions {
-  source?: 'startup' | 'channels_queried' | 'manual' | string;
-  priorityActiveCid?: string;
-}
-
-export interface BootstrapKnownE2eeChannelsResult extends E2eeBootstrapProgress {
-  results: EnsureE2eeChannelResult[];
-}
-
-export interface RestoredMessage {
-  epoch: number;
-  messageId?: string;
-  plaintext?: E2eePayload;
-  source?: 'archive';
-  createdAt?: string;
-  message?: Record<string, unknown>;
-  synced?: boolean;
-  alreadyAvailable?: boolean;
-  gap?: boolean;
-  reason?:
-    | 'no_archive'
-    | 'no_matching_wrap'
-    | 'missing_snapshot'
-    | 'expired_restore_window'
-    | 'adk_unwrap_error'
-    | 'decrypt_error';
-}
-
-export type RepairMode = 'failed_only' | 'recheck_channel';
-
-export interface RepairMessageResult {
-  messageId: string;
-  messageVersion: string;
-  epoch?: number;
-  createdAt?: string;
-}
-
-export interface RepairResult {
-  newlyRepaired: RepairMessageResult[];
-  stillFailed: RepairIssue[];
-  alreadyAvailable: number;
-  checked: number;
-}
-
-export type EncryptedChannelRepairMode = 'replay' | 'reset_local_state';
-
-export interface EncryptedChannelRepairResult {
-  cid: string;
-  scopeCid: string;
-  status: 'healthy' | 'replaying' | 'replay_failed' | 'reset_available' | 'resetting' | 'failed';
-  requiresPin: boolean;
-  resetAvailable: boolean;
-  processedEvents: number;
-  bufferedMessages: number;
-  repairedMessages: number;
-  stillFailed: number;
-  messageRepair?: RepairResult;
-  syncState?: E2eeSyncState;
-  repairState?: ChannelRepairState;
-  error?: string;
-}
-
-export interface RecoveryStatus {
-  hasVault: boolean;
-  unlocked: boolean;
-  hasIncompleteRestore: boolean;
-  incompleteChannels: string[];
-  channelsWithPermanentGaps: string[];
-  e2eeBootstrapRunning?: boolean;
-  e2eeBootstrapCompleted?: number;
-  e2eeBootstrapTotal?: number;
 }
 
 interface RestoreQueueEntry {
@@ -3405,6 +3245,43 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return this._lastSyncStates.get(cid) || null;
   }
 
+  private async _isScopeReadyForOpen(
+    scopeCid: string,
+    savedCursor?: EventCursor | null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    channel?: any,
+  ): Promise<boolean> {
+    if (!this.groups.has(scopeCid)) return false;
+    if (this.isScopeRepairing(scopeCid) || this._scopeRepairLocks.has(scopeCid)) return false;
+    if (this._scopeSyncRequestedAfterRepair.has(scopeCid)) return false;
+
+    const syncState = this.getSyncState(scopeCid);
+    if (!syncState || syncState.status !== 'ready' || syncState.needs_retry || syncState.has_more) return false;
+
+    const persistedCursor = savedCursor !== undefined ? savedCursor : await this._loadScopeSyncCursor(scopeCid);
+    if (!persistedCursor) return false;
+
+    let activeChannel = channel;
+    if (activeChannel === undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      activeChannel = (this.client as any)?.activeChannels?.[scopeCid];
+    }
+    if (activeChannel && activeChannel.data?.mls_enabled !== true) return false;
+
+    const memberCreatedAt = this._getMembershipCreatedAt(activeChannel);
+    if (memberCreatedAt) {
+      const membershipCursor = { created_at: this._initialSyncCursor(memberCreatedAt), event_id: ZERO_EVENT_ID };
+      if (compareEventCursor(persistedCursor, membershipCursor) < 0) return false;
+    }
+
+    const processedCursor =
+      syncState.processed_event_cursor || { created_at: syncState.processed_cursor, event_id: ZERO_EVENT_ID };
+    if (compareEventCursor(persistedCursor, processedCursor) < 0) return false;
+
+    const repairState = await this._loadChannelRepairState(scopeCid);
+    return !repairState || repairState.status === 'healthy';
+  }
+
   private _getDurableSyncCursor({
     processedCursor,
     serverNextCursor,
@@ -4500,8 +4377,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       return { cid, status: 'failed', error: '[MLS] Not initialized' };
     }
 
-    const readyUntil = this._channelReadyUntil.get(cid) ?? 0;
-    if (source === 'open' && this.groups.has(cid) && readyUntil > Date.now()) {
+    if (source === 'open' && (await this._isScopeReadyForOpen(cid))) {
       return { cid, status: 'ready', epoch: this.getEpoch(cid), sync_state: this.getSyncState(cid) || undefined };
     }
 
@@ -4580,6 +4456,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           } as any);
         }
         return result;
+      }
+
+      if (source === 'open' && (await this._isScopeReadyForOpen(cid, savedCursorRecord, channel))) {
+        return { cid, status: 'ready', epoch: this.getEpoch(cid), sync_state: this.getSyncState(cid) || undefined };
       }
 
       const since = this._membershipBoundedEventCursor(channel, savedCursorRecord);
@@ -4701,7 +4581,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * @param memberUserIds - all member user IDs to add
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async enableE2ee(channelType: string, channelId: string, cid: string, memberUserIds: string[]): Promise<any> {
+  async enableE2ee(
+    channelType: string,
+    channelId: string,
+    cid: string,
+    memberUserIds: string[],
+    recoveryPolicy: E2eeRecoveryPolicy = 'member_assisted',
+  ): Promise<any> {
     // 1. Create MLS group
     const group = this.createGroup(cid);
 
@@ -4740,6 +4626,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         // Send current pre-merge epoch. Server will store epoch+1 (post-commit).
         epoch: Number(group.epoch()),
         group_info: exportedGIEnable,
+        e2ee_recovery_policy: recoveryPolicy,
       });
     } catch (err) {
       // Server rejected (e.g. concurrent enable, epoch_stale) → clear pending commit

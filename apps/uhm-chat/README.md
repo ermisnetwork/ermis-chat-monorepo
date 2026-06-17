@@ -8,18 +8,26 @@
 - uhm-chat waits for `connectUser()` and MLS initialization before mounting the chat shell, preventing first-login channel queries with an unset auth token.
 - E2EE direct/group creation uses the SDK MLS bundle flow. Group E2EE channels are always private.
 - New E2EE direct/group channels default to Standard recovery (`e2ee_recovery_policy=member_assisted`) and can be created with Strict recovery (`self_owned_only`) from the create-channel modal.
-- Existing standard channels can be upgraded from Channel Info by the owner when MLS is initialized.
-- E2EE topics inherit encryption from the parent channel. Key rotation is exposed on parent E2EE channels for owners/moderators.
+- Existing standard channels can be upgraded from Channel Info by the owner when MLS is initialized; this path uses Standard recovery (`member_assisted`) by default.
+- E2EE topics inherit encryption and recovery policy from the parent channel unless they are gated/own-group topics. Key rotation is exposed on parent E2EE channels for owners/moderators.
 - Chat history PIN lives in the account menu. Users can set up, unlock, and change the PIN there; Channel Info repair only asks for the PIN when it is needed to continue.
 - E2EE Channel Info exposes one conversation repair card. The app replays encrypted state for the selected conversation, restores any available history, asks for PIN only when needed, and keeps retry modes plus message-level diagnostics out of the primary UI.
 - If replay cannot recover this device, Channel Info reveals the advanced reset action that reloads encrypted state on this device while keeping already shown messages.
-- If this device has no PIN or has a locked PIN that may need history restore, uhm-chat shows a soft PIN popup after login/app entry; setup/unlock starts the SDK background restore queue.
+- If this device has no PIN or has incomplete history restore, uhm-chat shows a soft PIN popup after login/app entry; a locked vault alone does not interrupt login.
 - After the channel list loads, the SDK prepares all loaded E2EE channels in the background with sequential external join and reports progress through a compact secure-restore banner.
 - Active E2EE channels show restore progress/gap state from local `restore_progress` records without creating fake messages.
 - SDK and app work now uses this monorepo as the source of truth: `packages/ermis-chat-sdk` and `apps/uhm-chat`.
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-06-17 - production PIN lazy unlock and ready-channel navigation
+
+- Goal: keep recovery PIN prompts tied to real recovery work and avoid redundant E2EE scope sync when users click channels that are already ready.
+- Code changed: app behavior already scopes the login gate to missing PIN setup or incomplete restore, and Channel Info repair opens the repair PIN dialog only when SDK repair returns `requiresPin`.
+- Docs changed: this README records that locked vault alone is not enough to show the login PIN gate; the SDK README records the channel-open sync guard.
+- Design decision: users can still open account PIN controls manually for setup/unlock/change, while passive reload/navigation stays uninterrupted when no restore work is pending.
+- Verification: `npm run build:uhm` passed. Targeted `yarn workspace uhm-chat exec eslint src/pages/ChatPage.tsx src/features/chat/UhmChannelInfoActions.tsx` was attempted but is blocked by existing `ChatPage.tsx` lint errors; neither file has code diffs in this change.
 
 ### 2026-06-16 - production SDK logger assets
 
@@ -32,6 +40,7 @@
 
 - Goal: make the E2EE recovery policy explicit in the Uhm create-channel flow.
 - Code changed: `CustomCreateChannelModal` now defaults to Standard recovery (`member_assisted`) and shows a compact Standard/Strict recovery selector when E2EE is enabled.
+- Code changed: Channel Info enable E2EE uses Standard recovery by default, and topic creation relies on parent-policy inheritance for normal non-gated topics.
 - UI copy: `Standard recovery: members can help preserve encrypted history; only your PIN can unlock it.` and `Strict recovery: history can only be recovered from archives created by your own devices; some history may be unavailable if all your devices were offline.`
 - Design decision: Uhm keeps member-assisted recovery as the default while making the stricter self-owned policy selectable before channel creation.
 - Verification: `yarn workspace uhm-chat build` passed.

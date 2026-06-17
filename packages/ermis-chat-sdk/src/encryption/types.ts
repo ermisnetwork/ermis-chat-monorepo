@@ -1,0 +1,1051 @@
+/**
+ * Public type contracts for Ermis encrypted messaging.
+ *
+ * Keep runtime implementations in api.ts, manager.ts, and storage.ts.
+ * This file is type-only so customer-facing contracts can be imported from
+ * `@ermis-network/ermis-chat-sdk/encryption` without coupling to internals.
+ */
+
+import type { APIResponse, E2eeRecoveryPolicy } from '../types';
+
+// ============================================================
+// Storage Adapter Interface
+// ============================================================
+
+export interface E2eeStoredMessage {
+  // Core identity
+  id: string;
+  cid: string;
+  /** 'mls' for encrypted E2EE messages, 'standard' for plaintext (system messages, etc.) */
+  content_type: 'mls' | 'standard';
+  /** Message type: 'regular' | 'reply' | 'system' etc. */
+  type: string;
+  created_at: string;
+  updated_at?: string;
+  // Sender
+  user_id: string;
+  user?: { id: string; name?: string; image?: string; [key: string]: unknown };
+
+  // Decrypted content (MessageContent::Standard)
+  text: string;
+  attachments?: unknown[];
+  sticker_url?: string;
+  poll_type?: string;
+  poll_choice_counts?: Record<string, number>;
+  latest_poll_choices?: unknown[];
+  is_edited?: boolean;
+  old_texts?: Array<{ text: string; created_at: string }>;
+
+  // Thread / reply routing
+  parent_id?: string;
+  quoted_message_id?: string;
+  quoted_message?: unknown;
+
+  // Notification metadata
+  mentioned_users?: string[];
+  mentioned_all?: boolean;
+
+  // State
+  pinned?: boolean;
+  pinned_at?: string;
+  reaction_counts?: Record<string, number>;
+  latest_reactions?: unknown[];
+
+  // Catch-all for future fields
+  [key: string]: unknown;
+}
+
+export interface PendingE2eeSnapshot {
+  cid: string;
+  event_type: 'application' | 'message_updated';
+  message_id: string;
+  mls_epoch?: number;
+  message: Record<string, unknown>;
+  version: string;
+  received_cursor?: string;
+  event_time?: string;
+}
+
+export interface RemovedSyncCursor {
+  removed_at: string;
+  event_id: string;
+}
+
+export interface EventCursor {
+  created_at: string;
+  event_id: string;
+}
+
+export type ChannelRepairStatus = 'healthy' | 'replaying' | 'replay_failed' | 'reset_available' | 'resetting';
+
+export interface ChannelRepairState {
+  scope_cid: string;
+  status: ChannelRepairStatus;
+  fail_count: number;
+  last_safe_cursor?: EventCursor;
+  last_attempted_cursor?: EventCursor;
+  last_committed_cursor?: EventCursor;
+  local_epoch?: number;
+  max_observed_epoch?: number;
+  last_error?: string;
+  updated_at: number;
+}
+
+export interface MlsSyncCheckpoint {
+  user_id: string;
+  device_id: string;
+  provider_bytes: Uint8Array;
+  scope_cursors?: Record<string, EventCursor>;
+  pending_snapshots?: Record<string, PendingE2eeSnapshot[]>;
+  repair_states?: ChannelRepairState[];
+}
+
+export type ArchiveScope = 'account_owned' | 'group_sponsored';
+
+export interface PendingArchiveUpload {
+  cid: string;
+  channel_type: string;
+  channel_id: string;
+  epoch: number;
+  scope: ArchiveScope;
+  upload: unknown;
+  retry_count: number;
+  created_at: number;
+}
+
+export interface PendingDeferredArchive {
+  cid: string;
+  channel_type: string;
+  channel_id: string;
+  epoch: number;
+  scope: 'account_owned';
+  archive_blob_id: string;
+  encrypted_archive: {
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
+    aead_aad: Uint8Array;
+  };
+  snapshot: {
+    snapshot_bytes: Uint8Array;
+    snapshot_hash: string;
+  };
+  encrypted_adk: {
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
+  };
+  retry_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export type ArchiveAckStatus = 'uploaded' | 'idempotent' | 'duplicate_cap';
+
+export interface ArchiveAckRecord {
+  cid: string;
+  epoch: number;
+  scope: ArchiveScope;
+  coverage_key: string;
+  recovery_key_id?: string;
+  recipient_set_hash?: string;
+  status: ArchiveAckStatus;
+  archive_blob_id?: string;
+  updated_at: number;
+}
+
+export type ArchiveMaterializationStatus = 'pending' | 'uploaded' | 'terminal' | 'unsupported';
+
+export interface EpochArchiveCheckpoint {
+  scope_cid: string;
+  channel_type: string;
+  channel_id: string;
+  epoch: number;
+  encrypted_archive_bytes: {
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
+  };
+  snapshot: {
+    snapshot_bytes: Uint8Array;
+    snapshot_hash: string;
+  };
+  sponsor_role: 'primary' | 'backup';
+  primary_user_id?: string;
+  sponsored_rewrap_count?: number;
+  materialization: Partial<Record<ArchiveScope, ArchiveMaterializationStatus>>;
+  coverage_degraded?: boolean;
+  last_error?: string;
+  captured_at: number;
+  updated_at: number;
+}
+
+export type RestoreStatus = 'pending' | 'running' | 'partial' | 'done' | 'done_with_gaps' | 'failed';
+
+export type RestorePermanentGapReason =
+  | 'no_archive'
+  | 'no_matching_wrap'
+  | 'missing_snapshot'
+  | 'expired_restore_window'
+  | 'decrypt_error';
+
+export type RestoreTransientFailureReason = 'network_error' | 'server_error' | 'decrypt_error';
+
+export type RepairIssueReason =
+  | RestorePermanentGapReason
+  | RestoreTransientFailureReason
+  | 'forward_secrecy_consumed'
+  | 'missing_local_snapshot'
+  | 'legacy_epoch_failure';
+
+export type RepairIssueStatus = 'retryable' | 'blocked' | 'terminal';
+
+export interface RepairIssue {
+  cid: string;
+  message_id: string;
+  message_version: string;
+  mls_epoch?: number;
+  encrypted_message?: Record<string, unknown>;
+  created_at?: string;
+  reason: RepairIssueReason;
+  status: RepairIssueStatus;
+  retry_count: number;
+  max_retries: number;
+  last_attempt_at?: number;
+  updated_at: number;
+}
+
+export interface RestoreProgressRecord {
+  device_id: string;
+  cid: string;
+  user_id: string;
+  channel_type: string;
+  channel_id: string;
+  status: RestoreStatus;
+  target_epochs?: number[];
+  completed_epochs: number[];
+  permanent_gaps: Array<{
+    epoch: number;
+    reason: RestorePermanentGapReason;
+    updated_at: number;
+  }>;
+  transient_failures: Array<{
+    epoch: number;
+    reason: RestoreTransientFailureReason;
+    retry_count: number;
+    max_retries: number;
+    updated_at: number;
+  }>;
+  repair_issues?: RepairIssue[];
+  last_checked_at: number;
+  updated_at: number;
+}
+
+/**
+ * Platform-agnostic storage adapter for MLS state.
+ *
+ * Implement this interface to provide custom storage (e.g., SQLite for React Native).
+ * The default `IndexedDBMlsStorage` uses browser IndexedDB.
+ *
+ * NOTE: `getDeviceId()` is a GLOBAL (per-browser) operation and does NOT
+ * require a userId — it identifies the physical device, not the user.
+ */
+export interface MlsStorageAdapter {
+  // ---- Device ID (global, per-browser) ----
+  getDeviceId(): Promise<string>;
+
+  // ---- Identity ----
+  saveIdentity(userId: string, deviceId: string, identityBytes: Uint8Array): Promise<void>;
+  loadIdentity(userId: string, deviceId: string): Promise<Uint8Array | null>;
+
+  // ---- E2EE Messages ----
+  saveE2eeMessage(message: E2eeStoredMessage): Promise<void>;
+  loadE2eeMessage(messageId: string): Promise<E2eeStoredMessage | null>;
+  loadE2eeMessages?(messageIds: string[]): Promise<Map<string, E2eeStoredMessage>>;
+  deleteE2eeMessage(messageId: string): Promise<void>;
+  getE2eeMessages(cid: string, limit?: number): Promise<E2eeStoredMessage[]>;
+  clearE2eeMessages(cid: string): Promise<void>;
+
+  // ---- E2EE Message Search ----
+  /** Search all E2EE messages across all channels by text content. */
+  searchE2eeMessages(searchTerm: string, limit?: number): Promise<E2eeStoredMessage[]>;
+  /** Search E2EE messages within a specific channel by text content. */
+  searchE2eeMessagesByCid(cid: string, searchTerm: string, limit?: number): Promise<E2eeStoredMessage[]>;
+
+  // ---- Group State ----
+  saveGroupState(cid: string, marker: unknown): Promise<void>;
+  loadGroupState(cid: string): Promise<unknown | null>;
+  listGroupCids(): Promise<string[]>;
+  deleteGroup(cid: string): Promise<void>;
+
+  // ---- Provider State ----
+  saveProviderState(userId: string, deviceId: string, providerBytes: Uint8Array): Promise<void>;
+  loadProviderState(userId: string, deviceId: string): Promise<Uint8Array | null>;
+
+  // ---- Sync Timestamps ----
+  saveSyncTimestamp(cid: string, timestamp: string): Promise<void>;
+  loadSyncTimestamp(cid: string): Promise<string | null>;
+
+  // ---- Batch Sync Cursors (for unified sync API) ----
+  loadAllSyncTimestamps(): Promise<Record<string, string>>;
+  saveAllSyncTimestamps(cursors: Record<string, string>): Promise<void>;
+  loadScopeSyncCursor?(scopeCid: string): Promise<EventCursor | null>;
+  saveScopeSyncCursor?(scopeCid: string, cursor: EventCursor): Promise<void>;
+  loadAllScopeSyncCursors?(): Promise<Record<string, EventCursor>>;
+  saveAllScopeSyncCursors?(cursors: Record<string, EventCursor>): Promise<void>;
+  loadChannelRepairState?(scopeCid: string): Promise<ChannelRepairState | null>;
+  saveChannelRepairState?(state: ChannelRepairState): Promise<void>;
+  deleteChannelRepairState?(scopeCid: string): Promise<void>;
+  saveMlsSyncCheckpoint?(checkpoint: MlsSyncCheckpoint): Promise<void>;
+  tryAcquireRepairLock?(scopeCid: string, ownerId: string, ttlMs: number): Promise<boolean>;
+  releaseRepairLock?(scopeCid: string, ownerId: string): Promise<void>;
+  loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null>;
+  saveRemovedSyncCursor(cursor: RemovedSyncCursor): Promise<void>;
+
+  // ---- Pending E2EE encrypted snapshots ----
+  loadPendingE2eeSnapshots(cid: string): Promise<PendingE2eeSnapshot[]>;
+  savePendingE2eeSnapshots(cid: string, messages: PendingE2eeSnapshot[]): Promise<void>;
+
+  // ---- Pending Evictions (offline recovery persistence) ----
+  // Map: cid → array of user_ids to evict
+  loadPendingEvictions(): Promise<Record<string, string[]>>;
+  savePendingEvictions(data: Record<string, string[]>): Promise<void>;
+
+  // ---- PIN Epoch Archive recovery ----
+  saveArchiveUpload(upload: PendingArchiveUpload): Promise<void>;
+  loadPendingArchiveUploads(): Promise<PendingArchiveUpload[]>;
+  deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
+  saveDeferredArchive(archive: PendingDeferredArchive): Promise<void>;
+  loadPendingDeferredArchives(): Promise<PendingDeferredArchive[]>;
+  deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
+  saveArchiveAck(record: ArchiveAckRecord): Promise<void>;
+  loadArchiveAck(
+    cid: string,
+    epoch: number,
+    scope: ArchiveScope,
+    coverageKey: string,
+  ): Promise<ArchiveAckRecord | null>;
+  saveEpochArchiveCheckpoint(checkpoint: EpochArchiveCheckpoint): Promise<void>;
+  loadEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<EpochArchiveCheckpoint | null>;
+  loadEpochArchiveCheckpoints(): Promise<EpochArchiveCheckpoint[]>;
+  deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<void>;
+  saveArchiveStashKey(key: CryptoKey): Promise<void>;
+  loadArchiveStashKey(): Promise<CryptoKey | null>;
+  saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void>;
+  loadRecoveryPublicKey(userId: string): Promise<Uint8Array | null>;
+
+  // ---- Restore Progress (required SDK contract) ----
+  saveRestoreProgress(record: RestoreProgressRecord): Promise<void>;
+  loadRestoreProgress(userId: string, deviceId: string, cid: string): Promise<RestoreProgressRecord | null>;
+  loadIncompleteRestores(userId: string, deviceId: string): Promise<RestoreProgressRecord[]>;
+  loadRestoresWithPermanentGaps(userId: string, deviceId: string): Promise<RestoreProgressRecord[]>;
+  deleteRestoreProgress(userId: string, deviceId: string, cid: string): Promise<void>;
+}
+
+// ============================================================
+// Request / Response Types
+// ============================================================
+
+export interface UploadKeyPackagesRequest {
+  /** TLS-serialized KeyPackage bytes from WASM `keyPackage.to_bytes()` */
+  key_packages: Uint8Array[];
+}
+
+export interface UploadKeyPackagesResponse extends APIResponse {
+  stored: number;
+  total_remaining: number;
+}
+
+export interface KeyPackageCountResponse extends APIResponse {
+  remaining: number;
+}
+
+export interface DeviceKeyPackage {
+  /** TLS-serialized KeyPackage bytes */
+  key_package: Uint8Array;
+  device_id: string;
+}
+
+export interface GetKeyPackagesResponse extends APIResponse {
+  key_packages: DeviceKeyPackage[];
+  user_id: string;
+}
+
+export interface MemberKeyPackages {
+  user_id: string;
+  key_packages: DeviceKeyPackage[];
+}
+
+export interface GetKeyPackagesByCidResponse extends APIResponse {
+  members: MemberKeyPackages[];
+}
+
+// NOTE: AddMembersRequest has been removed — add_members is now handled
+// through the standard edit_channel endpoint (POST /channels/{type}/{id})
+// with MLS fields (commit, welcome, ratchet_tree, epoch, group_info)
+// embedded alongside add_members in the request body.
+
+// RemoveMemberRequest — REMOVED
+// Merged into edit_channel_handler. Use channel.removeMembersE2ee() instead.
+// See MlsManager.evictMember() in encryption/manager.ts for the updated flow.
+
+export interface KeyRotationRequest {
+  commit: Uint8Array;
+  epoch: number;
+  /** TLS-serialized GroupInfo bytes — required so server stores alongside epoch advance. */
+  group_info: Uint8Array;
+}
+
+export interface EnableE2eeRequest {
+  /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
+  commit?: Uint8Array;
+  /** TLS-serialized welcome bytes from WASM */
+  welcome: Uint8Array;
+  /** Exported ratchet tree bytes */
+  ratchet_tree: Uint8Array;
+  epoch: number;
+  /**
+   * TLS-serialized GroupInfo bytes — required so external join is possible
+   * from the very first epoch without a separate upload.
+   */
+  group_info: Uint8Array;
+  /** Channel recovery policy after enabling E2EE. Defaults to member_assisted. */
+  e2ee_recovery_policy?: E2eeRecoveryPolicy;
+}
+
+export interface MlsOperationResponse extends APIResponse {
+  status: string;
+}
+
+// GroupInfo & External Join types
+
+export interface UploadGroupInfoRequest {
+  /** TLS-serialized GroupInfo bytes from WASM export_group_info */
+  group_info: Uint8Array;
+  epoch: number;
+}
+
+export interface GetGroupInfoResponse extends APIResponse {
+  group_info: Uint8Array;
+  epoch: number;
+  /** true if stored GroupInfo is older than channel.mls_epoch. */
+  is_stale?: boolean;
+  channel?: unknown;
+  messages?: unknown[];
+  pinned_messages?: unknown[];
+  watchers?: unknown[];
+  read?: unknown[];
+  membership?: unknown;
+  is_pinned?: boolean;
+}
+
+export interface ExternalJoinRequest {
+  /** External commit bytes from WASM Group.join_external */
+  commit: Uint8Array;
+  epoch: number;
+  /**
+   * GroupInfo bytes from joiner — optional because export_group_info() is
+   * only valid AFTER merge_pending_commit(). The joiner uploads GroupInfo
+   * via a separate POST /group_info call after merging.
+   */
+  group_info?: Uint8Array;
+  project_id?: string;
+  members?: string[];
+}
+
+/**
+ * CommitEvictionRequest — MLS-only commit for evicting users who already self-left.
+ * Used by `POST /v1/e2ee/channels/{type}/{id}/commit_eviction`.
+ * Does NOT touch channel membership (already handled by self_remove in edit_channel).
+ */
+export interface CommitEvictionRequest {
+  /** All users removed by the composite inline commit. Must already be inactive in channel membership. */
+  target_user_ids: string[];
+  /** MLS commit bytes from WASM commit_member_removals(target_user_ids) */
+  commit: Uint8Array;
+  /** Pre-merge epoch (must match DB epoch — CAS check) */
+  epoch: number;
+  /** Post-commit GroupInfo bytes (required) */
+  group_info: Uint8Array;
+}
+
+export interface CommitEvictionResponse extends APIResponse {
+  status: string;
+  epoch: number;
+}
+
+export interface SendE2eeMessageRequest {
+  message: {
+    id: string;
+    /** Encrypted MLS ciphertext from WASM `group.create_message()` */
+    mls_ciphertext: Uint8Array;
+    mls_epoch: number;
+    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
+    e2ee_group_id?: string;
+    mentioned_all?: boolean;
+    mentioned_users?: string[];
+    parent_id?: string;
+    quoted_message_id?: string;
+    forward_cid?: string;
+  };
+}
+
+export interface UpdateE2eeMessageRequest {
+  message: {
+    /** Encrypted MLS ciphertext from WASM `group.create_message()` */
+    mls_ciphertext: Uint8Array;
+    mls_epoch: number;
+    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
+    e2ee_group_id?: string;
+    mentioned_all?: boolean;
+    mentioned_users?: string[];
+  };
+}
+
+export interface UploadRecoveryVaultRequest {
+  vault_bytes: Uint8Array;
+  expected_revision?: number;
+}
+
+export interface UploadRecoveryVaultResponse extends APIResponse {
+  status: 'created' | 'updated' | 'conflict';
+  revision: number;
+}
+
+export interface RecoveryVaultResponse extends APIResponse {
+  vault_bytes: Uint8Array;
+  revision: number;
+  recovery_key_id: string;
+  ciphersuite: number;
+  vault_format_version: number;
+  kdf_metadata: {
+    name: string;
+    iterations: number;
+  };
+  updated_at: string;
+}
+
+export interface RecoveryPublicKeyResponse extends APIResponse {
+  public_key: Uint8Array;
+  key_id: string;
+  ciphersuite: number;
+}
+
+export interface UploadEpochArchiveRequest {
+  epoch: number;
+  archive_blob_id: string;
+  idempotency_key: string;
+  scope: 'account_owned' | 'group_sponsored';
+  recipient_set_hash?: string;
+  encrypted_archive: {
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
+    aead_aad: Uint8Array;
+  };
+  snapshot: {
+    snapshot_bytes: Uint8Array;
+    snapshot_hash: string;
+  };
+  wraps: Array<{
+    recipient_user_id: string;
+    recipient_recovery_key_id: string;
+    hpke_kem_output: Uint8Array;
+    hpke_ciphertext: Uint8Array;
+    ciphersuite: number;
+    hpke_info: Uint8Array;
+  }>;
+}
+
+export type UploadEpochArchiveReason = 'stored' | 'idempotent' | 'duplicate_cap' | 'recipient_set_stale';
+
+export interface UploadEpochArchiveResponse extends APIResponse {
+  status: 'stored' | 'duplicate' | 'rejected';
+  reason_code: UploadEpochArchiveReason;
+  message?: string;
+}
+
+export interface SponsoredArchiveRecipient {
+  user_id: string;
+  recovery_key_id: string;
+  ciphersuite: number;
+  public_key: Uint8Array;
+  public_key_hash: string;
+}
+
+export interface QuerySponsoredArchiveRecipientsResponse extends APIResponse {
+  recipient_set_hash?: string;
+  recipients: SponsoredArchiveRecipient[];
+  matching_candidate_exists: boolean;
+  reason?: 'no_recovery_recipients' | 'recipient_limit';
+}
+
+export interface EpochIndexEntry {
+  epoch: number;
+  scope: string;
+  blob_id: string;
+}
+
+export interface ArchiveBlobRecord {
+  archive_blob_id: string;
+  cid: string;
+  epoch: number;
+  archive_scope: string;
+  exporter_user_id: string;
+  exporter_device_id: string;
+  member_snapshot_hash: string;
+  encrypted_archive_bytes: Uint8Array;
+  aead_nonce: Uint8Array;
+  aead_aad: Uint8Array;
+  created_at: string;
+}
+
+export interface ArchiveKeyWrapRecord {
+  archive_blob_id: string;
+  recipient_user_id: string;
+  recipient_recovery_key_id: string;
+  hpke_kem_output: Uint8Array;
+  hpke_ciphertext: Uint8Array;
+  ciphersuite: number;
+  hpke_info: Uint8Array;
+  epoch: number;
+  created_at: string;
+}
+
+export interface MemberSnapshotRecord {
+  snapshot_hash: string;
+  cid: string;
+  first_seen_epoch: number;
+  last_seen_epoch: number;
+  snapshot_bytes: Uint8Array;
+  created_at: string;
+}
+
+export interface QueryEpochArchivesRequest {
+  list_epochs?: boolean;
+  epoch_from?: number;
+  epoch_to?: number;
+  include_snapshots?: boolean;
+  include_wraps?: boolean;
+}
+
+export interface QueryEpochArchivesResponse extends APIResponse {
+  epochs?: EpochIndexEntry[];
+  blobs?: ArchiveBlobRecord[];
+  wraps?: ArchiveKeyWrapRecord[];
+  snapshots?: Record<string, MemberSnapshotRecord>;
+}
+
+export interface ListArchiveAvailabilityResponse extends APIResponse {
+  epochs: EpochIndexEntry[];
+  has_more: boolean;
+  next_cursor?: string;
+}
+
+export interface QueryArchiveMaterialRequest {
+  epoch_from: number;
+  epoch_to: number;
+  include_snapshots?: boolean;
+  include_wraps?: boolean;
+}
+
+export interface CiphertextCursor {
+  last_event_key: string;
+}
+
+export interface HistoricalCiphertext {
+  cid?: string;
+  parent_cid?: string;
+  e2ee_group_id?: string;
+  message_id: string;
+  mls_ciphertext: Uint8Array;
+  mls_epoch: number;
+  created_at: string;
+  updated_at?: string;
+  type?: string;
+  user_id?: string;
+  user?: { id: string; [key: string]: unknown };
+  parent_id?: string;
+  quoted_message_id?: string;
+  mentioned_all?: boolean;
+  mentioned_users?: string[];
+}
+
+export interface CiphertextQueryResponse extends APIResponse {
+  ciphertexts: HistoricalCiphertext[];
+  has_more: boolean;
+  next_cursor?: CiphertextCursor;
+}
+
+// ============================================================
+// Sync Types
+// ============================================================
+
+/** Protocol event types */
+export type ProtocolType = 'commit' | 'welcome' | 'proposal' | 'external_commit';
+
+/** Protocol message (commit, welcome, or proposal) */
+export interface ProtocolMessage {
+  epoch: number;
+  user: { id: string; [key: string]: unknown };
+  type: ProtocolType;
+  commit?: Uint8Array;
+  welcome?: Uint8Array;
+  ratchet_tree?: Uint8Array;
+  proposal?: Uint8Array;
+  target_user_ids?: string[];
+}
+
+/** A single item in a sync response — either a protocol event or an app message */
+export type E2eeSyncEvent =
+  | {
+      type: 'application';
+      /** Full Message object — `created_at` is at `data.created_at` */
+      data: {
+        id: string;
+        created_at: string;
+        content_type: string;
+        mls_ciphertext?: Uint8Array;
+        mls_epoch?: number;
+        [key: string]: unknown;
+      };
+    }
+  | {
+      type: 'protocol';
+      /** MLS protocol payload — `created_at` is at `data.created_at` (consistent with application variant) */
+      data: {
+        epoch: number;
+        user: { id: string; [key: string]: unknown };
+        /** `commit` | `welcome` | `proposal` | `external_commit` */
+        type: ProtocolType;
+        commit?: Uint8Array;
+        welcome?: Uint8Array;
+        ratchet_tree?: Uint8Array;
+        proposal?: Uint8Array;
+        target_user_ids?: string[];
+        /** Timestamp when this event was stored — same location as Application.data.created_at */
+        created_at: string;
+      };
+    }
+  | {
+      type: 'reaction';
+      /** Reaction metadata — snapshot of current reaction state for a message */
+      data: {
+        /** "reaction.new" or "reaction.deleted" */
+        action: 'reaction.new' | 'reaction.deleted';
+        /** ID of the message that was reacted to */
+        message_id: string;
+        /** Current full list of reactions on the message (snapshot) */
+        latest_reactions?: Array<{
+          type: string;
+          user_id: string;
+          user?: { id: string; [key: string]: unknown };
+          message_id: string;
+          created_at: string;
+          updated_at: string;
+          [key: string]: unknown;
+        }>;
+        /** Current reaction counts (snapshot) */
+        reaction_counts?: Record<string, number>;
+        /** The specific reaction that triggered this event */
+        reaction?: {
+          type: string;
+          user_id: string;
+          user?: { id: string; [key: string]: unknown };
+          message_id: string;
+          created_at: string;
+          updated_at: string;
+          [key: string]: unknown;
+        };
+        /** Timestamp for timeline sorting */
+        created_at: string;
+      };
+    }
+  | {
+      type: 'member_removed';
+      /** Member removal metadata from event:{cid}; used to recover self-leave eviction after offline sync. */
+      data: {
+        member: {
+          user_id?: string;
+          channel_role?: string;
+          [key: string]: unknown;
+        };
+        channel_id: string;
+        channel_type: string;
+        topic_cids?: string[];
+        mls_enabled?: boolean;
+        self_remove?: boolean;
+        user?: { id: string; [key: string]: unknown };
+        created_at: string;
+      };
+    };
+
+/** Per-channel sync result (used by both syncChannel and syncAll) */
+export interface ChannelSyncResult {
+  events: E2eeSyncEvent[];
+  has_more: boolean;
+  /** RFC3339 timestamp of the last event — use this for the next sync cursor */
+  next_cursor?: string;
+}
+
+export interface ScopeSyncEvent {
+  type: E2eeSyncEvent['type'] | string;
+  /** Canonical channel/timeline that owns the event payload. */
+  cid: string;
+  /** Parent/general channel for topic events. */
+  parent_cid?: string;
+  /** Canonical datastore event id, used with created_at for the composite cursor. */
+  event_id: string;
+  /** Canonical event timestamp used for scope ordering. */
+  created_at: string;
+  /** Raw application/protocol/metadata payload. */
+  data: Record<string, unknown>;
+}
+
+export interface ScopeSyncResult {
+  events: ScopeSyncEvent[];
+  has_more: boolean;
+  next_cursor?: EventCursor;
+}
+
+export interface RemovedChannelSyncData {
+  event_id: string;
+  cid: string;
+  channel_id: string;
+  channel_type: string;
+  parent_cid?: string;
+  removed_at: string;
+  removed_by: string;
+  removal_type: 'self_remove' | 'kicked' | 'invite_rejected' | 'channel_deleted' | string;
+  reason?: string | null;
+  self_remove: boolean;
+}
+
+export interface RemovedChannelsSyncResult {
+  events: RemovedChannelSyncData[];
+  has_more: boolean;
+  next_cursor?: RemovedSyncCursor;
+}
+
+/** Response from POST /v1/e2ee/sync */
+export interface UnifiedSyncResponse extends APIResponse {
+  removed_channels?: RemovedChannelsSyncResult;
+  [cid: string]: ChannelSyncResult | RemovedChannelsSyncResult | unknown;
+}
+
+/** Response from POST /v1/e2ee/scope_sync */
+export interface ScopeSyncResponse extends APIResponse {
+  channels: Record<string, ScopeSyncResult>;
+  removed_channels?: RemovedChannelsSyncResult;
+}
+
+// ============================================================
+// Batch Topic E2EE Types
+// ============================================================
+
+export interface BatchAddMembersTopicBundle {
+  topic_cid: string;
+  commit: Uint8Array;
+  welcome: Uint8Array;
+  ratchet_tree: Uint8Array;
+  group_info: Uint8Array;
+  epoch: number;
+}
+
+export interface BatchAddMembersToTopicsRequest {
+  target_user_ids: string[];
+  topics: BatchAddMembersTopicBundle[];
+}
+
+export interface BatchExternalJoinTopicBundle {
+  topic_cid: string;
+  commit: Uint8Array;
+  epoch: number;
+  group_info?: Uint8Array;
+}
+
+export interface BatchExternalJoinTopicsRequest {
+  topics: BatchExternalJoinTopicBundle[];
+}
+
+export interface BatchTopicResult {
+  topic_cid: string;
+  success: boolean;
+  error?: string;
+  epoch?: number;
+}
+
+export interface BatchTopicResponse extends APIResponse {
+  results: BatchTopicResult[];
+}
+
+// ============================================================
+// Types
+// ============================================================
+
+export interface MlsManagerOptions {
+  /** Custom storage adapter. Defaults to IndexedDBMlsStorage. */
+  storage?: MlsStorageAdapter;
+  /** Path to the openmls WASM binary. Defaults to '/openmls_wasm_bg.wasm'. */
+  wasmPath?: string;
+  /**
+   * Pre-loaded WASM module. If provided, skips dynamic import.
+   * Prefer `loadOpenMlsWasm()` from `@ermis-network/ermis-chat-sdk` or
+   * `@ermis-network/ermis-chat-sdk/encryption`, then pass the returned module as `wasmModule`.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  wasmModule?: any;
+  /** Disable group-sponsored epoch archives for a staged rollout. Account-owned recovery remains enabled. */
+  enableSponsoredArchives?: boolean;
+}
+
+/**
+ * Structured payload encrypted inside mls_ciphertext.
+ * Mirrors bellboy's MessageContent::Standard — the ENTIRE Standard
+ * content variant is serialized to JSON, encrypted, and stored as
+ * the opaque ciphertext blob. Server only sees envelope metadata.
+ */
+export interface E2eePayload {
+  /** Message text */
+  text: string;
+  /** File/image/video attachments metadata */
+  attachments?: unknown[];
+  /** Sticker URL */
+  sticker_url?: string;
+  /** Poll type: 'single' | 'multiple' */
+  poll_type?: string;
+  /** Poll choices vote counts */
+  poll_choice_counts?: Record<string, number>;
+  /** Latest poll choices */
+  latest_poll_choices?: unknown[];
+  /** E2EE edit history, encrypted inside the latest message snapshot */
+  old_texts?: Array<{ text: string; created_at: string }>;
+}
+
+export interface DecryptResult {
+  /** Parsed E2EE payload — full MessageContent::Standard */
+  payload: E2eePayload;
+  messageType: number;
+  senderIndex: number;
+  epoch: number;
+}
+
+export interface WaterfallResult {
+  decrypted: E2eeStoredMessage[];
+  buffered: unknown[];
+}
+
+export type E2eeSyncStatus =
+  | 'idle'
+  | 'syncing'
+  | 'needs_retry'
+  | 'ready'
+  | 'joined_welcome'
+  | 'joined_external'
+  | 'stale_group_info'
+  | 'skipped'
+  | 'failed';
+
+export interface E2eeSyncState {
+  cid: string;
+  status: E2eeSyncStatus;
+  started_cursor: string;
+  processed_cursor: string;
+  server_next_cursor?: string;
+  started_event_cursor?: EventCursor;
+  processed_event_cursor?: EventCursor;
+  server_next_event_cursor?: EventCursor;
+  has_more: boolean;
+  needs_retry: boolean;
+  processed_events: number;
+  buffered_messages: number;
+  max_observed_epoch?: number;
+  error?: string;
+}
+
+export interface EnsureE2eeChannelResult {
+  cid: string;
+  status: E2eeSyncStatus;
+  epoch?: number;
+  sync_state?: E2eeSyncState;
+  error?: string;
+}
+
+export type E2eeBootstrapStatus = 'idle' | 'running' | 'done' | 'failed';
+
+export interface E2eeBootstrapProgress {
+  total: number;
+  completed: number;
+  running_cid?: string;
+  failed_cids: string[];
+  status: E2eeBootstrapStatus;
+}
+
+export interface BootstrapKnownE2eeChannelsOptions {
+  source?: 'startup' | 'channels_queried' | 'manual' | string;
+  priorityActiveCid?: string;
+}
+
+export interface BootstrapKnownE2eeChannelsResult extends E2eeBootstrapProgress {
+  results: EnsureE2eeChannelResult[];
+}
+
+export interface RestoredMessage {
+  epoch: number;
+  messageId?: string;
+  plaintext?: E2eePayload;
+  source?: 'archive';
+  createdAt?: string;
+  message?: Record<string, unknown>;
+  synced?: boolean;
+  alreadyAvailable?: boolean;
+  gap?: boolean;
+  reason?:
+    | 'no_archive'
+    | 'no_matching_wrap'
+    | 'missing_snapshot'
+    | 'expired_restore_window'
+    | 'adk_unwrap_error'
+    | 'decrypt_error';
+}
+
+export type RepairMode = 'failed_only' | 'recheck_channel';
+
+export interface RepairMessageResult {
+  messageId: string;
+  messageVersion: string;
+  epoch?: number;
+  createdAt?: string;
+}
+
+export interface RepairResult {
+  newlyRepaired: RepairMessageResult[];
+  stillFailed: RepairIssue[];
+  alreadyAvailable: number;
+  checked: number;
+}
+
+export type EncryptedChannelRepairMode = 'replay' | 'reset_local_state';
+
+export interface EncryptedChannelRepairResult {
+  cid: string;
+  scopeCid: string;
+  status: 'healthy' | 'replaying' | 'replay_failed' | 'reset_available' | 'resetting' | 'failed';
+  requiresPin: boolean;
+  resetAvailable: boolean;
+  processedEvents: number;
+  bufferedMessages: number;
+  repairedMessages: number;
+  stillFailed: number;
+  messageRepair?: RepairResult;
+  syncState?: E2eeSyncState;
+  repairState?: ChannelRepairState;
+  error?: string;
+}
+
+export interface RecoveryStatus {
+  hasVault: boolean;
+  unlocked: boolean;
+  hasIncompleteRestore: boolean;
+  incompleteChannels: string[];
+  channelsWithPermanentGaps: string[];
+  e2eeBootstrapRunning?: boolean;
+  e2eeBootstrapCompleted?: number;
+  e2eeBootstrapTotal?: number;
+}

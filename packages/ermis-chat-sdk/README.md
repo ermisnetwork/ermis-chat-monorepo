@@ -2,6 +2,13 @@
 
 The official core SDK for Ermis Chat.
 
+## Public Module Structure
+
+- Customer integrations should import from the package root, for example `import { ErmisChat, MlsManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk'`.
+- Encryption-specific integrations may import from `@ermis-network/ermis-chat-sdk/encryption`, which exposes `E2eeClient`, `MlsManager`, `IndexedDBMlsStorage`, `loadOpenMlsWasm`, public encryption types, and friendly aliases `EncryptionApiClient`, `EncryptionManager`, and `BrowserEncryptionStorage`.
+- Deep imports from `@ermis-network/ermis-chat-sdk/src/*` are intentionally unsupported. The package publishes `dist/` and runtime assets from `public/`, not TypeScript source files.
+- Apps using OpenMLS must publish `openmls_wasm_bg.wasm` with their web assets. The SDK package includes this binary under `public/openmls_wasm_bg.wasm`; `loadOpenMlsWasm('/openmls_wasm_bg.wasm')` loads the bundled JS glue and that public binary.
+
 ## E2EE Channel Helpers
 
 - `channel.removeMembersE2ee(members, e2eeOptions)` removes other members from an E2EE channel with an MLS commit and sends `self_remove: false`.
@@ -24,10 +31,11 @@ The official core SDK for Ermis Chat.
 - Recovery vault lookup is cached and in-flight de-duplicated inside `MlsManager`; repeated recovery status refreshes read local vault state instead of repeatedly calling `GET /recovery/vault`.
 - Fresh epoch archives are exported after channel creation and after every fresh epoch. If no recovery vault exists yet, the archive ADK is stashed locally under a device-local non-extractable WebCrypto AES-GCM key and uploaded after PIN setup/vault discovery.
 - Archive failures are best-effort: commit/join/rotate flows keep the MLS epoch change and retain retryable archive work locally.
-- New E2EE channel creation can pass `data.e2ee_recovery_policy` as `member_assisted` or `self_owned_only`. The default server/client behavior remains `member_assisted`.
+- New E2EE channel creation and `client.mlsManager.enableE2ee()` can pass `e2ee_recovery_policy` as `member_assisted` or `self_owned_only`. The default server/client behavior remains `member_assisted`.
 - `client.mlsManager.bootstrapKnownE2eeChannels()` scans loaded E2EE channels after `channels.queried`, external-joins missing local groups sequentially, emits `e2ee.bootstrap_progress`, and queues restore after PIN unlock.
-- E2EE non-gated topics inherit the parent `e2ee_group_id`; gated topics keep a topic-owned MLS group.
+- E2EE non-gated topics inherit the parent `e2ee_group_id` and recovery policy; gated topics keep a topic-owned MLS group and their own policy.
 - Reconnect catch-up uses `/v1/e2ee/scope_sync` with one `{ created_at, event_id }` cursor per E2EE scope.
+- Opening an already-ready E2EE channel reuses the local MLS group, persisted scope cursor, and last `ready` sync state instead of calling `/v1/e2ee/scope_sync` again; reconnect, missing local state, `has_more`, and repair paths still sync.
 - The SDK dispatches `e2ee.initialized` after MLS manager initialization, allowing app recovery gates to refresh once E2EE is ready.
 - The SDK dispatches `e2ee.restore_progress` after restore progress changes; UI clients can subscribe to refresh status without polling.
 - The SDK dispatches `e2ee.bootstrap_progress` while startup external-join preparation is running; UI clients can show non-blocking secure-restore preparation progress.
@@ -39,6 +47,34 @@ The official core SDK for Ermis Chat.
 For quick browser integration, pass console levels directly: `logger: ['info', 'warn', 'error']`. `info` uses `console.log`; `warn` uses `console.warn`; `error` uses `console.error`. For custom routing, pass a function logger; it receives `info`, `warn`, or `error` as the first argument, the formatted message as the second argument, and optional structured metadata as the third argument.
 
 ## Progress Log
+
+### 2026-06-17 - Encryption Public Types Module
+
+- Goal: keep the customer-facing encryption SDK professional by moving public DTOs, storage contracts, sync states, repair results, and manager option types into `src/encryption/types.ts` instead of scattering contracts across implementation files.
+- Code changed: `api.ts`, `storage.ts`, and `manager.ts` now import public contracts from `./types`; private manager helper shapes stay local to `manager.ts`, while `encryption/index.ts` exports `./types` first.
+- Docs/artifacts changed: this README documents that `@ermis-network/ermis-chat-sdk/encryption` exposes public encryption types. SQL, Postman, and Bellboy server docs are unchanged because API/schema/request shapes did not change.
+- Design decision: keep root `src/types.ts` for core chat SDK generics and put encryption-specific contracts in `src/encryption/types.ts` to avoid turning root types into a mixed-domain dump.
+- Performance: runtime Big-O, memory behavior, network/database round trips, payload sizes, and hot paths are unchanged; TypeScript interfaces are erased at build time, and runtime bundles remain effectively unchanged.
+- Verification: `npm run build:sdk`, `yarn workspace @ermis-network/ermis-chat-sdk test:repair`, Node subpath require smoke test, `yarn workspace uhm-chat build`, and `npm_config_cache=/private/tmp/npm-cache-codex npm pack --dry-run --json` passed.
+
+### 2026-06-17 - SDK Encryption Module Structure
+
+- Goal: make the new E2EE/MLS SDK surface look like a professional customer-facing module instead of flat internal filenames such as `e2ee.ts`, `mls_manager.ts`, and `mls_storage.ts`.
+- Code changed: moved E2EE API, manager, storage, encoding, OpenMLS loader, and OpenMLS generated assets under `src/encryption/`; package root now exports through the encryption barrel, and `@ermis-network/ermis-chat-sdk/encryption` is a first-class subpath export.
+- Packaging changed: removed `/src` from published files, kept runtime output in `dist/`, and added `public/openmls_wasm_bg.wasm` so published packages still carry the OpenMLS binary needed by `loadOpenMlsWasm()`.
+- Design decision: this intentionally breaks deep source imports for the new E2EE area; root package imports remain stable, and call/media worker files stay outside `encryption/` because they are not OpenMLS/E2EE code.
+- Performance: runtime complexity, storage operations, database/network round trips, payload sizes, and hot paths are unchanged; this is a module-boundary and packaging change. Build output adds a small encryption subpath bundle generated from the same source graph.
+- Verification: `npm run build:sdk`, `yarn workspace @ermis-network/ermis-chat-sdk test:repair`, Node subpath require smoke test, `yarn workspace uhm-chat build`, and `npm_config_cache=/private/tmp/npm-cache-codex npm pack --dry-run --json` passed.
+
+### 2026-06-17 - PIN Lazy Unlock And Open-Channel Sync Guard
+
+- Goal: avoid repeated PIN prompts and redundant `/scope_sync` calls when an E2EE channel is already ready after login/reconnect catch-up.
+- Code changed: `MlsManager.ensureChannelReady(..., { source: 'open' })` now checks for local group presence, persisted scope cursor, last sync state `ready`, no `has_more`, and no active/broken repair state before deciding to skip bounded scope sync.
+- Code changed: added a repair-suite regression test proving open-channel readiness does not call `E2eeClient.scopeSync()`.
+- Docs/artifacts changed: this README documents the guard. Bellboy client docs record the matching contract; SQL, Postman, and Bellboy server code are unchanged.
+- Design decision: the optimization is conservative; if cursor, repair, local group, or sync state evidence is missing, the SDK keeps the existing sync/join path.
+- Performance: repeated ready-channel opens move from one network call plus `O(L)` scope-index/payload work to `O(1)` local state checks. Login/reconnect/offline catch-up complexity is unchanged.
+- Verification: `npm run build:sdk`, `yarn workspace @ermis-network/ermis-chat-sdk test:repair`, and `npm run build:uhm` passed. Targeted Uhm ESLint was attempted but is blocked by existing `ChatPage.tsx` lint errors unrelated to this SDK change.
 
 ### 2026-06-16 - SDK Logger Console Level Shorthand
 
@@ -63,6 +99,7 @@ For quick browser integration, pass console levels directly: `logger: ['info', '
 
 - Goal: wire Bellboy `e2ee_recovery_policy` through the SDK-facing channel data contract.
 - Code changed: `ChannelData`, `ChannelResponse`, and `CreateTopicData` now expose `E2eeRecoveryPolicy = 'member_assisted' | 'self_owned_only'`, allowing E2EE create flows to choose member-assisted or self-owned-only recovery coverage.
+- Code changed: `MlsManager.enableE2ee()` sends `e2ee_recovery_policy` with default `member_assisted`; `Channel.createTopic()` applies the default only to gated/own-group E2EE topics and strips the field from inherited non-gated topics.
 - Design decision: SDK only transports the policy; Bellboy remains the source of truth for validation, immutability, inherited topic behavior, and sponsored upload rejection.
 - Verification: `npm run build:sdk` passed.
 
@@ -223,7 +260,7 @@ For quick browser integration, pass console levels directly: `logger: ['info', '
 
 ### 2026-06-15 - Archive API V2 and Vault Revision
 
-- `e2ee.ts` exposes cursor-paginated archive availability and bounded material queries. Keep V1 discovery during Bellboy manifest/recipient backfill; switch recovery orchestration to V2 only after server rollout confirms coverage.
+- `src/encryption/api.ts` exposes cursor-paginated archive availability and bounded material queries. Keep V1 discovery during Bellboy manifest/recipient backfill; switch recovery orchestration to V2 only after server rollout confirms coverage.
 - Vault responses carry `revision`; PIN changes send `expected_revision` so concurrent devices cannot silently overwrite recovery metadata.
 - Upload queues consume structured `{ status, reason_code }` results. A failed manifest may retry the same idempotency key, while an expired reservation requires a new upload identity.
 - Group-sponsored upload remains feature-detected and falls back to account-owned coverage when an older Bellboy returns unsupported endpoint/scope responses.

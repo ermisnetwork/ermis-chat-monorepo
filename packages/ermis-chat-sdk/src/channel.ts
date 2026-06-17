@@ -1,7 +1,7 @@
 import { ChannelState } from './channel_state';
 import { normalizeFileName, isVideoFile, buildAttachmentPayload } from './attachment_utils';
 import type { VoiceRecordingMeta } from './attachment_utils';
-import { encodeMlsChannelFields } from './e2ee_bytes';
+import { encodeMlsChannelFields } from './encryption/encoding';
 import {
   enrichWithUserInfo,
   ensureMembersUserInfoLoaded,
@@ -1048,6 +1048,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (parentMlsEnabled || explicitMlsEnabled) {
       const mlsManager = this.getClient().mlsManager;
       payload.data.mls_enabled = true;
+      if (ownTopicGroup) {
+        payload.data.e2ee_recovery_policy = data?.e2ee_recovery_policy || 'member_assisted';
+      } else {
+        delete payload.data.e2ee_recovery_policy;
+      }
       if (ownTopicGroup && mlsManager?.initialized) {
         try {
           const memberIds = Object.keys(this.state?.members || {});

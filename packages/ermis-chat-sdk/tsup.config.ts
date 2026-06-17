@@ -8,7 +8,7 @@ const shimPath = path.resolve(__dirname, 'src/shims/empty.ts');
 export default defineConfig([
   // 1. Node.js bundle (CJS + ESM) + type declarations
   {
-    entry: ['src/index.ts'],
+    entry: ['src/index.ts', 'src/encryption/index.ts'],
     format: ['cjs', 'esm'],
     outDir: 'dist',
     dts: true,
@@ -31,7 +31,7 @@ export default defineConfig([
   },
   // 2. Browser bundle (CJS + ESM) — shims jsonwebtoken & https to null
   {
-    entry: ['src/index.ts'],
+    entry: ['src/index.ts', 'src/encryption/index.ts'],
     format: ['cjs', 'esm'],
     outDir: 'dist',
     sourcemap: true,

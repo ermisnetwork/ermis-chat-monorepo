@@ -8,8 +8,8 @@ import WebSocket from 'isomorphic-ws';
 import { Channel } from './channel';
 import { ClientState } from './client_state';
 import { StableWSConnection } from './connection';
-import { normalizeE2eeEventBytes } from './e2ee_bytes';
-import { IndexedDBMlsStorage } from './mls_storage';
+import { normalizeE2eeEventBytes } from './encryption/encoding';
+import { IndexedDBMlsStorage } from './encryption/storage';
 import { IndexedDBUserCache } from './user_cache';
 import { getLogger, setSdkLogger } from './logger';
 

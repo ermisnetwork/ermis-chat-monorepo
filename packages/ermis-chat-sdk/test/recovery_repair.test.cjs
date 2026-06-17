@@ -128,6 +128,65 @@ test('pending invite defers realtime MLS messages before local group processing'
   assert.equal(result, null);
 });
 
+test('open-channel readiness reuses persisted ready scope without scope_sync', async () => {
+  const manager = new MlsManager();
+  manager.initialized = true;
+  const cid = 'messaging:channel-1';
+  const cursor = {
+    created_at: '2026-06-13T00:00:10.000Z',
+    event_id: '00000000-0000-0000-0000-000000000006',
+  };
+  let scopeSyncCalls = 0;
+
+  manager.groups.set(cid, { epoch: () => 12 });
+  manager.client = {
+    activeChannels: {
+      [cid]: {
+        id: 'channel-1',
+        type: 'messaging',
+        data: { mls_enabled: true },
+        state: {
+          membership: {
+            channel_role: 'member',
+            created_at: '2026-06-13T00:00:00.000Z',
+          },
+        },
+      },
+    },
+  };
+  manager.storage = {
+    loadScopeSyncCursor: async () => cursor,
+    loadChannelRepairState: async () => null,
+  };
+  manager.e2eeClient = {
+    scopeSync: async () => {
+      scopeSyncCalls += 1;
+      return { channels: {}, removed_channels: { events: [], has_more: false } };
+    },
+  };
+  manager._lastSyncStates.set(cid, {
+    cid,
+    status: 'ready',
+    started_cursor: '2026-06-13T00:00:00.000Z',
+    processed_cursor: cursor.created_at,
+    started_event_cursor: {
+      created_at: '2026-06-13T00:00:00.000Z',
+      event_id: '00000000-0000-0000-0000-000000000000',
+    },
+    processed_event_cursor: cursor,
+    has_more: false,
+    needs_retry: false,
+    processed_events: 6,
+    buffered_messages: 0,
+  });
+
+  const result = await manager.ensureChannelReady('messaging', 'channel-1', cid, { source: 'open' });
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.epoch, 12);
+  assert.equal(scopeSyncCalls, 0);
+});
+
 test('forward secrecy consumed remains blocked and recoverable by an alternate archive', () => {
   const manager = new MlsManager();
   const progress = manager._upsertRepairIssueInProgress(

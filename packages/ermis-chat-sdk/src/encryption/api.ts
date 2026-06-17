@@ -5,347 +5,61 @@
  * WASM module (openmls-wasm) handles the cryptographic operations client-side.
  */
 
-import type { ErmisChat } from './client';
+import type { ErmisChat } from '../client';
 import {
   encodeBytesToBase64,
   normalizeE2eeSyncEventBytes,
   normalizeRequiredBytes,
   normalizeScopeSyncResponseBytes,
-} from './e2ee_bytes';
-import type { EventCursor, RemovedSyncCursor } from './mls_storage';
-import type { APIResponse, ExtendableGenerics, DefaultGenerics } from './types';
-
-// ============================================================
-// Request / Response Types
-// ============================================================
-
-export interface UploadKeyPackagesRequest {
-  /** TLS-serialized KeyPackage bytes from WASM `keyPackage.to_bytes()` */
-  key_packages: Uint8Array[];
-}
-
-export interface UploadKeyPackagesResponse extends APIResponse {
-  stored: number;
-  total_remaining: number;
-}
-
-export interface KeyPackageCountResponse extends APIResponse {
-  remaining: number;
-}
-
-export interface DeviceKeyPackage {
-  /** TLS-serialized KeyPackage bytes */
-  key_package: Uint8Array;
-  device_id: string;
-}
-
-export interface GetKeyPackagesResponse extends APIResponse {
-  key_packages: DeviceKeyPackage[];
-  user_id: string;
-}
-
-export interface MemberKeyPackages {
-  user_id: string;
-  key_packages: DeviceKeyPackage[];
-}
-
-export interface GetKeyPackagesByCidResponse extends APIResponse {
-  members: MemberKeyPackages[];
-}
-
-// NOTE: AddMembersRequest has been removed — add_members is now handled
-// through the standard edit_channel endpoint (POST /channels/{type}/{id})
-// with MLS fields (commit, welcome, ratchet_tree, epoch, group_info)
-// embedded alongside add_members in the request body.
-
-// RemoveMemberRequest — REMOVED
-// Merged into edit_channel_handler. Use channel.removeMembersE2ee() instead.
-// See MlsManager.evictMember() in mls_manager.ts for the updated flow.
-
-export interface KeyRotationRequest {
-  commit: Uint8Array;
-  epoch: number;
-  /** TLS-serialized GroupInfo bytes — required so server stores alongside epoch advance. */
-  group_info: Uint8Array;
-}
-
-export interface EnableE2eeRequest {
-  /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
-  commit?: Uint8Array;
-  /** TLS-serialized welcome bytes from WASM */
-  welcome: Uint8Array;
-  /** Exported ratchet tree bytes */
-  ratchet_tree: Uint8Array;
-  epoch: number;
-  /**
-   * TLS-serialized GroupInfo bytes — required so external join is possible
-   * from the very first epoch without a separate upload.
-   */
-  group_info: Uint8Array;
-}
-
-export interface MlsOperationResponse extends APIResponse {
-  status: string;
-}
-
-// GroupInfo & External Join types
-
-export interface UploadGroupInfoRequest {
-  /** TLS-serialized GroupInfo bytes from WASM export_group_info */
-  group_info: Uint8Array;
-  epoch: number;
-}
-
-export interface GetGroupInfoResponse extends APIResponse {
-  group_info: Uint8Array;
-  epoch: number;
-  /** true if stored GroupInfo is older than channel.mls_epoch. */
-  is_stale?: boolean;
-  channel?: unknown;
-  messages?: unknown[];
-  pinned_messages?: unknown[];
-  watchers?: unknown[];
-  read?: unknown[];
-  membership?: unknown;
-  is_pinned?: boolean;
-}
-
-export interface ExternalJoinRequest {
-  /** External commit bytes from WASM Group.join_external */
-  commit: Uint8Array;
-  epoch: number;
-  /**
-   * GroupInfo bytes from joiner — optional because export_group_info() is
-   * only valid AFTER merge_pending_commit(). The joiner uploads GroupInfo
-   * via a separate POST /group_info call after merging.
-   */
-  group_info?: Uint8Array;
-  project_id?: string;
-  members?: string[];
-}
-
-/**
- * CommitEvictionRequest — MLS-only commit for evicting users who already self-left.
- * Used by `POST /v1/e2ee/channels/{type}/{id}/commit_eviction`.
- * Does NOT touch channel membership (already handled by self_remove in edit_channel).
- */
-export interface CommitEvictionRequest {
-  /** All users removed by the composite inline commit. Must already be inactive in channel membership. */
-  target_user_ids: string[];
-  /** MLS commit bytes from WASM commit_member_removals(target_user_ids) */
-  commit: Uint8Array;
-  /** Pre-merge epoch (must match DB epoch — CAS check) */
-  epoch: number;
-  /** Post-commit GroupInfo bytes (required) */
-  group_info: Uint8Array;
-}
-
-export interface CommitEvictionResponse extends APIResponse {
-  status: string;
-  epoch: number;
-}
-
-export interface SendE2eeMessageRequest {
-  message: {
-    id: string;
-    /** Encrypted MLS ciphertext from WASM `group.create_message()` */
-    mls_ciphertext: Uint8Array;
-    mls_epoch: number;
-    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
-    e2ee_group_id?: string;
-    mentioned_all?: boolean;
-    mentioned_users?: string[];
-    parent_id?: string;
-    quoted_message_id?: string;
-    forward_cid?: string;
-  };
-}
-
-export interface UpdateE2eeMessageRequest {
-  message: {
-    /** Encrypted MLS ciphertext from WASM `group.create_message()` */
-    mls_ciphertext: Uint8Array;
-    mls_epoch: number;
-    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
-    e2ee_group_id?: string;
-    mentioned_all?: boolean;
-    mentioned_users?: string[];
-  };
-}
-
-export interface UploadRecoveryVaultRequest {
-  vault_bytes: Uint8Array;
-  expected_revision?: number;
-}
-
-export interface UploadRecoveryVaultResponse extends APIResponse {
-  status: 'created' | 'updated' | 'conflict';
-  revision: number;
-}
-
-export interface RecoveryVaultResponse extends APIResponse {
-  vault_bytes: Uint8Array;
-  revision: number;
-  recovery_key_id: string;
-  ciphersuite: number;
-  vault_format_version: number;
-  kdf_metadata: {
-    name: string;
-    iterations: number;
-  };
-  updated_at: string;
-}
-
-export interface RecoveryPublicKeyResponse extends APIResponse {
-  public_key: Uint8Array;
-  key_id: string;
-  ciphersuite: number;
-}
-
-export interface UploadEpochArchiveRequest {
-  epoch: number;
-  archive_blob_id: string;
-  idempotency_key: string;
-  scope: 'account_owned' | 'group_sponsored';
-  recipient_set_hash?: string;
-  encrypted_archive: {
-    ciphertext: Uint8Array;
-    nonce: Uint8Array;
-    aead_aad: Uint8Array;
-  };
-  snapshot: {
-    snapshot_bytes: Uint8Array;
-    snapshot_hash: string;
-  };
-  wraps: Array<{
-    recipient_user_id: string;
-    recipient_recovery_key_id: string;
-    hpke_kem_output: Uint8Array;
-    hpke_ciphertext: Uint8Array;
-    ciphersuite: number;
-    hpke_info: Uint8Array;
-  }>;
-}
-
-export type UploadEpochArchiveReason = 'stored' | 'idempotent' | 'duplicate_cap' | 'recipient_set_stale';
-
-export interface UploadEpochArchiveResponse extends APIResponse {
-  status: 'stored' | 'duplicate' | 'rejected';
-  reason_code: UploadEpochArchiveReason;
-  message?: string;
-}
-
-export interface SponsoredArchiveRecipient {
-  user_id: string;
-  recovery_key_id: string;
-  ciphersuite: number;
-  public_key: Uint8Array;
-  public_key_hash: string;
-}
-
-export interface QuerySponsoredArchiveRecipientsResponse extends APIResponse {
-  recipient_set_hash?: string;
-  recipients: SponsoredArchiveRecipient[];
-  matching_candidate_exists: boolean;
-  reason?: 'no_recovery_recipients' | 'recipient_limit';
-}
-
-export interface EpochIndexEntry {
-  epoch: number;
-  scope: string;
-  blob_id: string;
-}
-
-export interface ArchiveBlobRecord {
-  archive_blob_id: string;
-  cid: string;
-  epoch: number;
-  archive_scope: string;
-  exporter_user_id: string;
-  exporter_device_id: string;
-  member_snapshot_hash: string;
-  encrypted_archive_bytes: Uint8Array;
-  aead_nonce: Uint8Array;
-  aead_aad: Uint8Array;
-  created_at: string;
-}
-
-export interface ArchiveKeyWrapRecord {
-  archive_blob_id: string;
-  recipient_user_id: string;
-  recipient_recovery_key_id: string;
-  hpke_kem_output: Uint8Array;
-  hpke_ciphertext: Uint8Array;
-  ciphersuite: number;
-  hpke_info: Uint8Array;
-  epoch: number;
-  created_at: string;
-}
-
-export interface MemberSnapshotRecord {
-  snapshot_hash: string;
-  cid: string;
-  first_seen_epoch: number;
-  last_seen_epoch: number;
-  snapshot_bytes: Uint8Array;
-  created_at: string;
-}
-
-export interface QueryEpochArchivesRequest {
-  list_epochs?: boolean;
-  epoch_from?: number;
-  epoch_to?: number;
-  include_snapshots?: boolean;
-  include_wraps?: boolean;
-}
-
-export interface QueryEpochArchivesResponse extends APIResponse {
-  epochs?: EpochIndexEntry[];
-  blobs?: ArchiveBlobRecord[];
-  wraps?: ArchiveKeyWrapRecord[];
-  snapshots?: Record<string, MemberSnapshotRecord>;
-}
-
-export interface ListArchiveAvailabilityResponse extends APIResponse {
-  epochs: EpochIndexEntry[];
-  has_more: boolean;
-  next_cursor?: string;
-}
-
-export interface QueryArchiveMaterialRequest {
-  epoch_from: number;
-  epoch_to: number;
-  include_snapshots?: boolean;
-  include_wraps?: boolean;
-}
-
-export interface CiphertextCursor {
-  last_event_key: string;
-}
-
-export interface HistoricalCiphertext {
-  cid?: string;
-  parent_cid?: string;
-  e2ee_group_id?: string;
-  message_id: string;
-  mls_ciphertext: Uint8Array;
-  mls_epoch: number;
-  created_at: string;
-  updated_at?: string;
-  type?: string;
-  user_id?: string;
-  user?: { id: string; [key: string]: unknown };
-  parent_id?: string;
-  quoted_message_id?: string;
-  mentioned_all?: boolean;
-  mentioned_users?: string[];
-}
-
-export interface CiphertextQueryResponse extends APIResponse {
-  ciphertexts: HistoricalCiphertext[];
-  has_more: boolean;
-  next_cursor?: CiphertextCursor;
-}
+} from './encoding';
+import type { APIResponse, ExtendableGenerics, DefaultGenerics } from '../types';
+import type {
+  ArchiveBlobRecord,
+  ArchiveKeyWrapRecord,
+  BatchAddMembersToTopicsRequest,
+  BatchExternalJoinTopicsRequest,
+  BatchTopicResponse,
+  ChannelSyncResult,
+  CiphertextCursor,
+  CiphertextQueryResponse,
+  CommitEvictionRequest,
+  CommitEvictionResponse,
+  DeviceKeyPackage,
+  E2eeSyncEvent,
+  EnableE2eeRequest,
+  ExternalJoinRequest,
+  GetGroupInfoResponse,
+  GetKeyPackagesByCidResponse,
+  GetKeyPackagesResponse,
+  HistoricalCiphertext,
+  KeyPackageCountResponse,
+  KeyRotationRequest,
+  ListArchiveAvailabilityResponse,
+  MemberKeyPackages,
+  MemberSnapshotRecord,
+  MlsOperationResponse,
+  QueryArchiveMaterialRequest,
+  QueryEpochArchivesRequest,
+  QueryEpochArchivesResponse,
+  QuerySponsoredArchiveRecipientsResponse,
+  RecoveryPublicKeyResponse,
+  RecoveryVaultResponse,
+  RemovedChannelsSyncResult,
+  ScopeSyncResponse,
+  SendE2eeMessageRequest,
+  SponsoredArchiveRecipient,
+  UnifiedSyncResponse,
+  UpdateE2eeMessageRequest,
+  UploadEpochArchiveRequest,
+  UploadEpochArchiveResponse,
+  UploadGroupInfoRequest,
+  UploadKeyPackagesRequest,
+  UploadKeyPackagesResponse,
+  UploadRecoveryVaultRequest,
+  UploadRecoveryVaultResponse,
+  EventCursor,
+  RemovedSyncCursor,
+} from './types';
 
 // ============================================================
 // E2EE API Client
@@ -778,12 +492,12 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   // NOTE: addMembers has been removed — add_members is now handled through
   // the standard edit_channel endpoint (POST /channels/{type}/{id}).
-  // See MlsManager.addMembers() in mls_manager.ts for the updated flow.
+  // See MlsManager.addMembers() in encryption/manager.ts for the updated flow.
 
   // removeMember — REMOVED
   // Merged into edit_channel_handler (RemoveMembers branch).
   // Use channel.removeMembersE2ee() which calls the standard POST /channels/{type}/{id} endpoint.
-  // See MlsManager.evictMember() in mls_manager.ts for the updated flow.
+  // See MlsManager.evictMember() in encryption/manager.ts for the updated flow.
 
   /** Key rotation (self update): rotate own key material for forward secrecy. */
   async keyRotation(channelType: string, channelId: string, data: KeyRotationRequest): Promise<MlsOperationResponse> {
@@ -990,204 +704,3 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 }
 
-// ============================================================
-// Sync Types
-// ============================================================
-
-/** Protocol event types */
-export type ProtocolType = 'commit' | 'welcome' | 'proposal' | 'external_commit';
-
-/** Protocol message (commit, welcome, or proposal) */
-export interface ProtocolMessage {
-  epoch: number;
-  user: { id: string; [key: string]: unknown };
-  type: ProtocolType;
-  commit?: Uint8Array;
-  welcome?: Uint8Array;
-  ratchet_tree?: Uint8Array;
-  proposal?: Uint8Array;
-  target_user_ids?: string[];
-}
-
-/** A single item in a sync response — either a protocol event or an app message */
-export type E2eeSyncEvent =
-  | {
-      type: 'application';
-      /** Full Message object — `created_at` is at `data.created_at` */
-      data: {
-        id: string;
-        created_at: string;
-        content_type: string;
-        mls_ciphertext?: Uint8Array;
-        mls_epoch?: number;
-        [key: string]: unknown;
-      };
-    }
-  | {
-      type: 'protocol';
-      /** MLS protocol payload — `created_at` is at `data.created_at` (consistent with application variant) */
-      data: {
-        epoch: number;
-        user: { id: string; [key: string]: unknown };
-        /** `commit` | `welcome` | `proposal` | `external_commit` */
-        type: ProtocolType;
-        commit?: Uint8Array;
-        welcome?: Uint8Array;
-        ratchet_tree?: Uint8Array;
-        proposal?: Uint8Array;
-        target_user_ids?: string[];
-        /** Timestamp when this event was stored — same location as Application.data.created_at */
-        created_at: string;
-      };
-    }
-  | {
-      type: 'reaction';
-      /** Reaction metadata — snapshot of current reaction state for a message */
-      data: {
-        /** "reaction.new" or "reaction.deleted" */
-        action: 'reaction.new' | 'reaction.deleted';
-        /** ID of the message that was reacted to */
-        message_id: string;
-        /** Current full list of reactions on the message (snapshot) */
-        latest_reactions?: Array<{
-          type: string;
-          user_id: string;
-          user?: { id: string; [key: string]: unknown };
-          message_id: string;
-          created_at: string;
-          updated_at: string;
-          [key: string]: unknown;
-        }>;
-        /** Current reaction counts (snapshot) */
-        reaction_counts?: Record<string, number>;
-        /** The specific reaction that triggered this event */
-        reaction?: {
-          type: string;
-          user_id: string;
-          user?: { id: string; [key: string]: unknown };
-          message_id: string;
-          created_at: string;
-          updated_at: string;
-          [key: string]: unknown;
-        };
-        /** Timestamp for timeline sorting */
-        created_at: string;
-      };
-    }
-  | {
-      type: 'member_removed';
-      /** Member removal metadata from event:{cid}; used to recover self-leave eviction after offline sync. */
-      data: {
-        member: {
-          user_id?: string;
-          channel_role?: string;
-          [key: string]: unknown;
-        };
-        channel_id: string;
-        channel_type: string;
-        topic_cids?: string[];
-        mls_enabled?: boolean;
-        self_remove?: boolean;
-        user?: { id: string; [key: string]: unknown };
-        created_at: string;
-      };
-    };
-
-/** Per-channel sync result (used by both syncChannel and syncAll) */
-export interface ChannelSyncResult {
-  events: E2eeSyncEvent[];
-  has_more: boolean;
-  /** RFC3339 timestamp of the last event — use this for the next sync cursor */
-  next_cursor?: string;
-}
-
-export interface ScopeSyncEvent {
-  type: E2eeSyncEvent['type'] | string;
-  /** Canonical channel/timeline that owns the event payload. */
-  cid: string;
-  /** Parent/general channel for topic events. */
-  parent_cid?: string;
-  /** Canonical datastore event id, used with created_at for the composite cursor. */
-  event_id: string;
-  /** Canonical event timestamp used for scope ordering. */
-  created_at: string;
-  /** Raw application/protocol/metadata payload. */
-  data: Record<string, unknown>;
-}
-
-export interface ScopeSyncResult {
-  events: ScopeSyncEvent[];
-  has_more: boolean;
-  next_cursor?: EventCursor;
-}
-
-export interface RemovedChannelSyncData {
-  event_id: string;
-  cid: string;
-  channel_id: string;
-  channel_type: string;
-  parent_cid?: string;
-  removed_at: string;
-  removed_by: string;
-  removal_type: 'self_remove' | 'kicked' | 'invite_rejected' | 'channel_deleted' | string;
-  reason?: string | null;
-  self_remove: boolean;
-}
-
-export interface RemovedChannelsSyncResult {
-  events: RemovedChannelSyncData[];
-  has_more: boolean;
-  next_cursor?: RemovedSyncCursor;
-}
-
-/** Response from POST /v1/e2ee/sync */
-export interface UnifiedSyncResponse extends APIResponse {
-  removed_channels?: RemovedChannelsSyncResult;
-  [cid: string]: ChannelSyncResult | RemovedChannelsSyncResult | unknown;
-}
-
-/** Response from POST /v1/e2ee/scope_sync */
-export interface ScopeSyncResponse extends APIResponse {
-  channels: Record<string, ScopeSyncResult>;
-  removed_channels?: RemovedChannelsSyncResult;
-}
-
-// ============================================================
-// Batch Topic E2EE Types
-// ============================================================
-
-export interface BatchAddMembersTopicBundle {
-  topic_cid: string;
-  commit: Uint8Array;
-  welcome: Uint8Array;
-  ratchet_tree: Uint8Array;
-  group_info: Uint8Array;
-  epoch: number;
-}
-
-export interface BatchAddMembersToTopicsRequest {
-  target_user_ids: string[];
-  topics: BatchAddMembersTopicBundle[];
-}
-
-export interface BatchExternalJoinTopicBundle {
-  topic_cid: string;
-  commit: Uint8Array;
-  epoch: number;
-  group_info?: Uint8Array;
-}
-
-export interface BatchExternalJoinTopicsRequest {
-  topics: BatchExternalJoinTopicBundle[];
-}
-
-export interface BatchTopicResult {
-  topic_cid: string;
-  success: boolean;
-  error?: string;
-  epoch?: number;
-}
-
-export interface BatchTopicResponse extends APIResponse {
-  results: BatchTopicResult[];
-}
