@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { ChatProvider } from '@ermis-network/ermis-chat-react'
-import { ErmisChat, MlsManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk'
+import { ErmisChat, EncryptionManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk'
 import { LoginPage } from '@/pages/LoginPage'
 import { ChatPage } from '@/pages/ChatPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -28,15 +28,15 @@ const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_D
 });
 
 
-const mlsManager = new MlsManager();
+const encryptionManager = new EncryptionManager();
 let e2eeInitPromise: Promise<void> | null = null;
 
 async function initializeE2ee(userId: string) {
-  if (chatClient.mlsManager?.initialized) return;
+  if (chatClient.encryptionManager?.initialized) return;
   if (!e2eeInitPromise) {
     e2eeInitPromise = (async () => {
       const wasmModule = await loadOpenMlsWasm('/openmls_wasm_bg.wasm');
-      await mlsManager.initialize(chatClient, userId, { wasmModule });
+      await encryptionManager.initialize(chatClient, userId, { wasmModule });
     })().catch((err) => {
       e2eeInitPromise = null;
       throw err;

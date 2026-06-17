@@ -132,7 +132,7 @@ URL.revokeObjectURL(url);
 Fetches a paginated list of all users in the project.
 
 ```typescript
-const response = await chatClient.queryUsers('25', 1); // page_size, page
+const response = await chatClient.queryUsers(25, 1); // page_size, page
 console.log(response.data); // UserResponse[]
 ```
 

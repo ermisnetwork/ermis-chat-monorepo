@@ -8,7 +8,7 @@ const BASE64_LOOKUP = (() => {
   return lookup;
 })();
 
-const MLS_CHANNEL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'group_info'] as const;
+const ENCRYPTION_CHANNEL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'group_info'] as const;
 const PROTOCOL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'proposal'] as const;
 
 export function encodeBytesToBase64(bytes: Uint8Array): string {
@@ -107,9 +107,9 @@ export function normalizeOptionalBytes(value: unknown, fieldName = 'bytes'): Uin
   throw new TypeError(`${fieldName} must be Uint8Array, base64 string, or legacy byte array`);
 }
 
-export function encodeMlsChannelFields<T extends Record<string, unknown>>(input: T): T {
+export function encodeEncryptionChannelFields<T extends Record<string, unknown>>(input: T): T {
   const output: Record<string, unknown> = { ...input };
-  for (const field of MLS_CHANNEL_BYTE_FIELDS) {
+  for (const field of ENCRYPTION_CHANNEL_BYTE_FIELDS) {
     if (isByteLike(output[field])) {
       output[field] = encodeBytesToBase64(normalizeRequiredBytes(output[field], field));
     }

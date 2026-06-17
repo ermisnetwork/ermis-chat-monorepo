@@ -41,6 +41,23 @@ import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { isSafari } from '@/utils/browser'
 import { toast } from 'sonner'
+
+const isEffectiveE2eeChannel = (channel: ChannelType | null | undefined, client: any) => {
+  if (channel?.data?.mls_enabled === true) return true
+  const parentCid = channel?.data?.parent_cid as string | undefined
+  if (!parentCid) return false
+  return client?.activeChannels?.[parentCid]?.data?.mls_enabled === true
+}
+
+const isUserGatedRestoreProgress = (progress: RestoreProgressRecord | null | undefined) =>
+  Boolean(
+    progress &&
+    (progress.requires_user_action === 'unlock_recovery_vault' ||
+      (progress.target_epochs?.length || 0) > 0 ||
+      (progress.permanent_gaps?.length || 0) > 0 ||
+      (progress.transient_failures?.length || 0) > 0),
+  )
+
 export function ChatPage() {
   const { t, i18n } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -213,7 +230,7 @@ export function ChatPage() {
     activeRestoreProgressRequestRef.current = requestId
     setActiveRestoreProgressCheckedCid(null)
 
-    if (!activeChannel?.id || !activeChannel.type || !activeChannel.cid || activeChannel.data?.mls_enabled !== true) {
+    if (!activeChannel?.id || !activeChannel.type || !activeChannel.cid || !isEffectiveE2eeChannel(activeChannel, client)) {
       setActiveRestoreProgress(null)
       return
     }
@@ -222,7 +239,15 @@ export function ChatPage() {
     if (activeRestoreProgressRequestRef.current !== requestId) return
     setActiveRestoreProgress(progress)
     setActiveRestoreProgressCheckedCid(cid)
-  }, [activeChannel?.id, activeChannel?.type, activeChannel?.cid, activeChannel?.data?.mls_enabled, recovery])
+  }, [
+    activeChannel?.id,
+    activeChannel?.type,
+    activeChannel?.cid,
+    activeChannel?.data?.mls_enabled,
+    activeChannel?.data?.parent_cid,
+    client,
+    recovery,
+  ])
 
   useEffect(() => {
     refreshActiveRestoreProgress()
@@ -241,17 +266,17 @@ export function ChatPage() {
   useEffect(() => {
     const status = recovery.recoveryStatus
     if (!status) return
-    if (status.unlocked) {
+    if (status.unlocked || !status.hasVault) {
       setIsRecoveryGateOpen(false)
       return
     }
-    if ((!status.hasVault || status.hasIncompleteRestore) && !recoveryGateDismissed) {
+    if (status.hasIncompleteRestore && !recoveryGateDismissed) {
       setIsRecoveryGateOpen(true)
     }
   }, [recovery.recoveryStatus, recoveryGateDismissed])
 
   useEffect(() => {
-    if (!activeChannel?.id || activeChannel.data?.mls_enabled !== true) return
+    if (!activeChannel?.id || !isEffectiveE2eeChannel(activeChannel, client)) return
     if (!activeChannel.cid || activeRestoreProgressCheckedCid !== activeChannel.cid) return
 
     if (!activeRestoreProgress) {
@@ -264,6 +289,7 @@ export function ChatPage() {
 
       if (
         !recoveryGateDismissed &&
+        recovery.recoveryStatus?.hasVault &&
         recovery.recoveryStatus?.incompleteChannels.includes(activeChannel.cid) &&
         activeRestorePromptedCidRef.current !== activeChannel.cid
       ) {
@@ -273,7 +299,9 @@ export function ChatPage() {
       return
     }
 
-    const needsRestore = ['pending', 'partial', 'failed'].includes(activeRestoreProgress.status)
+    const needsRestore =
+      isUserGatedRestoreProgress(activeRestoreProgress) &&
+      ['pending', 'partial', 'failed'].includes(activeRestoreProgress.status)
     if (!needsRestore) return
 
     if (recovery.recoveryStatus?.unlocked) {
@@ -283,7 +311,11 @@ export function ChatPage() {
       return
     }
 
-    if (!recoveryGateDismissed && activeRestorePromptedCidRef.current !== activeRestoreProgress.cid) {
+    if (
+      !recoveryGateDismissed &&
+      recovery.recoveryStatus?.hasVault &&
+      activeRestorePromptedCidRef.current !== activeRestoreProgress.cid
+    ) {
       activeRestorePromptedCidRef.current = activeRestoreProgress.cid
       setIsRecoveryGateOpen(true)
     }
@@ -292,9 +324,11 @@ export function ChatPage() {
     activeChannel?.type,
     activeChannel?.cid,
     activeChannel?.data?.mls_enabled,
+    activeChannel?.data?.parent_cid,
     activeRestoreProgress,
     activeRestoreProgressCheckedCid,
     recoveryGateDismissed,
+    client,
     recovery,
   ])
 
@@ -398,7 +432,10 @@ export function ChatPage() {
     if (progress?.status === 'done_with_gaps' || recovery.recoveryStatus?.channelsWithPermanentGaps.includes(cid)) {
       return { label: t('recovery_pin.status_restore_gaps'), tone: 'gap' }
     }
-    if (['pending', 'partial', 'failed'].includes(progress?.status || '') || recovery.recoveryStatus?.incompleteChannels.includes(cid)) {
+    if (
+      (isUserGatedRestoreProgress(progress) && ['pending', 'partial', 'failed'].includes(progress?.status || '')) ||
+      recovery.recoveryStatus?.incompleteChannels.includes(cid)
+    ) {
       return { label: t('recovery_pin.status_restore_pending'), tone: 'pending' }
     }
     return null
@@ -512,19 +549,19 @@ export function ChatPage() {
   /** Info button injected into ChannelHeader's right side */
   const renderHeaderRight = useCallback(
     (channel: ChannelType, actionDisabled?: boolean) => {
-      const isE2ee = channel.data?.mls_enabled === true
+      const isE2ee = isEffectiveE2eeChannel(channel, client)
       const isTopic = Boolean(channel.data?.parent_cid)
       const currentUserRole = client.userID ? channel.state?.members?.[client.userID]?.channel_role : undefined
       const canRotateKey = isE2ee && !isTopic && ['owner', 'moder'].includes(String(currentUserRole))
-      const mlsManager = client.mlsManager
+      const encryptionManager = client.encryptionManager
       const rotating = rotatingKeyCid === channel.cid
       const restoreBadge = isE2ee ? getRestoreBadge(channel) : null
 
       const handleRotateKey = async () => {
-        if (!canRotateKey || !mlsManager?.initialized || !channel.cid || rotating) return
+        if (!canRotateKey || !encryptionManager?.initialized || !channel.cid || rotating) return
         try {
           setRotatingKeyCid(channel.cid)
-          const result = await mlsManager.keyRotation(channel.cid)
+          const result = await encryptionManager.keyRotation(channel.cid)
           toast.success(t('e2ee.rotate_success', { epoch: result.epoch }))
         } catch (err: any) {
           console.error('[E2EE] Key rotation failed', err)
@@ -543,8 +580,8 @@ export function ChatPage() {
             >
               <LockKeyhole className="w-3.5 h-3.5" />
               <span>{t('e2ee.badge')}</span>
-              {typeof mlsManager?.getEpoch === 'function' && !isTopic && (
-                <span className="font-mono opacity-70">{mlsManager.getEpoch(channel.cid) ?? '?'}</span>
+              {typeof encryptionManager?.getEpoch === 'function' && !isTopic && (
+                <span className="font-mono opacity-70">{encryptionManager.getEpoch(channel.cid) ?? '?'}</span>
               )}
             </div>
           )}
@@ -566,7 +603,7 @@ export function ChatPage() {
               onClick={handleRotateKey}
               title={t('e2ee.rotate_key')}
               aria-label={t('e2ee.rotate_key')}
-              disabled={actionDisabled || !mlsManager?.initialized || rotating}
+              disabled={actionDisabled || !encryptionManager?.initialized || rotating}
             >
               <RotateCw className={`w-[17px] h-[17px] ${rotating ? 'animate-spin' : ''}`} />
             </button>

@@ -336,7 +336,7 @@ export function CustomCreateChannelModal({ isOpen, onClose }: { isOpen: boolean,
       emptyStateLabel={t('chat.create_channel_empty_friends', 'No friends found')}
       e2eeLabel={t('e2ee.toggle_label', 'End-to-end encrypted')}
       e2eeDescription={t('e2ee.toggle_description', 'Messages and attachments are encrypted for channel members.')}
-      e2eeUnavailableLabel={t('e2ee.unavailable', 'E2EE is unavailable until MLS is initialized.')}
+      e2eeUnavailableLabel={t('e2ee.unavailable', 'E2EE is unavailable until encryption is initialized.')}
       e2eeRecoveryPolicy={e2eeRecoveryPolicy}
       TabsComponent={CustomTabsComponent}
       FooterComponent={CustomFooterComponent}

@@ -421,7 +421,7 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     epoch?: number;
   };
 
-/** MLS protocol fields required for E2EE add_members operations. */
+/** Encryption protocol fields required for E2EE add_members operations. */
 export type E2EEAddMembersOptions = {
   commit: Uint8Array;
   welcome: Uint8Array;
@@ -430,7 +430,7 @@ export type E2EEAddMembersOptions = {
   group_info: Uint8Array;
 };
 
-/** MLS protocol fields required for E2EE remove_members operations. */
+/** Encryption protocol fields required for E2EE remove_members operations. */
 export type E2EERemoveMembersOptions = {
   commit: Uint8Array;
   epoch: number;

@@ -4,11 +4,11 @@
 
 - `public/openmls_wasm_bg.wasm` must be published with the app. `App.tsx` loads this binary through `loadOpenMlsWasm()` after `connectUser`; the OpenMLS JS glue comes from the SDK bundle so SDK logger settings cover OpenMLS glue logs. The legacy public OpenMLS JS glue copies are logger-safe for direct/older asset loads.
 - `public/wasm_worker.worker.mjs` must be copied from the SDK `dist` after building or installing a published SDK. The worker forwards WASM logs through the SDK logger bridge, so stale public copies can bypass `logger` and write to the browser console directly.
-- E2EE controls stay disabled when `client.mlsManager` is not initialized; standard chat continues to work.
-- uhm-chat waits for `connectUser()` and MLS initialization before mounting the chat shell, preventing first-login channel queries with an unset auth token.
-- E2EE direct/group creation uses the SDK MLS bundle flow. Group E2EE channels are always private.
+- E2EE controls stay disabled when `client.encryptionManager` is not initialized; standard chat continues to work.
+- uhm-chat waits for `connectUser()` and encryption initialization before mounting the chat shell, preventing first-login channel queries with an unset auth token.
+- E2EE direct/group creation uses the SDK encryption bundle flow. Group E2EE channels are always private.
 - New E2EE direct/group channels default to Standard recovery (`e2ee_recovery_policy=member_assisted`) and can be created with Strict recovery (`self_owned_only`) from the create-channel modal.
-- Existing standard channels can be upgraded from Channel Info by the owner when MLS is initialized; this path uses Standard recovery (`member_assisted`) by default.
+- Existing standard channels can be upgraded from Channel Info by the owner when encryption is initialized; this path uses Standard recovery (`member_assisted`) by default.
 - E2EE topics inherit encryption and recovery policy from the parent channel unless they are gated/own-group topics. Key rotation is exposed on parent E2EE channels for owners/moderators.
 - Chat history PIN lives in the account menu. Users can set up, unlock, and change the PIN there; Channel Info repair only asks for the PIN when it is needed to continue.
 - E2EE Channel Info exposes one conversation repair card. The app replays encrypted state for the selected conversation, restores any available history, asks for PIN only when needed, and keeps retry modes plus message-level diagnostics out of the primary UI.
@@ -20,6 +20,15 @@
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-06-17 - production encryption naming cleanup
+
+- Goal: align uhm-chat with the SDK breaking rename from MLS-facing integration names to encryption-facing names.
+- Code changed: app bootstrap and E2EE UI paths now instantiate `EncryptionManager` and read `client.encryptionManager`; user-visible copy no longer says MLS initialized except OpenMLS runtime notes.
+- Docs changed: this README records the app integration rename and explicitly keeps OpenMLS/WASM asset names unchanged.
+- Design decision: app code should use product-level encryption naming while server-owned `mls_*` fields and OpenMLS asset names stay stable.
+- Performance: startup, channel navigation, repair, IndexedDB, network round trips, payload sizes, and scaling behavior are unchanged.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, static forbidden-name checks, and Node SDK export smoke test passed. Targeted UHM ESLint was attempted but remains blocked by existing no-explicit-any/react-hooks lint findings in `App.tsx`, `CustomCreateChannelModal.tsx`, `ChatPage.tsx`, and `UhmAddMemberModal.tsx`.
 
 ### 2026-06-17 - production PIN lazy unlock and ready-channel navigation
 
@@ -107,7 +116,7 @@
 ### 2026-06-01 - production
 
 - Goal: fix first-login `/channels` 401 races and make new devices prepare all loaded E2EE channels without requiring channel clicks.
-- Code changed: app bootstrap now waits for `connectUser()` and MLS initialization before rendering `ChatPage`, and uhm-chat renders a compact secure-restore preparation banner while the SDK external-joins loaded E2EE channels in the background.
+- Code changed: app bootstrap now waits for `connectUser()` and encryption initialization before rendering `ChatPage`, and uhm-chat renders a compact secure-restore preparation banner while the SDK external-joins loaded E2EE channels in the background.
 - Design decision: auth/token readiness is hard-gated before ChannelList mounts, while external join and restore preparation remain non-blocking once the chat shell is visible.
 - Verification: `npm run build:uhm` passed.
 
@@ -127,14 +136,14 @@
 ### 2026-05-15 - production
 
 - Goal: add missing E2EE UI/UX to `apps/uhm-chat` without replacing existing optimized app and React SDK flows.
-- Code changed: initialized MLS in app login/restore flow, published OpenMLS WASM assets, added E2EE channel creation and standard-channel enable controls, decrypted-message refresh, encrypted placeholders, add/remove member E2EE paths, E2EE badges, inherited topic notice, and key rotation controls.
+- Code changed: initialized encryption in app login/restore flow, published OpenMLS WASM assets, added E2EE channel creation and standard-channel enable controls, decrypted-message refresh, encrypted placeholders, add/remove member E2EE paths, E2EE badges, inherited topic notice, and key rotation controls.
 - Docs changed: this README now records OpenMLS runtime requirements and E2EE UI behavior.
 - Verification: run SDK/react/app type and build commands after implementation.
 
 ### 2026-05-15 - production
 
 - Goal: fix direct `messaging` E2EE channel creation diagnostics.
-- Code changed: SDK now rejects E2EE channel creation before the channel create request when any selected recipient has no uploaded KeyPackages, avoiding invalid MLS bundles with an empty `welcome`.
+- Code changed: SDK now rejects E2EE channel creation before the channel create request when any selected recipient has no uploaded KeyPackages, avoiding invalid encryption bundles with an empty `welcome`.
 - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types` passed.
 
 ### 2026-05-15 - production
@@ -146,13 +155,13 @@
 ### 2026-05-15 - production
 
 - Goal: prevent channel query responses from overwriting local decrypted E2EE messages.
-- Code changed: SDK channel query and message pagination now hydrate server-returned MLS envelopes from the local E2EE message cache before writing into `ChannelState`.
+- Code changed: SDK channel query and message pagination now hydrate server-returned encryption envelopes from the local E2EE message cache before writing into `ChannelState`.
 - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, `yarn workspace @ermis-network/ermis-chat-react build`, and `yarn workspace uhm-chat build` passed.
 
 ### 2026-05-15 - production
 
 - Goal: implement a more efficient local-first E2EE message fetch/reconcile path.
-- Code changed: MLS storage now supports batch message lookup in one IndexedDB transaction; `Channel` seeds E2EE state from local cache before non-windowed queries and reconciles query/pagination/search results with cached plaintext. React listens for local-cache seed events and asks the SDK state for messages instead of relying on server envelopes.
+- Code changed: encryption storage now supports batch message lookup in one IndexedDB transaction; `Channel` seeds E2EE state from local cache before non-windowed queries and reconciles query/pagination/search results with cached plaintext. React listens for local-cache seed events and asks the SDK state for messages instead of relying on server envelopes.
 - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, `yarn workspace @ermis-network/ermis-chat-react build`, and `yarn workspace uhm-chat build` passed.
 
 ### 2026-05-15 - production
@@ -163,14 +172,14 @@
 
 ### 2026-05-15 - production
 
-- Goal: prevent consumed MLS application messages from blocking metadata sync after new reactions.
+- Goal: prevent consumed encryption application messages from blocking metadata sync after new reactions.
 - Code changed: waterfall sync now treats forward-secrecy/secret-consumed decrypt errors as non-buffering consumed messages, allowing cursor advancement instead of replaying later reaction events forever.
 - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, `yarn workspace @ermis-network/ermis-chat-react build`, and `yarn workspace uhm-chat build` passed.
 
 ### 2026-05-15 - production
 
 - Goal: stop channel query envelopes from overwriting already-rendered local plaintext.
-- Code changed: `Channel` hydration now falls back to current `ChannelState` plaintext when IndexedDB does not have a matching decrypted record yet, and the shared message-list merge utility preserves decrypted plaintext fields when a later server MLS envelope with the same ID arrives.
+- Code changed: `Channel` hydration now falls back to current `ChannelState` plaintext when IndexedDB does not have a matching decrypted record yet, and the shared message-list merge utility preserves decrypted plaintext fields when a later server encryption envelope with the same ID arrives.
 - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `yarn workspace @ermis-network/ermis-chat-sdk build`, `yarn workspace @ermis-network/ermis-chat-react build`, and `yarn workspace uhm-chat build` passed.
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

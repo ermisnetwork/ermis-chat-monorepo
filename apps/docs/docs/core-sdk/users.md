@@ -13,7 +13,7 @@ Retrieve users registered inside your Ermis Project using these methods.
 ### Paginated User Search
 ```typescript
 // Query full paginated user list (by page size & page number)
-const usersData = await chatClient.queryUsers('25', 1); // pageSize = 25, page = 1
+const usersData = await chatClient.queryUsers(25, 1); // pageSize = 25, page = 1
 
 // Search users by name
 const searchResult = await chatClient.searchUsers(1, 25, 'Jane Doe'); 
@@ -34,7 +34,7 @@ In browser runtimes, the SDK stores profiles returned by `queryUser`, `queryUser
 
 ```typescript
 // Optional manual refresh. connectUser already schedules this in the background.
-await chatClient.syncUserCache('10000', 1);
+await chatClient.syncUserCache(10000, 1);
 ```
 
 Message, member, watcher, and read-state rendering should treat `client.state.users[userId]` as the preferred profile source, then fall back to the user object carried by a message/member payload, and only then fall back to the raw user id.

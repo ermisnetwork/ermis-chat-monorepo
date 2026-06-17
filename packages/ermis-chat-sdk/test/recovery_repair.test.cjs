@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { MlsManager } = require('../dist/index.cjs');
+const { EncryptionManager } = require('../dist/index.cjs');
 
 const makeProgress = (overrides = {}) => ({
   device_id: 'device-1',
@@ -20,7 +20,7 @@ const makeProgress = (overrides = {}) => ({
 });
 
 test('processed event cursor keeps its own event_id when server cursor is later in same timestamp', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const started = {
     created_at: '2026-06-13T00:00:00.000Z',
     event_id: '00000000-0000-0000-0000-000000000000',
@@ -45,7 +45,7 @@ test('processed event cursor keeps its own event_id when server cursor is later 
 });
 
 test('a new failed message remains repairable in a completed epoch', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const progress = manager._upsertRepairIssueInProgress(
     makeProgress({ completed_epochs: [12] }),
     {
@@ -65,7 +65,7 @@ test('a new failed message remains repairable in a completed epoch', () => {
 });
 
 test('retries update one issue per message version instead of counting the epoch batch', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const message = {
     id: 'failed-message',
     cid: 'messaging:channel-1',
@@ -82,7 +82,7 @@ test('retries update one issue per message version instead of counting the epoch
 });
 
 test('message repair identity does not change when the same version is observed at another epoch', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const first = {
     id: 'same-version',
     created_at: '2026-06-13T00:00:00Z',
@@ -97,8 +97,8 @@ test('message repair identity does not change when the same version is observed 
   assert.equal(manager._messageVersionKey(first), manager._messageVersionKey(second));
 });
 
-test('pending invite defers realtime MLS messages before local group processing', async () => {
-  const manager = new MlsManager();
+test('pending invite defers realtime encryption messages before local group processing', async () => {
+  const manager = new EncryptionManager();
   manager.userId = 'user-1';
   const cid = 'messaging:channel-1';
   manager.client = {
@@ -129,7 +129,7 @@ test('pending invite defers realtime MLS messages before local group processing'
 });
 
 test('open-channel readiness reuses persisted ready scope without scope_sync', async () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   manager.initialized = true;
   const cid = 'messaging:channel-1';
   const cursor = {
@@ -187,8 +187,298 @@ test('open-channel readiness reuses persisted ready scope without scope_sync', a
   assert.equal(scopeSyncCalls, 0);
 });
 
+test('recovery status does not invent incomplete restore for ready channel without progress record', async () => {
+  const manager = new EncryptionManager();
+  const cid = 'team:channel-1';
+  manager.userId = 'user-1';
+  manager.deviceId = 'device-1';
+  manager.groups.set(cid, { epoch: () => 3 });
+  manager.client = {
+    activeChannels: {
+      [cid]: {
+        id: 'channel-1',
+        type: 'team',
+        data: { mls_enabled: true },
+        state: { membership: { channel_role: 'member' } },
+      },
+    },
+  };
+  manager._loadRecoveryPublicMetadata = async () => ({ revision: 1 });
+  manager.storage = {
+    getDeviceId: async () => 'device-1',
+    loadIncompleteRestores: async () => [],
+    loadRestoresWithPermanentGaps: async () => [],
+    loadRestoreProgress: async () => {
+      throw new Error('missing progress must not be treated as incomplete restore');
+    },
+  };
+
+  const status = await manager.getRecoveryStatus();
+
+  assert.equal(status.hasVault, true);
+  assert.equal(status.hasIncompleteRestore, false);
+  assert.deepEqual(status.incompleteChannels, []);
+});
+
+test('recovery status ignores passive decrypt repair issues for PIN gate', async () => {
+  const manager = new EncryptionManager();
+  const cid = 'team:channel-1';
+  manager.userId = 'user-1';
+  manager.deviceId = 'device-1';
+  manager._loadRecoveryPublicMetadata = async () => ({ revision: 1 });
+  manager.storage = {
+    getDeviceId: async () => 'device-1',
+    loadIncompleteRestores: async () => [
+      manager._upsertRepairIssueInProgress(
+        makeProgress({ cid, status: 'failed' }),
+        {
+          id: 'encrypted-message',
+          cid,
+          created_at: '2026-06-17T00:00:00.000Z',
+          mls_epoch: 4,
+        },
+        'decrypt_error',
+        false,
+      ),
+    ],
+    loadRestoresWithPermanentGaps: async () => [],
+  };
+
+  const status = await manager.getRecoveryStatus();
+
+  assert.equal(status.hasVault, true);
+  assert.equal(status.hasIncompleteRestore, false);
+  assert.deepEqual(status.incompleteChannels, []);
+});
+
+test('recovery status treats pending unlock action as PIN-gated restore work', async () => {
+  const manager = new EncryptionManager();
+  const cid = 'team:channel-1';
+  manager.userId = 'user-1';
+  manager.deviceId = 'device-1';
+  manager._loadRecoveryPublicMetadata = async () => ({ revision: 1 });
+  manager.storage = {
+    getDeviceId: async () => 'device-1',
+    loadIncompleteRestores: async () => [
+      makeProgress({ cid, status: 'pending', requires_user_action: 'unlock_recovery_vault' }),
+    ],
+    loadRestoresWithPermanentGaps: async () => [],
+  };
+
+  const status = await manager.getRecoveryStatus();
+
+  assert.equal(status.hasVault, true);
+  assert.equal(status.hasIncompleteRestore, true);
+  assert.deepEqual(status.incompleteChannels, [cid]);
+});
+
+test('recovery status keeps active archive restore progress in PIN gate', async () => {
+  const manager = new EncryptionManager();
+  const cid = 'team:channel-1';
+  manager.userId = 'user-1';
+  manager.deviceId = 'device-1';
+  manager._loadRecoveryPublicMetadata = async () => ({ revision: 1 });
+  manager.storage = {
+    getDeviceId: async () => 'device-1',
+    loadIncompleteRestores: async () => [makeProgress({ cid, status: 'failed', target_epochs: [4] })],
+    loadRestoresWithPermanentGaps: async () => [],
+  };
+
+  const status = await manager.getRecoveryStatus();
+
+  assert.equal(status.hasVault, true);
+  assert.equal(status.hasIncompleteRestore, true);
+  assert.deepEqual(status.incompleteChannels, [cid]);
+});
+
+test('bootstrap marks old known E2EE channels as pending recovery unlock when vault is locked', async () => {
+  const manager = new EncryptionManager();
+  const cid = 'team:channel-1';
+  const saved = [];
+  manager.initialized = true;
+  manager.userId = 'user-1';
+  manager.deviceId = 'device-1';
+  manager.groups.set(cid, { epoch: () => 1 });
+  manager._loadRecoveryPublicMetadata = async () => ({ revision: 1 });
+  manager.client = {
+    state: { users: {} },
+    activeChannels: {
+      [cid]: {
+        cid,
+        type: 'team',
+        id: 'channel-1',
+        data: { mls_enabled: true },
+        state: { membership: { channel_role: 'member', created_at: '2026-06-16T00:00:00.000Z' } },
+      },
+    },
+    dispatchEvent() {},
+  };
+  manager.storage = {
+    loadRestoreProgress: async () => null,
+    saveRestoreProgress: async (record) => saved.push(record),
+  };
+
+  await manager.bootstrapKnownE2eeChannels({ source: 'channels_queried' });
+
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].cid, cid);
+  assert.equal(saved[0].status, 'pending');
+  assert.equal(saved[0].requires_user_action, 'unlock_recovery_vault');
+});
+
+test('bootstrap does not mark freshly accepted E2EE channels as pending recovery unlock', async () => {
+  const manager = new EncryptionManager();
+  const cid = 'team:channel-1';
+  const saved = [];
+  manager.initialized = true;
+  manager.userId = 'user-1';
+  manager.deviceId = 'device-1';
+  manager.groups.set(cid, { epoch: () => 1 });
+  manager._loadRecoveryPublicMetadata = async () => ({ revision: 1 });
+  manager.client = {
+    state: { users: {} },
+    activeChannels: {
+      [cid]: {
+        cid,
+        type: 'team',
+        id: 'channel-1',
+        data: { mls_enabled: true },
+        state: { membership: { channel_role: 'member', created_at: new Date().toISOString() } },
+      },
+    },
+    dispatchEvent() {},
+  };
+  manager.storage = {
+    loadRestoreProgress: async () => null,
+    saveRestoreProgress: async (record) => saved.push(record),
+  };
+
+  await manager.bootstrapKnownE2eeChannels({ source: 'channels_queried' });
+
+  assert.equal(saved.length, 0);
+});
+
+test('inherited E2EE topic resolves encryption group from parent channel', () => {
+  const manager = new EncryptionManager();
+  const parentCid = 'team:channel-1';
+  const topicCid = 'topic:topic-1';
+  manager.client = {
+    activeChannels: {
+      [parentCid]: {
+        cid: parentCid,
+        data: { mls_enabled: true },
+      },
+      [topicCid]: {
+        cid: topicCid,
+        data: { parent_cid: parentCid },
+      },
+    },
+  };
+
+  assert.equal(
+    manager._resolveChannelE2eeGroupId(topicCid, manager.client.activeChannels[topicCid]),
+    parentCid,
+  );
+});
+
+test('inherited E2EE topic decrypt gate follows parent membership', () => {
+  const manager = new EncryptionManager();
+  const parentCid = 'team:channel-1';
+  const topicCid = 'topic:topic-1';
+  manager.userId = 'user-1';
+  manager.client = {
+    activeChannels: {
+      [parentCid]: {
+        cid: parentCid,
+        data: { mls_enabled: true },
+        state: { membership: { channel_role: 'member' } },
+      },
+      [topicCid]: {
+        cid: topicCid,
+        data: { parent_cid: parentCid, gate: false },
+        state: { membership: { channel_role: 'pending' } },
+      },
+    },
+  };
+
+  assert.equal(manager._isEncryptionProcessingBlockedForRoute(topicCid, parentCid), false);
+
+  manager.client.activeChannels[parentCid].state.members = {
+    'user-1': { channel_role: 'pending' },
+  };
+
+  assert.equal(manager._isEncryptionProcessingBlockedForRoute(topicCid, parentCid), true);
+});
+
+test('decrypted inherited topic messages publish into topic state even when topic is only nested under parent', () => {
+  const manager = new EncryptionManager();
+  const parentCid = 'team:channel-1';
+  const topicCid = 'topic:topic-1';
+  const dispatched = [];
+  const topic = {
+    cid: topicCid,
+    data: { parent_cid: parentCid },
+    state: {
+      messageSets: [
+        {
+          messages: [
+            {
+              id: 'topic-message-1',
+              cid: topicCid,
+              content_type: 'mls',
+              text: '',
+              created_at: '2026-06-17T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+      addMessagesSorted(messages) {
+        this.addedMessages = messages;
+        this.messageSets[0].messages = messages;
+      },
+    },
+  };
+
+  manager.client = {
+    state: {
+      users: {
+        'user-1': { id: 'user-1', name: 'User One' },
+      },
+    },
+    activeChannels: {
+      [parentCid]: {
+        cid: parentCid,
+        data: { mls_enabled: true },
+        state: { topics: [topic] },
+      },
+    },
+    dispatchEvent(event) {
+      dispatched.push(event);
+    },
+  };
+
+  manager._publishDecryptedMessages([
+    {
+      id: 'topic-message-1',
+      cid: topicCid,
+      content_type: 'standard',
+      text: '7',
+      user_id: 'user-1',
+      created_at: '2026-06-17T00:00:00.000Z',
+      type: 'regular',
+    },
+  ]);
+
+  assert.equal(topic.state.addedMessages[0].text, '7');
+  assert.equal(topic.state.messageSets[0].messages[0].content_type, 'standard');
+  assert.equal(topic.state.messageSets[0].messages[0].text, '7');
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].cid, topicCid);
+  assert.equal(dispatched[0].messages[0].text, '7');
+});
+
 test('forward secrecy consumed remains blocked and recoverable by an alternate archive', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const progress = manager._upsertRepairIssueInProgress(
     makeProgress(),
     {
@@ -205,7 +495,7 @@ test('forward secrecy consumed remains blocked and recoverable by an alternate a
 });
 
 test('clearing one message version does not erase another version of the same message', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const first = {
     id: 'edited-message',
     created_at: '2026-06-13T00:00:00.000Z',
@@ -225,7 +515,7 @@ test('clearing one message version does not erase another version of the same me
 });
 
 test('manual material failures replace the target issue without adding an epoch duplicate', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const message = {
     id: 'message-2',
     created_at: '2026-06-13T00:00:00.000Z',
@@ -240,7 +530,7 @@ test('manual material failures replace the target issue without adding an epoch 
 });
 
 test('manual repair marks failed issue no_archive when list epochs has no matching archive', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const message = {
     id: 'message-no-archive',
     created_at: '2026-06-13T00:00:00.000Z',
@@ -260,7 +550,7 @@ test('manual repair marks failed issue no_archive when list epochs has no matchi
 });
 
 test('legacy epoch progress is lazily exposed as repair issues', () => {
-  const manager = new MlsManager();
+  const manager = new EncryptionManager();
   const progress = manager._normalizeProgress({
     ...makeProgress(),
     repair_issues: undefined,
@@ -279,4 +569,45 @@ test('legacy epoch progress is lazily exposed as repair issues', () => {
   assert.equal(progress.repair_issues.length, 2);
   assert.equal(progress.repair_issues.find((issue) => issue.mls_epoch === 3).status, 'terminal');
   assert.equal(progress.repair_issues.find((issue) => issue.mls_epoch === 4).status, 'retryable');
+});
+
+test('post-unlock recovery maintenance runs in the background and dedupes', async () => {
+  const manager = new EncryptionManager();
+  const calls = [];
+  let releaseRecheck;
+
+  manager._recoveryPrivateKey = new Uint8Array([1]);
+  manager._flushDeferredArchives = async () => {
+    calls.push('flush');
+  };
+  manager._resumeEpochArchiveCheckpoints = async () => {
+    calls.push('resume');
+  };
+  manager._recheckKnownRecoveryChannelsOnce = async () => {
+    calls.push('recheck');
+    await new Promise((resolve) => {
+      releaseRecheck = resolve;
+    });
+  };
+
+  manager._scheduleRecoveryPostUnlockMaintenance();
+  const firstWork = manager._recoveryPostUnlockMaintenancePromise;
+  manager._scheduleRecoveryPostUnlockMaintenance();
+
+  assert.ok(firstWork);
+  assert.equal(manager._recoveryPostUnlockMaintenancePromise, firstWork);
+  assert.deepEqual(calls, []);
+
+  for (let attempt = 0; attempt < 10 && calls.length < 3; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.deepEqual(calls, ['flush', 'resume', 'recheck']);
+  assert.equal(manager._recoveryPostUnlockMaintenancePromise, firstWork);
+  assert.equal(typeof releaseRecheck, 'function');
+
+  releaseRecheck();
+  await firstWork;
+
+  assert.equal(manager._recoveryPostUnlockMaintenancePromise, null);
 });

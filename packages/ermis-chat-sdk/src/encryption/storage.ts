@@ -1,8 +1,8 @@
 /**
- * MLS Storage — Persistence layer for MLS (E2EE) state
+ * Encryption Storage — Persistence layer for encryption (E2EE) state
  *
- * Defines the `MlsStorageAdapter` interface for platform abstraction
- * and provides `IndexedDBMlsStorage` as the default browser implementation.
+ * Defines the `EncryptionStorageAdapter` interface for platform abstraction
+ * and provides `IndexedDBEncryptionStorage` as the default browser implementation.
  *
  * Stores:
  * - Device ID (per browser)
@@ -26,8 +26,8 @@ import type {
   EpochArchiveCheckpoint,
   E2eeStoredMessage,
   EventCursor,
-  MlsStorageAdapter,
-  MlsSyncCheckpoint,
+  EncryptionStorageAdapter,
+  EncryptionSyncCheckpoint,
   PendingArchiveUpload,
   PendingDeferredArchive,
   PendingE2eeSnapshot,
@@ -119,7 +119,7 @@ function eventCursorFromStoredValue(value: unknown): EventCursor | null {
 }
 
 /**
- * Default MLS storage adapter using browser IndexedDB.
+ * Default encryption storage adapter using browser IndexedDB.
  *
  * Each user gets their own IndexedDB database (`ermis_mls_{userId}`) to
  * prevent cross-user state contamination during login/logout cycles.
@@ -127,17 +127,17 @@ function eventCursorFromStoredValue(value: unknown): EventCursor | null {
  *
  * @example
  * ```ts
- * const storage = new IndexedDBMlsStorage('user123');
+ * const storage = new IndexedDBEncryptionStorage('user123');
  * const deviceId = await storage.getDeviceId();
  * ```
  */
-export class IndexedDBMlsStorage implements MlsStorageAdapter {
+export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private readonly dbName: string;
 
   /**
    * @param userId - The current user's ID. Used to scope the IndexedDB
-   *                 database name so each user's MLS state is isolated.
+   *                 database name so each user's encryption state is isolated.
    *                 Pass empty string for legacy/global access (migration only).
    */
   constructor(userId: string = '', logger?: Logger) {
@@ -308,7 +308,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
             db.close();
             if (legacyId && typeof localStorage !== 'undefined') {
               localStorage.setItem(DEVICE_ID_LS_KEY, legacyId);
-              sdkLog('info', '[MLS Storage] Migrated device_id from IndexedDB to localStorage:', legacyId);
+              sdkLog('info', '[Encryption Storage] Migrated device_id from IndexedDB to localStorage:', legacyId);
               resolve(legacyId);
             } else {
               resolve(null);
@@ -579,7 +579,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
 
       this._indexReady = true;
       this._indexBuildPromise = null;
-      sdkLog('info', `[MLS Storage] Search index built: ${indexable.length} messages indexed`);
+      sdkLog('info', `[Encryption Storage] Search index built: ${indexable.length} messages indexed`);
     })();
 
     return this._indexBuildPromise;
@@ -601,7 +601,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       this._searchIndex.add(message);
       this._indexedIds.add(message.id);
     } catch (err) {
-      sdkLog('warn', '[MLS Storage] Failed to index message:', message.id, err);
+      sdkLog('warn', '[Encryption Storage] Failed to index message:', message.id, err);
     }
   }
 
@@ -862,7 +862,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     });
   }
 
-  async saveMlsSyncCheckpoint(checkpoint: MlsSyncCheckpoint): Promise<void> {
+  async saveEncryptionSyncCheckpoint(checkpoint: EncryptionSyncCheckpoint): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');

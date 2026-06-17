@@ -200,7 +200,7 @@
     "topic_inherited": "E2EE inherited from parent channel",
     "toggle_label": "End-to-end encrypted",
     "toggle_description": "Messages and attachments are encrypted for channel members.",
-    "unavailable": "E2EE is unavailable until MLS is initialized."
+    "unavailable": "E2EE is unavailable until encryption is initialized."
   },
   "recovery_pin": {
     "title": "Chat history PIN",
@@ -211,7 +211,7 @@
     "menu_locked": "Enter PIN",
     "menu_active": "On",
     "open_action": "Chat history PIN",
-    "mls_unavailable": "Chat history recovery isn't available right now.",
+    "encryption_unavailable": "Chat history recovery isn't available right now.",
     "e2ee_required": "Chat history PIN is available for end-to-end encrypted chats.",
     "no_channel": "No chat selected",
     "current_epoch": "History version {{epoch}}",

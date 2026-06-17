@@ -330,9 +330,9 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const isE2ee = Boolean(e2eeChannel?.data?.mls_enabled);
   const [isRotatingKey, setIsRotatingKey] = useState(false);
   const [isEnablingE2ee, setIsEnablingE2ee] = useState(false);
-  const mlsEpoch =
-    isE2ee && e2eeChannel?.cid && typeof client?.mlsManager?.getEpoch === 'function'
-      ? client.mlsManager.getEpoch(e2eeChannel.cid)
+  const encryptionEpoch =
+    isE2ee && e2eeChannel?.cid && typeof client?.encryptionManager?.getEpoch === 'function'
+      ? client.encryptionManager.getEpoch(e2eeChannel.cid)
       : undefined;
 
   const handleDeleteChannel = useCallback(async () => {
@@ -364,12 +364,12 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     if (onRemoveMemberProp) return onRemoveMemberProp(memberId);
     if (!channel) return;
     try {
-      const mlsManager = channel.getClient().mlsManager;
+      const encryptionManager = channel.getClient().encryptionManager;
       if (channel.data?.mls_enabled) {
-        if (!mlsManager?.initialized || !channel.id || !channel.cid) {
-          throw new Error('[E2EE] Cannot remove member from E2EE channel before MLS is initialized');
+        if (!encryptionManager?.initialized || !channel.id || !channel.cid) {
+          throw new Error('[E2EE] Cannot remove member from E2EE channel before encryption is initialized');
         }
-        await mlsManager.evictMember(channel.type, channel.id, channel.cid, memberId);
+        await encryptionManager.evictMember(channel.type, channel.id, channel.cid, memberId);
       } else {
         await channel.removeMembers([memberId]);
       }
@@ -416,10 +416,10 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   }, [channel, onUnblockUserProp]);
 
   const handleRotateKey = useCallback(async () => {
-    if (!e2eeChannel?.cid || !client?.mlsManager?.initialized || parentCid) return;
+    if (!e2eeChannel?.cid || !client?.encryptionManager?.initialized || parentCid) return;
     try {
       setIsRotatingKey(true);
-      await client.mlsManager.keyRotation(e2eeChannel.cid);
+      await client.encryptionManager.keyRotation(e2eeChannel.cid);
     } catch (e) {
       console.error('Error rotating E2EE key', e);
     } finally {
@@ -428,12 +428,12 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   }, [client, e2eeChannel?.cid, parentCid]);
 
   const handleEnableE2ee = useCallback(async () => {
-    if (!channel?.id || !channel?.cid || !client?.mlsManager?.initialized || parentCid || isE2ee) return;
+    if (!channel?.id || !channel?.cid || !client?.encryptionManager?.initialized || parentCid || isE2ee) return;
     try {
       setIsEnablingE2ee(true);
       const memberUserIds = Object.keys(channel.state?.members || {});
       const recoveryPolicy = (channel.data as any)?.e2ee_recovery_policy || 'member_assisted';
-      const result = await client.mlsManager.enableE2ee(
+      const result = await client.encryptionManager.enableE2ee(
         channel.type,
         channel.id,
         channel.cid,
@@ -586,7 +586,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
           parentChannelName={finalParentChannelName}
           isTopic={isTopic}
           isE2ee={isE2ee}
-          mlsEpoch={mlsEpoch}
+          encryptionEpoch={encryptionEpoch}
         />
 
         {isBanned && (
@@ -634,12 +634,12 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 topicsEnabled={channel?.data?.topics_enabled === true}
                 currentUserRole={currentUserRole}
                 isE2ee={isE2ee}
-                mlsInitialized={Boolean(client?.mlsManager?.initialized)}
-                mlsEpoch={mlsEpoch}
+                encryptionInitialized={Boolean(client?.encryptionManager?.initialized)}
+                encryptionEpoch={encryptionEpoch}
                 onRotateKey={!isTopic && isE2ee && canManageChannel(currentUserRole) ? handleRotateKey : undefined}
                 rotateKeyDisabled={isRotatingKey || isBlocked || isClosedTopic}
                 onEnableE2ee={!isTopic && !isE2ee && currentUserRole === CHANNEL_ROLES.OWNER ? handleEnableE2ee : undefined}
-                enableE2eeDisabled={isEnablingE2ee || isBlocked || isClosedTopic || !client?.mlsManager?.initialized}
+                enableE2eeDisabled={isEnablingE2ee || isBlocked || isClosedTopic || !client?.encryptionManager?.initialized}
                 searchLabel={actionsSearchLabel}
                 settingsLabel={actionsSettingsLabel}
                 deleteLabel={actionsDeleteLabel}

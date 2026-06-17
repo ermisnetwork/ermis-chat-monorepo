@@ -1,5 +1,5 @@
 /**
- * E2EE (MLS) API methods for Ermis Chat
+ * E2EE (encryption) API methods for Ermis Chat
  *
  * All endpoints are under `/v1/e2ee/` and require JWT auth.
  * WASM module (openmls-wasm) handles the cryptographic operations client-side.
@@ -37,7 +37,7 @@ import type {
   ListArchiveAvailabilityResponse,
   MemberKeyPackages,
   MemberSnapshotRecord,
-  MlsOperationResponse,
+  EncryptionOperationResponse,
   QueryArchiveMaterialRequest,
   QueryEpochArchivesRequest,
   QueryEpochArchivesResponse,
@@ -483,7 +483,7 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // ---- Enable E2EE ----
 
   /** Upgrade a standard channel to E2EE. Admin or channel Owner only. All members must have accepted their invites. */
-  async enableE2ee(channelType: string, channelId: string, data: EnableE2eeRequest): Promise<MlsOperationResponse> {
+  async enableE2ee(channelType: string, channelId: string, data: EnableE2eeRequest): Promise<EncryptionOperationResponse> {
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/enable`,
       encodeEnableE2eeRequest(data),
@@ -492,15 +492,15 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   // NOTE: addMembers has been removed — add_members is now handled through
   // the standard edit_channel endpoint (POST /channels/{type}/{id}).
-  // See MlsManager.addMembers() in encryption/manager.ts for the updated flow.
+  // See EncryptionManager.addMembers() in encryption/manager.ts for the updated flow.
 
   // removeMember — REMOVED
   // Merged into edit_channel_handler (RemoveMembers branch).
   // Use channel.removeMembersE2ee() which calls the standard POST /channels/{type}/{id} endpoint.
-  // See MlsManager.evictMember() in encryption/manager.ts for the updated flow.
+  // See EncryptionManager.evictMember() in encryption/manager.ts for the updated flow.
 
   /** Key rotation (self update): rotate own key material for forward secrecy. */
-  async keyRotation(channelType: string, channelId: string, data: KeyRotationRequest): Promise<MlsOperationResponse> {
+  async keyRotation(channelType: string, channelId: string, data: KeyRotationRequest): Promise<EncryptionOperationResponse> {
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/key_rotation`,
       encodeKeyRotationRequest(data),
@@ -615,7 +615,7 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     channelType: string,
     channelId: string,
     data: UploadGroupInfoRequest,
-  ): Promise<MlsOperationResponse> {
+  ): Promise<EncryptionOperationResponse> {
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/group_info`,
       encodeGroupInfoRequest(data),
@@ -637,7 +637,7 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Submit external join commit to server
    * Multi-device: only broadcast commit. Public channel: insert member + system msg + commit.
    */
-  async externalJoin(channelType: string, channelId: string, data: ExternalJoinRequest): Promise<MlsOperationResponse> {
+  async externalJoin(channelType: string, channelId: string, data: ExternalJoinRequest): Promise<EncryptionOperationResponse> {
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/external_join`,
       encodeExternalJoinRequest(data),
@@ -645,11 +645,11 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   /**
-   * Commit the MLS eviction of a user who already self-left the channel.
+   * Commit the encryption eviction of a user who already self-left the channel.
    *
    * Called by the designated evictor (owner/moder) after receiving `member.removed`
    * triggered by a `self_remove=true` leave. The target user is already removed from
-   * channel DB — this endpoint only processes the MLS commit (no membership check).
+   * channel DB — this endpoint only processes the encryption commit (no membership check).
    *
    * `POST /v1/e2ee/channels/{type}/{id}/commit_eviction`
    */
@@ -657,7 +657,7 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   /**
    * Batch add members to N E2EE topics at once.
-   * Each topic has its own MLS bundle (commit + welcome + ratchet_tree + group_info + epoch).
+   * Each topic has its own encryption bundle (commit + welcome + ratchet_tree + group_info + epoch).
    * Independent processing: one topic failure does NOT affect others.
    *
    * `POST /v1/e2ee/channels/{type}/{id}/topics/batch_add_members`

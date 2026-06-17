@@ -21,6 +21,12 @@ const fullyQueriedChannels = new Set<string>();
 export const markChannelAsFullyQueried = (cid: string) => fullyQueriedChannels.add(cid);
 
 const isInactiveInviteRole = (role?: string) => isPendingMember(role) || role === 'rejected' || role === 'skipped';
+const isE2eeChannel = (channel: any, client: any) => {
+  if (channel?.data?.mls_enabled === true) return true;
+  const parentCid = channel?.data?.parent_cid as string | undefined;
+  if (!parentCid) return false;
+  return client?.activeChannels?.[parentCid]?.data?.mls_enabled === true;
+};
 
 /**
  * Schedule multiple scroll-to-bottom attempts with increasing delays.
@@ -150,7 +156,7 @@ export function useChannelMessages({
     };
 
     const syncMessagesWithE2eeCache = () => {
-      if (!activeChannel.data?.mls_enabled || !client.mlsManager?.storage || !activeChannel.cid) {
+      if (!isE2eeChannel(activeChannel, client) || !client.encryptionManager?.storage || !activeChannel.cid) {
         syncMessages();
         return;
       }
@@ -158,7 +164,7 @@ export function useChannelMessages({
       const baseMessages = [...activeChannel.state.latestMessages];
       setMessages(mergeAndFilterE2eeMessages(baseMessages, []));
 
-      client.mlsManager.storage
+      client.encryptionManager.storage
         .getE2eeMessages(activeChannel.cid, 100)
         .then((decryptedMessages: any[]) => {
           setMessages((prev) => mergeAndFilterE2eeMessages(prev.length ? prev : baseMessages, decryptedMessages));
@@ -167,17 +173,17 @@ export function useChannelMessages({
     };
 
     const syncStoredE2eeMessages = () => {
-      if (!activeChannel.data?.mls_enabled || !client.mlsManager?.storage || !activeChannel.cid) return;
-      client.mlsManager.storage
+      if (!isE2eeChannel(activeChannel, client) || !client.encryptionManager?.storage || !activeChannel.cid) return;
+      client.encryptionManager.storage
         .getE2eeMessages(activeChannel.cid, 100)
         .then(mergeDecryptedMessages)
         .catch((err: any) => console.warn('[E2EE] Failed to load decrypted message cache', err));
     };
 
     const ensureE2eeChannelReady = () => {
-      if (!activeChannel.data?.mls_enabled || !client.mlsManager?.initialized || !activeChannel.cid) return;
+      if (!isE2eeChannel(activeChannel, client) || !client.encryptionManager?.initialized || !activeChannel.cid) return;
       if (isInactiveInviteRole(activeChannel.state?.membership?.channel_role as string)) return;
-      client.mlsManager
+      client.encryptionManager
         .ensureChannelReady(activeChannel.type, activeChannel.id, activeChannel.cid, { source: 'open' })
         .then(() => syncMessagesWithE2eeCache())
         .catch((err: any) => console.warn('[E2EE] Failed to ensure channel ready', err));
@@ -396,5 +402,5 @@ export function useChannelMessages({
       sub18.unsubscribe();
       sub19.unsubscribe();
     };
-  }, [activeChannel, scrollToBottom, scheduleScrollToBottom, syncMessages, setMessages, onChannelSwitch, setReadState]);
+  }, [activeChannel, client, scrollToBottom, scheduleScrollToBottom, syncMessages, setMessages, onChannelSwitch, setReadState]);
 }

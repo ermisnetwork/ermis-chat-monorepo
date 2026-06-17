@@ -91,7 +91,7 @@ export interface ChannelRepairState {
   updated_at: number;
 }
 
-export interface MlsSyncCheckpoint {
+export interface EncryptionSyncCheckpoint {
   user_id: string;
   device_id: string;
   provider_bytes: Uint8Array;
@@ -219,6 +219,7 @@ export interface RestoreProgressRecord {
   channel_type: string;
   channel_id: string;
   status: RestoreStatus;
+  requires_user_action?: 'unlock_recovery_vault';
   target_epochs?: number[];
   completed_epochs: number[];
   permanent_gaps: Array<{
@@ -239,15 +240,15 @@ export interface RestoreProgressRecord {
 }
 
 /**
- * Platform-agnostic storage adapter for MLS state.
+ * Platform-agnostic storage adapter for encryption state.
  *
  * Implement this interface to provide custom storage (e.g., SQLite for React Native).
- * The default `IndexedDBMlsStorage` uses browser IndexedDB.
+ * The default `IndexedDBEncryptionStorage` uses browser IndexedDB.
  *
  * NOTE: `getDeviceId()` is a GLOBAL (per-browser) operation and does NOT
  * require a userId — it identifies the physical device, not the user.
  */
-export interface MlsStorageAdapter {
+export interface EncryptionStorageAdapter {
   // ---- Device ID (global, per-browser) ----
   getDeviceId(): Promise<string>;
 
@@ -293,7 +294,7 @@ export interface MlsStorageAdapter {
   loadChannelRepairState?(scopeCid: string): Promise<ChannelRepairState | null>;
   saveChannelRepairState?(state: ChannelRepairState): Promise<void>;
   deleteChannelRepairState?(scopeCid: string): Promise<void>;
-  saveMlsSyncCheckpoint?(checkpoint: MlsSyncCheckpoint): Promise<void>;
+  saveEncryptionSyncCheckpoint?(checkpoint: EncryptionSyncCheckpoint): Promise<void>;
   tryAcquireRepairLock?(scopeCid: string, ownerId: string, ttlMs: number): Promise<boolean>;
   releaseRepairLock?(scopeCid: string, ownerId: string): Promise<void>;
   loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null>;
@@ -379,12 +380,12 @@ export interface GetKeyPackagesByCidResponse extends APIResponse {
 
 // NOTE: AddMembersRequest has been removed — add_members is now handled
 // through the standard edit_channel endpoint (POST /channels/{type}/{id})
-// with MLS fields (commit, welcome, ratchet_tree, epoch, group_info)
+// with encryption fields (commit, welcome, ratchet_tree, epoch, group_info)
 // embedded alongside add_members in the request body.
 
 // RemoveMemberRequest — REMOVED
 // Merged into edit_channel_handler. Use channel.removeMembersE2ee() instead.
-// See MlsManager.evictMember() in encryption/manager.ts for the updated flow.
+// See EncryptionManager.evictMember() in encryption/manager.ts for the updated flow.
 
 export interface KeyRotationRequest {
   commit: Uint8Array;
@@ -410,7 +411,7 @@ export interface EnableE2eeRequest {
   e2ee_recovery_policy?: E2eeRecoveryPolicy;
 }
 
-export interface MlsOperationResponse extends APIResponse {
+export interface EncryptionOperationResponse extends APIResponse {
   status: string;
 }
 
@@ -451,14 +452,14 @@ export interface ExternalJoinRequest {
 }
 
 /**
- * CommitEvictionRequest — MLS-only commit for evicting users who already self-left.
+ * CommitEvictionRequest — encryption-only commit for evicting users who already self-left.
  * Used by `POST /v1/e2ee/channels/{type}/{id}/commit_eviction`.
  * Does NOT touch channel membership (already handled by self_remove in edit_channel).
  */
 export interface CommitEvictionRequest {
   /** All users removed by the composite inline commit. Must already be inactive in channel membership. */
   target_user_ids: string[];
-  /** MLS commit bytes from WASM commit_member_removals(target_user_ids) */
+  /** Encryption commit bytes from WASM commit_member_removals(target_user_ids) */
   commit: Uint8Array;
   /** Pre-merge epoch (must match DB epoch — CAS check) */
   epoch: number;
@@ -474,10 +475,10 @@ export interface CommitEvictionResponse extends APIResponse {
 export interface SendE2eeMessageRequest {
   message: {
     id: string;
-    /** Encrypted MLS ciphertext from WASM `group.create_message()` */
+    /** Encrypted message ciphertext from WASM `group.create_message()` */
     mls_ciphertext: Uint8Array;
     mls_epoch: number;
-    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
+    /** encryption group used to encrypt this message. Non-gated topics use the parent channel CID. */
     e2ee_group_id?: string;
     mentioned_all?: boolean;
     mentioned_users?: string[];
@@ -489,10 +490,10 @@ export interface SendE2eeMessageRequest {
 
 export interface UpdateE2eeMessageRequest {
   message: {
-    /** Encrypted MLS ciphertext from WASM `group.create_message()` */
+    /** Encrypted message ciphertext from WASM `group.create_message()` */
     mls_ciphertext: Uint8Array;
     mls_epoch: number;
-    /** MLS group used to encrypt this message. Non-gated topics use the parent channel CID. */
+    /** encryption group used to encrypt this message. Non-gated topics use the parent channel CID. */
     e2ee_group_id?: string;
     mentioned_all?: boolean;
     mentioned_users?: string[];
@@ -708,7 +709,7 @@ export type E2eeSyncEvent =
     }
   | {
       type: 'protocol';
-      /** MLS protocol payload — `created_at` is at `data.created_at` (consistent with application variant) */
+          /** Encryption protocol payload — `created_at` is at `data.created_at` (consistent with application variant) */
       data: {
         epoch: number;
         user: { id: string; [key: string]: unknown };
@@ -879,9 +880,9 @@ export interface BatchTopicResponse extends APIResponse {
 // Types
 // ============================================================
 
-export interface MlsManagerOptions {
-  /** Custom storage adapter. Defaults to IndexedDBMlsStorage. */
-  storage?: MlsStorageAdapter;
+export interface EncryptionManagerOptions {
+  /** Custom storage adapter. Defaults to IndexedDBEncryptionStorage. */
+  storage?: EncryptionStorageAdapter;
   /** Path to the openmls WASM binary. Defaults to '/openmls_wasm_bg.wasm'. */
   wasmPath?: string;
   /**

@@ -1313,8 +1313,8 @@ export type ChannelInfoCoverProps = {
   isTeamChannel?: boolean;
   /** Whether this channel or inherited parent topic is E2EE enabled */
   isE2ee?: boolean;
-  /** Current MLS epoch, if available */
-  mlsEpoch?: number;
+  /** Current encryption epoch, if available */
+  encryptionEpoch?: number;
 };
 
 export type ChannelInfoActionsProps = {
@@ -1353,8 +1353,8 @@ export type ChannelInfoActionsProps = {
   createTopicLabel?: string;
   topicsEnabled?: boolean;
   isE2ee?: boolean;
-  mlsInitialized?: boolean;
-  mlsEpoch?: number;
+  encryptionInitialized?: boolean;
+  encryptionEpoch?: number;
   onRotateKey?: () => void;
   rotateKeyLabel?: string;
   rotateKeyDisabled?: boolean;

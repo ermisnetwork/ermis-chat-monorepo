@@ -9,7 +9,7 @@ import { Channel } from './channel';
 import { ClientState } from './client_state';
 import { StableWSConnection } from './connection';
 import { normalizeE2eeEventBytes } from './encryption/encoding';
-import { IndexedDBMlsStorage } from './encryption/storage';
+import { IndexedDBEncryptionStorage } from './encryption/storage';
 import { IndexedDBUserCache } from './user_cache';
 import { getLogger, setSdkLogger } from './logger';
 
@@ -109,13 +109,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   /** Tracks consecutive REST API failures for exponential backoff purposes. */
   consecutiveFailures: number;
   defaultWSTimeout: number;
-  /** Device ID used by MLS/E2EE sessions and sent to Bellboy over WS/HTTP. */
+  /** Device ID used by encryption/E2EE sessions and sent to Bellboy over WS/HTTP. */
   deviceId?: string;
   /** Latest current-device KeyPackage count reported by health.check. */
   latestKeyPackagesRemaining?: number;
-  /** MLS Manager instance set by MlsManager.initialize() for E2EE event handling. */
+  /** Encryption Manager instance set by EncryptionManager.initialize() for E2EE event handling. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mlsManager?: any;
+  encryptionManager?: any;
   private userCache?: IndexedDBUserCache<ErmisChatGenerics>;
   private userCacheKey?: string;
   private userCacheSyncPromise: Promise<UsersResponse<ErmisChatGenerics> | void> | null = null;
@@ -309,8 +309,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     if (this.browser && !this.deviceId) {
       try {
-        const mlsStorage = new IndexedDBMlsStorage('', this.logger);
-        this.deviceId = await mlsStorage.getDeviceId();
+        const encryptionStorage = new IndexedDBEncryptionStorage('', this.logger);
+        this.deviceId = await encryptionStorage.getDeviceId();
         this.logger('info', `client:connectUser() - deviceId initialized: ${this.deviceId}`, {
           tags: ['connection', 'client', 'e2ee'],
         });
@@ -472,7 +472,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   private _scheduleUserCacheSync(): void {
     if (!this.browser || this.userCacheSyncPromise) return;
-    this.userCacheSyncPromise = this.syncUserCache('10000', 1)
+    this.userCacheSyncPromise = this.syncUserCache(10000, 1)
       .catch((err) => {
         this.logger('warn', 'client:userCache - failed to sync users', { err });
       })
@@ -530,10 +530,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       tags: ['connection', 'client'],
     });
 
-    const mlsMgr = this.mlsManager;
-    if (mlsMgr && typeof mlsMgr.destroy === 'function') {
-      mlsMgr.destroy();
-      this.mlsManager = undefined;
+    const encryptionMgr = this.encryptionManager;
+    if (encryptionMgr && typeof encryptionMgr.destroy === 'function') {
+      encryptionMgr.destroy();
+      this.encryptionManager = undefined;
     }
     this.deviceId = undefined;
     this.userCache = undefined;
@@ -1049,9 +1049,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       if (typeof remaining === 'number') {
         this.latestKeyPackagesRemaining = remaining;
       }
-      if (this.mlsManager?.initialized && typeof remaining === 'number') {
-        this.mlsManager.ensureKeyPackages(remaining).catch((err: unknown) => {
-          this.logger('warn', '[MLS] Failed to top up key packages', { err });
+      if (this.encryptionManager?.initialized && typeof remaining === 'number') {
+        this.encryptionManager.ensureKeyPackages(remaining).catch((err: unknown) => {
+          this.logger('warn', '[Encryption] Failed to top up key packages', { err });
         });
       }
     }
@@ -1075,13 +1075,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
     if (event.type === 'notification.invite_rejected') {
       if (event.member?.user_id === this.userID && event.cid) {
-        if (event.mls_enabled && this.mlsManager?.initialized) {
+        if (event.mls_enabled && this.encryptionManager?.initialized) {
           const rejectTimestamp = event.created_at || event.createdAt || event.message?.created_at || Date.now();
-          this.mlsManager.leaveGroup(event.cid, rejectTimestamp);
+          this.encryptionManager.leaveGroup(event.cid, rejectTimestamp);
           if (Array.isArray(event.topic_cids)) {
             for (const topicCid of event.topic_cids) {
-              if (this.mlsManager.ownsE2eeGroup(topicCid)) {
-                this.mlsManager.leaveGroup(topicCid, rejectTimestamp);
+              if (this.encryptionManager.ownsE2eeGroup(topicCid)) {
+                this.encryptionManager.leaveGroup(topicCid, rejectTimestamp);
               }
             }
           }
@@ -1259,8 +1259,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       tags: ['connection'],
     });
 
-    if (this.mlsManager?.initialized) {
-      this.mlsManager.markSyncStart();
+    if (this.encryptionManager?.initialized) {
+      this.encryptionManager.markSyncStart();
     }
 
     const cids = Object.keys(this.activeChannels);
@@ -1286,11 +1286,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       } as Event<ErmisChatGenerics>);
     }
 
-    if (this.mlsManager?.initialized) {
+    if (this.encryptionManager?.initialized) {
       try {
-        await this.mlsManager.sync();
+        await this.encryptionManager.sync();
       } catch (err) {
-        this.logger('error', '[MLS] Failed to sync on reconnect', { err });
+        this.logger('error', '[Encryption] Failed to sync on reconnect', { err });
       }
     }
 
@@ -1410,7 +1410,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
   }
 
-  async queryUsers(page_size?: string, page?: number): Promise<UsersResponse<ErmisChatGenerics>> {
+  async queryUsers(page_size?: number, page?: number): Promise<UsersResponse<ErmisChatGenerics>> {
     // Make sure we wait for the connect promise if there is a pending one
     await this.wsPromise;
     const userIDAtRequest = this.userID;
@@ -1430,7 +1430,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return data;
   }
 
-  async syncUserCache(page_size = '10000', page = 1): Promise<UsersResponse<ErmisChatGenerics>> {
+  async syncUserCache(page_size = 10000, page = 1): Promise<UsersResponse<ErmisChatGenerics>> {
     return await this.queryUsers(page_size, page);
   }
 
@@ -1650,7 +1650,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     // Hydrate E2EE messages from local cache BEFORE initializing state.
     // Without this, encrypted API messages overwrite decrypted local messages,
     // causing the UI to show "encrypted message" until the user switches channels.
-    if (this.mlsManager?.storage) {
+    if (this.encryptionManager?.storage) {
       await Promise.all(
         data.channels.map(async (channelState) => {
           const isE2ee = (channelState.channel as any)?.mls_enabled === true;

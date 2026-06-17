@@ -41,7 +41,7 @@ export function UhmRecoveryPinDialog({
   const [localError, setLocalError] = useState<string | null>(null);
   const isGate = variant === 'gate';
   const isRepair = variant === 'repair';
-  const mlsInitialized = client?.mlsManager?.initialized === true;
+  const encryptionInitialized = client?.encryptionManager?.initialized === true;
   const hasVault = recovery.recoveryStatus?.hasVault === true;
   const unlocked = recovery.recoveryStatus?.unlocked === true;
   const working = recovery.status === 'working';
@@ -207,19 +207,19 @@ export function UhmRecoveryPinDialog({
         </DialogHeader>
 
         <div className="space-y-4 p-5">
-          {!mlsInitialized && (
+          {!encryptionInitialized && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
-              {t('recovery_pin.mls_unavailable')}
+              {t('recovery_pin.encryption_unavailable')}
             </div>
           )}
 
-          {mlsInitialized && recovery.recoveryStatus === null && (
+          {encryptionInitialized && recovery.recoveryStatus === null && (
             <div className="flex items-center justify-center py-8 text-zinc-500">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
           )}
 
-          {mlsInitialized && recovery.recoveryStatus && !hasVault && (
+          {encryptionInitialized && recovery.recoveryStatus && !hasVault && (
             <form className="space-y-4" onSubmit={handleSetup}>
               <div className="flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-[12px] font-medium text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
                 <ShieldPlus className="mt-0.5 h-4 w-4 shrink-0" />
@@ -236,7 +236,7 @@ export function UhmRecoveryPinDialog({
             </form>
           )}
 
-          {mlsInitialized && hasVault && !unlocked && (
+          {encryptionInitialized && hasVault && !unlocked && (
             <form className="space-y-4" onSubmit={handleUnlock}>
               <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] font-medium text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">
                 <LockOpen className="mt-0.5 h-4 w-4 shrink-0" />
@@ -253,7 +253,7 @@ export function UhmRecoveryPinDialog({
             </form>
           )}
 
-          {mlsInitialized && hasVault && unlocked && !isChanging && (
+          {encryptionInitialized && hasVault && unlocked && !isChanging && (
             <div className="space-y-4">
               <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
                 <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300" />
@@ -275,7 +275,7 @@ export function UhmRecoveryPinDialog({
             </div>
           )}
 
-          {mlsInitialized && hasVault && unlocked && isChanging && (
+          {encryptionInitialized && hasVault && unlocked && isChanging && (
             <form className="space-y-4" onSubmit={handleChange}>
               {renderPinFields(true)}
               {validationError && <ErrorText>{validationError}</ErrorText>}

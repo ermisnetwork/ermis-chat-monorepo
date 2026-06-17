@@ -128,9 +128,9 @@ export const UhmAddMemberModal: React.FC<AddMemberModalProps> = ({
     try {
       setIsAdding(true);
       const memberIds = selectedUsers.map(u => u.id);
-      const mlsManager = channel.getClient().mlsManager;
-      if (channel.data?.mls_enabled && mlsManager?.initialized && channel.id && channel.cid) {
-        await mlsManager.addMembers(channel.type, channel.id, channel.cid, memberIds);
+      const encryptionManager = channel.getClient().encryptionManager;
+      if (channel.data?.mls_enabled && encryptionManager?.initialized && channel.id && channel.cid) {
+        await encryptionManager.addMembers(channel.type, channel.id, channel.cid, memberIds);
       } else {
         await channel.addMembers(memberIds);
       }

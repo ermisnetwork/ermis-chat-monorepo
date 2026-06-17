@@ -42,6 +42,11 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
     };
 
     const handleUpdate = () => setUpdateCount((c) => c + 1);
+    const handleE2eePreviewUpdate = (event: any) => {
+      if (event?.cid === channel.cid) {
+        handleUpdate();
+      }
+    };
 
     const sub1 = channel.on('member.banned', handleBanned);
     const sub2 = channel.on('member.unbanned', handleUnbanned);
@@ -70,13 +75,17 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
     const sub12 = channel.on('channel.topic.created', handleUpdate);
     const sub13 = channel.on('channel.pinned', handleUpdate);
     const sub14 = channel.on('channel.unpinned', handleUpdate);
+    const client = channel.getClient();
+    const sub15 = client.on('e2ee.message_decrypted' as any, handleE2eePreviewUpdate);
+    const sub16 = client.on('e2ee.local_messages_loaded' as any, handleE2eePreviewUpdate);
+    const sub17 = client.on('e2ee.post_join_sync' as any, handleE2eePreviewUpdate);
 
     // Topic support: listen for ban events on parent channel too
-    let sub15: { unsubscribe: () => void } | undefined;
-    let sub16: { unsubscribe: () => void } | undefined;
+    let sub18: { unsubscribe: () => void } | undefined;
+    let sub19: { unsubscribe: () => void } | undefined;
     if (parentChannel) {
-      sub15 = parentChannel.on('member.banned', handleBanned);
-      sub16 = parentChannel.on('member.unbanned', handleUnbanned);
+      sub18 = parentChannel.on('member.banned', handleBanned);
+      sub19 = parentChannel.on('member.unbanned', handleUnbanned);
     }
 
     return () => {
@@ -95,8 +104,11 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub12.unsubscribe();
       sub13.unsubscribe();
       sub14.unsubscribe();
-      if (sub15) sub15.unsubscribe();
-      if (sub16) sub16.unsubscribe();
+      sub15.unsubscribe();
+      sub16.unsubscribe();
+      sub17.unsubscribe();
+      if (sub18) sub18.unsubscribe();
+      if (sub19) sub19.unsubscribe();
     };
   }, [channel, currentUserId]);
 

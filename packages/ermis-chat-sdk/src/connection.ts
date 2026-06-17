@@ -351,8 +351,8 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     this._destroyCurrentWSConnection();
 
     try {
-      if (this.client.mlsManager?.initialized) {
-        this.client.mlsManager.markSyncStart();
+      if (this.client.encryptionManager?.initialized) {
+        this.client.encryptionManager.markSyncStart();
       }
       await this._connect();
       this._log('_reconnect() - Waiting for recoverCallBack');

@@ -4,34 +4,52 @@ The official React UI components for Ermis Chat.
 
 ## E2EE UI Support
 
-- `CreateChannelModal` supports E2EE direct/group creation when `client.mlsManager` is initialized.
+- `CreateChannelModal` supports E2EE direct/group creation when `client.encryptionManager` is initialized.
 - `CreateChannelModal` accepts `e2eeRecoveryPolicy`, defaulting to `member_assisted`, and sends it with new E2EE direct/group creation payloads.
-- Channel info actions can enable E2EE for an existing standard channel when the viewer is the owner and MLS is initialized; enable uses `member_assisted` recovery by default unless the caller has already set a policy in channel data.
-- Channel message lists listen for `e2ee.message_decrypted` and refresh decrypted message content from the SDK MLS storage.
+- Channel info actions can enable E2EE for an existing standard channel when the viewer is the owner and encryption is initialized; enable uses `member_assisted` recovery by default unless the caller has already set a policy in channel data.
+- Channel message lists listen for `e2ee.message_decrypted` and refresh decrypted message content from the SDK encryption storage.
+- Channel and topic-group previews listen for E2EE decrypted/local-cache refresh events so sidebar previews replace `Encrypted message` after plaintext is available.
 - Recovery PIN helpers expose vault state, unlocked PIN change, `repairEncryptedChannel()` for Channel Info repair, lower-level archive repair, restore progress loading, and queue enqueueing for app-level PIN gates.
-- `useRecoveryPin()` refreshes after MLS initialization and restore progress events, including apps that mount recovery UI before `client.mlsManager` is attached.
+- `useRecoveryPin()` refreshes after encryption initialization and restore progress events, including apps that mount recovery UI before `client.encryptionManager` is attached.
 - `CreateChannelModal` asks the SDK to archive the initial E2EE epoch after server channel creation succeeds, but does not fail channel creation if archive upload/stash is temporarily unavailable.
-- Channel info add/remove member actions use MLS member commits for E2EE channels and never fall back to standard `removeMembers` while MLS is required. Self-leave calls `channel.leaveChannelE2ee`, sending `self_remove: true` so the remaining designated MLS member can commit the eviction.
+- Channel info add/remove member actions use encryption member commits for E2EE channels and never fall back to standard `removeMembers` while encryption is required. Self-leave calls `channel.leaveChannelE2ee`, sending `self_remove: true` so the remaining designated encryption member can commit the eviction.
 - Consumers can customize E2EE toggle rendering through `E2eeToggleComponent` and receive E2EE status/key-rotation props in channel info cover/actions components.
 - Custom Channel Info action components receive the current `channel`, allowing selected-timeline repair UI without relying on global active-channel state.
 
 ## Progress Log
 
+### 2026-06-17 - Encryption Naming API Cleanup
+
+- Goal: align React package integration points with the SDK encryption naming cleanup.
+- Code changed: React hooks/components now read `client.encryptionManager`, use encryption initialization naming, and expose Channel Info props as `encryptionInitialized` / `encryptionEpoch`.
+- Docs/artifacts changed: this README records the rename boundary. Bellboy wire fields remain `mls_*`, so API docs, SQL, and Postman artifacts are unchanged.
+- Design decision: UI package names should describe the product feature as encryption; OpenMLS remains an implementation detail below the SDK boundary.
+- Performance: no runtime complexity, memory, storage, network, payload, or scaling behavior changes.
+- Verification: `npm run build:react`, `yarn workspace uhm-chat build`, static forbidden-name checks, and Node SDK export smoke test passed. Targeted UHM ESLint was attempted but is blocked by existing app lint errors unrelated to this rename.
+
+### 2026-06-17 - E2EE Topic Preview Refresh
+
+- Goal: fix topic-enabled channel list previews staying on `Encrypted message` after a hidden topic message decrypts.
+- Code changed: `useChannelRowUpdates()` and `useTopicGroupUpdates()` now listen for E2EE decrypted/local-cache refresh events and recompute row previews for the matching channel or topic group.
+- Docs changed: E2EE UI support notes now mention channel/topic-group preview refresh behavior.
+- Design decision: keep the fix in React render-state wiring; the SDK already merges successful decrypted messages into channel state before dispatching `e2ee.message_decrypted`.
+- Verification: `npm run build:react` and `yarn workspace uhm-chat build` passed.
+
 ### 2026-06-16 - E2EE Recovery Policy Create Flow
 
 - Goal: expose Bellboy recovery policy selection to React create-channel consumers.
 - Code changed: `CreateChannelModalProps` now includes `e2eeRecoveryPolicy`, and `CreateChannelModal` sends `data.e2ee_recovery_policy` when creating E2EE direct/group channels.
-- Code changed: Channel Info enable E2EE now passes the recovery policy to `MlsManager.enableE2ee()`, defaulting to `member_assisted`.
-- Design decision: the default remains `member_assisted`; apps that need strict self-owned recovery can pass `self_owned_only` without changing the MLS bundle flow.
+- Code changed: Channel Info enable E2EE now passes the recovery policy to `EncryptionManager.enableE2ee()`, defaulting to `member_assisted`.
+- Design decision: the default remains `member_assisted`; apps that need strict self-owned recovery can pass `self_owned_only` without changing the encryption bundle flow.
 - Verification: `npm run build:react` passed.
 
 ### 2026-05-17 - Production
 
 - Goal: fix E2EE self-leave from React channel actions so OpenMLS does not reject a self-removal commit.
-- Code changed: `ChannelInfo.tsx` and `ChannelActions.tsx` now call `channel.leaveChannelE2ee(currentUserId)` for E2EE leave actions instead of `mlsManager.evictMember(...)` or a plain `removeMembers(...)` call.
-- Follow-up audit: E2EE remove-member actions now fail early if MLS is not initialized instead of falling back to standard `removeMembers`, and remove errors are rethrown to the confirmation/action caller.
+- Code changed: `ChannelInfo.tsx` and `ChannelActions.tsx` now call `channel.leaveChannelE2ee(currentUserId)` for E2EE leave actions instead of `encryptionManager.evictMember(...)` or a plain `removeMembers(...)` call.
+- Follow-up audit: E2EE remove-member actions now fail early if encryption is not initialized instead of falling back to standard `removeMembers`, and remove errors are rethrown to the confirmation/action caller.
 - Docs changed: this README now distinguishes E2EE remove-member commits from self-leave with `self_remove=true`.
-- Design decision: self-leave remains a channel membership update; the existing `member.removed` handler cleans local MLS state for the leaving user only after the server emits the removal event and lets a remaining designated member commit the MLS eviction with `selfLeft=true`.
+- Design decision: self-leave remains a channel membership update; the existing `member.removed` handler cleans local encryption state for the leaving user only after the server emits the removal event and lets a remaining designated member commit the encryption eviction with `selfLeft=true`.
 - Verification: `./node_modules/.bin/tsc --noEmit -p packages/ermis-chat-react/tsconfig.json` and `yarn workspace @ermis-network/ermis-chat-react build` passed.
 - Next step: browser retest the E2EE leave action with at least one remaining online designated evictor.
 
@@ -44,7 +62,7 @@ The official React UI components for Ermis Chat.
 - Goal: expose production PIN recovery UX primitives for setup, unlock, incomplete restore prompts, and terminal gap display.
 - Code changed: `useRecoveryPin()` now surfaces SDK recovery status and queue enqueueing, while `RecoveryGate` and `RecoveryRestoreProgress` provide dialog/progress rendering helpers.
 - Design decision: the recovery gate is a non-blocking dialog. Permanent gaps render as recovery metadata and do not create fake timeline messages.
-- Code changed: `useChannelMessages` now merges `event.messages` from `e2ee.local_messages_loaded` before reloading the MLS local cache.
+- Code changed: `useChannelMessages` now merges `event.messages` from `e2ee.local_messages_loaded` before reloading the encryption local cache.
 - Verification: `yarn workspace @ermis-network/ermis-chat-react build` and `yarn workspace uhm-chat build` passed.
 
 ### 2026-06-01 - Restore Progress Event Wiring
@@ -55,8 +73,8 @@ The official React UI components for Ermis Chat.
 
 ### 2026-06-01 - Initial Archive and Gate Refresh Fixes
 
-- Goal: close real-app gaps where recovery UI mounted before MLS init and new E2EE rooms could miss their first epoch archive.
-- Code changed: `useRecoveryPin()` now retries status refresh while MLS initialization is still attaching the manager, and `CreateChannelModal` archives the current epoch immediately after the created E2EE channel is available.
+- Goal: close real-app gaps where recovery UI mounted before encryption init and new E2EE rooms could miss their first epoch archive.
+- Code changed: `useRecoveryPin()` now retries status refresh while encryption initialization is still attaching the manager, and `CreateChannelModal` archives the current epoch immediately after the created E2EE channel is available.
 - Design decision: archive upload still belongs to the SDK manager; React only triggers the post-create hook after the channel exists on the server.
 - Verification: `npm run build:uhm` passed.
 

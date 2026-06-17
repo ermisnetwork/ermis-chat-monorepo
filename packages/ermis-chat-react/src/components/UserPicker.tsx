@@ -230,7 +230,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
 
       try {
         setLoading(true);
-        const response = await client.queryUsers(String(pageSize), 1);
+        const response = await client.queryUsers(pageSize, 1);
         if (active && response.data) {
           setAllUsers(response.data);
           setHasMore(response.data.length >= pageSize);
@@ -258,7 +258,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
     const nextPage = page + 1;
     setLoadingMore(true);
     try {
-      const response = await client.queryUsers(String(pageSize), nextPage);
+      const response = await client.queryUsers(pageSize, nextPage);
       if (response.data) {
         setAllUsers(prev => {
           const existingIds = new Set(prev.map(u => u.id));

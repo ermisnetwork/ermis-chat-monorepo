@@ -110,8 +110,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     deleteTopicLabel,
     createTopicLabel,
     isE2ee,
-    mlsInitialized,
-    mlsEpoch,
+    encryptionInitialized,
+    encryptionEpoch,
     onRotateKey,
     rotateKeyLabel,
     rotateKeyDisabled,
@@ -263,10 +263,10 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
               label={
                 rotateKeyLabel ||
                 `${t('e2ee.rotate_key', 'Rotate encryption key')}${
-                  typeof mlsEpoch === 'number' ? ` (${mlsEpoch})` : ''
+                  typeof encryptionEpoch === 'number' ? ` (${encryptionEpoch})` : ''
                 }`
               }
-              disabled={isBlocked || !mlsInitialized || rotateKeyDisabled}
+              disabled={isBlocked || !encryptionInitialized || rotateKeyDisabled}
             />
           )}
 
@@ -275,7 +275,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
               onClick={onEnableE2ee}
               icon={Lock}
               label={enableE2eeLabel || t('e2ee.enable_channel', 'Enable E2EE')}
-              disabled={isBlocked || !mlsInitialized || enableE2eeDisabled}
+              disabled={isBlocked || !encryptionInitialized || enableE2eeDisabled}
             />
           )}
 
@@ -479,7 +479,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
             <div className="mt-3">
               <button
                 type="button"
-                disabled={isRepairing || !mlsInitialized}
+                disabled={isRepairing || !encryptionInitialized}
                 onClick={requestRepair}
                 className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
               >
@@ -498,7 +498,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
                 <div className="mt-1 leading-5">{t('encrypted_history.reset_warning')}</div>
                 <button
                   type="button"
-                  disabled={isRepairing || !mlsInitialized || !activeChannel}
+                  disabled={isRepairing || !encryptionInitialized || !activeChannel}
                   onClick={() => {
                     if (activeChannel) {
                       requestConfirm('reset_encrypted', activeChannel, () => runRepair('reset_local_state'));

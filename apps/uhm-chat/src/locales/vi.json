@@ -200,7 +200,7 @@
     "topic_inherited": "E2EE kế thừa từ kênh cha",
     "toggle_label": "Mã hóa đầu cuối",
     "toggle_description": "Tin nhắn và tệp đính kèm được mã hóa cho thành viên kênh.",
-    "unavailable": "E2EE chưa khả dụng cho đến khi MLS được khởi tạo."
+    "unavailable": "E2EE chưa khả dụng cho đến khi mã hóa được khởi tạo."
   },
   "recovery_pin": {
     "title": "PIN lịch sử trò chuyện",
@@ -211,7 +211,7 @@
     "menu_locked": "Nhập PIN",
     "menu_active": "Đã bật",
     "open_action": "PIN lịch sử trò chuyện",
-    "mls_unavailable": "Tính năng khôi phục lịch sử trò chuyện hiện chưa khả dụng.",
+    "encryption_unavailable": "Tính năng khôi phục lịch sử trò chuyện hiện chưa khả dụng.",
     "e2ee_required": "PIN lịch sử trò chuyện chỉ dùng cho cuộc trò chuyện mã hóa đầu cuối.",
     "no_channel": "Chưa chọn cuộc trò chuyện",
     "current_epoch": "Phiên bản lịch sử {{epoch}}",
