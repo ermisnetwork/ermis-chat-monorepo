@@ -1,8 +1,9 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { APIErrorResponse, ErmisChatOptions, ErrorFromResponse, Logger } from './types';
-import { chatCodes, isFunction, randomId, retryInterval, sleep } from './utils';
+import { chatCodes, randomId, retryInterval, sleep } from './utils';
 import https from 'https';
 import { isErrorResponse } from './errors';
+import { getLogger, setSdkLogger } from './logger';
 
 export class ErmisAuthProvider {
   apiKey: string;
@@ -28,7 +29,9 @@ export class ErmisAuthProvider {
   constructor(apiKey: string, baseURL: string, options?: ErmisChatOptions) {
     const inputOptions = options || {};
     this.apiKey = apiKey;
-    console.log("userBaseURL: ", options?.userBaseURL);
+    this.logger = getLogger(inputOptions.logger);
+    setSdkLogger(inputOptions.logger);
+    this.logger('info', 'auth:constructor - userBaseURL configured', { userBaseURL: options?.userBaseURL });
 
     this.baseURL = options?.userBaseURL || baseURL + '/uss/v1';
 
@@ -48,7 +51,6 @@ export class ErmisAuthProvider {
       });
     }
     this.axiosInstance = axios.create(this.options);
-    this.logger = isFunction(inputOptions.logger) ? inputOptions.logger : () => null;
     this.consecutiveFailures = 0;
     this.disconnected = false;
   }

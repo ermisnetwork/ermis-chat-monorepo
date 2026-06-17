@@ -1372,7 +1372,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
       // Đặt timeout 5 giây, nếu không lấy được ảnh thì bỏ qua để không treo upload
       timeoutId = window.setTimeout(() => {
-        console.warn('Timeout extracting video thumbnail. Skipping.');
+        this._client.logger('warn', 'channel:getThumbBlobVideo() - Timeout extracting video thumbnail', {
+          cid: this.cid,
+        });
         cleanup();
         resolve(null);
       }, 5000);
@@ -1388,7 +1390,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       const seekInterval = 1.0; // Nhảy mỗi lần 1 giây nếu gặp ảnh đen
 
       videoPlayer.addEventListener('error', () => {
-        console.error('Error when loading video file.');
+        this._client.logger('error', 'channel:getThumbBlobVideo() - Error when loading video file', { cid: this.cid });
         cleanup();
         resolve(null);
       });
@@ -1401,7 +1403,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
           if (!ctx) {
-            console.error('Failed to create canvas context.');
+            this._client.logger('error', 'channel:getThumbBlobVideo() - Failed to create canvas context', {
+              cid: this.cid,
+            });
             cleanup();
             resolve(null);
             return;
@@ -1443,7 +1447,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             (blob) => {
               cleanup();
               if (!blob) {
-                console.error('Failed to generate thumbnail.');
+                this._client.logger('error', 'channel:getThumbBlobVideo() - Failed to generate thumbnail', {
+                  cid: this.cid,
+                });
                 resolve(null);
                 return;
               }
@@ -1453,7 +1459,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             0.75,
           );
         } catch (error) {
-          console.error('Error while extracting thumbnail:', error);
+          this._client.logger('error', 'channel:getThumbBlobVideo() - Error while extracting thumbnail', {
+            cid: this.cid,
+            error,
+          });
           cleanup();
           resolve(null);
         }
@@ -2453,14 +2462,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         ? storage.loadE2eeMessages
           ? await storage.loadE2eeMessages(lookupIds).catch(() => new Map<string, any>())
           : new Map(
-            (
-              await Promise.all(
-                Array.from(new Set(lookupIds)).map((id) => storage.loadE2eeMessage(id).catch(() => null)),
+              (
+                await Promise.all(
+                  Array.from(new Set(lookupIds)).map((id) => storage.loadE2eeMessage(id).catch(() => null)),
+                )
               )
+                .filter(Boolean)
+                .map((message: any) => [message.id, message]),
             )
-              .filter(Boolean)
-              .map((message: any) => [message.id, message]),
-          )
         : new Map<string, any>();
     const currentMessages = this.state.messageSets?.flatMap((set) => set.messages) || [];
     const currentMessagesById = new Map(currentMessages.map((message: any) => [message.id, message]));

@@ -242,7 +242,7 @@ function passArray32ToWasm0(arg, malloc) {
  * # Example
  * ```javascript
  * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) console.warn("Invalid KeyPackage!");
+ * if (!isValid) globalThis.__ermisSdkLog?.('warn', "Invalid KeyPackage!");
  * ```
  * @param {Uint8Array} bytes
  * @returns {boolean}
@@ -2998,7 +2998,7 @@ async function __wbg_load(module, imports) {
 
             } catch (e) {
                 if (module.headers.get('Content-Type') != 'application/wasm') {
-                    console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+                    globalThis.__ermisSdkLog?.('warn', "`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
 
                 } else {
                     throw e;
@@ -3049,7 +3049,7 @@ function __wbg_get_imports() {
         try {
             deferred0_0 = arg0;
             deferred0_1 = arg1;
-            console.error(getStringFromWasm0(arg0, arg1));
+            globalThis.__ermisSdkLog?.('error', getStringFromWasm0(arg0, arg1));
         } finally {
             wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
         }
@@ -3235,7 +3235,7 @@ function initSync(module) {
         if (Object.getPrototypeOf(module) === Object.prototype) {
             ({module} = module)
         } else {
-            console.warn('using deprecated parameters for `initSync()`; pass a single object instead')
+            globalThis.__ermisSdkLog?.('warn', 'using deprecated parameters for `initSync()`; pass a single object instead')
         }
     }
 
@@ -3260,7 +3260,7 @@ async function __wbg_init(module_or_path) {
         if (Object.getPrototypeOf(module_or_path) === Object.prototype) {
             ({module_or_path} = module_or_path)
         } else {
-            console.warn('using deprecated parameters for the initialization function; pass a single object instead')
+            globalThis.__ermisSdkLog?.('warn', 'using deprecated parameters for the initialization function; pass a single object instead')
         }
     }
 

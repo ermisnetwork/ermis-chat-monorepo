@@ -2,6 +2,7 @@ import FormData from 'form-data';
 import { ExtendableGenerics, DefaultGenerics, MessageResponse, FormatMessageResponse, ForwardMessage } from './types';
 import { AxiosRequestConfig } from 'axios';
 import { ErmisChat } from './client';
+import { sdkLog } from './logger';
 
 /**
  * logChatPromiseExecution - utility function for logging the execution of a promise..
@@ -13,7 +14,7 @@ import { ErmisChat } from './client';
  */
 export function logChatPromiseExecution<T>(promise: Promise<T>, name: string) {
   promise.then().catch((error) => {
-    console.warn(`failed to do ${name}, ran into error: `, error);
+    sdkLog('warn', `failed to do ${name}, ran into error: `, error);
   });
 }
 
@@ -82,7 +83,6 @@ export function addFileToFormData(
   return data;
 }
 
-
 /**
  * retryInterval - A retry interval which increases acc to number of failures
  *
@@ -149,10 +149,6 @@ function getRandomBytes(length: number): Uint8Array {
   getRandomValues(bytes);
   return bytes;
 }
-
-
-
-
 
 /**
  * listenForConnectionChanges - Adds an event listener fired on browser going online or offline
@@ -472,7 +468,7 @@ export async function ensureMembersUserInfoLoaded<ErmisChatGenerics extends Exte
           try {
             await client.getBatchUsers(idsToFetch);
           } catch (e) {
-            console.error('Failed to get batch users', e);
+            client.logger('error', 'utils:ensureMembersUserInfoLoaded() - Failed to get batch users', { err: e });
           }
         }
         if (resolveFn) resolveFn();

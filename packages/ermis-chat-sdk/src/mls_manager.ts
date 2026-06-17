@@ -44,6 +44,7 @@ import type {
 import { IndexedDBMlsStorage } from './mls_storage';
 import type { ErmisChat } from './client';
 import type { ExtendableGenerics, DefaultGenerics } from './types';
+import { sdkLog } from './logger';
 
 // ============================================================
 // Epoch-stale error detection
@@ -586,7 +587,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // Load public recovery metadata before sync so this device can upload
     // account-owned archives without requiring the user to enter the PIN first.
     await this._loadRecoveryPublicMetadata().catch((err) => {
-      console.warn('[MLS] Recovery public metadata unavailable during init:', err);
+      sdkLog('warn', '[MLS] Recovery public metadata unavailable during init:', err);
     });
 
     // Normalize interrupted restore jobs before status/UI checks.
@@ -615,7 +616,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       user_id: this.userId,
       device_id: this.deviceId,
     } as any);
-    console.log('[MLS] Manager initialized', {
+    sdkLog('info', '[MLS] Manager initialized', {
       userId: this.userId,
       deviceId: this.deviceId,
       groups: this.groups.size,
@@ -655,15 +656,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       try {
         this.provider = wasmModule.Provider.from_bytes(new Uint8Array(savedProvider));
         this._providerRestored = true;
-        console.log('[MLS] Provider restored from storage');
+        sdkLog('info', '[MLS] Provider restored from storage');
         return;
       } catch (err) {
-        console.warn('[MLS] Failed to restore Provider, creating new one:', err);
+        sdkLog('warn', '[MLS] Failed to restore Provider, creating new one:', err);
       }
     }
 
     this.provider = new wasmModule.Provider();
-    console.log('[MLS] New Provider created');
+    sdkLog('info', '[MLS] New Provider created');
   }
 
   /**
@@ -674,12 +675,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     if (savedBytes) {
       this.identity = wasmModule.Identity.from_bytes(this.provider, new Uint8Array(savedBytes));
-      console.log('[MLS] Identity restored from storage');
+      sdkLog('info', '[MLS] Identity restored from storage');
     } else {
       this.identity = new wasmModule.Identity(this.provider, this.userId);
       const bytes = this.identity.to_bytes();
       await this.storage.saveIdentity(this.userId!, this.deviceId!, bytes);
-      console.log('[MLS] New identity created and saved');
+      sdkLog('info', '[MLS] New identity created and saved');
     }
   }
 
@@ -699,9 +700,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         const serialized = kps.map((kp: any) => kp.to_bytes());
         await this.e2eeClient!.uploadKeyPackages({ key_packages: serialized });
         await this._persistProvider();
-        console.log(`[MLS] Uploaded ${uploadCount} key packages`);
+        sdkLog('info', `[MLS] Uploaded ${uploadCount} key packages`);
       } catch (err) {
-        console.warn('[MLS] Failed to upload key packages:', err);
+        sdkLog('warn', '[MLS] Failed to upload key packages:', err);
       } finally {
         this._keyPackageUploadPromise = null;
       }
@@ -721,7 +722,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     if (remaining >= KEY_PACKAGE_POOL_TARGET) return;
 
     const toUpload = KEY_PACKAGE_POOL_TARGET - remaining;
-    console.log(`[MLS] Key packages below target (${remaining}/${KEY_PACKAGE_POOL_TARGET}), topping up ${toUpload}...`);
+    sdkLog(
+      'info',
+      `[MLS] Key packages below target (${remaining}/${KEY_PACKAGE_POOL_TARGET}), topping up ${toUpload}...`,
+    );
     await this._uploadKeyPackages(toUpload);
   }
 
@@ -730,7 +734,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const response = await this.e2eeClient!.getKeyPackageCount();
       await this.ensureKeyPackages(response.remaining);
     } catch (err) {
-      console.warn('[MLS] Failed to check key package count:', err);
+      sdkLog('warn', '[MLS] Failed to check key package count:', err);
     }
   }
 
@@ -752,7 +756,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const bytes = this.provider.to_bytes();
       await this.storage.saveProviderState(this.userId!, this.deviceId!, bytes);
     } catch (err) {
-      console.warn('[MLS] Failed to persist Provider:', err);
+      sdkLog('warn', '[MLS] Failed to persist Provider:', err);
     }
   }
 
@@ -1185,12 +1189,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         });
       }
     } catch (err) {
-      current = await this._saveCheckpointMaterialization(
-        current,
-        'account_owned',
-        'pending',
-        getApiErrorMessage(err),
-      );
+      current = await this._saveCheckpointMaterialization(current, 'account_owned', 'pending', getApiErrorMessage(err));
     }
 
     if (current.materialization.group_sponsored === 'pending' && !this._sponsoredArchiveDisabled) {
@@ -1211,7 +1210,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         if (recipients.matching_candidate_exists) {
           current = await this._saveCheckpointMaterialization(current, 'group_sponsored', 'uploaded');
         } else if (!recipients.recipient_set_hash || recipients.recipients.length === 0 || recipients.reason) {
-          current = await this._saveCheckpointMaterialization(current, 'group_sponsored', 'terminal', recipients.reason);
+          current = await this._saveCheckpointMaterialization(
+            current,
+            'group_sponsored',
+            'terminal',
+            recipients.reason,
+          );
         } else if (
           !(await this._hasArchiveAcknowledged(
             current.scope_cid,
@@ -1452,7 +1456,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             status: 'failed',
             error: err instanceof Error ? err.message : String(err),
           });
-          console.warn('[MLS] Known E2EE channel bootstrap failed:', channel.cid, err);
+          sdkLog('warn', '[MLS] Known E2EE channel bootstrap failed:', channel.cid, err);
         } finally {
           completed += 1;
           this._emitBootstrapProgress({
@@ -1507,14 +1511,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this._recoveryRecheckDoneForUnlock = true;
 
     await this.bootstrapKnownE2eeChannels({ source: 'recovery_unlock' }).catch((err) => {
-      console.warn('[MLS] Recovery unlock bootstrap did not fully complete; continuing archive recheck:', err);
+      sdkLog('warn', '[MLS] Recovery unlock bootstrap did not fully complete; continuing archive recheck:', err);
     });
 
     for (const timeline of this._listKnownE2eeTimelines()) {
       try {
         await this.repairRecoveryChannel(timeline.channelType, timeline.channelId, { mode: 'recheck_channel' });
       } catch (err) {
-        console.warn('[MLS] Recovery unlock archive recheck failed:', timeline.cid, err);
+        sdkLog('warn', '[MLS] Recovery unlock archive recheck failed:', timeline.cid, err);
       }
     }
   }
@@ -1538,7 +1542,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     try {
       await this.archiveCurrentEpoch(channelType, channelId, sponsorRole, primaryUserId);
     } catch (err) {
-      console.warn('[MLS] Archive current epoch failed; continuing MLS flow:', channelType, channelId, err);
+      sdkLog('warn', '[MLS] Archive current epoch failed; continuing MLS flow:', channelType, channelId, err);
     }
   }
 
@@ -1588,7 +1592,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           retry_count: record.retry_count + 1,
           updated_at: Date.now(),
         });
-        console.warn('[MLS] Deferred archive flush failed; keeping for retry:', record.cid, record.epoch, err);
+        sdkLog('warn', '[MLS] Deferred archive flush failed; keeping for retry:', record.cid, record.epoch, err);
       }
     }
     await this._drainArchiveUploadQueue();
@@ -1688,7 +1692,13 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         }
         await this._markArchiveUploadAcknowledged(item, upload, response.reason_code);
         if (response.status !== 'stored') {
-          console.debug('[MLS] Archive upload acknowledged without storing:', item.cid, item.epoch, response.reason_code);
+          sdkLog(
+            'info',
+            '[MLS] Archive upload acknowledged without storing:',
+            item.cid,
+            item.epoch,
+            response.reason_code,
+          );
         }
       } catch (err) {
         const ermisCode = getApiErrorCode(err);
@@ -1710,7 +1720,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
               getApiErrorMessage(err),
             );
           }
-          console.warn('[MLS] Archive upload rejected; removing non-retryable work item:', {
+          sdkLog('warn', '[MLS] Archive upload rejected; removing non-retryable work item:', {
             cid: item.cid,
             epoch: item.epoch,
             ermisCode,
@@ -1720,7 +1730,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         }
         item.retry_count += 1;
         await this.storage.saveArchiveUpload(item);
-        console.warn('[MLS] Archive upload failed, queued for retry:', item.cid, item.epoch, err);
+        sdkLog('warn', '[MLS] Archive upload failed, queued for retry:', item.cid, item.epoch, err);
       }
     }
   }
@@ -1759,9 +1769,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             id: issue.message_id,
             created_at: issue.created_at,
             updated_at:
-              typeof issue.encrypted_message?.updated_at === 'string'
-                ? issue.encrypted_message.updated_at
-                : undefined,
+              typeof issue.encrypted_message?.updated_at === 'string' ? issue.encrypted_message.updated_at : undefined,
           });
       const existing = repairByVersion.get(messageVersion);
       const latest = existing && existing.updated_at > issue.updated_at ? existing : issue;
@@ -2142,7 +2150,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const status = this._normalizeProgress(record).status;
       return status === 'done' || status === 'done_with_gaps';
     } catch (err) {
-      console.warn('[MLS] Restore progress check failed before enqueue:', cid, err);
+      sdkLog('warn', '[MLS] Restore progress check failed before enqueue:', cid, err);
       return false;
     }
   }
@@ -2205,7 +2213,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         try {
           await this.restoreHistoricalMessages(entry.channelType, entry.channelId, entry.options);
         } catch (err) {
-          console.warn('[MLS] Restore queue entry failed:', entry.cid, err);
+          sdkLog('warn', '[MLS] Restore queue entry failed:', entry.cid, err);
           if (!this._recoveryPrivateKey) break;
         }
       }
@@ -2980,7 +2988,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             continue;
           }
 
-          const reason: RepairIssueReason = candidates.every((candidate) => candidate.prepareError === 'missing_snapshot')
+          const reason: RepairIssueReason = candidates.every(
+            (candidate) => candidate.prepareError === 'missing_snapshot',
+          )
             ? 'missing_snapshot'
             : candidates.every((candidate) => candidate.prepareError === 'no_matching_wrap')
             ? 'no_matching_wrap'
@@ -3261,7 +3271,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         const cursor = (await this._loadScopeSyncCursor(scopeCid)) || this._nowEventCursor();
         await this._syncChannelFromCursor(scopeCid, cursor);
       })().catch((err) => {
-        console.warn('[MLS] Deferred scope sync after repair failed:', scopeCid, err);
+        sdkLog('warn', '[MLS] Deferred scope sync after repair failed:', scopeCid, err);
       });
     }
   }
@@ -3316,7 +3326,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       } finally {
         this._finishScopeRepairGate(scopeCid);
         if (softLockAcquired && this.storage.releaseRepairLock) {
-          await this.storage.releaseRepairLock(scopeCid, this._repairLockOwnerId).catch(console.warn);
+          await this.storage.releaseRepairLock(scopeCid, this._repairLockOwnerId).catch((err) => sdkLog('warn', err));
         }
       }
     })();
@@ -3545,15 +3555,15 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // Step 1: Restore groups from Provider storage using saved CID list
       const savedCids = await this.storage.listGroupCids();
       if (savedCids.length > 0) {
-        console.log(`[MLS] Restoring ${savedCids.length} group(s) from Provider...`);
+        sdkLog('info', `[MLS] Restoring ${savedCids.length} group(s) from Provider...`);
         for (const cid of savedCids) {
           if (this.groups.has(cid)) continue;
           try {
             const group = wasmModule.Group.load(this.provider, cid);
             this.groups.set(cid, group);
-            console.log('[MLS] Restored group:', cid);
+            sdkLog('info', '[MLS] Restored group:', cid);
           } catch (err) {
-            console.warn('[MLS] Failed to restore group:', cid, err);
+            sdkLog('warn', '[MLS] Failed to restore group:', cid, err);
           }
         }
       }
@@ -3569,10 +3579,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           this._pendingEvictions.set(cid, existing);
         }
         if (Object.keys(persisted).length > 0) {
-          console.log('[MLS] Restored pending evictions from storage:', persisted);
+          sdkLog('info', '[MLS] Restored pending evictions from storage:', persisted);
         }
       } catch (err) {
-        console.warn('[MLS] Failed to load persisted evictions:', err);
+        sdkLog('warn', '[MLS] Failed to load persisted evictions:', err);
       }
 
       // Step 2: Sync all MLS scopes via scope_sync.
@@ -3590,7 +3600,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
 
       if (Object.keys(syncCursors).length === 0) {
-        console.log('[MLS] No existing channels to sync — will check for external join');
+        sdkLog('info', '[MLS] No existing channels to sync — will check for external join');
       }
 
       // Paginated sync loop. It also carries removed_cursor, so keep calling
@@ -3688,7 +3698,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
       await this._saveMlsSyncCheckpoint({ scopeCursors: syncCursors });
 
-      console.log(`[MLS] Sync complete. Groups: ${this.groups.size}`);
+      sdkLog('info', `[MLS] Sync complete. Groups: ${this.groups.size}`);
 
       // Pending evictions are intentionally deferred. The next MLS membership
       // commit bundles them through _collectPendingGhosts(); sync itself must
@@ -3712,20 +3722,20 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         }
 
         if (missingCids.length > 0) {
-          console.log(`[MLS] Multi-device: ${missingCids.length} E2EE channel(s) need external join`);
+          sdkLog('info', `[MLS] Multi-device: ${missingCids.length} E2EE channel(s) need external join`);
           // External join sequentially to avoid race conditions on Provider snapshot
           for (const { cid, type, id } of missingCids) {
             try {
               const result = await this.syncNewChannel(type, id, cid);
-              console.log('[MLS] Multi-device ensure completed:', cid, result.status);
+              sdkLog('info', '[MLS] Multi-device ensure completed:', cid, result.status);
             } catch (err) {
-              console.warn('[MLS] Multi-device external join failed:', cid, err);
+              sdkLog('warn', '[MLS] Multi-device external join failed:', cid, err);
             }
           }
         }
       }
     } catch (err) {
-      console.warn('[MLS] Failed to sync and restore groups:', err);
+      sdkLog('warn', '[MLS] Failed to sync and restore groups:', err);
     }
   }
 
@@ -3759,7 +3769,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       delete activeChannels[cid];
     }
 
-    console.log('[MLS] Removed channel tombstone processed:', cid, {
+    sdkLog('info', '[MLS] Removed channel tombstone processed:', cid, {
       removed_at: tombstone.removed_at,
       removed_by: tombstone.removed_by,
       removal_type: tombstone.removal_type,
@@ -3851,7 +3861,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                   );
                 } catch (err) {
                   if (this._isMissingKeyPackageError(err)) {
-                    console.warn('[MLS] Skipping stale welcome with no local KeyPackage:', protocolCid, err);
+                    sdkLog('warn', '[MLS] Skipping stale welcome with no local KeyPackage:', protocolCid, err);
                     break;
                   }
                   throw err;
@@ -3867,12 +3877,12 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                 protoUserId === this.userId && !!protoDeviceId && protoDeviceId === this.deviceId;
 
               if (isOwnDeviceCommit) {
-                console.log(`[MLS] Skipping own ${typeField} (already merged):`, protocolCid);
+                sdkLog('info', `[MLS] Skipping own ${typeField} (already merged):`, protocolCid);
                 break;
               }
 
               if (!this.groups.has(protocolCid)) {
-                console.log(`[MLS] Skipping ${typeField} before local group exists:`, protocolCid);
+                sdkLog('info', `[MLS] Skipping ${typeField} before local group exists:`, protocolCid);
                 break;
               }
 
@@ -3885,7 +3895,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
               if (currentGroup && commitEventEpoch >= 0) {
                 const groupEpoch = Number(currentGroup.epoch());
                 if (groupEpoch >= commitEventEpoch) {
-                  console.log(
+                  sdkLog(
+                    'info',
                     `[MLS] processCommit: commit at epoch ${commitEventEpoch} already applied (group at ${groupEpoch}), skipping:`,
                     protocolCid,
                   );
@@ -3972,10 +3983,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                       const queue = this._pendingEvictions.get(e2eeGroupId) ?? new Set<string>();
                       queue.add(leftUserId);
                       this._pendingEvictions.set(e2eeGroupId, queue);
-                      console.log('[MLS] Queued eviction (offline recovery) for', leftUserId, 'in', e2eeGroupId);
+                      sdkLog('info', '[MLS] Queued eviction (offline recovery) for', leftUserId, 'in', e2eeGroupId);
                       // Persist immediately so the queue survives a crash/reconnect
                       // even after the sync cursor has advanced past this SystemMessage.
-                      this._persistPendingEvictions().catch(console.warn);
+                      this._persistPendingEvictions().catch((err) => sdkLog('warn', err));
                     }
                   } catch (_err) {
                     // members_by_user_id may fail if group is in invalid state — safe to ignore
@@ -4068,7 +4079,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
                 queue.add(removedUserId);
                 this._pendingEvictions.set(eventGroupId, queue);
                 await this._persistPendingEvictions();
-                console.log('[MLS] Queued eviction from member_removed sync for', removedUserId, 'in', eventGroupId);
+                sdkLog('info', '[MLS] Queued eviction from member_removed sync for', removedUserId, 'in', eventGroupId);
               }
             } catch (_err) {
               // members_by_user_id may fail if group is in invalid state — safe to ignore
@@ -4115,7 +4126,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
               });
             }
           } catch (err) {
-            console.warn('[MLS] Failed to update reactions in storage:', messageId, err);
+            sdkLog('warn', '[MLS] Failed to update reactions in storage:', messageId, err);
           }
           break;
         }
@@ -4141,7 +4152,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           try {
             await this.storage.deleteE2eeMessage(deletedMessageId);
           } catch (err) {
-            console.warn('[MLS] Failed to delete message from storage during sync:', deletedMessageId, err);
+            sdkLog('warn', '[MLS] Failed to delete message from storage during sync:', deletedMessageId, err);
           }
 
           // 3. Dispatch event for UI re-render
@@ -4152,7 +4163,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             cid: routeCid,
           });
 
-          console.log('[MLS] Sync: message deleted:', deletedMessageId);
+          sdkLog('info', '[MLS] Sync: message deleted:', deletedMessageId);
           break;
         }
         case 'message_updated': {
@@ -4209,11 +4220,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
               }
             }
           } catch (err) {
-            console.warn('[MLS] Failed to update message in storage during sync:', updatedMessage.id, err);
+            sdkLog('warn', '[MLS] Failed to update message in storage during sync:', updatedMessage.id, err);
           }
 
           if (updateBuffered) {
-            console.log('[MLS] Sync: buffered message update:', updatedMessage.id);
+            sdkLog('info', '[MLS] Sync: buffered message update:', updatedMessage.id);
             processedEvents += 1;
             lastSafeEventCursor = eventCursor;
             continue;
@@ -4234,7 +4245,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             cid: routeCid,
           });
 
-          console.log('[MLS] Sync: message updated:', updatedMessage.id);
+          sdkLog('info', '[MLS] Sync: message updated:', updatedMessage.id);
           break;
         }
         case 'message_pin': {
@@ -4256,7 +4267,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
             }
           }
 
-          console.log('[MLS] Sync: message', pinData.action, ':', pinnedMessage.id);
+          sdkLog('info', '[MLS] Sync: message', pinData.action, ':', pinnedMessage.id);
           break;
         }
         default:
@@ -4306,7 +4317,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
     }
 
-    console.log('[MLS] Processed', events.length, 'events for:', cid);
+    sdkLog('info', '[MLS] Processed', events.length, 'events for:', cid);
     return {
       processedEventCursor: lastSafeEventCursor,
       processedEvents,
@@ -4408,11 +4419,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     if (!this.groups.has(cid)) {
       // Multi-device fallback: no welcome found (consumed by another device) → external join
-      console.log('[MLS] No welcome found for:', cid, '→ attempting external join');
+      sdkLog('info', '[MLS] No welcome found for:', cid, '→ attempting external join');
       try {
         const joinResult = await this.joinExternal(channelType, channelId, cid);
         const postJoinState = await this.syncAfterExternalJoin(channelType, channelId, cid);
-        console.log('[MLS] External join fallback succeeded:', cid);
+        sdkLog('info', '[MLS] External join fallback succeeded:', cid);
         return {
           cid,
           status: postJoinState.status === 'needs_retry' ? 'needs_retry' : 'joined_external',
@@ -4420,7 +4431,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           sync_state: postJoinState.sync_state,
         };
       } catch (err) {
-        console.warn('[MLS] External join fallback failed:', cid, err);
+        sdkLog('warn', '[MLS] External join fallback failed:', cid, err);
         if ((err as any)?.code === 'stale_group_info') {
           const state = this._makeSyncState(cid, 'stale_group_info', since.created_at, syncState.processed_cursor, {
             needs_retry: true,
@@ -4455,7 +4466,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     void channelType;
     void channelId;
     if (!this.groups.has(cid)) {
-      console.warn('[MLS] syncAfterExternalJoin: no group for', cid, '— skipping');
+      sdkLog('warn', '[MLS] syncAfterExternalJoin: no group for', cid, '— skipping');
       return { cid, status: 'skipped', error: 'no local MLS group' };
     }
 
@@ -4469,7 +4480,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // Notify UI: E2EE messages for this channel have been decrypted, please refresh.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (this.client as any)?.dispatchEvent?.({ type: 'e2ee.post_join_sync', cid });
-    console.log('[MLS] syncAfterExternalJoin complete for:', cid);
+    sdkLog('info', '[MLS] syncAfterExternalJoin complete for:', cid);
     return {
       cid,
       status: syncState.needs_retry ? 'needs_retry' : 'ready',
@@ -4630,7 +4641,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this.groups.set(cid, group);
     // Persist group CID marker to storage
     this._saveGroup(cid);
-    console.log('[MLS] Group created:', cid);
+    sdkLog('info', '[MLS] Group created:', cid);
     return group;
   }
 
@@ -4647,7 +4658,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     // Skip if we already have this group (e.g. we're the creator)
     if (this.groups.has(cid)) {
-      console.log('[MLS] Already have group, skipping join:', cid);
+      sdkLog('info', '[MLS] Already have group, skipping join:', cid);
       group.free();
       return this.groups.get(cid);
     }
@@ -4656,7 +4667,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     await this._saveGroup(cid);
     await this._persistProvider();
     await this.safeArchiveCurrentEpochForCid(cid, 'backup', primaryUserId);
-    console.log('[MLS] Joined group via Welcome:', cid);
+    sdkLog('info', '[MLS] Joined group via Welcome:', cid);
     return group;
   }
 
@@ -4673,7 +4684,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     try {
       await this.storage.saveGroupState(cid, true);
     } catch (err) {
-      console.warn('[MLS] Failed to save group CID:', cid, err);
+      sdkLog('warn', '[MLS] Failed to save group CID:', cid, err);
     }
   }
 
@@ -4732,7 +4743,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       });
     } catch (err) {
       // Server rejected (e.g. concurrent enable, epoch_stale) → clear pending commit
-      console.error('[MLS] enableE2ee failed, clearing pending commit:', err);
+      sdkLog('error', '[MLS] enableE2ee failed, clearing pending commit:', err);
       group.clear_pending_commit(this.provider);
       await this._persistProvider();
       throw err;
@@ -4743,7 +4754,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     await this._persistProvider();
     await this.safeArchiveCurrentEpoch(channelType, channelId);
 
-    console.log('[MLS] E2EE enabled for channel:', cid, 'epoch:', Number(group.epoch()));
+    sdkLog('info', '[MLS] E2EE enabled for channel:', cid, 'epoch:', Number(group.epoch()));
     return result;
   }
 
@@ -4792,7 +4803,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (!projectId) throw new Error('[MLS] createE2eeChannel: client.projectId is required for messaging E2EE');
       channelId = wasmModule.hash_channel_id(projectId, allMemberUserIds);
       cid = `messaging:${channelId}`;
-      console.log('[MLS] createE2eeChannel: computed messaging channelId:', channelId);
+      sdkLog('info', '[MLS] createE2eeChannel: computed messaging channelId:', channelId);
     }
 
     if (!channelId || !cid) {
@@ -4833,7 +4844,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     if (allKeyPackages.length === 0 && requestedRecipientIds.length === 0) {
       // Channel has only the creator. Proceed with a solo commit.
-      console.log('[MLS] createE2eeChannel: no other member KPs found, creating solo group for:', cid);
+      sdkLog('info', '[MLS] createE2eeChannel: no other member KPs found, creating solo group for:', cid);
     }
 
     // 3. Add members → commit + welcome (or solo commit if no KPs)
@@ -4860,7 +4871,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
 
-    console.log('[MLS] createE2eeChannel: bundle ready for cid:', cid, 'epoch:', Number(group.epoch()));
+    sdkLog('info', '[MLS] createE2eeChannel: bundle ready for cid:', cid, 'epoch:', Number(group.epoch()));
 
     const result: {
       welcome: Uint8Array;
@@ -4957,7 +4968,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     }
     if (pending.size === 0) this._pendingEvictions.delete(cid);
     await this._persistPendingEvictions();
-    console.log('[MLS] Cleaned up evicted ghosts:', ghostsEvicted, 'from', cid);
+    sdkLog('info', '[MLS] Cleaned up evicted ghosts:', ghostsEvicted, 'from', cid);
   }
 
   private _isActiveChannelMember(cid: string, userId: string): boolean {
@@ -4991,7 +5002,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     if (pending && pending.size === 0) this._pendingEvictions.delete(cid);
     if (dropped.length > 0) {
       await this._persistPendingEvictions();
-      console.log('[MLS] Dropped pending ghosts that are active again:', dropped, 'from', cid);
+      sdkLog('info', '[MLS] Dropped pending ghosts that are active again:', dropped, 'from', cid);
     }
     return dropped;
   }
@@ -5079,14 +5090,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       });
     } catch (err) {
       if (isEpochStaleError(err) && !isRetry) {
-        console.warn('[MLS] addMembers: epoch_stale, clearing + syncing + retrying');
+        sdkLog('warn', '[MLS] addMembers: epoch_stale, clearing + syncing + retrying');
         group.clear_pending_commit(this.provider);
         await this._persistProvider();
         await this.sync();
         return this.addMembers(channelType, channelId, cid, newUserIds, true);
       }
       // Any other error → clear pending commit + rethrow
-      console.error('[MLS] addMembers failed, clearing pending commit:', err);
+      sdkLog('error', '[MLS] addMembers failed, clearing pending commit:', err);
       group.clear_pending_commit(this.provider);
       await this._persistProvider();
       throw err;
@@ -5098,7 +5109,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     await this.safeArchiveCurrentEpoch(channelType, channelId);
     await this._cleanupEvictedGhosts(cid, ghostsToRemove);
 
-    console.log('[MLS] Added', newUserIds.length, 'users to:', cid, 'epoch:', Number(group.epoch()));
+    sdkLog('info', '[MLS] Added', newUserIds.length, 'users to:', cid, 'epoch:', Number(group.epoch()));
     return { epoch: Number(group.epoch()) };
   }
 
@@ -5128,7 +5139,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
 
       if (!this.isDesignatedEvictor(activeChannel)) {
-        console.log('[MLS] _drainPendingEvictions: keep queued for', cid, '— this client is not designated evictor');
+        sdkLog('info', '[MLS] _drainPendingEvictions: keep queued for', cid, '— this client is not designated evictor');
         continue;
       }
 
@@ -5164,7 +5175,8 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         if (activeTarget) {
           await this.sync();
           await this._dropActivePendingEvictions(cid, [activeTarget]);
-          console.warn(
+          sdkLog(
+            'warn',
             '[MLS] _drainPendingEvictions: target active again, dropped from retry list:',
             cid,
             activeTarget,
@@ -5175,7 +5187,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           await this.sync();
           await this._dropActivePendingEvictions(cid, ghostsToRemove);
         }
-        console.warn('[MLS] _drainPendingEvictions: composite commit failed, queue kept for retry:', cid, err);
+        sdkLog('warn', '[MLS] _drainPendingEvictions: composite commit failed, queue kept for retry:', cid, err);
       }
     }
   }
@@ -5213,10 +5225,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           group.delete_state(this.provider);
         }
       } catch (err) {
-        console.warn('[MLS] _deleteLocalGroupState: failed to delete OpenMLS group state for', cid, err);
+        sdkLog('warn', '[MLS] _deleteLocalGroupState: failed to delete OpenMLS group state for', cid, err);
       }
       this.groups.delete(cid);
-      console.log('[MLS] _deleteLocalGroupState: deleted local group state for', cid);
+      sdkLog('info', '[MLS] _deleteLocalGroupState: deleted local group state for', cid);
     }
 
     this._channelReadyUntil.delete(cid);
@@ -5238,18 +5250,20 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           group.delete_state(this.provider);
         }
       } catch (err) {
-        console.warn('[MLS] leaveGroup: failed to delete OpenMLS group state for', cid, err);
+        sdkLog('warn', '[MLS] leaveGroup: failed to delete OpenMLS group state for', cid, err);
       }
       this.groups.delete(cid);
-      console.log('[MLS] leaveGroup: deleted local group state for', cid);
+      sdkLog('info', '[MLS] leaveGroup: deleted local group state for', cid);
     }
     // Fire-and-forget: remove the local group marker and move the per-cid cursor
     // past the removal event. Without this, a later re-add can replay an old
     // already-consumed Welcome and fail with "No matching key package".
-    this._persistProvider().catch(console.warn);
-    this.storage.deleteGroup?.(cid).catch?.(console.warn);
-    this._saveScopeSyncCursor(cid, { created_at: removedCursor, event_id: ZERO_EVENT_ID }).catch(console.warn);
-    this._savePendingSnapshots(cid, []).catch(console.warn);
+    this._persistProvider().catch((err) => sdkLog('warn', err));
+    this.storage.deleteGroup?.(cid).catch?.((err) => sdkLog('warn', err));
+    this._saveScopeSyncCursor(cid, { created_at: removedCursor, event_id: ZERO_EVENT_ID }).catch((err) =>
+      sdkLog('warn', err),
+    );
+    this._savePendingSnapshots(cid, []).catch((err) => sdkLog('warn', err));
   }
 
   /**
@@ -5270,7 +5284,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     for (const cid of orphans) {
       this.groups.delete(cid);
       await this.storage.deleteGroup?.(cid);
-      console.log('[MLS] cleanupOrphanedGroups: removed orphaned group', cid);
+      sdkLog('info', '[MLS] cleanupOrphanedGroups: removed orphaned group', cid);
     }
     if (orphans.length > 0) {
       await this._persistProvider();
@@ -5314,7 +5328,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   private _isMlsProcessingBlockedForRoute(routeCid: string, groupCid?: string): boolean {
-    return this.isChannelMlsSyncBlocked(routeCid) || (!!groupCid && groupCid !== routeCid && this.isChannelMlsSyncBlocked(groupCid));
+    return (
+      this.isChannelMlsSyncBlocked(routeCid) ||
+      (!!groupCid && groupCid !== routeCid && this.isChannelMlsSyncBlocked(groupCid))
+    );
   }
 
   private _shouldLogThrottled(map: Map<string, number>, key: string, ttlMs: number): boolean {
@@ -5333,7 +5350,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private _logDeferredMlsEventOnce(reason: string, routeCid: string, groupCid: string, messageId?: string): void {
     const key = `${reason}:${routeCid}:${groupCid}:${messageId || ''}`;
     if (!this._shouldLogThrottled(this._deferredMlsEventLogKeys, key, MLS_EXPECTED_DECRYPT_LOG_TTL_MS)) return;
-    console.debug('[MLS] Deferred MLS event until channel state is ready:', {
+    sdkLog('info', '[MLS] Deferred MLS event until channel state is ready:', {
       reason,
       cid: routeCid,
       groupCid,
@@ -5376,7 +5393,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   ): void {
     const key = `${routeCid}:${this._messageVersionKey(message)}:${errMsg}`;
     if (!this._shouldLogThrottled(this._expectedDecryptLogKeys, key, MLS_EXPECTED_DECRYPT_LOG_TTL_MS)) return;
-    console.debug('[MLS] Message is waiting for encrypted history recovery:', {
+    sdkLog('info', '[MLS] Message is waiting for encrypted history recovery:', {
       cid: routeCid,
       msgId: message.id,
       groupEpoch,
@@ -5406,7 +5423,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     queue.add(targetUserId);
     this._pendingEvictions.set(cid, queue);
     await this._persistPendingEvictions();
-    console.log('[MLS] Queued pending eviction for', targetUserId, 'in', cid);
+    sdkLog('info', '[MLS] Queued pending eviction for', targetUserId, 'in', cid);
     return true;
   }
 
@@ -5480,11 +5497,11 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     const group = this.groups.get(cid);
     if (!group) {
-      console.warn('[MLS] evictMember: no local group for', cid, '— skipping');
+      sdkLog('warn', '[MLS] evictMember: no local group for', cid, '— skipping');
       return;
     }
 
-    console.log('[MLS] Evicting member:', targetUserId, 'from:', cid, '(selfLeft:', selfLeft, ')');
+    sdkLog('info', '[MLS] Evicting member:', targetUserId, 'from:', cid, '(selfLeft:', selfLeft, ')');
 
     let targetHasLeaf = true;
     try {
@@ -5507,7 +5524,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       throw new Error(`[MLS] evictMember: no MLS leaves to remove for ${targetUserId} in ${cid}`);
     }
     if (allRemoveIds.length > 1) {
-      console.log('[MLS] evictMember: bundling', allRemoveIds.length - 1, 'ghosts with target eviction');
+      sdkLog('info', '[MLS] evictMember: bundling', allRemoveIds.length - 1, 'ghosts with target eviction');
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -5516,14 +5533,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       this._requireCompositeCommitMethods(group);
       commitBundle = group.commit_member_removals(this.provider, this.identity, allRemoveIds);
     } catch (err) {
-      console.error('[MLS] evictMember: WASM commit_member_removals failed:', err);
+      sdkLog('error', '[MLS] evictMember: WASM commit_member_removals failed:', err);
       throw err;
     }
 
     // 2. Get GroupInfo from commitBundle (must be present — post-commit epoch N+1 state)
     const groupInfoBytes = commitBundle.group_info;
     if (!groupInfoBytes || groupInfoBytes.length === 0) {
-      console.error('[MLS] evictMember: commitBundle has no group_info');
+      sdkLog('error', '[MLS] evictMember: commitBundle has no group_info');
       group.clear_pending_commit(this.provider);
       await this._persistProvider();
       throw new Error('[MLS] evictMember: commitBundle.group_info is empty — cannot proceed');
@@ -5558,7 +5575,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     } catch (err) {
       const activeTarget = getActiveTargetFromCommitEvictionError(err);
       if (selfLeft && activeTarget) {
-        console.warn('[MLS] evictMember: target active again, dropping pending eviction:', activeTarget);
+        sdkLog('warn', '[MLS] evictMember: target active again, dropping pending eviction:', activeTarget);
         group.clear_pending_commit(this.provider);
         await this._persistProvider();
         await this.sync();
@@ -5568,7 +5585,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (isEpochStaleError(err) && !isRetry) {
         // Another commit won the epoch race. Sync first, drop any targets that
         // became active again, then let the remaining queue retry from fresh state.
-        console.warn('[MLS] evictMember: epoch_stale — syncing before retry/drop', targetUserId);
+        sdkLog('warn', '[MLS] evictMember: epoch_stale — syncing before retry/drop', targetUserId);
         group.clear_pending_commit(this.provider);
         await this._persistProvider();
         await this.sync();
@@ -5588,7 +5605,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     await this.safeArchiveCurrentEpoch(channelType, channelId);
     // 5. Queue cleanup AFTER confirmed merge.
     await this._cleanupEvictedGhosts(cid, allRemoveIds);
-    console.log('[MLS] Evicted', targetUserId, 'from:', cid, 'epoch:', Number(group.epoch()));
+    sdkLog('info', '[MLS] Evicted', targetUserId, 'from:', cid, 'epoch:', Number(group.epoch()));
   }
 
   // ============================================================
@@ -5639,7 +5656,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           // No group_info here — will upload separately after merge below.
         });
       } catch (err) {
-        console.error('[MLS] External join failed, clearing pending commit:', err);
+        sdkLog('error', '[MLS] External join failed, clearing pending commit:', err);
         group.clear_pending_commit(this.provider);
         await this._persistProvider();
         if (isEpochStaleError(err) && attempt === 0) {
@@ -5661,7 +5678,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       await this._uploadGroupInfo(channelType, channelId, group);
       await this.safeArchiveCurrentEpoch(channelType, channelId);
 
-      console.log('[MLS] External join completed for:', cid, 'epoch:', Number(group.epoch()));
+      sdkLog('info', '[MLS] External join completed for:', cid, 'epoch:', Number(group.epoch()));
       return { epoch: Number(group.epoch()), status: 'joined_external' };
     }
 
@@ -5712,14 +5729,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       });
     } catch (err) {
       if (isEpochStaleError(err) && !isRetry) {
-        console.warn('[MLS] keyRotation: epoch_stale, clearing + syncing + retrying');
+        sdkLog('warn', '[MLS] keyRotation: epoch_stale, clearing + syncing + retrying');
         group.clear_pending_commit(this.provider);
         await this._persistProvider();
         await this.sync();
         return this.keyRotation(cid, true);
       }
       // Any other error → clear pending commit + rethrow
-      console.error('[MLS] keyRotation failed, clearing pending commit:', err);
+      sdkLog('error', '[MLS] keyRotation failed, clearing pending commit:', err);
       group.clear_pending_commit(this.provider);
       await this._persistProvider();
       throw err;
@@ -5734,7 +5751,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     await this._persistProvider();
     await this.safeArchiveCurrentEpoch(channelType, channelId);
 
-    console.log('[MLS] Key rotation completed for:', cid, 'epoch:', Number(group.epoch()));
+    sdkLog('info', '[MLS] Key rotation completed for:', cid, 'epoch:', Number(group.epoch()));
     return { epoch: Number(group.epoch()) };
   }
 
@@ -5756,19 +5773,19 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private async _uploadGroupInfo(channelType: string, channelId: string, group: any): Promise<void> {
     try {
       const groupInfoBytes = group.export_group_info(this.provider, this.identity, true);
-      console.log('[MLS] Exported group_info for:', channelType, channelId, 'epoch:', Number(group.epoch()));
+      sdkLog('info', '[MLS] Exported group_info for:', channelType, channelId, 'epoch:', Number(group.epoch()));
       if (!channelType || !channelId) {
-        console.warn('[MLS] Invalid CID format for GroupInfo upload:', channelType, channelId);
+        sdkLog('warn', '[MLS] Invalid CID format for GroupInfo upload:', channelType, channelId);
         return;
       }
       await this.e2eeClient!.uploadGroupInfo(channelType, channelId, {
         group_info: groupInfoBytes,
         epoch: Number(group.epoch()),
       });
-      console.log('[MLS] GroupInfo uploaded for:', channelType, channelId, 'epoch:', Number(group.epoch()));
+      sdkLog('info', '[MLS] GroupInfo uploaded for:', channelType, channelId, 'epoch:', Number(group.epoch()));
     } catch (err) {
       // Non-fatal: GroupInfo upload failure shouldn't block the commit flow
-      console.error('[MLS] Failed to upload GroupInfo for:', channelType, channelId, err);
+      sdkLog('error', '[MLS] Failed to upload GroupInfo for:', channelType, channelId, err);
     }
   }
 
@@ -5799,7 +5816,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     try {
       group.save_state(this.provider);
     } catch (e) {
-      console.warn('[MLS] Failed to save group state after encrypt:', e);
+      sdkLog('warn', '[MLS] Failed to save group state after encrypt:', e);
     }
 
     return ciphertext;
@@ -5836,7 +5853,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     try {
       group.save_state(this.provider);
     } catch (e) {
-      console.warn('[MLS] Failed to save group state after decrypt:', e);
+      sdkLog('warn', '[MLS] Failed to save group state after decrypt:', e);
     }
 
     const decoder = new TextDecoder();
@@ -5858,7 +5875,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       payload = { text: raw };
     }
 
-    console.log('[MLS] Decrypted message:', payload.text);
+    sdkLog('info', '[MLS] Decrypted message:', payload.text);
     return {
       payload,
       messageType: processed.message_type,
@@ -5888,7 +5905,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
     const group = this.groups.get(cid);
     if (!group) {
-      console.warn('[MLS] processCommit: no group for', cid);
+      sdkLog('warn', '[MLS] processCommit: no group for', cid);
       return null;
     }
 
@@ -5898,9 +5915,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // which can corrupt ratchet state.
     if (eventEpoch !== undefined && eventEpoch >= 0) {
       const groupEpoch = Number(group.epoch());
-      console.log('[MLS] processCommit: group epoch:', groupEpoch, 'event epoch:', eventEpoch);
+      sdkLog('info', '[MLS] processCommit: group epoch:', groupEpoch, 'event epoch:', eventEpoch);
       if (groupEpoch >= eventEpoch) {
-        console.log(
+        sdkLog(
+          'info',
           `[MLS] processCommit: commit at epoch ${eventEpoch} already applied (group at ${groupEpoch}), skipping:`,
           cid,
         );
@@ -5915,7 +5933,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     try {
       const processed = group.process_message(this.provider, new Uint8Array(commitBytes));
 
-      console.log('[MLS] Commit processed for:', cid, 'epoch:', Number(group.epoch()));
+      sdkLog('info', '[MLS] Commit processed for:', cid, 'epoch:', Number(group.epoch()));
       await this._persistProvider();
       await this.safeArchiveCurrentEpochForCid(cid, 'backup', primaryUserId);
 
@@ -5938,7 +5956,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         }
         if (cleaned) {
           if (pending.size === 0) this._pendingEvictions.delete(cid);
-          this._persistPendingEvictions().catch(console.warn);
+          this._persistPendingEvictions().catch((err) => sdkLog('warn', err));
         }
       }
 
@@ -5947,7 +5965,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const errMsg = (err as Error).message || '';
       if (errMsg.includes('epoch differs')) {
         // Likely a duplicate commit already processed during sync — safe to ignore
-        console.warn('[MLS] processCommit: commit already applied (epoch mismatch), skipping:', cid);
+        sdkLog('warn', '[MLS] processCommit: commit already applied (epoch mismatch), skipping:', cid);
         return null;
       }
 
@@ -5956,7 +5974,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // Do not auto-advance the sync cursor here. Channel Repair can replay first,
       // then offer a user-confirmed local reset if replay keeps failing.
       if (errMsg.includes('missing a proposal')) {
-        console.warn('[MLS] processCommit: missing proposal — repair reset required for', cid);
+        sdkLog('warn', '[MLS] processCommit: missing proposal — repair reset required for', cid);
         this.provider = wasmModule.Provider.from_bytes(new Uint8Array(snapshot));
         const missingProposalError = new Error(`[MLS] Missing proposal while processing commit for ${cid}`) as Error & {
           code?: string;
@@ -5966,7 +5984,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
 
       // ROLLBACK: restore Provider from snapshot (commits modify Provider via as_mut)
-      console.warn('[MLS] processCommit failed, rolling back Provider snapshot:', errMsg);
+      sdkLog('warn', '[MLS] processCommit failed, rolling back Provider snapshot:', errMsg);
       this.provider = wasmModule.Provider.from_bytes(new Uint8Array(snapshot));
       throw err;
     }
@@ -6127,7 +6145,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   ): Promise<Record<string, unknown> | null> {
     const versionKey = this._messageVersionKey(message);
     if (this._decryptPromises.has(versionKey)) {
-      console.log('[MLS] processE2eeMessage: deduplicating concurrent request via MlsPlaintextCache:', versionKey);
+      sdkLog('info', '[MLS] processE2eeMessage: deduplicating concurrent request via MlsPlaintextCache:', versionKey);
       return this._decryptPromises.get(versionKey)!;
     }
 
@@ -6167,7 +6185,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     }
 
     if (this.isScopeRepairing(groupCid)) {
-      console.log('[MLS] processE2eeMessage: repair in progress, waiting for scope:', groupCid, message.id);
+      sdkLog('info', '[MLS] processE2eeMessage: repair in progress, waiting for scope:', groupCid, message.id);
       try {
         await this.waitForScopeRepair(groupCid);
       } catch (_) {
@@ -6188,7 +6206,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     // the cached result; otherwise decrypt normally (message arrived after the
     // sync window).
     if (this._syncing) {
-      console.log('[MLS] processE2eeMessage: sync in progress, waiting for completion:', message.id);
+      sdkLog('info', '[MLS] processE2eeMessage: sync in progress, waiting for completion:', message.id);
       try {
         await this.waitForSync();
       } catch {
@@ -6196,7 +6214,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
       // Re-check dedup after sync: sync may have already decrypted this message
       if (this._decryptedMsgIds.has(versionKey)) {
-        console.log('[MLS] processE2eeMessage: decrypted by sync (post-wait), returning cached:', versionKey);
+        sdkLog('info', '[MLS] processE2eeMessage: decrypted by sync (post-wait), returning cached:', versionKey);
         const cached = await this.storage.loadE2eeMessage(message.id);
         if (cached && this._storedMessageCoversVersion(cached, message)) {
           await this._clearRepairIssue(routeCid, message);
@@ -6223,7 +6241,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     //    decrypt consumed the ratchet but IndexedDB hasn't flushed yet.
     // 2. IndexedDB lookup — catches messages decrypted in a previous session.
     if (this._decryptedMsgIds.has(versionKey)) {
-      console.log('[MLS] processE2eeMessage: already decrypted (in-memory), skipping:', versionKey);
+      sdkLog('info', '[MLS] processE2eeMessage: already decrypted (in-memory), skipping:', versionKey);
       const cached = await this.storage.loadE2eeMessage(message.id);
       if (cached && this._storedMessageCoversVersion(cached, message)) {
         await this._clearRepairIssue(routeCid, message);
@@ -6235,7 +6253,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     }
     const existing = await this.storage.loadE2eeMessage(message.id);
     if (existing && this._storedMessageCoversVersion(existing, message)) {
-      console.log('[MLS] processE2eeMessage: already decrypted (IndexedDB), skipping:', versionKey);
+      sdkLog('info', '[MLS] processE2eeMessage: already decrypted (IndexedDB), skipping:', versionKey);
       this._decryptedMsgIds.add(versionKey);
       await this._clearRepairIssue(routeCid, message);
       return this._buildFullMessage(existing, message);
@@ -6248,7 +6266,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       return null;
     }
 
-    console.log('[MLS] processE2eeMessage:', {
+    sdkLog('info', '[MLS] processE2eeMessage:', {
       msgId: message.id,
       cid: routeCid,
       groupCid,
@@ -6291,7 +6309,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // future messages at higher generations will still work — the ratchet has
       // already advanced past this point.
       if (this._isForwardSecrecyConsumedError(errMsg)) {
-        console.warn('[MLS] Forward secrecy: message already consumed, cannot re-decrypt:', message.id, {
+        sdkLog('warn', '[MLS] Forward secrecy: message already consumed, cannot re-decrypt:', message.id, {
           groupEpoch: this._safeGroupEpoch(group),
           msgEpoch: message.mls_epoch,
         });
@@ -6308,7 +6326,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       } else {
         // Epoch mismatch or other recoverable error — log and return null.
         // channel.ts will dispatch 'failed' → UI shows "Encrypted message".
-        console.error('[MLS] Failed to decrypt message:', routeCid, {
+        sdkLog('error', '[MLS] Failed to decrypt message:', routeCid, {
           msgId: message.id,
           groupEpoch,
           msgEpoch: message.mls_epoch,
@@ -6453,7 +6471,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       });
     } catch (err) {
       if (isEpochStaleError(err)) {
-        console.warn('[MLS] sendMessage: epoch_stale — syncing group and retrying...');
+        sdkLog('warn', '[MLS] sendMessage: epoch_stale — syncing group and retrying...');
         await this.sync();
         // Re-encrypt with updated epoch after sync
         ciphertext = this.encryptMessage(e2eeGroupId, payload);
@@ -6528,7 +6546,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       poll_choice_counts?: Record<string, number>;
     } = {},
   ): Promise<any> {
-    console.log('[MLS] updateMessage: encrypting edit', {
+    sdkLog('info', '[MLS] updateMessage: encrypting edit', {
       cid,
       message_id: messageId,
     });
@@ -6584,10 +6602,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           ...envelopeOptions,
         },
       });
-      console.log('[MLS] updateMessage: sent', { cid, message_id: messageId });
+      sdkLog('info', '[MLS] updateMessage: sent', { cid, message_id: messageId });
     } catch (err) {
       if (isEpochStaleError(err)) {
-        console.warn('[MLS] updateMessage: epoch_stale — syncing group and retrying...');
+        sdkLog('warn', '[MLS] updateMessage: epoch_stale — syncing group and retrying...');
         await this.sync();
         ciphertext = this.encryptMessage(e2eeGroupId, payload);
         group = this.getGroup(e2eeGroupId)!;
@@ -6644,7 +6662,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         });
       }
     } catch (err) {
-      console.warn('[MLS] updateMessage: failed to update local cache:', messageId, err);
+      sdkLog('warn', '[MLS] updateMessage: failed to update local cache:', messageId, err);
     }
 
     // Persist Provider snapshot after encrypting an edit.
@@ -6781,9 +6799,9 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         decryptFailures,
       };
       if (decryptFailures > 0) {
-        console.warn('[MLS] Waterfall decrypt completed with unexpected failures:', summary);
+        sdkLog('warn', '[MLS] Waterfall decrypt completed with unexpected failures:', summary);
       } else {
-        console.debug('[MLS] Waterfall decrypt summary:', summary);
+        sdkLog('info', '[MLS] Waterfall decrypt summary:', summary);
       }
     }
     return { decrypted, buffered };
@@ -6874,7 +6892,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     this._providerRestored = false;
     // Reset storage so next initialize() creates a new user-scoped instance
     this.storage = null as unknown as MlsStorageAdapter;
-    console.log('[MLS] Manager destroyed');
+    sdkLog('info', '[MLS] Manager destroyed');
   }
   // ============================================================
   // E2EE Topic Operations
@@ -6941,7 +6959,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     group.merge_pending_commit(this.provider);
     await this._persistProvider();
 
-    console.log('[MLS] createE2eeTopic: bundle ready for:', topicCid, 'epoch:', Number(group.epoch()));
+    sdkLog('info', '[MLS] createE2eeTopic: bundle ready for:', topicCid, 'epoch:', Number(group.epoch()));
 
     return {
       commit: commitBundle.commit,
@@ -7000,7 +7018,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       const topicCid = ownGroupTopicCids[i];
       const group = this.groups.get(topicCid);
       if (!group) {
-        console.warn('[MLS] batchAddMembersToTopics: no group for', topicCid, '— skipping');
+        sdkLog('warn', '[MLS] batchAddMembersToTopics: no group for', topicCid, '— skipping');
         continue;
       }
 
@@ -7014,7 +7032,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       }
 
       if (kpsForThisTopic.length === 0) {
-        console.warn('[MLS] batchAddMembersToTopics: no KPs available for topic', topicCid);
+        sdkLog('warn', '[MLS] batchAddMembersToTopics: no KPs available for topic', topicCid);
         continue;
       }
 
@@ -7032,7 +7050,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
         if (!groupInfo || groupInfo.length === 0) {
           group.clear_pending_commit(this.provider);
-          console.error('[MLS] batchAddMembersToTopics: empty group_info for', topicCid);
+          sdkLog('error', '[MLS] batchAddMembersToTopics: empty group_info for', topicCid);
           continue;
         }
 
@@ -7047,7 +7065,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         processedCids.push(topicCid);
         topicGhostsByCid.set(topicCid, ghostsToRemove);
       } catch (err) {
-        console.error('[MLS] batchAddMembersToTopics: WASM error for', topicCid, err);
+        sdkLog('error', '[MLS] batchAddMembersToTopics: WASM error for', topicCid, err);
       }
     }
 
@@ -7082,10 +7100,10 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       if (result.success) {
         g.merge_pending_commit(this.provider);
         await this._cleanupEvictedGhosts(result.topic_cid, topicGhostsByCid.get(result.topic_cid) ?? []);
-        console.log('[MLS] batchAddMembers: merged', result.topic_cid, 'epoch:', result.epoch);
+        sdkLog('info', '[MLS] batchAddMembers: merged', result.topic_cid, 'epoch:', result.epoch);
       } else {
         g.clear_pending_commit(this.provider);
-        console.warn('[MLS] batchAddMembers: failed', result.topic_cid, result.error);
+        sdkLog('warn', '[MLS] batchAddMembers: failed', result.topic_cid, result.error);
       }
     }
 
@@ -7137,7 +7155,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         const result = wasmModule.Group.join_external(this.provider, this.identity, new Uint8Array(group_info), null);
         const group = result.group;
         if (!group) {
-          console.error('[MLS] batchExternalJoin: no group for', topicCid);
+          sdkLog('error', '[MLS] batchExternalJoin: no group for', topicCid);
           continue;
         }
 
@@ -7149,7 +7167,7 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
           // group_info is uploaded separately after merge
         });
       } catch (err) {
-        console.error('[MLS] batchExternalJoin: error for', topicCid, err);
+        sdkLog('error', '[MLS] batchExternalJoin: error for', topicCid, err);
       }
     }
 
@@ -7194,14 +7212,14 @@ export class MlsManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
         // Save cursor
         await this._saveScopeSyncCursor(result.topic_cid, this._nowEventCursor());
 
-        console.log('[MLS] batchExternalJoin: joined', result.topic_cid, 'epoch:', result.epoch);
+        sdkLog('info', '[MLS] batchExternalJoin: joined', result.topic_cid, 'epoch:', result.epoch);
       } else {
         try {
           group.clear_pending_commit(this.provider);
         } catch (e) {
           /* ignore */
         }
-        console.warn('[MLS] batchExternalJoin: failed', result.topic_cid, result.error);
+        sdkLog('warn', '[MLS] batchExternalJoin: failed', result.topic_cid, result.error);
       }
     }
 

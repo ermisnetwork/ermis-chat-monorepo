@@ -249,7 +249,7 @@ export type ErmisChatOptions = AxiosRequestConfig & {
   browser?: boolean;
   enableInsights?: boolean;
   /** experimental feature, please contact support if you want this feature enabled for you */
-  logger?: Logger;
+  logger?: LoggerOption;
   /**
    * When network is recovered, we re-query the active channels on client. But in single query, you can recover
    * only 30 channels. So its not guaranteed that all the channels in activeChannels object have updated state.
@@ -458,6 +458,8 @@ export type LiteralStringForUnion = string & {};
 export type LogLevel = 'info' | 'error' | 'warn';
 
 export type Logger = (logLevel: LogLevel, message: string, extraData?: Record<string, unknown>) => void;
+
+export type LoggerOption = Logger | LogLevel[];
 
 export type Message<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = Partial<
   MessageBase<ErmisChatGenerics>

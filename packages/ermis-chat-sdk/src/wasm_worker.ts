@@ -11,6 +11,14 @@
 // @ts-ignore — WASM module import sẽ được resolve bởi bundler
 import { initSync, ErmisCall } from './wasm/ermis_call_node_wasm';
 
+(
+  globalThis as unknown as {
+    __ermisSdkLog?: (logLevel: 'info' | 'warn' | 'error', ...args: unknown[]) => void;
+  }
+).__ermisSdkLog = (logLevel, ...args) => {
+  self.postMessage({ type: 'sdk_log', logLevel, args });
+};
+
 let ermisCall: ErmisCall | null = null;
 let isRecvActive = false;
 

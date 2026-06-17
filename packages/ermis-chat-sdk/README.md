@@ -32,7 +32,32 @@ The official core SDK for Ermis Chat.
 - The SDK dispatches `e2ee.restore_progress` after restore progress changes; UI clients can subscribe to refresh status without polling.
 - The SDK dispatches `e2ee.bootstrap_progress` while startup external-join preparation is running; UI clients can show non-blocking secure-restore preparation progress.
 
+## SDK Logging
+
+`ErmisChatOptions.logger` is optional. When it is not provided, SDK runtime logs are no-op, including E2EE/MLS storage, OpenMLS WASM wrapper warnings/errors, media/call helpers, and worker messages.
+
+For quick browser integration, pass console levels directly: `logger: ['info', 'warn', 'error']`. `info` uses `console.log`; `warn` uses `console.warn`; `error` uses `console.error`. For custom routing, pass a function logger; it receives `info`, `warn`, or `error` as the first argument, the formatted message as the second argument, and optional structured metadata as the third argument.
+
 ## Progress Log
+
+### 2026-06-16 - SDK Logger Console Level Shorthand
+
+- Goal: make SDK logging easier to enable from apps without writing a custom logger switch.
+- Code changed: `ErmisChatOptions.logger` now accepts either the existing function logger or a console-level array such as `['info', 'warn', 'error']`; `info` enables SDK info logs, while `warn` and `error` map to their matching console methods.
+- Docs/artifacts changed: this README documents the shorthand and records the compatibility behavior. SQL, Bellboy API docs, and Postman artifacts are unchanged because this only changes the SDK client-side integration option.
+- Design decision: keep the existing function logger as the advanced API and add the array as sugar, instead of replacing the logger contract or adding a second option name.
+- Performance: current and proposed logging remain O(1) per log call with no database/network round trips; array resolution happens once at client/auth initialization, then each log checks a small in-memory set.
+- Verification: `npm run build:sdk` passed.
+
+### 2026-06-16 - SDK Logger No-Op Runtime
+
+- Goal: route SDK runtime logs through the optional `logger` integration so apps that do not pass a logger do not emit inspect-console logs.
+- Code changed: added the central SDK logger helper, connected `ErmisChat`/`ErmisAuthProvider` options to it, and replaced authored `console.log`/`warn`/`error`/`debug` calls across client/auth/channel/E2EE MLS storage/manager/media/call/worker code with logger-backed calls.
+- Code changed: OpenMLS and call WASM JS wrappers now call a no-op global SDK log bridge instead of `console.*`; the call worker forwards wrapper log events back to the main-thread logger.
+- Docs/artifacts changed: this README documents logger no-op behavior and records the change. SQL, Bellboy API docs, and Postman artifacts are unchanged because endpoint contracts, schema, and request/response examples did not change.
+- Design decision: `Logger` keeps the existing `info | warn | error` public levels; debug-style internal messages are routed as `info` to avoid expanding the public logger contract.
+- Performance: current and proposed logging paths remain O(1) per log call with no database/network round trips; without a logger `sdkLog` returns before formatting, and direct WASM wrapper hooks short-circuit before argument evaluation when no bridge is installed. No hot partition, payload, or scaling behavior changes.
+- Verification: `rg -n "console\\.(log|warn|error|debug|info)" packages/ermis-chat-sdk/src` returned no matches; `npm run build:sdk` passed.
 
 ### 2026-06-16 - E2EE Recovery Policy Client Contract
 

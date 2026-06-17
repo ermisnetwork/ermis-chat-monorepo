@@ -15,6 +15,8 @@
 
 import { normalizeRequiredBytes } from './e2ee_bytes';
 import { randomId } from './utils';
+import type { Logger } from './types';
+import { setSdkLogger, sdkLog } from './logger';
 import MiniSearch from 'minisearch';
 
 // ============================================================
@@ -325,7 +327,12 @@ export interface MlsStorageAdapter {
   loadPendingDeferredArchives(): Promise<PendingDeferredArchive[]>;
   deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
   saveArchiveAck(record: ArchiveAckRecord): Promise<void>;
-  loadArchiveAck(cid: string, epoch: number, scope: ArchiveScope, coverageKey: string): Promise<ArchiveAckRecord | null>;
+  loadArchiveAck(
+    cid: string,
+    epoch: number,
+    scope: ArchiveScope,
+    coverageKey: string,
+  ): Promise<ArchiveAckRecord | null>;
   saveEpochArchiveCheckpoint(checkpoint: EpochArchiveCheckpoint): Promise<void>;
   loadEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<EpochArchiveCheckpoint | null>;
   loadEpochArchiveCheckpoints(): Promise<EpochArchiveCheckpoint[]>;
@@ -394,7 +401,10 @@ function normalizeEpochArchiveCheckpoint(record: EpochArchiveCheckpoint): EpochA
   return {
     ...record,
     encrypted_archive_bytes: {
-      ciphertext: normalizeRequiredBytes(record.encrypted_archive_bytes.ciphertext, 'encrypted_archive_bytes.ciphertext'),
+      ciphertext: normalizeRequiredBytes(
+        record.encrypted_archive_bytes.ciphertext,
+        'encrypted_archive_bytes.ciphertext',
+      ),
       nonce: normalizeRequiredBytes(record.encrypted_archive_bytes.nonce, 'encrypted_archive_bytes.nonce'),
     },
     snapshot: {
@@ -444,7 +454,8 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
    *                 database name so each user's MLS state is isolated.
    *                 Pass empty string for legacy/global access (migration only).
    */
-  constructor(userId: string = '') {
+  constructor(userId: string = '', logger?: Logger) {
+    if (logger) setSdkLogger(logger);
     if (userId) {
       this.dbName = `${DB_NAME_PREFIX}_${userId}`;
     } else {
@@ -611,7 +622,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
             db.close();
             if (legacyId && typeof localStorage !== 'undefined') {
               localStorage.setItem(DEVICE_ID_LS_KEY, legacyId);
-              console.log('[MLS Storage] Migrated device_id from IndexedDB to localStorage:', legacyId);
+              sdkLog('info', '[MLS Storage] Migrated device_id from IndexedDB to localStorage:', legacyId);
               resolve(legacyId);
             } else {
               resolve(null);
@@ -882,7 +893,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
 
       this._indexReady = true;
       this._indexBuildPromise = null;
-      console.log(`[MLS Storage] Search index built: ${indexable.length} messages indexed`);
+      sdkLog('info', `[MLS Storage] Search index built: ${indexable.length} messages indexed`);
     })();
 
     return this._indexBuildPromise;
@@ -904,7 +915,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       this._searchIndex.add(message);
       this._indexedIds.add(message.id);
     } catch (err) {
-      console.warn('[MLS Storage] Failed to index message:', message.id, err);
+      sdkLog('warn', '[MLS Storage] Failed to index message:', message.id, err);
     }
   }
 

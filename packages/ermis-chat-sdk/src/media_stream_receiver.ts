@@ -2,6 +2,7 @@ import { replaceCodecNumber } from './utils';
 import { FRAME_TYPE, IMediaReceiverEvents, INodeCall, VideoConfig } from './types';
 import { HEVCDecoderConfigurationRecord } from './hevc_decoder_config';
 
+import { sdkLog } from './logger';
 const MAX_AUDIO_LATENCY = 0.5; // 500ms
 const MIN_BUFFER_AHEAD = 0.05; // 50ms
 
@@ -36,7 +37,7 @@ export class MediaStreamReceiver {
     try {
       await this.nodeCall.acceptConnection();
     } catch (error) {
-      console.error('❌ Error starting MediaStreamReceiver:', error);
+      sdkLog('error', '❌ Error starting MediaStreamReceiver:', error);
     }
   }
 
@@ -90,7 +91,7 @@ export class MediaStreamReceiver {
     // 3. Init AudioDecoder
     this.audioDecoder = new AudioDecoder({
       output: (audioData) => this.playDecodedAudio(audioData),
-      error: (err) => console.error('AudioDecoder error:', err),
+      error: (err) => sdkLog('error', 'AudioDecoder error:', err),
     });
 
     if (callType === 'video') {
@@ -129,25 +130,25 @@ export class MediaStreamReceiver {
           await this.videoWriter.write(frame);
         } catch (err) {
           frame.close();
-          // console.error('Frame write error:', err);
+          // sdkLog('error', 'Frame write error:', err);
         } finally {
           frame.close();
         }
       },
       error: (err) => {
-        console.error('❌ VideoDecoder CRASHED:', err);
+        sdkLog('error', '❌ VideoDecoder CRASHED:', err);
         this.isWaitingForKeyFrame = true;
 
         if (this.videoWriter) {
           // Tránh hồi sinh ngay lập tức gây vòng lặp vô hạn (Infinite Loop) nếu stream bị hỏng nặng
-          console.log('♻️ Scheduled VideoDecoder respawn in 1000ms...');
+          sdkLog('info', '♻️ Scheduled VideoDecoder respawn in 1000ms...');
           setTimeout(() => {
             if (!this.videoWriter) return;
             this.setupVideoDecoder();
             if (this.lastVideoConfig && this.videoDecoder) {
               try {
                 this.videoDecoder.configure(this.lastVideoConfig);
-              } catch (configErr) { }
+              } catch (configErr) {}
             }
           }, 1000);
         }
@@ -209,7 +210,9 @@ export class MediaStreamReceiver {
         try {
           oldestNode?.stop();
           oldestNode?.disconnect();
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+          /* ignore */
+        }
       }
 
       source.onended = () => {
@@ -221,7 +224,7 @@ export class MediaStreamReceiver {
 
       audioData.close();
     } catch (err) {
-      console.error('Error in playDecodedAudio:', err);
+      sdkLog('error', 'Error in playDecodedAudio:', err);
       audioData?.close();
     }
   };
@@ -245,7 +248,7 @@ export class MediaStreamReceiver {
 
     while (true) {
       // Force a macro-task yield every 16ms (roughly every frame) to prevent Main Thread starvation.
-      // This is crucial because if nodeCall.asyncRecv() returns data from a local buffer, 
+      // This is crucial because if nodeCall.asyncRecv() returns data from a local buffer,
       // the 'await' might resolve as a micro-task, which blocks UI painting/interaction.
       if (Date.now() - lastYieldTime > 16) {
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -276,7 +279,7 @@ export class MediaStreamReceiver {
         //     [FRAME_TYPE.END_CALL]: 'END_CALL',
         //   }[frameType] || 'UNKNOWN';
 
-        // console.log(`----frameType ${frameTypeName}----`, frameType);
+        // sdkLog('info', `----frameType ${frameTypeName}----`, frameType);
 
         const payloadOffset = (
           [
@@ -309,7 +312,7 @@ export class MediaStreamReceiver {
               this.lastVideoConfigStr = videoConfigStr;
               const videoConfig = JSON.parse(videoConfigStr);
 
-              console.log('videoConfig', videoConfig);
+              sdkLog('info', 'videoConfig', videoConfig);
 
               // Setup Video Track Writer & Combine Streams
               if (!this.videoWriter) {
@@ -367,11 +370,11 @@ export class MediaStreamReceiver {
                   this.videoDecoder.configure(decoderConfig);
                   this.isWaitingForKeyFrame = true;
                 } else {
-                  console.error('❌ Browser does not support this video config:', decoderConfig);
+                  sdkLog('error', '❌ Browser does not support this video config:', decoderConfig);
                 }
               }
             } catch (error) {
-              console.error('❌ Error processing VIDEO_CONFIG:', error);
+              sdkLog('error', '❌ Error processing VIDEO_CONFIG:', error);
             }
             break;
           }
@@ -388,7 +391,7 @@ export class MediaStreamReceiver {
               this.lastAudioConfigStr = audioConfigStr;
               const audioConfig = JSON.parse(audioConfigStr);
 
-              console.log('audioConfig', audioConfig);
+              sdkLog('info', 'audioConfig', audioConfig);
 
               if (this.audioDecoder?.state !== 'closed') {
                 this.audioDecoder?.configure({
@@ -398,7 +401,7 @@ export class MediaStreamReceiver {
                 });
               }
             } catch (e) {
-              console.error('❌ Error processing AUDIO_CONFIG:', e);
+              sdkLog('error', '❌ Error processing AUDIO_CONFIG:', e);
             }
             break;
           }
@@ -411,7 +414,7 @@ export class MediaStreamReceiver {
 
             if (this.isWaitingForKeyFrame) {
               if (!isKeyFrame) break;
-              // console.log('✅ Resumed decoding at KeyFrame');
+              // sdkLog('info', 'Resumed decoding at KeyFrame');
               this.isWaitingForKeyFrame = false;
             }
 
@@ -434,7 +437,7 @@ export class MediaStreamReceiver {
                 }),
               );
             } catch (decodeErr) {
-              console.error('Video decode failed:', decodeErr);
+              sdkLog('error', 'Video decode failed:', decodeErr);
               if ((this.videoDecoder as VideoDecoder).state === 'closed') {
                 // this.setupVideoDecoder();
                 // if (this.lastVideoConfig) {
@@ -487,30 +490,30 @@ export class MediaStreamReceiver {
                 // 2. QUAN TRỌNG: Phải chờ KeyFrame mới để tránh lỗi decode Delta frame sau khi reset
                 this.isWaitingForKeyFrame = true;
 
-                console.log('🔄 Reconfigured rotation to', orientation, '- Waiting for next KeyFrame');
+                sdkLog('info', '🔄 Reconfigured rotation to', orientation, '- Waiting for next KeyFrame');
               } catch (configErr) {
-                console.error('Error reconfiguring VideoDecoder with new orientation:', configErr);
+                sdkLog('error', 'Error reconfiguring VideoDecoder with new orientation:', configErr);
               }
             }
             break;
           }
 
           case FRAME_TYPE.REQUEST_CONFIG:
-            console.log('📥 Received REQUEST_CONFIG');
+            sdkLog('info', '📥 Received REQUEST_CONFIG');
             if (this.events.onRequestConfig) {
               this.events.onRequestConfig();
             }
             break;
 
           case FRAME_TYPE.REQUEST_KEY_FRAME:
-            console.log('📥 Received REQUEST_KEY_FRAME');
+            sdkLog('info', '📥 Received REQUEST_KEY_FRAME');
             if (this.events.onRequestKeyFrame) {
               this.events.onRequestKeyFrame();
             }
             break;
 
           case FRAME_TYPE.END_CALL:
-            console.log('📥 Received END_CALL');
+            sdkLog('info', '📥 Received END_CALL');
             if (this.events.onEndCall) {
               this.events.onEndCall();
             }
@@ -525,7 +528,7 @@ export class MediaStreamReceiver {
             break;
         }
       } catch (error) {
-        // console.error('Stream loop error', error);
+        // sdkLog('error', 'Stream loop error', error);
         await new Promise((r) => setTimeout(r, 200));
       }
     }
@@ -537,7 +540,7 @@ export class MediaStreamReceiver {
         this.videoWriter.abort('Stream stopped').catch(() => {});
         this.videoWriter.releaseLock();
       } catch (e) {
-        console.warn('Error closing video writer:', e);
+        sdkLog('warn', 'Error closing video writer:', e);
       }
       this.videoWriter = null;
     }
@@ -567,7 +570,7 @@ export class MediaStreamReceiver {
       try {
         this.audioContext.close();
       } catch (e) {
-        console.warn('Error closing audio context:', e);
+        sdkLog('warn', 'Error closing audio context:', e);
       }
       this.audioContext = null;
     }

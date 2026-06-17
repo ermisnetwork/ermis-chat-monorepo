@@ -250,7 +250,7 @@ function getArrayJsValueFromWasm0(ptr, len) {
  * # Example
  * ```javascript
  * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) console.warn("Invalid KeyPackage!");
+ * if (!isValid) globalThis.__ermisSdkLog?.('warn', "Invalid KeyPackage!");
  * ```
  * @param {Uint8Array} bytes
  * @returns {boolean}
@@ -1950,7 +1950,7 @@ export function __wbg_error_7534b8e9a36f1ab4(arg0, arg1) {
     try {
         deferred0_0 = arg0;
         deferred0_1 = arg1;
-        console.error(getStringFromWasm0(arg0, arg1));
+        globalThis.__ermisSdkLog?.('error', getStringFromWasm0(arg0, arg1));
     } finally {
         wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
     }

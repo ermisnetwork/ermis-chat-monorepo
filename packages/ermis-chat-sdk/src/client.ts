@@ -11,6 +11,7 @@ import { StableWSConnection } from './connection';
 import { normalizeE2eeEventBytes } from './e2ee_bytes';
 import { IndexedDBMlsStorage } from './mls_storage';
 import { IndexedDBUserCache } from './user_cache';
+import { getLogger, setSdkLogger } from './logger';
 
 import { TokenManager } from './token_manager';
 
@@ -24,7 +25,6 @@ import {
   getDirectChannelImage,
   getDirectChannelName,
   getLatestCreatedAt,
-  isFunction,
   randomId,
 } from './utils';
 
@@ -172,7 +172,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     this.axiosInstance.defaults.paramsSerializer = axiosParamsSerializer;
 
-    this.logger = isFunction(inputOptions.logger) ? inputOptions.logger : () => null;
+    this.logger = getLogger(inputOptions.logger);
+    setSdkLogger(inputOptions.logger);
     this.recoverStateOnReconnect = this.options.recoverStateOnReconnect;
   }
 
@@ -284,8 +285,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
      * If the user id remains the same we don't throw error
      */
     if (this.userID === connectionUser.id && this.setUserPromise) {
-      console.warn(
+      this.logger(
+        'warn',
         'Consecutive calls to connectUser is detected, ideally you should only call this function once in your app.',
+        { tags: ['connection', 'client'] },
       );
       return this.setUserPromise;
     }
@@ -297,14 +300,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
 
     if (this.node && !this.options.allowServerSideConnect) {
-      console.warn(
+      this.logger(
+        'warn',
         'Please do not use connectUser server side. connectUser impacts MAU and concurrent connection usage and thus your bill. If you have a valid use-case, add "allowServerSideConnect: true" to the client options to disable this warning.',
+        { tags: ['connection', 'client'] },
       );
     }
 
     if (this.browser && !this.deviceId) {
       try {
-        const mlsStorage = new IndexedDBMlsStorage();
+        const mlsStorage = new IndexedDBMlsStorage('', this.logger);
         this.deviceId = await mlsStorage.getDeviceId();
         this.logger('info', `client:connectUser() - deviceId initialized: ${this.deviceId}`, {
           tags: ['connection', 'client', 'e2ee'],

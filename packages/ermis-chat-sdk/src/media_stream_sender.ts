@@ -1,6 +1,7 @@
 import { base64Encode, createPacketWithHeader } from './utils';
 import { AudioConfig, INodeCall, TransceiverState, VideoConfig } from './types';
 
+import { sdkLog } from './logger';
 export class MediaStreamSender {
   private videoEncoder: VideoEncoder | null = null;
   private audioEncoder: AudioEncoder | null = null;
@@ -42,7 +43,7 @@ export class MediaStreamSender {
       // Start health call keep-alive (every 5s, matching native SDK)
       this.startHealthCallInterval();
     } catch (error) {
-      console.error('Error starting MediaStreamSender:', error);
+      sdkLog('error', 'Error starting MediaStreamSender:', error);
     }
   }
 
@@ -56,7 +57,7 @@ export class MediaStreamSender {
         await this.sendVideoConfig();
       }
     } catch (error) {
-      console.error('Error sending configs:', error);
+      sdkLog('error', 'Error sending configs:', error);
     }
   }
 
@@ -156,7 +157,7 @@ export class MediaStreamSender {
           });
         }
       },
-      error: (e) => console.error('AudioEncoder error:', e),
+      error: (e) => sdkLog('error', 'AudioEncoder error:', e),
     });
 
     audioEncoder.configure({
@@ -219,7 +220,7 @@ export class MediaStreamSender {
           });
         }
       },
-      error: (e) => console.error('VideoEncoder error:', e),
+      error: (e) => sdkLog('error', 'VideoEncoder error:', e),
     });
 
     videoEncoder.configure({
@@ -292,7 +293,7 @@ export class MediaStreamSender {
    * Yêu cầu gửi keyframe ngay lập tức (được gọi khi nhận REQUEST_KEY_FRAME từ receiver)
    */
   public requestKeyFrame = (): void => {
-    console.log('📥 KeyFrame requested');
+    sdkLog('info', '📥 KeyFrame requested');
     this.forceKeyFrame = true;
   };
 
@@ -320,20 +321,20 @@ export class MediaStreamSender {
           frameCounter += 1;
           const keyFrame = frameCounter % 60 === 0 || this.forceKeyFrame;
           if (this.forceKeyFrame) {
-            console.log('📤 Sending forced KeyFrame');
+            sdkLog('info', '📤 Sending forced KeyFrame');
             this.forceKeyFrame = false;
           }
           try {
             this.videoEncoder.encode(frame, { keyFrame });
           } catch (err) {
-            console.error('Encode error:', err);
+            sdkLog('error', 'Encode error:', err);
           } finally {
             frame.close();
           }
         }
       }
     } catch (error: any) {
-      console.error(`Error processing video frames: ${error.message}`);
+      sdkLog('error', `Error processing video frames: ${error.message}`);
     } finally {
       if (this.videoReader) {
         try {
@@ -365,14 +366,14 @@ export class MediaStreamSender {
           try {
             this.audioEncoder.encode(frame);
           } catch (err) {
-            console.error('Audio Encoding error:', err);
+            sdkLog('error', 'Audio Encoding error:', err);
           } finally {
             frame.close();
           }
         }
       }
     } catch (error: any) {
-      console.error(`Error processing audio frames: ${error.message}`);
+      sdkLog('error', `Error processing audio frames: ${error.message}`);
     } finally {
       if (this.audioReader) {
         try {
@@ -403,7 +404,7 @@ export class MediaStreamSender {
         await this.nodeCall.sendControlFrame(configPacket);
         this.videoConfigSent = true;
       } catch (error) {
-        console.error('Error sending video config:', error);
+        sdkLog('error', 'Error sending video config:', error);
       }
     }
   };
@@ -415,7 +416,7 @@ export class MediaStreamSender {
         await this.nodeCall.sendControlFrame(configPacket);
         this.audioConfigSent = true;
       } catch (error) {
-        console.error('Error sending audio config:', error);
+        sdkLog('error', 'Error sending audio config:', error);
       }
     }
   };

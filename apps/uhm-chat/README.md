@@ -2,7 +2,8 @@
 
 ## UHM Chat E2EE Runtime Notes
 
-- `public/openmls_wasm*` must be published with the app. `App.tsx` loads `/openmls_wasm_bg.wasm` through `loadOpenMlsWasm()` after `connectUser`.
+- `public/openmls_wasm_bg.wasm` must be published with the app. `App.tsx` loads this binary through `loadOpenMlsWasm()` after `connectUser`; the OpenMLS JS glue comes from the SDK bundle so SDK logger settings cover OpenMLS glue logs. The legacy public OpenMLS JS glue copies are logger-safe for direct/older asset loads.
+- `public/wasm_worker.worker.mjs` must be copied from the SDK `dist` after building or installing a published SDK. The worker forwards WASM logs through the SDK logger bridge, so stale public copies can bypass `logger` and write to the browser console directly.
 - E2EE controls stay disabled when `client.mlsManager` is not initialized; standard chat continues to work.
 - uhm-chat waits for `connectUser()` and MLS initialization before mounting the chat shell, preventing first-login channel queries with an unset auth token.
 - E2EE direct/group creation uses the SDK MLS bundle flow. Group E2EE channels are always private.
@@ -19,6 +20,13 @@
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-06-16 - production SDK logger assets
+
+- Goal: keep uhm-chat's published/copied WASM worker assets aligned with SDK logger behavior.
+- Artifact changed: refreshed `apps/uhm-chat/public/wasm_worker.worker.mjs` from the SDK `dist` worker and made public OpenMLS JS glue copies use `globalThis.__ermisSdkLog` so copied/published WASM assets do not write to `console.*` directly.
+- Docs changed: clarified that OpenMLS uses the public `.wasm` binary with SDK-bundled JS glue, while the Direct Call worker is a public asset that must be refreshed from the published SDK.
+- Verification: `yarn workspace uhm-chat build` passed after the asset refresh.
 
 ### 2026-06-16 - production
 
