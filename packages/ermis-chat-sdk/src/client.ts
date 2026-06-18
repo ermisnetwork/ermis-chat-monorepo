@@ -8,7 +8,7 @@ import WebSocket from 'isomorphic-ws';
 import { Channel } from './channel';
 import { ClientState } from './client_state';
 import { StableWSConnection } from './connection';
-import { normalizeE2eeEventBytes } from './encryption/encoding';
+import { E2EE_BYTES_HEADER, E2EE_BYTES_WIRE_FORMAT, normalizeE2eeEventBytes } from './encryption/encoding';
 import { IndexedDBEncryptionStorage } from './encryption/storage';
 import { IndexedDBUserCache } from './user_cache';
 import { getLogger, setSdkLogger } from './logger';
@@ -1959,6 +1959,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         ...(this.deviceId ? { 'X-Device-ID': this.deviceId } : {}),
         ...options.headers,
         ...(axiosRequestConfigHeaders || {}),
+        [E2EE_BYTES_HEADER]: E2EE_BYTES_WIRE_FORMAT,
       },
 
       ...options.config,

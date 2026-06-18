@@ -10,6 +10,7 @@ import {
 
 import { ConnectAPIResponse, ConnectionOpen, ExtendableGenerics, DefaultGenerics, UR, LogLevel } from './types';
 import { ErmisChat } from './client';
+import { E2EE_BYTES_WIRE_FORMAT, E2EE_BYTES_WS_QUERY_PARAM } from './encryption/encoding';
 
 // Type guards to check WebSocket error type
 const isCloseEvent = (res: WebSocket.CloseEvent | WebSocket.Data | WebSocket.ErrorEvent): res is WebSocket.CloseEvent =>
@@ -186,7 +187,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
 
     let rawURL = `${this.client.wsBaseURL}/connect?json=${qs}&api_key=${
       this.client.apiKey
-    }&authorization=${token}&stream-auth-type=${this.client.getAuthType()}&X-Stream-Client=${this.client.getUserAgent()}`;
+    }&authorization=${token}&stream-auth-type=${this.client.getAuthType()}&X-Stream-Client=${this.client.getUserAgent()}&${E2EE_BYTES_WS_QUERY_PARAM}=${E2EE_BYTES_WIRE_FORMAT}`;
     if (this.client.deviceId) {
       rawURL += `&device_id=${encodeURIComponent(this.client.deviceId)}`;
     }
@@ -284,8 +285,8 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
             const err: any = new Error('WS connection timeout');
             err.isWSFailure = true;
             reject(err);
-          }, 5000)
-        )
+          }, 5000),
+        ),
       ]);
       this.isConnecting = false;
 
@@ -295,7 +296,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     } catch (err: any) {
       this.isConnecting = false;
       this._log(`_connect() - Error - `, err);
-      
+
       this.rejectPromise?.(err);
       if (this.ws) {
         try {

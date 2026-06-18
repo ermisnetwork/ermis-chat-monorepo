@@ -11,6 +11,10 @@ const BASE64_LOOKUP = (() => {
 const ENCRYPTION_CHANNEL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'group_info'] as const;
 const PROTOCOL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'proposal'] as const;
 
+export const E2EE_BYTES_HEADER = 'X-Ermis-E2EE-Bytes';
+export const E2EE_BYTES_WIRE_FORMAT = 'base64';
+export const E2EE_BYTES_WS_QUERY_PARAM = 'e2ee_bytes';
+
 export function encodeBytesToBase64(bytes: Uint8Array): string {
   if (!(bytes instanceof Uint8Array)) {
     throw new TypeError('expected Uint8Array');
@@ -139,6 +143,8 @@ export function normalizeE2eeSyncEventBytes<T>(event: T): T {
     normalizeMessageRecord(data);
   } else if (value.type === 'protocol') {
     normalizeProtocolRecord(data);
+  } else if (value.type === 'message_updated' || value.type === 'message_pin') {
+    normalizeMessageRecord(data.message as Record<string, unknown> | undefined);
   }
 
   return event;
@@ -159,6 +165,8 @@ export function normalizeScopeSyncResponseBytes<T>(response: T): T {
         normalizeMessageRecord(data);
       } else if (syncEvent.type === 'protocol') {
         normalizeProtocolRecord(data);
+      } else if (syncEvent.type === 'message_updated' || syncEvent.type === 'message_pin') {
+        normalizeMessageRecord(data.message as Record<string, unknown> | undefined);
       }
     }
   }

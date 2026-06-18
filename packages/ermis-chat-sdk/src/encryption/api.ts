@@ -7,6 +7,8 @@
 
 import type { ErmisChat } from '../client';
 import {
+  E2EE_BYTES_HEADER,
+  E2EE_BYTES_WIRE_FORMAT,
   encodeBytesToBase64,
   normalizeE2eeSyncEventBytes,
   normalizeRequiredBytes,
@@ -273,7 +275,10 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   /** Build headers with X-Device-ID if available */
   private get deviceHeaders(): Record<string, string> {
     const deviceId = (this.client as any).deviceId;
-    return deviceId ? { 'X-Device-ID': deviceId } : {};
+    return {
+      [E2EE_BYTES_HEADER]: E2EE_BYTES_WIRE_FORMAT,
+      ...(deviceId ? { 'X-Device-ID': deviceId } : {}),
+    };
   }
 
   /** POST with X-Device-ID header */
@@ -483,7 +488,11 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // ---- Enable E2EE ----
 
   /** Upgrade a standard channel to E2EE. Admin or channel Owner only. All members must have accepted their invites. */
-  async enableE2ee(channelType: string, channelId: string, data: EnableE2eeRequest): Promise<EncryptionOperationResponse> {
+  async enableE2ee(
+    channelType: string,
+    channelId: string,
+    data: EnableE2eeRequest,
+  ): Promise<EncryptionOperationResponse> {
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/enable`,
       encodeEnableE2eeRequest(data),
@@ -500,7 +509,11 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // See EncryptionManager.evictMember() in encryption/manager.ts for the updated flow.
 
   /** Key rotation (self update): rotate own key material for forward secrecy. */
-  async keyRotation(channelType: string, channelId: string, data: KeyRotationRequest): Promise<EncryptionOperationResponse> {
+  async keyRotation(
+    channelType: string,
+    channelId: string,
+    data: KeyRotationRequest,
+  ): Promise<EncryptionOperationResponse> {
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/key_rotation`,
       encodeKeyRotationRequest(data),
@@ -637,7 +650,11 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
    * Submit external join commit to server
    * Multi-device: only broadcast commit. Public channel: insert member + system msg + commit.
    */
-  async externalJoin(channelType: string, channelId: string, data: ExternalJoinRequest): Promise<EncryptionOperationResponse> {
+  async externalJoin(
+    channelType: string,
+    channelId: string,
+    data: ExternalJoinRequest,
+  ): Promise<EncryptionOperationResponse> {
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/external_join`,
       encodeExternalJoinRequest(data),
@@ -703,4 +720,3 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     );
   }
 }
-
