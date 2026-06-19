@@ -166,19 +166,50 @@ export function useChannelMessages({
       };
     };
 
-    const mergeAndFilterE2eeMessages = (baseMessages: any[], decryptedMessages: any[]) => {
+    const getMessageAndQuoteIds = (messages: any[]) =>
+      Array.from(
+        new Set(
+          messages.flatMap((message: any) =>
+            [message?.id, message?.quoted_message_id].filter(
+              (id): id is string => typeof id === 'string' && id.length > 0,
+            ),
+          ),
+        ),
+      );
+
+    const loadStoredE2eeMessagesById = async (messageIds: string[]) => {
+      const storage = client.encryptionManager?.storage;
+      if (!storage || messageIds.length === 0) return [];
+
+      const uniqueIds = Array.from(new Set(messageIds));
+      if (storage.loadE2eeMessages) {
+        const stored = await storage.loadE2eeMessages(uniqueIds);
+        return Array.from(stored.values());
+      }
+
+      const stored = await Promise.all(uniqueIds.map((id) => storage.loadE2eeMessage(id).catch(() => null)));
+      return stored.filter(Boolean);
+    };
+
+    const mergeAndFilterE2eeMessages = (
+      baseMessages: any[],
+      decryptedMessages: any[],
+      options: { includeMissing?: boolean } = {},
+    ) => {
+      const includeMissing = options.includeMissing ?? true;
       const byId = new Map(baseMessages.map((msg: any) => [msg.id, msg]));
       for (const decrypted of decryptedMessages) {
         const normalized = normalizeDecryptedMessage(decrypted);
         const hasPlaintext = isDecryptedPlaintextMessage(normalized);
-        const current: any = byId.get(decrypted.id) || {};
+        const current: any = byId.get(decrypted.id);
+        if (!includeMissing && !current) continue;
         byId.set(decrypted.id, {
-          ...current,
+          ...(current || {}),
           ...normalized,
           content_type: hasPlaintext
-            ? normalized.content_type || current.content_type || 'standard'
-            : normalized.content_type || current.content_type,
-          status: normalized.status ?? (hasPlaintext ? 'received' : current.status ?? null),
+            ? normalized.content_type || current?.content_type || 'standard'
+            : normalized.content_type || current?.content_type,
+          status: normalized.status ?? (hasPlaintext ? 'received' : current?.status ?? null),
         });
       }
 
@@ -189,15 +220,17 @@ export function useChannelMessages({
       });
     };
 
-    const mergeDecryptedMessages = (decryptedMessages: any[]) => {
+    const mergeDecryptedMessages = (decryptedMessages: any[], includeMissing = false) => {
       if (!decryptedMessages.length) {
         setMessages((prev) => mergeAndFilterE2eeMessages(prev, []));
         return;
       }
-      setMessages((prev) => mergeAndFilterE2eeMessages(prev, decryptedMessages));
+      setMessages((prev) =>
+        mergeAndFilterE2eeMessages(prev, decryptedMessages, { includeMissing: includeMissing || prev.length === 0 }),
+      );
     };
 
-    const syncMessagesWithE2eeCache = () => {
+    const syncMessagesWithE2eeCache = (options: { includeStoredWindow?: boolean } = {}) => {
       if (!isE2eeChannel(activeChannel, client) || !client.encryptionManager?.storage || !activeChannel.cid) {
         syncMessages();
         return;
@@ -206,19 +239,30 @@ export function useChannelMessages({
       const baseMessages = [...activeChannel.state.latestMessages];
       setMessages(mergeAndFilterE2eeMessages(baseMessages, []));
 
-      client.encryptionManager.storage
-        .getE2eeMessages(activeChannel.cid, 100)
+      const loadStoredMessages = options.includeStoredWindow
+        ? client.encryptionManager.storage.getE2eeMessages(activeChannel.cid, 100)
+        : loadStoredE2eeMessagesById(getMessageAndQuoteIds(baseMessages));
+
+      loadStoredMessages
         .then((decryptedMessages: any[]) => {
-          setMessages((prev) => mergeAndFilterE2eeMessages(prev.length ? prev : baseMessages, decryptedMessages));
+          setMessages((prev) =>
+            mergeAndFilterE2eeMessages(prev.length ? prev : baseMessages, decryptedMessages, {
+              includeMissing: options.includeStoredWindow === true,
+            }),
+          );
         })
         .catch((err: any) => console.warn('[E2EE] Failed to load decrypted message cache', err));
     };
 
-    const syncStoredE2eeMessages = () => {
+    const syncStoredE2eeMessages = (includeStoredWindow = false) => {
       if (!isE2eeChannel(activeChannel, client) || !client.encryptionManager?.storage || !activeChannel.cid) return;
-      client.encryptionManager.storage
-        .getE2eeMessages(activeChannel.cid, 100)
-        .then(mergeDecryptedMessages)
+      const baseMessages = [...activeChannel.state.latestMessages];
+      const loadStoredMessages = includeStoredWindow
+        ? client.encryptionManager.storage.getE2eeMessages(activeChannel.cid, 100)
+        : loadStoredE2eeMessagesById(getMessageAndQuoteIds(baseMessages));
+
+      loadStoredMessages
+        .then((storedMessages: any[]) => mergeDecryptedMessages(storedMessages, includeStoredWindow))
         .catch((err: any) => console.warn('[E2EE] Failed to load decrypted message cache', err));
     };
 
@@ -227,21 +271,21 @@ export function useChannelMessages({
       if (isInactiveInviteRole(activeChannel.state?.membership?.channel_role as string)) return;
       client.encryptionManager
         .ensureChannelReady(activeChannel.type, activeChannel.id, activeChannel.cid, { source: 'open' })
-        .then(() => syncMessagesWithE2eeCache())
+        .then(() => syncMessagesWithE2eeCache({ includeStoredWindow: true }))
         .catch((err: any) => console.warn('[E2EE] Failed to ensure channel ready', err));
     };
 
     // Fetch hidden messages if not already done for this channel
     const cid = activeChannel.cid;
     if (includeHiddenMessages && cid && !fullyQueriedChannels.has(cid)) {
-      syncMessagesWithE2eeCache();
+      syncMessagesWithE2eeCache({ includeStoredWindow: true });
       activeChannel
         .query({
           messages: { limit: 25, include_hidden_messages: true },
         })
         .then(() => {
           fullyQueriedChannels.add(cid);
-          syncMessagesWithE2eeCache();
+          syncMessagesWithE2eeCache({ includeStoredWindow: true });
           ensureE2eeChannelReady();
           // Sync initial read state from SDK so read receipts show immediately
           setReadState({ ...activeChannel.state.read });
@@ -265,7 +309,7 @@ export function useChannelMessages({
         });
     } else {
       // Already queried or disabled: sync cache, scroll and fade in quickly
-      syncMessagesWithE2eeCache();
+      syncMessagesWithE2eeCache({ includeStoredWindow: true });
       ensureE2eeChannelReady();
       // Sync initial read state from SDK so read receipts show immediately
       setReadState({ ...activeChannel.state.read });
@@ -329,7 +373,7 @@ export function useChannelMessages({
         activeChannel
           .query({ messages: { limit: 30 } })
           .then(() => {
-            syncMessagesWithE2eeCache();
+            syncMessagesWithE2eeCache({ includeStoredWindow: true });
             scheduleScrollToBottom(false);
             const isPending = isPendingMember(activeChannel.state?.membership?.channel_role as string);
             if (!isPending) {
@@ -355,7 +399,7 @@ export function useChannelMessages({
       activeChannel
         .query({ messages: { limit: 30 } })
         .then(() => {
-          syncMessagesWithE2eeCache();
+          syncMessagesWithE2eeCache({ includeStoredWindow: true });
           scheduleScrollToBottom(false);
           activeChannel.markRead().catch(() => {});
         })
@@ -371,7 +415,7 @@ export function useChannelMessages({
       activeChannel
         .query({ messages: { limit: 25, include_hidden_messages: true } })
         .then(() => {
-          syncMessagesWithE2eeCache();
+          syncMessagesWithE2eeCache({ includeStoredWindow: true });
           ensureE2eeChannelReady();
           setReadState({ ...activeChannel.state.read });
           scheduleScrollToBottom(false);
@@ -379,7 +423,7 @@ export function useChannelMessages({
         .catch((err: any) => {
           console.error('Failed to recover channel messages after reconnect', err);
           // Fallback: sync whatever we have from recoverState
-          syncMessagesWithE2eeCache();
+          syncMessagesWithE2eeCache({ includeStoredWindow: true });
           ensureE2eeChannelReady();
           scheduleScrollToBottom(false);
         });

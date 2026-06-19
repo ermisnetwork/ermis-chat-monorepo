@@ -44,6 +44,8 @@ function getAttachmentPreview(
 function hasUnavailableContent(quotedMessage: QuotedMessagePreviewProps['quotedMessage']): boolean {
   const hasText = Boolean(quotedMessage.text?.trim());
   if (hasText) return false;
+  if (isStickerMessage(quotedMessage)) return false;
+  if (quotedMessage.attachments?.length) return false;
 
   return (
     quotedMessage.content_type === 'mls' ||
@@ -83,13 +85,6 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
       };
     }
 
-    if (hasUnavailableContent(quotedMessage)) {
-      return {
-        text: unavailableMessageLabel,
-        unavailable: true,
-      };
-    }
-
     if (isStickerMessage(quotedMessage)) {
       return {
         text: stickerLabel,
@@ -101,6 +96,13 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
       return {
         text: getAttachmentPreview(quotedMessage.attachments, attachmentLabel),
         unavailable: false,
+      };
+    }
+
+    if (hasUnavailableContent(quotedMessage)) {
+      return {
+        text: unavailableMessageLabel,
+        unavailable: true,
       };
     }
 

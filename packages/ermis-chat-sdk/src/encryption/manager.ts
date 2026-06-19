@@ -6297,6 +6297,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (typeof message.text === 'string' && message.text.trim()) return true;
     if (Array.isArray(message.attachments) && message.attachments.length > 0) return true;
     if (typeof message.sticker_url === 'string' && message.sticker_url) return true;
+    if (message.type === 'sticker') return true;
     return false;
   }
 

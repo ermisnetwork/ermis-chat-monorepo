@@ -14,7 +14,7 @@ The official core SDK for Ermis Chat.
 <details>
 <summary>Change log</summary>
 
-- `2026-06-19`: E2EE message hydration now resolves `quoted_message` from decrypted local state or IndexedDB when only `quoted_message_id` is present.
+- `2026-06-19`: E2EE message hydration now resolves `quoted_message` from decrypted local state or IndexedDB when only `quoted_message_id` is present, including sticker quotes stored as `type: 'sticker'`.
   - Reason: quoted replies in encrypted channels must preview the replied-to plaintext without requiring Bellboy to decrypt or duplicate message bodies.
   - Integrator action: rebuild SDK/React clients so reply previews can hydrate from local encrypted-message cache.
   - Compatibility/default: if the quoted message is not available locally, clients keep the existing unavailable-message fallback.
@@ -67,7 +67,7 @@ For quick browser integration, pass console levels directly: `logger: ['info', '
 ### 2026-06-19 - E2EE Quoted Reply Hydration
 
 - Goal: fix reply previews where own sent replies showed no quote UI and other users saw `Message unavailable`.
-- Code changed: `Channel.sendMessage()` adds local quoted-message data to optimistic messages; `EncryptionManager` builds decrypted/sent/restored E2EE messages with quoted previews resolved from active state or IndexedDB; channel cache hydration and local seed paths also hydrate quoted replies and ignore unrenderable server quote envelopes when local plaintext is available.
+- Code changed: `Channel.sendMessage()` adds local quoted-message data to optimistic messages; `EncryptionManager` builds decrypted/sent/restored E2EE messages with quoted previews resolved from active state or IndexedDB; channel cache hydration and local seed paths also hydrate quoted replies and ignore unrenderable server quote envelopes when local plaintext is available. Sticker quotes stored as `type: 'sticker'` are now treated as renderable even when `sticker_url` is not present on the preview envelope.
 - Docs/artifacts changed: this README records the SDK behavior and contract changelog. React and UHM README files record the UI behavior. SQL, Postman, and Bellboy server docs are unchanged because the API/schema/event contract is unchanged.
 - Design decision: keep plaintext quote preview hydration on the client; Bellboy remains a relay and only needs `quoted_message_id` metadata for encrypted replies.
 - Performance: hydrate remains `O(M + Q)` time and memory per loaded batch where `M` is message count and `Q` is unique quoted IDs loaded from local IndexedDB; it adds no network requests, server payload growth, database hot partitions, or backend contention.

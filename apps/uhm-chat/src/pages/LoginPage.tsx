@@ -40,9 +40,9 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     let finalIdentifier = identifier.trim()
-    
+
     if (loginMode === 'email') {
       if (!identifier.trim() || !validateEmail(identifier)) {
         setFieldError(t('errors.invalid_email'))
@@ -55,13 +55,13 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       }
       finalIdentifier = normalizePhone(identifier)
     }
-    
+
     setError('')
     setFieldError('')
     setLoading(true)
 
     try {
-      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.USS_BASE_URL)
+      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL)
       authProviderRef.current = provider
 
       let res
@@ -127,7 +127,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     setLoading(true)
     try {
       const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL)
-      
+
       const res = await provider.loginWithGoogle(credentialResponse.credential) as any
       if (res && res.success !== false) {
         const token = res.token || res.data?.token || res.access_token
@@ -135,7 +135,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
         const payload = parseJwt(token)
         const finalUserId = res.user_id || res.user?.id || res.data?.user?.id || payload?.user_id || payload?.sub || payload?.id
-        
+
         localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId)
         localStorage.setItem(STORAGE_KEYS.TOKEN, token)
         localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
@@ -156,7 +156,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       {/* Container chính: card bọc toàn bộ chia đôi trên màn lớn */}
       <div className="w-full max-w-6xl">
         <div className="flex flex-col lg:flex-row overflow-hidden rounded-[2rem] bg-white dark:bg-[#211f30] shadow-2xl border border-zinc-200/50 dark:border-zinc-800/50">
-          
+
           {/* Cột trái (Giới thiệu) */}
           <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-zinc-900 via-zinc-900 to-[#12082a] p-10 xl:p-12 text-white relative overflow-hidden flex-col justify-between">
             {/* Background decorations */}
@@ -164,7 +164,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
               <div className="absolute -top-1/4 -left-1/4 w-[40rem] h-[40rem] rounded-full bg-[#7949EC]/20 blur-[120px]" />
               <div className="absolute bottom-1/4 right-0 w-[30rem] h-[30rem] rounded-full bg-[#5027B1]/20 blur-[100px]" />
             </div>
-            
+
             <div className="relative z-10">
               <img src={uhmLogo} alt="Uhm Logo" className="h-14 w-auto object-contain mb-10" />
               <h1 className="text-4xl xl:text-5xl xl:leading-[1.15] font-semibold whitespace-pre-line text-zinc-50 tracking-tight">
@@ -174,7 +174,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 {t('login.hero_subtitle')}
               </p>
             </div>
-            
+
             <div className="relative z-10">
               <div className="text-sm font-medium text-zinc-500">
                 {t('login.hero_footer')}
@@ -232,19 +232,19 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                           <TabsTrigger value="email" className="relative z-10 rounded-lg py-2 data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors font-medium text-zinc-500 dark:text-zinc-400 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-50">{t('login.email_tab')}</TabsTrigger>
                           <TabsTrigger value="phone" className="relative z-10 rounded-lg py-2 data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors font-medium text-zinc-500 dark:text-zinc-400 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-50">{t('login.phone_tab')}</TabsTrigger>
                         </TabsList>
-                        
+
                         <form onSubmit={handleSendOtp} noValidate className="space-y-6 animate-in fade-in duration-500">
                           <TabsContent value="email" className="mt-0 space-y-2.5 outline-none">
                             <Label htmlFor="email" className="text-zinc-700 dark:text-zinc-300 font-semibold">{t('login.email_label')}</Label>
-                            <Input 
-                              id="email" 
-                              type="text" 
+                            <Input
+                              id="email"
+                              type="text"
                               value={identifier}
                               onChange={(e) => { setIdentifier(e.target.value); setFieldError('') }}
                               onBlur={() => {
                                 if (identifier.trim() && !validateEmail(identifier)) setFieldError(t('errors.invalid_email'))
                               }}
-                              placeholder={t('login.email_placeholder')} 
+                              placeholder={t('login.email_placeholder')}
                               disabled={loading}
                               className={`bg-zinc-50 dark:bg-[#1a1828] border-zinc-200 dark:border-zinc-800 h-12 rounded-xl focus-visible:ring-[#7949EC] ${fieldError && loginMode === 'email' ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                             />
@@ -260,7 +260,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                                 <span className="mr-2 text-base select-none">🇻🇳</span>
                                 <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 select-none">+84</span>
                               </div>
-                              <input 
+                              <input
                                 id="phone"
                                 type="tel"
                                 value={identifier}
@@ -293,7 +293,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                             {t('login.otp_desc').replace('{{identifier}}', identifier)}
                           </p>
                         </div>
-                        
+
                         <div className="flex justify-center lg:justify-start gap-2 sm:gap-3">
                           {Array.from({ length: 6 }).map((_, idx) => (
                             <Input
@@ -307,7 +307,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                               onChange={(e) => {
                                 const val = e.target.value.replace(/\D/g, '')
                                 if (!val) return
-                                
+
                                 const newOtp = otpCode.split('')
                                 newOtp[idx] = val
                                 const finalOtp = newOtp.join('')

@@ -76,6 +76,7 @@ function hasRenderableQuotedMessageContent(quotedMessage: any) {
   if (typeof quotedMessage.text === 'string' && quotedMessage.text.trim()) return true;
   if (Array.isArray(quotedMessage.attachments) && quotedMessage.attachments.length > 0) return true;
   if (typeof quotedMessage.sticker_url === 'string' && quotedMessage.sticker_url) return true;
+  if (isStickerMessage(quotedMessage)) return true;
   return false;
 }
 

@@ -23,7 +23,7 @@ const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_D
     filter: { type: ['messaging', 'team'] },
     options: { message_limit: 1 },
   },
-  userBaseURL: `${API_DEFAULTS.USS_BASE_URL}/uss/v1`,
+  // userBaseURL: `${API_DEFAULTS.USS_BASE_URL}/uss/v1`,
   logger: ['info', 'warn', 'error'],
 });
 

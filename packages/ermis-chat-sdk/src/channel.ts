@@ -2517,6 +2517,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       if (typeof quoted.text === 'string' && quoted.text.trim()) return true;
       if (Array.isArray(quoted.attachments) && quoted.attachments.length > 0) return true;
       if (typeof quoted.sticker_url === 'string' && quoted.sticker_url) return true;
+      if (quoted.type === 'sticker') return true;
       return false;
     };
     const resolveQuotedMessage = (message: any) => {
@@ -2633,6 +2634,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           if (typeof quoted.text === 'string' && quoted.text.trim()) return true;
           if (Array.isArray(quoted.attachments) && quoted.attachments.length > 0) return true;
           if (typeof quoted.sticker_url === 'string' && quoted.sticker_url) return true;
+          if (quoted.type === 'sticker') return true;
           return false;
         };
         const messages = storedMessages
