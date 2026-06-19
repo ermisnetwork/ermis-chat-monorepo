@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
 import { isPendingMember } from '../channelRoleUtils';
@@ -20,6 +20,8 @@ export type UseChannelMessagesOptions = {
 const fullyQueriedChannels = new Set<string>();
 export const markChannelAsFullyQueried = (cid: string) => fullyQueriedChannels.add(cid);
 
+const isInactiveInviteRole = (role?: string) => isPendingMember(role) || role === 'rejected' || role === 'skipped';
+
 /**
  * Schedule multiple scroll-to-bottom attempts with increasing delays.
  * Handles content that changes height after initial render (images, embeds).
@@ -40,7 +42,8 @@ export function useChannelMessages({
   includeHiddenMessages = true,
   containerRef,
 }: UseChannelMessagesOptions): void {
-  const { client, activeChannel, syncMessages, setReadState } = useChatClient();
+  const { client, activeChannel, syncMessages, setMessages, setReadState } = useChatClient();
+  const inviteRefreshInFlightRef = useRef<Set<string>>(new Set());
 
   const scheduleScrollToBottom = useCallback(
     (smooth: boolean, force = false) => {
@@ -94,16 +97,105 @@ export function useChannelMessages({
       }, 50);
     };
 
+    const isDecryptedPlaintextMessage = (message: any) => {
+      if (!message || message.e2ee_status === 'failed' || message.e2ee_status === 'decrypting') return false;
+      return (
+        typeof message.text === 'string' ||
+        Boolean(message.attachments?.length) ||
+        Boolean(message.sticker_url) ||
+        Boolean(message.poll_type) ||
+        Boolean(message.poll_choice_counts) ||
+        Boolean(message.latest_poll_choices)
+      );
+    };
+
+    const normalizeDecryptedMessage = (message: any) => {
+      if (!isDecryptedPlaintextMessage(message)) return message;
+      return {
+        ...message,
+        content_type: 'standard',
+        type: message.sticker_url ? 'sticker' : message.type,
+      };
+    };
+
+    const mergeAndFilterE2eeMessages = (baseMessages: any[], decryptedMessages: any[]) => {
+      const byId = new Map(baseMessages.map((msg: any) => [msg.id, msg]));
+      for (const decrypted of decryptedMessages) {
+        const normalized = normalizeDecryptedMessage(decrypted);
+        const hasPlaintext = isDecryptedPlaintextMessage(normalized);
+        const current: any = byId.get(decrypted.id) || {};
+        byId.set(decrypted.id, {
+          ...current,
+          ...normalized,
+          content_type: hasPlaintext
+            ? normalized.content_type || current.content_type || 'standard'
+            : normalized.content_type || current.content_type,
+          status: current.status === 'sending' ? current.status : null,
+        });
+      }
+
+      return Array.from(byId.values())
+        .sort((a: any, b: any) => {
+          const aTime = new Date(a.created_at || 0).getTime();
+          const bTime = new Date(b.created_at || 0).getTime();
+          return aTime - bTime;
+        });
+    };
+
+    const mergeDecryptedMessages = (decryptedMessages: any[]) => {
+      if (!decryptedMessages.length) {
+        setMessages((prev) => mergeAndFilterE2eeMessages(prev, []));
+        return;
+      }
+      setMessages((prev) => mergeAndFilterE2eeMessages(prev, decryptedMessages));
+    };
+
+    const syncMessagesWithE2eeCache = () => {
+      if (!activeChannel.data?.mls_enabled || !client.mlsManager?.storage || !activeChannel.cid) {
+        syncMessages();
+        return;
+      }
+
+      const baseMessages = [...activeChannel.state.latestMessages];
+      setMessages(mergeAndFilterE2eeMessages(baseMessages, []));
+
+      client.mlsManager.storage
+        .getE2eeMessages(activeChannel.cid, 100)
+        .then((decryptedMessages: any[]) => {
+          setMessages((prev) => mergeAndFilterE2eeMessages(prev.length ? prev : baseMessages, decryptedMessages));
+        })
+        .catch((err: any) => console.warn('[E2EE] Failed to load decrypted message cache', err));
+    };
+
+    const syncStoredE2eeMessages = () => {
+      if (!activeChannel.data?.mls_enabled || !client.mlsManager?.storage || !activeChannel.cid) return;
+      client.mlsManager.storage
+        .getE2eeMessages(activeChannel.cid, 100)
+        .then(mergeDecryptedMessages)
+        .catch((err: any) => console.warn('[E2EE] Failed to load decrypted message cache', err));
+    };
+
+    const ensureE2eeChannelReady = () => {
+      if (!activeChannel.data?.mls_enabled || !client.mlsManager?.initialized || !activeChannel.cid) return;
+      if (isInactiveInviteRole(activeChannel.state?.membership?.channel_role as string)) return;
+      client.mlsManager
+        .ensureChannelReady(activeChannel.type, activeChannel.id, activeChannel.cid, { source: 'open' })
+        .then(() => syncMessagesWithE2eeCache())
+        .catch((err: any) => console.warn('[E2EE] Failed to ensure channel ready', err));
+    };
+
     // Fetch hidden messages if not already done for this channel
     const cid = activeChannel.cid;
     if (includeHiddenMessages && cid && !fullyQueriedChannels.has(cid)) {
+      syncMessagesWithE2eeCache();
       activeChannel
         .query({
           messages: { limit: 25, include_hidden_messages: true },
         })
         .then(() => {
           fullyQueriedChannels.add(cid);
-          syncMessages();
+          syncMessagesWithE2eeCache();
+          ensureE2eeChannelReady();
           // Sync initial read state from SDK so read receipts show immediately
           setReadState({ ...activeChannel.state.read });
           scheduleScrollToBottom(false);
@@ -126,7 +218,8 @@ export function useChannelMessages({
         });
     } else {
       // Already queried or disabled: sync cache, scroll and fade in quickly
-      syncMessages();
+      syncMessagesWithE2eeCache();
+      ensureE2eeChannelReady();
       // Sync initial read state from SDK so read receipts show immediately
       setReadState({ ...activeChannel.state.read });
       setTimeout(() => {
@@ -144,7 +237,7 @@ export function useChannelMessages({
       // Capture scroll state BEFORE sync causes re-render
       const wasAtBottom = isAtBottomRef.current;
 
-      syncMessages();
+      syncMessagesWithE2eeCache();
 
       const isOwnMessage = event.message?.user?.id === client.userID || event.message?.user_id === client.userID;
 
@@ -161,17 +254,23 @@ export function useChannelMessages({
         setTimeout(() => scrollToBottom(false), 150);
         setTimeout(() => scrollToBottom(false), 300);
       } else if (wasAtBottom) {
-        scheduleScrollToBottom(true);
+        scheduleScrollToBottom(true, true);
       }
     };
 
-    const handleMessageChange = (_event: Event) => {
-      syncMessages();
+    const handleMessageChange = (event: Event) => {
+      syncMessagesWithE2eeCache();
     };
 
     const handleMessageRead = (_event: Event) => {
       // SDK already updated channel.state.read — sync into React state
       setReadState({ ...activeChannel.state.read });
+      // Read receipt avatars appear below the last message, increasing content
+      // height. Auto-scroll so the user doesn't have to manually scroll down
+      // to see the "seen" indicator.
+      if (isAtBottomRef.current) {
+        setTimeout(() => scrollToBottom(false), 100);
+      }
     };
 
     const handleUnblocked = (event: Event) => {
@@ -181,7 +280,7 @@ export function useChannelMessages({
         activeChannel
           .query({ messages: { limit: 30 } })
           .then(() => {
-            syncMessages();
+            syncMessagesWithE2eeCache();
             scheduleScrollToBottom(false);
             const isPending = isPendingMember(activeChannel.state?.membership?.channel_role as string);
             if (!isPending) {
@@ -192,43 +291,70 @@ export function useChannelMessages({
       }
     };
 
-    const handleInviteAccepted = (event: Event) => {
-      // Make sure the accepted invite corresponds to the actively opened channel
+    const refreshAfterOwnInviteMembership = (event: Event) => {
       const eventCid =
         event.cid ||
         event.channel?.cid ||
         ((event as any).channel_id ? `${(event as any).channel_type}:${(event as any).channel_id}` : undefined);
-      if (eventCid === activeChannel.cid) {
-        activeChannel
-          .query({ messages: { limit: 30 } })
-          .then(() => {
-            syncMessages();
-            scheduleScrollToBottom(false);
-            activeChannel.markRead().catch(() => {});
-          })
-          .catch((e: any) => console.error('Failed to sync messages after accepting invite', e));
-      }
+      if (eventCid !== activeChannel.cid) return;
+
+      const memberUserId = (event as any).member?.user_id;
+      if (memberUserId && memberUserId !== client.userID) return;
+      if (inviteRefreshInFlightRef.current.has(eventCid)) return;
+
+      inviteRefreshInFlightRef.current.add(eventCid);
+      activeChannel
+        .query({ messages: { limit: 30 } })
+        .then(() => {
+          syncMessagesWithE2eeCache();
+          scheduleScrollToBottom(false);
+          activeChannel.markRead().catch(() => {});
+        })
+        .catch((e: any) => console.error('Failed to refresh channel after invite membership update', e))
+        .finally(() => {
+          inviteRefreshInFlightRef.current.delete(eventCid);
+        });
     };
 
-    const handleRecovery = (event: any) => {
+    const handleRecovery = () => {
       // recoverState() only fetches channels with message_limit: 1 (for sidebar previews).
       // Re-query the active channel with a proper limit to load all missed messages.
       activeChannel
         .query({ messages: { limit: 25, include_hidden_messages: true } })
         .then(() => {
-          syncMessages();
+          syncMessagesWithE2eeCache();
+          ensureE2eeChannelReady();
           setReadState({ ...activeChannel.state.read });
           scheduleScrollToBottom(false);
         })
         .catch((err: any) => {
           console.error('Failed to recover channel messages after reconnect', err);
           // Fallback: sync whatever we have from recoverState
-          syncMessages();
+          syncMessagesWithE2eeCache();
+          ensureE2eeChannelReady();
           scheduleScrollToBottom(false);
         });
     };
 
-    const client = activeChannel.getClient();
+    const handleE2eeDecrypted = (event: any) => {
+      if (!event?.message?.id || event.cid !== activeChannel.cid) return;
+      const wasAtBottom = isAtBottomRef.current;
+      mergeDecryptedMessages([event.message]);
+      if (wasAtBottom) {
+        scheduleScrollToBottom(false, true);
+      }
+    };
+
+    const handleE2eeRefresh = (event: any) => {
+      if (event?.cid === activeChannel.cid) {
+        if (Array.isArray(event.messages) && event.messages.length > 0) {
+          mergeDecryptedMessages(event.messages);
+        }
+        syncStoredE2eeMessages();
+      }
+    };
+
+    const eventClient = activeChannel.getClient();
     const sub1 = activeChannel.on('message.new', handleNewMessage);
     const sub2 = activeChannel.on('message.updated', handleMessageChange);
     const sub3 = activeChannel.on('message.deleted', handleMessageChange);
@@ -239,8 +365,16 @@ export function useChannelMessages({
     const sub8 = activeChannel.on('reaction.new', handleMessageChange);
     const sub9 = activeChannel.on('reaction.deleted', handleMessageChange);
     const sub10 = activeChannel.on('member.unblocked', handleUnblocked);
-    const sub11 = client.on('notification.invite_accepted', handleInviteAccepted);
-    const sub12 = client.on('connection.recovered', handleRecovery);
+    const sub11 = activeChannel.on('channel.truncate', handleMessageChange);
+    const sub12 = activeChannel.on('channel.truncate_for_me', handleMessageChange);
+    
+    const sub13 = eventClient.on('notification.invite_accepted', refreshAfterOwnInviteMembership);
+    const sub14 = eventClient.on('member.joined', refreshAfterOwnInviteMembership);
+    const sub15 = eventClient.on('connection.recovered', handleRecovery);
+    const sub16 = eventClient.on('e2ee.message_decrypted' as any, handleE2eeDecrypted);
+    const sub17 = eventClient.on('e2ee.post_join_sync' as any, handleE2eeRefresh);
+    const sub18 = eventClient.on('e2ee.channel_ready' as any, handleE2eeRefresh);
+    const sub19 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
 
     return () => {
       sub1.unsubscribe();
@@ -255,6 +389,13 @@ export function useChannelMessages({
       sub10.unsubscribe();
       sub11.unsubscribe();
       sub12.unsubscribe();
+      sub13.unsubscribe();
+      sub14.unsubscribe();
+      sub15.unsubscribe();
+      sub16.unsubscribe();
+      sub17.unsubscribe();
+      sub18.unsubscribe();
+      sub19.unsubscribe();
     };
-  }, [activeChannel, scrollToBottom, scheduleScrollToBottom, syncMessages, onChannelSwitch, setReadState]);
+  }, [activeChannel, scrollToBottom, scheduleScrollToBottom, syncMessages, setMessages, onChannelSwitch, setReadState]);
 }

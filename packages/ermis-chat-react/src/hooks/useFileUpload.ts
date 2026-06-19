@@ -35,7 +35,16 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
         ? new File([file], normalizedName, { type: file.type, lastModified: file.lastModified })
         : file;
 
-      const response = await activeChannel.sendFile(fileToUpload, fileToUpload.name, fileToUpload.type);
+      const response = await activeChannel.uploadFilePresigned(
+        fileToUpload,
+        fileToUpload.name,
+        fileToUpload.type || 'application/octet-stream',
+        (progress) => {
+          setFiles((prev) =>
+            prev.map((f) => (f.id === item.id ? { ...f, progress: progress.percentage } : f))
+          );
+        }
+      );
       const uploadedUrl = response.file;
 
       let thumbUrl = '';
@@ -44,7 +53,7 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
           const thumbBlob = await activeChannel.getThumbBlobVideo(file);
           if (thumbBlob) {
             const thumbFile = new File([thumbBlob], `thumb_${normalizedName}.jpg`, { type: 'image/jpeg' });
-            const thumbResp = await activeChannel.sendFile(thumbFile, thumbFile.name, 'image/jpeg');
+            const thumbResp = await activeChannel.uploadFilePresigned(thumbFile, thumbFile.name, 'image/jpeg');
             thumbUrl = thumbResp.file;
           }
         } catch {
@@ -89,7 +98,10 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
     setHasContent(true);
 
     newItems.forEach((item) => uploadSingleFile(item));
-  }, [uploadSingleFile, setHasContent]);
+
+    // Auto-focus the input so user can press Enter to send immediately
+    editableRef.current?.focus();
+  }, [uploadSingleFile, setHasContent, editableRef]);
 
   const handleRemoveFile = useCallback((id: string) => {
     setFiles((prev) => {

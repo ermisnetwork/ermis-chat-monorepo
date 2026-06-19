@@ -5,9 +5,33 @@ import { Avatar } from './Avatar';
 import { useChatClient } from '../hooks/useChatClient';
 import { useChatComponents } from '../context/ChatComponentsContext';
 import { markChannelAsFullyQueried } from '../hooks/useChannelMessages';
-import type { CreateChannelModalProps, UserPickerUser } from '../types';
+import type { CreateChannelE2eeToggleProps, CreateChannelModalProps, UserPickerUser } from '../types';
 import { isDirectChannel } from '../channelTypeUtils';
 
+const DefaultE2eeToggle: React.FC<CreateChannelE2eeToggleProps> = ({
+  enabled,
+  onChange,
+  disabled,
+  label = 'End-to-end encrypted',
+  description,
+}) => (
+  <div className="ermis-create-channel__field ermis-create-channel__field--toggle">
+    <div>
+      <label className="ermis-create-channel__label">{label}</label>
+      {description && <div className="ermis-create-channel__hint">{description}</div>}
+    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      className={`ermis-create-channel__toggle ${enabled ? 'ermis-create-channel__toggle--on' : ''}`}
+      onClick={() => onChange(!enabled)}
+      disabled={disabled}
+    >
+      <span className="ermis-create-channel__toggle-thumb" />
+    </button>
+  </div>
+);
 
 export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   isOpen,
@@ -31,11 +55,15 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   nextButtonLabel = 'Next',
   backButtonLabel = 'Back',
   emptyStateLabel = 'No users found',
+  e2eeLabel = 'End-to-end encrypted',
+  e2eeDescription = 'Only channel members can read encrypted messages.',
+  e2eeUnavailableLabel = 'E2EE is unavailable on this device.',
   TabsComponent,
   FooterComponent,
   GroupFieldsComponent,
   SearchInputComponent,
   SelectedBoxComponent,
+  E2eeToggleComponent = DefaultE2eeToggle,
 }) => {
   const { client, setActiveChannel } = useChatClient();
   const { ModalComponent } = useChatComponents();
@@ -50,6 +78,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(false);
+  const [e2eeEnabled, setE2eeEnabled] = useState(false);
 
   // Users
   const [selectedUsers, setSelectedUsers] = useState<UserPickerUser[]>([]);
@@ -57,6 +86,11 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   // Progress/Error
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const e2eeAvailable = Boolean(client?.mlsManager?.initialized);
+
+  const handleE2eeChange = useCallback((enabled: boolean) => {
+    setE2eeEnabled(enabled);
+  }, []);
 
   /* ---------- Exclude IDs for Direct ---------- */
   const hasExistingDirectChannel = useMemo(() => {
@@ -120,14 +154,32 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           return;
         }
 
-        createdChannel = client.channel('messaging', {
-          members: [currentUserId, targetUserId],
-        } as any);
+        const members = [currentUserId, targetUserId];
+        const payload: Record<string, any> = { members };
+
+        if (e2eeEnabled) {
+          const mlsManager = client.mlsManager;
+          if (!mlsManager?.initialized) {
+            throw new Error(e2eeUnavailableLabel);
+          }
+          const bundle = await mlsManager.createE2eeChannel('messaging', null, null, members);
+          Object.assign(payload, {
+            mls_enabled: true,
+            channel_id: bundle.channel_id,
+            ...bundle,
+          });
+        }
+
+        createdChannel = client.channel('messaging', payload as any);
         const response = (await createdChannel.create()) as any;
         if (response?.channel?.id) {
           createdChannel = client.channel('messaging', response.channel.id);
           await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
           markChannelAsFullyQueried(createdChannel.cid);
+          if (e2eeEnabled && client.mlsManager?.initialized && createdChannel.id) {
+            client.mlsManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
+              .catch((err: unknown) => console.warn('[E2EE] Initial epoch archive failed:', err));
+          }
         }
       } else {
         // Group Channel
@@ -147,12 +199,35 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           payload.description = description.trim();
         }
 
-        createdChannel = client.channel('team', payload);
+        if (e2eeEnabled) {
+          const mlsManager = client.mlsManager;
+          if (!mlsManager?.initialized) {
+            throw new Error(e2eeUnavailableLabel);
+          }
+          const uuid =
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : Math.random().toString(36).slice(2);
+          const channelId = `${client.projectId}:${uuid}`;
+          const cid = `team:${channelId}`;
+          const bundle = await mlsManager.createE2eeChannel('team', channelId, cid, memberIds);
+          Object.assign(payload, {
+            mls_enabled: true,
+            ...bundle,
+          });
+          createdChannel = client.channel('team', channelId, payload);
+        } else {
+          createdChannel = client.channel('team', payload);
+        }
         const response = (await createdChannel.create()) as any;
         if (response?.channel?.id) {
           createdChannel = client.channel('team', response.channel.id);
           await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
           markChannelAsFullyQueried(createdChannel.cid);
+          if (e2eeEnabled && client.mlsManager?.initialized && createdChannel.id) {
+            client.mlsManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
+              .catch((err: unknown) => console.warn('[E2EE] Initial epoch archive failed:', err));
+          }
         }
       }
 
@@ -172,7 +247,20 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
     } finally {
       setIsCreating(false);
     }
-  }, [client, currentUserId, isCreating, selectedUsers, tab, name, isPublic, description, onSuccess, onClose]);
+  }, [
+    client,
+    currentUserId,
+    isCreating,
+    selectedUsers,
+    tab,
+    name,
+    isPublic,
+    description,
+    e2eeEnabled,
+    e2eeUnavailableLabel,
+    onSuccess,
+    onClose,
+  ]);
 
 
   const isValid = useMemo(() => {
@@ -214,6 +302,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         messageButtonLabel={messageButtonLabel}
         nextButtonLabel={nextButtonLabel}
         backButtonLabel={backButtonLabel}
+        e2eeEnabled={e2eeEnabled}
       />
     );
   } else if (tab === 'messaging') {
@@ -256,8 +345,9 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
             onTabChange={(t) => {
               setTab(t);
               setStep(1);
-              setSelectedUsers([]);
-              setError(null);
+            setSelectedUsers([]);
+            setE2eeEnabled(false);
+            setError(null);
             }}
             disabled={isCreating}
             directTabLabel={directTabLabel}
@@ -270,8 +360,9 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
               onClick={() => {
                 setTab('messaging');
                 setStep(1);
-                setSelectedUsers([]);
-                setError(null);
+              setSelectedUsers([]);
+              setE2eeEnabled(false);
+              setError(null);
               }}
               disabled={isCreating}
             >
@@ -282,8 +373,9 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
               onClick={() => {
                 setTab('team');
                 setStep(1);
-                setSelectedUsers([]);
-                setError(null);
+              setSelectedUsers([]);
+              setE2eeEnabled(false);
+              setError(null);
               }}
               disabled={isCreating}
             >
@@ -308,6 +400,11 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
               groupDescriptionLabel={groupDescriptionLabel}
               groupDescriptionPlaceholder={groupDescriptionPlaceholder}
               groupPublicLabel={groupPublicLabel}
+              e2eeEnabled={e2eeEnabled}
+              onE2eeChange={handleE2eeChange}
+              e2eeLabel={e2eeLabel}
+              e2eeDescription={e2eeDescription}
+              e2eeDisabled={!e2eeAvailable || isCreating}
             />
           ) : (
             <>
@@ -349,8 +446,26 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
                   <span className="ermis-create-channel__toggle-thumb" />
                 </button>
               </div>
+
+              <DefaultE2eeToggle
+                enabled={e2eeEnabled}
+                onChange={handleE2eeChange}
+                disabled={!e2eeAvailable || isCreating}
+                label={e2eeLabel}
+                description={e2eeAvailable ? e2eeDescription : e2eeUnavailableLabel}
+              />
             </>
           )
+        )}
+
+        {tab === 'messaging' && (
+          <E2eeToggleComponent
+            enabled={e2eeEnabled}
+            onChange={handleE2eeChange}
+            disabled={!e2eeAvailable || isCreating}
+            label={e2eeLabel}
+            description={e2eeAvailable ? e2eeDescription : e2eeUnavailableLabel}
+          />
         )}
 
         {/* User Selection - Step 2 (Group) or Step 1 (Messaging) */}

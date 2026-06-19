@@ -60,6 +60,11 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     topics_enabled?: boolean;
     parent_cid?: string;
     is_closed_topic?: boolean;
+    gate?: boolean;
+    mls_enabled?: boolean;
+    mls_enabled_at?: string;
+    mls_epoch?: number;
+    e2ee_group_id?: string;
   };
 
 export type QueryChannelsAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = APIResponse & {
@@ -129,14 +134,22 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     display_type?: MessageDisplayType;
     channel?: ChannelResponse<ErmisChatGenerics>;
     cid?: string;
+    content_type?: 'standard' | 'mls';
     created_at?: string;
     deleted_at?: string;
     latest_reactions?: ReactionResponse<ErmisChatGenerics>[];
     mentioned_users?: string[];
+    device_id?: string;
+    mls_ciphertext?: number[];
+    mls_epoch?: number;
+    e2ee_group_id?: string;
+    old_texts?: Array<{ text: string; created_at: string }>;
+    e2ee_status?: string;
     own_reactions?: ReactionResponse<ErmisChatGenerics>[] | null;
     pinned_at?: string | null;
     pinned_by?: UserResponse<ErmisChatGenerics> | null;
     reaction_counts?: { [key: string]: number } | null;
+    reaction_groups?: { [key: string]: unknown } | null;
     reaction_scores?: { [key: string]: number } | null;
     reply_count?: number;
     status?: string;
@@ -282,6 +295,22 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   user?: UserResponse<ErmisChatGenerics>;
   user_id?: string;
   watcher_count?: number;
+  protocol_data?: {
+    type?: 'commit' | 'welcome' | 'external_commit' | 'proposal' | string;
+    type_field?: string;
+    cid?: string;
+    commit?: number[];
+    welcome?: number[];
+    ratchet_tree?: number[];
+    epoch?: number;
+    target_user_ids?: string[];
+    device_id?: string;
+    user?: UserResponse<ErmisChatGenerics>;
+    [key: string]: unknown;
+  };
+  topic_cids?: string[];
+  mls_enabled?: boolean;
+  self_remove?: boolean;
 };
 
 export type EventHandler<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = (
@@ -316,6 +345,8 @@ export type ChannelFilters = {
 export type CreateTopicData = {
   name: string;
   image?: string;
+  gate?: boolean;
+  mls_enabled?: boolean;
   [key: string]: any;
 };
 
@@ -374,7 +405,32 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     members?: string[];
     name?: string;
     is_pinned?: boolean;
+    mls_enabled?: boolean;
+    e2ee_group_id?: string;
+    gate?: boolean;
+    /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
+    commit?: number[];
+    welcome?: number[];
+    ratchet_tree?: number[];
+    group_info?: number[];
+    epoch?: number;
   };
+
+/** MLS protocol fields required for E2EE add_members operations. */
+export type E2EEAddMembersOptions = {
+  commit: number[];
+  welcome: number[];
+  ratchet_tree: number[];
+  epoch: number;
+  group_info: number[];
+};
+
+/** MLS protocol fields required for E2EE remove_members operations. */
+export type E2EERemoveMembersOptions = {
+  commit: number[];
+  epoch: number;
+  group_info: number[];
+};
 
 export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
   banned?: boolean;

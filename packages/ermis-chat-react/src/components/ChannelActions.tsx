@@ -216,9 +216,14 @@ export function computeDefaultActions(
         isDanger: true,
         onClick: async (ch) => {
           try {
-            await ch.removeMembers([currentUserId]);
+            if (ch.data?.mls_enabled) {
+              await ch.leaveChannelE2ee(currentUserId);
+            } else {
+              await ch.removeMembers([currentUserId]);
+            }
           } catch (e) {
             console.error('Error leaving channel', e);
+            throw e;
           }
         },
       });

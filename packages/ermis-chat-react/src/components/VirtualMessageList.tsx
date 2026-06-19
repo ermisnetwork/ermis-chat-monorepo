@@ -21,6 +21,7 @@ import {
   defaultMessageRenderers,
   type MessageBubbleProps,
 } from './MessageRenderers';
+import { isStickerMessage } from '../messageTypeUtils';
 import { getDateKey, formatDateLabel, getMessageUserId, formatReadTimestamp } from '../utils';
 import { QuotedMessagePreview } from './QuotedMessagePreview';
 import { PinnedMessages } from './PinnedMessages';
@@ -260,8 +261,6 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         } as any);
       }
 
-      // Re-watch to get full fresh state from server
-      activeChannel.watch().catch(() => {});
     } catch (e: any) {
       console.error('Error accepting invite', e);
     }
@@ -416,7 +415,11 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     const entries: MsgEntry[] = messages.map((message, index) => {
       const isOwnMessage =
         message.user_id === currentUserId || message.user?.id === currentUserId;
-      const messageType = (message.type || 'regular') as MessageLabel;
+      const messageType = (
+        isStickerMessage(message) ? 'sticker' : (message.type || 'regular')
+      ) as MessageLabel;
+
+      // Date separator
       const prevMsg = index > 0 ? messages[index - 1] : null;
       const showDateSeparator =
         !prevMsg || getDateKey(message.created_at) !== getDateKey(prevMsg.created_at);

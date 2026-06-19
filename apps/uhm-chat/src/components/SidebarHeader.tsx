@@ -35,7 +35,7 @@ export function SidebarHeader({
   onSearchClose,
 }: SidebarHeaderProps) {
   const { t, i18n } = useTranslation()
-  const { client, theme, setTheme } = useChatClient()
+  const { client, theme, setTheme, clearAllDrafts } = useChatClient()
   const { user } = useChatUser()
   const { inviteCount } = useInviteCount()
   const { contactCount } = useContactCount()
@@ -74,6 +74,7 @@ export function SidebarHeader({
   const handleLogout = async () => {
     try {
       if (client) {
+        clearAllDrafts();
         await client.disconnectUser()
       }
     } catch (err) {

@@ -88,7 +88,11 @@ export const FilesPreview: React.FC<FilesPreviewProps> = React.memo(({ files, on
             {/* Upload status overlay */}
             {isUploading && (
               <div className="ermis-files-preview__uploading">
-                <span className="ermis-files-preview__spinner" />
+                {item.progress !== undefined ? (
+                  <span className="ermis-files-preview__progress">{item.progress}%</span>
+                ) : (
+                  <span className="ermis-files-preview__spinner" />
+                )}
               </div>
             )}
 

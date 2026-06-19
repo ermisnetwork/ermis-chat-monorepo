@@ -221,6 +221,38 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
 ) {
   const addMessageToList = addIfDoesNotExist || timestampChanged;
   let messageArr = messages;
+  const mergeMessage = (
+    existingMessage: FormatMessageResponse<ErmisChatGenerics>,
+    incomingMessage: FormatMessageResponse<ErmisChatGenerics>,
+  ) => {
+    const incomingAny = incomingMessage as any;
+    const existingAny = existingMessage as any;
+    const incomingIsEncrypted = incomingAny.content_type === 'mls' || Boolean(incomingAny.mls_ciphertext);
+    const existingHasPlaintext =
+      existingAny.content_type === 'standard' ||
+      Boolean(existingAny.text) ||
+      Boolean(existingAny.attachments?.length) ||
+      Boolean(existingAny.sticker_url);
+    const encryptedPlaintextKeys = new Set([
+      'content_type',
+      'text',
+      'attachments',
+      'sticker_url',
+      'poll_type',
+      'poll_choice_counts',
+      'latest_poll_choices',
+    ]);
+    const mergedMessage = { ...existingMessage };
+    (Object.keys(incomingMessage) as Array<keyof typeof incomingMessage>).forEach((key) => {
+      if (incomingMessage[key] === undefined) return;
+      if (incomingIsEncrypted && existingHasPlaintext && encryptedPlaintextKeys.has(String(key))) return;
+      (mergedMessage as any)[key] = incomingMessage[key];
+    });
+    if (incomingIsEncrypted && existingHasPlaintext) {
+      (mergedMessage as any).content_type = 'standard';
+    }
+    return mergedMessage;
+  };
 
   // if created_at has changed, message should be filtered and re-inserted in correct order
   // slow op but usually this only happens for a message inserted to state before actual response with correct timestamp
@@ -265,28 +297,12 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
   // message already exists and not filtered due to timestampChanged, update and return
   if (!timestampChanged && message.id) {
     if (messageArr[left] && message.id === messageArr[left].id) {
-      // Merge properties safely: do not overwrite existing data with undefined
-      const existingMessage = messageArr[left];
-      const mergedMessage = { ...existingMessage };
-      (Object.keys(message) as Array<keyof typeof message>).forEach((key) => {
-        if (message[key] !== undefined) {
-          (mergedMessage as any)[key] = message[key];
-        }
-      });
-      messageArr[left] = mergedMessage;
+      messageArr[left] = mergeMessage(messageArr[left], message);
       return [...messageArr];
     }
 
     if (messageArr[left - 1] && message.id === messageArr[left - 1].id) {
-      // Merge properties safely: do not overwrite existing data with undefined
-      const existingMessage = messageArr[left - 1];
-      const mergedMessage = { ...existingMessage };
-      (Object.keys(message) as Array<keyof typeof message>).forEach((key) => {
-        if (message[key] !== undefined) {
-          (mergedMessage as any)[key] = message[key];
-        }
-      });
-      messageArr[left - 1] = mergedMessage;
+      messageArr[left - 1] = mergeMessage(messageArr[left - 1], message);
       return [...messageArr];
     }
   }
@@ -402,7 +418,15 @@ let pendingBatchUserPromise: Promise<void> | null = null;
 let resolvePendingBatchUserPromise: (() => void) | null = null;
 
 /**
+ * Track user IDs we've already attempted to fetch, so we don't re-fetch
+ * infinitely for users who genuinely have no name set in the backend.
+ */
+const _fetchedUserIds = new Set<string>();
+
+/**
  * Ensure all members' user info are loaded in state.users.
+ * Also re-fetches users whose name equals their id (e.g. hex wallet addresses)
+ * since they likely have incomplete profile data.
  * @param client ErmisChat client instance
  * @param members Array of channel members (each member must have user?.id)
  */
@@ -413,13 +437,23 @@ export async function ensureMembersUserInfoLoaded<ErmisChatGenerics extends Exte
   // Get all memberIds
   const memberIds = (members || []).map((m: any) => m.user?.id).filter((id: string | undefined) => !!id);
 
-  // Filter out ids that do not exist in users
+  // Filter out ids that are missing or have incomplete info (name === id, i.e. hex address)
   const users = client.state.users;
-  const missingUserIds = memberIds.filter((id: string) => !users[id]);
+  const missingUserIds = memberIds.filter((id: string) => {
+    // Skip users we've already attempted to fetch (prevents infinite re-fetching)
+    if (_fetchedUserIds.has(id)) return false;
+    const existing = users[id];
+    // Treat as missing if: not in state, has no name, or name is just the raw id
+    return !existing || !existing.name || existing.name === existing.id;
+  });
 
   // If there are users missing, fetch and update them into state
   if (missingUserIds.length > 0) {
-    missingUserIds.forEach((id) => pendingBatchUserIds.add(id));
+    // Mark as attempted before fetching
+    missingUserIds.forEach((id) => {
+      _fetchedUserIds.add(id);
+      pendingBatchUserIds.add(id);
+    });
 
     if (!pendingBatchUserPromise) {
       pendingBatchUserPromise = new Promise((resolve) => {

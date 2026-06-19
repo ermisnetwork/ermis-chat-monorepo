@@ -37,7 +37,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   DragAndDropOverlayComponent = UhmDragAndDropOverlay,
 }) => {
   const { t } = useTranslation();
-  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatClient();
+  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage, setDraft, getDraft } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
@@ -45,6 +45,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   const editableRef = useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
+  const prevChannelCidRef = useRef<string | null>(null);
 
   const { hasCapability } = useChannelCapabilities();
   const isClosedTopic = activeChannel?.data?.is_closed_topic === true;
@@ -78,19 +79,21 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const cancelRecording = () => {
+  const cancelRecording = useCallback(() => {
     if (recorderRef.current) {
       recorderRef.current.close();
       recorderRef.current = null;
     }
-    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    setRecordedUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
     setIsRecording(false);
     setRecordingTime(0);
     setIsUploadingVoice(false);
     setRecordedBlob(null);
-    setRecordedUrl(null);
     if (timerRef.current) clearInterval(timerRef.current);
-  };
+  }, []);
 
   const sendVoiceMessage = async () => {
     if (!recordedBlob || !activeChannel) return;
@@ -169,6 +172,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     handleFilesSelected, handleRemoveFile, handleAttachClick, cleanupFiles,
   } = useFileUpload({ activeChannel, editableRef, setHasContent });
 
+  const filesRef = useRef(files);
+  filesRef.current = files;
+
   const { isDragging } = useDragAndDrop(
     handleFilesSelected,
     !canSendMessage || !!editingMessage || !!quotedMessage
@@ -214,7 +220,12 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     buildPayload,
     reset: resetMentions,
     syncMessages,
-    onSend: () => { },
+    onSend: () => {
+      // Clear draft after successful send
+      if (activeChannel?.cid) {
+        setDraft(activeChannel.cid, { html: '', files: [] });
+      }
+    },
     onBeforeSend: async (text: string) => {
       // Keyword validation (links)
       if (!canSendLinks && text) {
@@ -333,6 +344,55 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       editableRef.current.focus();
     }
   }, [activeChannel, quotedMessage, editingMessage]);
+
+  // Draft save/restore + cleanup on channel switch
+  useEffect(() => {
+    // Save draft from PREVIOUS channel before switching
+    if (prevChannelCidRef.current && editableRef.current) {
+      const currentHtml = editableRef.current.innerHTML;
+      setDraft(prevChannelCidRef.current, { html: currentHtml, files: filesRef.current });
+    }
+
+    // Clear attachments, mentions, pickers, and recording from previous channel
+    resetMentions();
+    closePickers();
+    cancelRecording();
+    // Do not revoke Object URLs here since we save files in drafts and need previews when returning
+    setFiles([]);
+
+    // Restore draft for NEW channel
+    const newCid = activeChannel?.cid || null;
+    prevChannelCidRef.current = newCid;
+
+    if (newCid && editableRef.current) {
+      const draft = getDraft(newCid);
+      if (draft) {
+        editableRef.current.innerHTML = draft.html;
+        setFiles(draft.files || []);
+        setHasContent(!!editableRef.current.textContent?.trim() || !!(draft.files && draft.files.length));
+        // Move cursor to end of restored draft
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(editableRef.current);
+        range.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      } else {
+        editableRef.current.innerHTML = '';
+        setFiles([]);
+        setHasContent(false);
+      }
+    } else {
+      if (editableRef.current) editableRef.current.innerHTML = '';
+      setFiles([]);
+      setHasContent(false);
+    }
+
+    // Stop typing indicator on channel switch
+    return () => {
+      activeChannel?.stopTyping();
+    };
+  }, [activeChannel, setDraft, getDraft, cancelRecording, closePickers, resetMentions, setFiles]);
 
   useEffect(() => {
     if (editingMessage && editableRef.current) {

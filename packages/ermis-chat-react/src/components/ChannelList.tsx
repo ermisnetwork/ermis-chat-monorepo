@@ -89,8 +89,28 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   }, [defaultActions, hiddenActions]);
   const ActionsComponent = ChannelActionsComponent || DefaultChannelActions;
 
-  const name = channel.data?.name || channel.cid;
-  const image = channel.data?.image as string | undefined;
+  // For DM channels, resolve name/image from the other member if channel.data.name is missing
+  const resolvedNameImage = useMemo(() => {
+    if (channel.data?.name) {
+      return { name: channel.data.name as string, image: channel.data.image as string | undefined };
+    }
+    // For DM (messaging) channels, find the other member's info
+    if (isDirectChannel(channel) && currentUserId && channel.state?.members) {
+      const members = Object.values(channel.state.members) as any[];
+      const other = members.find((m: any) => (m.user_id || m.user?.id) !== currentUserId);
+      if (other) {
+        const otherUser = other.user || other;
+        return {
+          name: otherUser.name || otherUser.id || channel.cid,
+          image: otherUser.image || otherUser.avatar || otherUser.avatar_url,
+        };
+      }
+    }
+    return { name: channel.cid, image: channel.data?.image as string | undefined };
+  }, [channel.data?.name, channel.data?.image, channel.state?.members, currentUserId, channel.cid, updateCount]);
+
+  const name = resolvedNameImage.name;
+  const image = resolvedNameImage.image;
   const showUnread = hasUnread && !isActive;
   const avatarClassName = isGroupChannel(channel) ? 'ermis-avatar-wrapper--group' : undefined;
 

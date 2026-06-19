@@ -19,6 +19,12 @@ export default defineConfig([
     define: {
       'process.env.PKG_VERSION': JSON.stringify(pkg.version),
     },
+    esbuildOptions(options) {
+      options.logOverride = {
+        ...options.logOverride,
+        'empty-import-meta': 'silent',
+      };
+    },
     outExtension({ format }) {
       return { js: format === 'cjs' ? '.cjs' : '.mjs' };
     },
@@ -37,6 +43,10 @@ export default defineConfig([
     esbuildOptions(options) {
       options.alias = {
         https: shimPath,
+      };
+      options.logOverride = {
+        ...options.logOverride,
+        'empty-import-meta': 'silent',
       };
     },
     outExtension({ format }) {
@@ -58,6 +68,10 @@ export default defineConfig([
     esbuildOptions(options) {
       options.alias = {
         https: shimPath,
+      };
+      options.logOverride = {
+        ...options.logOverride,
+        'empty-import-meta': 'silent',
       };
     },
     outExtension() {

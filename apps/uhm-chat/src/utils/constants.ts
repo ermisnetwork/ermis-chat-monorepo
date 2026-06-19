@@ -9,10 +9,16 @@ export const STORAGE_KEYS = {
 export const API_DEFAULTS = {
   API_KEY: import.meta.env.VITE_API_KEY || 'uhm-chat-dev-key',
   BASE_URL: import.meta.env.VITE_API_URL || 'https://api-trieve.ermis.network',
+  USS_BASE_URL: import.meta.env.VITE_USS_API_URL || 'https://api-trieve.ermis.network/uss/v1',
 } as const;
 
 export const OTP_CONFIG = {
   COUNTDOWN_SECONDS: 60,
   CODE_LENGTH: 6,
   PHONE_METHOD: 'Sms',
+} as const;
+
+export const RECOVERY_PIN_CONFIG = {
+  MIN_DIGITS: 8,
+  RESTORE_PREVIEW_LIMIT: 8,
 } as const;

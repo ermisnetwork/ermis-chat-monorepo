@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pencil, Globe, Lock, Hash } from 'lucide-react';
+import { Pencil, Globe, Lock, Hash, LockKeyhole } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Avatar, MediaLightbox } from '@ermis-network/ermis-chat-react';
 import type { ChannelInfoCoverProps } from '@ermis-network/ermis-chat-react';
@@ -15,6 +15,8 @@ export const UhmChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo((
   parentChannelName,
   isTopic,
   isTeamChannel,
+  isE2ee,
+  mlsEpoch,
 }) => {
   const { t } = useTranslation();
   const [isLightboxOpen, setIsLightboxOpen] = React.useState(false);
@@ -103,6 +105,12 @@ export const UhmChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo((
           ) : isTeamChannel && !isTopic && (
             <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 px-2 py-0.5 rounded border border-zinc-100 dark:border-zinc-800">
               {isPublic ? t('system_messages.public') : t('system_messages.private')}
+            </span>
+          )}
+          {isE2ee && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded border border-emerald-200 bg-emerald-50 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+              <LockKeyhole className="w-2.5 h-2.5" />
+              E2EE{typeof mlsEpoch === 'number' ? ` · ${mlsEpoch}` : ''}
             </span>
           )}
         </div>

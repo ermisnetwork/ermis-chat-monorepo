@@ -38,6 +38,8 @@ import {
   ForwardMessage,
   CreateTopicData,
   EditTopicData,
+  E2EEAddMembersOptions,
+  E2EERemoveMembersOptions,
 } from './types';
 /**
  * Represents a Channel in the Sub2s.
@@ -104,6 +106,17 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this._client;
   }
 
+  private _isE2eeQuery(): boolean {
+    return (this.data as any)?.mls_enabled === true || (this._data as any)?.mls_enabled === true;
+  }
+
+  private _queryDataPayload(): ChannelData<ErmisChatGenerics> | ChannelResponse<ErmisChatGenerics> | undefined {
+    if (!this._data || Object.keys(this._data).length === 0) return undefined;
+    const data = { ...(this._data as any) };
+    delete data.messages;
+    return Object.keys(data).length > 0 ? data : undefined;
+  }
+
   /**
    * Sends a message to this channel.
    * By default, it pushes the message eagerly (optimistically) to the local UI state before the server replies.
@@ -127,10 +140,47 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       updated_at: new Date().toISOString(),
       user: this.getClient().user,
       user_id: this.getClient().userID,
-      type: 'regular',
+      type: message.sticker_url ? 'sticker' : message.type || 'regular',
     } as unknown as MessageResponse<ErmisChatGenerics>;
 
     this.state.addMessageSorted(optimisticMessage);
+
+    const isE2ee = (this.data as any)?.mls_enabled;
+    const mlsMgr = this.getClient().mlsManager;
+    if (isE2ee && mlsMgr?.initialized) {
+      try {
+        const response = await mlsMgr.sendMessage(this.type, this.id, this.cid, message.text || '', messageId, {
+          parent_id: message.parent_id,
+          quoted_message_id: message.quoted_message_id,
+          mentioned_users: message.mentioned_users,
+          mentioned_all: message.mentioned_all,
+          forward_cid: message.forward_cid,
+          attachments: message.attachments,
+          sticker_url: message.sticker_url,
+          poll_type: message.poll_type,
+        });
+        if (response?.message) {
+          this.state.addMessageSorted(
+            {
+              ...response.message,
+              status: 'received',
+              user: response.message.user || this.getClient().user,
+            } as MessageResponse<ErmisChatGenerics>,
+            true,
+            false,
+          );
+        }
+        return response;
+      } catch (error: any) {
+        const isOfflineError =
+          !error.response ||
+          error.code === 'ERR_NETWORK' ||
+          error.isWSFailure ||
+          !this.getClient().wsConnection?.isHealthy;
+        this.state.updateMessageStatus(messageId, isOfflineError ? 'failed_offline' : 'error');
+        throw error;
+      }
+    }
 
     // 3. Call API — don't update status on success (WS message.new will handle it)
     try {
@@ -269,6 +319,28 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async editMessage(oldMessageID: string, message: EditMessage) {
+    const isE2ee = (this.data as any)?.mls_enabled;
+    const mlsMgr = this.getClient().mlsManager;
+    if (isE2ee && mlsMgr?.initialized) {
+      const response = await mlsMgr.updateMessage(this.type, this.id, this.cid, oldMessageID, message.text, {
+        mentioned_all: message.mentioned_all,
+        mentioned_users: message.mentioned_users,
+      });
+      const stored = await mlsMgr.storage?.loadE2eeMessage(oldMessageID).catch(() => null);
+      if (stored) {
+        this.state.addMessageSorted(
+          {
+            ...stored,
+            content_type: 'standard',
+            user: stored.user || this.getClient().user,
+          } as MessageResponse<ErmisChatGenerics>,
+          false,
+          false,
+        );
+      }
+      return response;
+    }
+
     return await this.getClient().post(this.getClient().baseURL + `/messages/${this.type}/${this.id}/${oldMessageID}`, {
       message,
     });
@@ -281,6 +353,78 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     user?: UserResponse<ErmisChatGenerics>,
   ) {
     return this.getClient().sendFile(`${this._channelURL()}/file`, uri, name, contentType, user);
+  }
+
+  /**
+   * Uploads a file directly to the storage bucket via a presigned URL, bypassing the server.
+   * This reduces server bandwidth and latency for file uploads.
+   *
+   * @param file       - The File or Blob to upload
+   * @param name       - The file name
+   * @param contentType - The MIME type of the file
+   * @param onProgress - Optional callback for upload progress (browser only)
+   */
+  async uploadFilePresigned(
+    file: File | Blob | Buffer,
+    name: string,
+    contentType: string,
+    onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void,
+  ): Promise<{ file: string }> {
+    // 1. Request presigned URL
+    const presignResp = await this.getClient().post<{ attachment_id: string; upload_url: string; expires_in_secs: number }>(
+      `${this._channelURL()}/file/presign`,
+      {
+        file_name: name,
+        content_type: contentType,
+      },
+    );
+
+    // 2. Upload directly to storage (R2/S3)
+    await new Promise<void>((resolve, reject) => {
+      if (typeof XMLHttpRequest !== 'undefined') {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', presignResp.upload_url);
+        xhr.setRequestHeader('Content-Type', contentType);
+
+        xhr.upload.onprogress = ({ loaded, total }) => {
+          if (total > 0 && onProgress) {
+            onProgress({ loaded, total, percentage: Math.round((loaded / total) * 100) });
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status < 300) resolve();
+          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+        };
+
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(file as any);
+      } else {
+        // Fallback for Node.js
+        fetch(presignResp.upload_url, {
+          method: 'PUT',
+          headers: { 'Content-Type': contentType },
+          body: file as any,
+        })
+          .then((res) => {
+            if (res.ok) resolve();
+            else reject(new Error(`Upload failed: HTTP ${res.status}`));
+          })
+          .catch(reject);
+      }
+    });
+
+    // 3. Confirm upload
+    const confirmResp = await this.getClient().post<{ file: string }>(
+      `${this._channelURL()}/file/confirm`,
+      {
+        attachment_id: presignResp.attachment_id,
+        file_name: name,
+        content_type: contentType,
+      },
+    );
+
+    return confirmResp;
   }
   /**
    * Pre-process files (normalize names), upload them in parallel,
@@ -313,7 +457,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     // 2. Upload all files in parallel
     const uploadResults = await Promise.allSettled(
-      processedFiles.map((file) => this.sendFile(file, file.name, file.type)),
+      processedFiles.map((file) => this.uploadFilePresigned(file, file.name, file.type || 'application/octet-stream')),
     );
 
     // 3. For successful video uploads, generate and upload thumbnails
@@ -329,7 +473,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               const thumbBlob = await this.getThumbBlobVideo(files[i]);
               if (thumbBlob) {
                 const thumbFile = new File([thumbBlob], `thumb_${processedFiles[i].name}.jpg`, { type: 'image/jpeg' });
-                const thumbResp = await this.sendFile(thumbFile, thumbFile.name, 'image/jpeg');
+                const thumbResp = await this.uploadFilePresigned(thumbFile, thumbFile.name, 'image/jpeg');
                 thumbUrls.set(i, thumbResp.file);
               }
             } catch {
@@ -424,8 +568,35 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return await this.getClient().delete(this._channelURL());
   }
 
-  async truncate() {
-    return await this.getClient().delete(this._channelURL() + '/truncate');
+  async truncate(options?: { for_me?: boolean }) {
+    const qs = options?.for_me ? '?for_me=true' : '';
+    const response = await this.getClient().delete(this._channelURL() + '/chat' + qs);
+    
+    // Dispatch local event so UI clears immediately
+    const truncateDate = (response as any)?.channel?.truncated_at || new Date().toISOString();
+    
+    // Unconditionally clear local state
+    this.state.clearMessages();
+    if (this.data) {
+      (this.data as any).truncated_at = truncateDate;
+    }
+
+    const eventType = options?.for_me ? 'channel.truncate_for_me' : 'channel.truncate';
+    
+    const syntheticEvent = {
+      type: eventType,
+      channel: (response as any)?.channel || this.data,
+      created_at: truncateDate,
+      cid: this.cid,
+      channel_type: this.type,
+      channel_id: this.id,
+    } as any;
+
+    this._handleChannelEvent(syntheticEvent);
+    this._callChannelListeners(syntheticEvent);
+    this.getClient().dispatchEvent(syntheticEvent);
+    
+    return response;
   }
 
   async blockUser() {
@@ -461,6 +632,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    */
   async addMembers(members: string[]) {
     return await this._update({ add_members: members });
+  }
+
+  async addMembersE2ee(members: string[], e2eeOptions: E2EEAddMembersOptions) {
+    return await this._update({ add_members: members, ...e2eeOptions });
   }
 
   async addModerators(members: string[]) {
@@ -517,6 +692,44 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async searchMessage(search_term: string, offset: number) {
+    const isE2ee = (this.data as any)?.mls_enabled;
+    const mlsEnabledAt = (this.data as any)?.mls_enabled_at;
+
+    if (!isE2ee) {
+      return this._searchServerMessages(search_term, offset);
+    }
+
+    if (!mlsEnabledAt) {
+      return this._searchLocalE2eeMessages(search_term, offset);
+    }
+
+    const [serverResult, localResult] = await Promise.allSettled([
+      this._searchServerMessages(search_term, 0).catch(() => null),
+      this._searchLocalE2eeMessages(search_term, 0),
+    ]);
+
+    const serverMsgs =
+      serverResult.status === 'fulfilled' && serverResult.value ? serverResult.value.messages || [] : [];
+    const localMsgs = localResult.status === 'fulfilled' && localResult.value ? localResult.value.messages || [] : [];
+
+    const seen = new Set<string>();
+    const merged = [...serverMsgs, ...localMsgs]
+      .filter((message: any) => {
+        if (seen.has(message.id)) return false;
+        seen.add(message.id);
+        return true;
+      })
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    if (merged.length === 0) return null;
+
+    return {
+      total: merged.length,
+      messages: merged.slice(offset, offset + 25),
+    };
+  }
+
+  private async _searchServerMessages(search_term: string, offset: number) {
     const response: any = await this.getClient().post(this.getClient().baseURL + `/channels/search`, {
       cid: this.cid,
       search_term,
@@ -528,9 +741,27 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       return null;
     }
 
+    const messages = response?.search_result?.messages.map((message: any) => {
+      const user = getUserInfo(message.user_id, Object.values(this.getClient().state.users)) || message.user;
+      return { ...message, user };
+    });
+
     return {
       ...response?.search_result,
-      messages: response?.search_result?.messages.map((message: any) => {
+      messages: await this._hydrateE2eeMessagesFromLocalCache(messages),
+    };
+  }
+
+  private async _searchLocalE2eeMessages(search_term: string, offset: number) {
+    const mlsManager = this.getClient().mlsManager;
+    if (!mlsManager?.storage) return null;
+
+    const matches = await mlsManager.storage.searchE2eeMessagesByCid(this.cid, search_term, 100);
+    if (!matches || matches.length === 0) return null;
+
+    return {
+      total: matches.length,
+      messages: matches.slice(offset, offset + 25).map((message: any) => {
         const user = getUserInfo(message.user_id, Object.values(this.getClient().state.users)) || message.user;
         return { ...message, user };
       }),
@@ -544,6 +775,29 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    */
   async removeMembers(members: string[]) {
     return await this._update({ remove_members: members });
+  }
+
+  async removeMembersE2ee(members: string[], e2eeOptions: E2EERemoveMembersOptions) {
+    return await this._update({ remove_members: members, ...e2eeOptions, self_remove: false });
+  }
+
+  /**
+   * Self-leave an E2EE channel.
+   *
+   * Sends `self_remove: true` so the server removes channel membership without
+   * requiring an MLS remove commit from the leaving user.
+   */
+  async leaveChannelE2ee(userId: string) {
+    const currentUserId = this.getClient().user?.id;
+    if (currentUserId && userId !== currentUserId) {
+      throw new Error('[E2EE] leaveChannelE2ee can only remove the current user');
+    }
+    const response = await this._update({ remove_members: [userId], self_remove: true });
+    const mlsManager = this.getClient().mlsManager;
+    if (mlsManager?.initialized && this.cid) {
+      mlsManager.leaveGroup(this.cid, Date.now());
+    }
+    return response;
   }
 
   async demoteModerators(members: string[]) {
@@ -761,6 +1015,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const project_id = this._client.projectId;
     const uuid = randomId();
     const topicID = `${project_id}:${uuid}`;
+    const topicCid = `topic:${topicID}`;
 
     const queryURL = `${this.getClient().baseURL}/channels/topic/${topicID}`;
     const payload: any = {
@@ -768,6 +1023,28 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       parent_cid: this.cid,
       data: { ...data },
     };
+
+    const parentMlsEnabled = (this.data as any)?.mls_enabled || false;
+    const explicitMlsEnabled = data?.mls_enabled === true;
+    const gatedTopic = data?.gate === true;
+    const ownTopicGroup = gatedTopic || (!parentMlsEnabled && explicitMlsEnabled);
+    if (parentMlsEnabled || explicitMlsEnabled) {
+      const mlsManager = this.getClient().mlsManager;
+      payload.data.mls_enabled = true;
+      if (ownTopicGroup && mlsManager?.initialized) {
+        try {
+          const memberIds = Object.keys(this.state?.members || {});
+          const bundle = await mlsManager.createE2eeTopic(topicCid, memberIds);
+          payload.data.commit = bundle.commit;
+          payload.data.welcome = bundle.welcome;
+          payload.data.ratchet_tree = bundle.ratchet_tree;
+          payload.data.group_info = bundle.group_info;
+          payload.data.epoch = bundle.epoch;
+        } catch (err) {
+          this.getClient().logger('error', '[MLS] createTopic: failed to prepare E2EE bundle', { err, cid: topicCid });
+        }
+      }
+    }
 
     const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
 
@@ -778,8 +1055,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     // Make sure we wait for the connect promise if there is a pending one
     await this.getClient().wsPromise;
 
+    this._seedE2eeStateFromLocalCache(options, messageSetToAddToIfDoesNotExist);
+
     let project_id = this._client.projectId;
-    let update_options = { ...options, project_id };
+    const update_options = this._isE2eeQuery() ? { project_id } : { ...options, project_id };
 
     let queryURL = `${this.getClient().baseURL}/channels/${this.type}`;
     if (this.id) {
@@ -797,8 +1076,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       ...update_options,
     };
 
-    if (this._data && Object.keys(this._data).length > 0) {
-      payload.data = this._data;
+    const dataPayload = this._queryDataPayload();
+    if (dataPayload) {
+      payload.data = dataPayload;
     }
 
     const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
@@ -818,6 +1098,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.pinned_messages = state.pinned_messages ? enrichWithUserInfo(state.pinned_messages, users) : [];
     state.read = enrichWithUserInfo(state.read || [], users);
     state.channel.is_pinned = state.is_pinned || false;
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
+    state.pinned_messages = await this._hydrateE2eeMessagesFromLocalCache(state.pinned_messages || [], state.channel);
 
     // Process topics for team channels
     // NOTE: topic processing is handled by _initializeState() below (line 1837).
@@ -887,12 +1169,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       project_id,
     };
 
-    if (this._data && Object.keys(this._data).length > 0) {
-      payload.data = this._data;
+    const dataPayload = this._queryDataPayload();
+    if (dataPayload) {
+      payload.data = dataPayload;
     }
 
     const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
 
+    // Ensure all members' user info are loaded in state.users
+    await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
     const users = Object.values(this.getClient().state.users);
     state.channel.members = enrichWithUserInfo(state.channel.members, users);
     state.channel.name =
@@ -902,6 +1187,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.messages = enrichWithUserInfo(state.messages, users);
     state.pinned_messages = state.pinned_messages ? enrichWithUserInfo(state.pinned_messages, users) : [];
     state.read = enrichWithUserInfo(state.read || [], users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
+    state.pinned_messages = await this._hydrateE2eeMessagesFromLocalCache(state.pinned_messages || [], state.channel);
 
     // add any messages to our channel state
     const { messageSet } = this._initializeState(state, messageSetToAddToIfDoesNotExist);
@@ -936,8 +1223,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       messages: { limit, id_lt: message_id },
     });
 
+    // Ensure user info for message authors is loaded
+    const messageMemberStubs = (state.messages || [])
+      .filter((m: any) => m.user_id || m.user?.id)
+      .map((m: any) => ({ user: { id: m.user?.id || m.user_id } }));
+    await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubs);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -967,8 +1260,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       messages: { limit, id_gt: message_id },
     });
 
+    // Ensure user info for message authors is loaded
+    const messageMemberStubsGt = (state.messages || [])
+      .filter((m: any) => m.user_id || m.user?.id)
+      .map((m: any) => ({ user: { id: m.user?.id || m.user_id } }));
+    await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubsGt);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -998,8 +1297,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       messages: { limit, id_around: message_id },
     });
 
+    // Ensure user info for message authors is loaded
+    const messageMemberStubsAround = (state.messages || [])
+      .filter((m: any) => m.user_id || m.user?.id)
+      .map((m: any) => ({ user: { id: m.user?.id || m.user_id } }));
+    await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubsAround);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -1031,6 +1336,21 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
   async getThumbBlobVideo(file: File): Promise<Blob | null> {
     return new Promise((resolve) => {
+      let timeoutId: number | null = null;
+      
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (videoPlayer.src) URL.revokeObjectURL(videoPlayer.src);
+        videoPlayer.remove();
+      };
+
+      // Đặt timeout 5 giây, nếu không lấy được ảnh thì bỏ qua để không treo upload
+      timeoutId = window.setTimeout(() => {
+        console.warn('Timeout extracting video thumbnail. Skipping.');
+        cleanup();
+        resolve(null);
+      }, 5000);
+
       const videoPlayer = document.createElement('video');
       videoPlayer.src = URL.createObjectURL(file);
       videoPlayer.crossOrigin = 'anonymous';
@@ -1040,11 +1360,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       let attempts = 0;
       const maxAttempts = 5;
       const seekInterval = 1.0; // Nhảy mỗi lần 1 giây nếu gặp ảnh đen
-
-      const cleanup = () => {
-        URL.revokeObjectURL(videoPlayer.src);
-        videoPlayer.remove();
-      };
 
       videoPlayer.addEventListener('error', () => {
         console.error('Error when loading video file.');
@@ -1328,6 +1643,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               }
             }
           }
+
+          const mlsMgr = this.getClient().mlsManager;
+          const isE2ee = (this.data as any)?.mls_enabled;
+          if (isE2ee && mlsMgr?.initialized && event.message.id) {
+            try {
+              await mlsMgr.storage.deleteE2eeMessage(event.message.id);
+            } catch (err) {
+              this.getClient().logger('warn', '[MLS] Failed to delete message from local DB', {
+                err,
+                message_id: event.message.id,
+              });
+            }
+          }
         }
         break;
       case 'message.deleted_for_me':
@@ -1356,10 +1684,24 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const isThreadMessage = !!event.message.parent_id;
 
           const existUser = users.find((user) => user.id === event.user?.id);
-          if (!existUser) {
+          // Also fetch if user exists but has no proper name (e.g. name is hex wallet address)
+          const userHasProperName = existUser && existUser.name && existUser.name !== existUser.id;
+          if (!existUser || !userHasProperName) {
             if (event.user?.id) {
-              const resUser = await this.getClient().queryUser(event.user.id);
-              users.push(resUser);
+              try {
+                const resUser = await this.getClient().queryUser(event.user.id);
+                if (existUser) {
+                  // Update existing entry in the local array
+                  Object.assign(existUser, resUser);
+                } else {
+                  users.push(resUser);
+                }
+              } catch (err) {
+                this._client.logger('warn', 'Failed to query user for new message, using event user fallback', { err });
+                if (!existUser) {
+                  users.push(event.user as any);
+                }
+              }
             }
           }
 
@@ -1371,8 +1713,47 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           }
           event.user = userInfo;
 
+          const mlsMgr = this.getClient().mlsManager;
+          const isMlsMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
+          const isOwnDeviceMessage = ownMessage && (!mlsMgr?.deviceId || event.message.device_id === mlsMgr.deviceId);
+
           if (this.state.isUpToDate || isThreadMessage) {
-            channelState.addMessageSorted(event.message, ownMessage);
+            if (!(isMlsMessage && isOwnDeviceMessage)) {
+              channelState.addMessageSorted(event.message, ownMessage);
+            }
+          }
+
+          if (!isOwnDeviceMessage && mlsMgr?.initialized && isMlsMessage && this.cid) {
+            mlsMgr
+              .processE2eeMessage(this.cid, event.message as any)
+              .then((result: Record<string, unknown> | null) => {
+                if (result) {
+                  const decryptedMessage = {
+                    ...event.message,
+                    ...result,
+                    content_type: 'standard',
+                  };
+                  channelState.addMessageSorted(decryptedMessage as any, false, false);
+                  this.getClient().dispatchEvent({
+                    type: 'e2ee.message_decrypted' as any,
+                    message: decryptedMessage,
+                    cid: this.cid,
+                  } as any);
+                } else {
+                  this.getClient().dispatchEvent({
+                    type: 'e2ee.message_decrypted' as any,
+                    message: {
+                      id: event.message!.id,
+                      e2ee_status: 'failed',
+                      text: '',
+                    },
+                    cid: this.cid,
+                  } as any);
+                }
+              })
+              .catch((err: unknown) => {
+                this.getClient().logger('error', '[E2EE] Failed to decrypt message', { err, cid: this.cid });
+              });
           }
           // if (event.message.pinned) {
           //   channelState.addPinnedMessage(event.message);
@@ -1419,6 +1800,51 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             event.message.latest_reactions = enrichWithUserInfo(event.message.latest_reactions || [], users);
           }
 
+          const mlsMgr = this.getClient().mlsManager;
+          const ownMessage = event.user?.id === this.getClient().user?.id;
+          const isMlsMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
+          const isOwnDeviceMessage = ownMessage && (!mlsMgr?.deviceId || event.message.device_id === mlsMgr.deviceId);
+
+          if (!isOwnDeviceMessage && mlsMgr?.initialized && isMlsMessage && this.cid) {
+            mlsMgr
+              .processE2eeMessage(this.cid, event.message as any)
+              .then((result: Record<string, unknown> | null) => {
+                if (result) {
+                  const decryptedMessage = {
+                    ...result,
+                    content_type: 'standard',
+                  };
+                  channelState.addMessageSorted(decryptedMessage as any, false, false);
+                  this.getClient().dispatchEvent({
+                    type: 'e2ee.message_decrypted' as any,
+                    message: decryptedMessage,
+                    cid: this.cid,
+                  } as any);
+                } else {
+                  this.getClient().dispatchEvent({
+                    type: 'e2ee.message_decrypted' as any,
+                    message: {
+                      id: event.message!.id,
+                      e2ee_status: 'failed',
+                      text: '',
+                    },
+                    cid: this.cid,
+                  } as any);
+                }
+              })
+              .catch((err: unknown) => {
+                this.getClient().logger('error', '[E2EE] Failed to decrypt updated message', {
+                  err,
+                  cid: this.cid,
+                });
+              });
+            break;
+          }
+
+          if (isMlsMessage && isOwnDeviceMessage) {
+            break;
+          }
+
           this._extendEventWithOwnReactions(event);
           channelState.addMessageSorted(event.message, false, false);
           if (event.message.pinned) {
@@ -1444,25 +1870,29 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           channelState.addMessageSorted(event.message, false, false);
         }
         break;
-      case 'channel.truncate': {
-        const truncateDate = event.channel?.created_at || event.created_at;
+      case 'channel.truncate':
+      case 'channel.truncate_for_me': {
+        const truncateDate = (event.channel as any)?.truncated_at || event.created_at;
         if (truncateDate) {
-          const truncatedAt = +new Date(truncateDate);
+          const truncatedAt = new Date(truncateDate).getTime();
 
           channelState.messageSets.forEach((messageSet, messageSetIndex) => {
-            messageSet.messages.forEach(({ created_at: createdAt, id }) => {
-              if (truncatedAt > +createdAt) channelState.removeMessage({ id, messageSetIndex });
+            const messagesToProcess = [...messageSet.messages];
+            messagesToProcess.forEach(({ created_at: createdAt, id }) => {
+              const msgCreatedAt = new Date(createdAt || '').getTime();
+              if (truncatedAt >= msgCreatedAt) channelState.removeMessage({ id, messageSetIndex });
             });
           });
 
-          channelState.pinnedMessages.forEach(({ id, created_at: createdAt }) => {
-            if (truncatedAt > +createdAt)
+          const pinnedMessagesToProcess = [...channelState.pinnedMessages];
+          pinnedMessagesToProcess.forEach(({ id, created_at: createdAt }) => {
+            const msgCreatedAt = new Date(createdAt || '').getTime();
+            if (truncatedAt >= msgCreatedAt)
               channelState.removePinnedMessage({ id } as MessageResponse<ErmisChatGenerics>);
           });
         } else {
           channelState.clearMessages();
         }
-
 
         channelState.unreadCount = 0;
         // system messages don't increment unread counts
@@ -1494,14 +1924,67 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           channelState.membership = event.member;
         }
         break;
-      case 'member.removed':
-        if (event.member?.user_id) {
-          delete channelState.members[event.member.user_id];
-        } else if (event.user?.id) {
-          // fallback just in case some legacy payload uses event.user for the removed user
-          delete channelState.members[event.user.id];
+      case 'member.removed': {
+        const removedUserId = event.member?.user_id || event.user?.id;
+        if (removedUserId) {
+          delete channelState.members[removedUserId];
+
+          const mlsMgrRemoved = this.getClient().mlsManager;
+          const actorUserId = event.user?.id;
+          const currentUserId = this.getClient().user?.id;
+          const currentUserWasRemoved = removedUserId === currentUserId;
+          const selfRemoveEvent =
+            event.self_remove === true ||
+            (event.self_remove === undefined && !!actorUserId && removedUserId === actorUserId);
+          const removalCursor = (event as any).created_at || (event as any).createdAt || event.message?.created_at;
+
+          if (currentUserWasRemoved) {
+            if (mlsMgrRemoved?.initialized && this.cid) {
+              mlsMgrRemoved.leaveGroup(this.cid, removalCursor);
+              if (Array.isArray(event.topic_cids)) {
+                for (const topicCid of event.topic_cids) {
+                  if (mlsMgrRemoved.ownsE2eeGroup(topicCid)) {
+                    mlsMgrRemoved.leaveGroup(topicCid, removalCursor);
+                  }
+                }
+              }
+            }
+          } else if (
+            selfRemoveEvent &&
+            event.mls_enabled &&
+            mlsMgrRemoved?.initialized &&
+            this.cid &&
+            this.type &&
+            this.id &&
+            mlsMgrRemoved.isDesignatedEvictor(channel)
+          ) {
+            mlsMgrRemoved.evictMember(this.type, this.id, this.cid, removedUserId, true).catch((err: unknown) => {
+              this.getClient().logger('error', '[MLS Event] evictMember after member.removed failed', {
+                err,
+                cid: this.cid,
+                user_id: removedUserId,
+              });
+            });
+
+            if (Array.isArray(event.topic_cids)) {
+              for (const topicCid of event.topic_cids) {
+                if (!mlsMgrRemoved.ownsE2eeGroup(topicCid)) continue;
+                const colonIdx = topicCid.indexOf(':');
+                const topicType = topicCid.substring(0, colonIdx);
+                const topicId = topicCid.substring(colonIdx + 1);
+                mlsMgrRemoved.evictMember(topicType, topicId, topicCid, removedUserId, true).catch((err: unknown) => {
+                  this.getClient().logger('error', '[MLS Event] topic evictMember after member.removed failed', {
+                    err,
+                    cid: topicCid,
+                    user_id: removedUserId,
+                  });
+                });
+              }
+            }
+          }
         }
         break;
+      }
       case 'channel.topic.enabled':
         if (channel.data) {
           channel.data.topics_enabled = true;
@@ -1523,6 +2006,25 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             ...event.channel,
             own_capabilities: event.channel?.own_capabilities ?? channel.data?.own_capabilities,
           };
+
+          const mlsMgr = this.getClient().mlsManager;
+          const channelData = event.channel as any;
+          if (
+            mlsMgr?.initialized &&
+            channelData?.mls_enabled &&
+            channelData?.mls_enabled_at &&
+            this.cid &&
+            !mlsMgr.isChannelMlsSyncBlocked(this.cid)
+          ) {
+            mlsMgr
+              .ensureChannelReady(this.type, this.id, this.cid, { source: 'channel_updated' })
+              .catch((err: unknown) => {
+                this.getClient().logger('error', '[MLS Event] Failed to ensure channel after channel.updated', {
+                  err,
+                  cid: this.cid,
+                });
+              });
+          }
         }
         break;
       case 'pollchoice.new':
@@ -1544,6 +2046,22 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             event.message.quoted_message.user = quotedUser;
           }
           event.message = channelState.addReaction(event.reaction, event.message);
+
+          // Patch E2EE local cache with updated reaction metadata
+          const mlsMgrReaction = this.getClient().mlsManager;
+          const isE2eeReaction = (this.data as any)?.mls_enabled;
+          if (isE2eeReaction && mlsMgrReaction?.initialized && event.message?.id) {
+            mlsMgrReaction.storage.loadE2eeMessage(event.message.id).then((local: any) => {
+              if (!local) return;
+              mlsMgrReaction.storage.saveE2eeMessage({
+                ...local,
+                latest_reactions: event.message?.latest_reactions,
+                reaction_counts: event.message?.reaction_counts,
+              });
+            }).catch((err: unknown) => {
+              this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.new', { err });
+            });
+          }
         }
         break;
       case 'reaction.deleted':
@@ -1564,6 +2082,24 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           event.reaction.user = getUserInfo(event.reaction.user?.id || '', users);
           event.message = channelState.removeReaction(event.reaction, event.message);
         }
+
+        // Patch E2EE local cache with updated reaction metadata
+        {
+          const mlsMgrReactionDel = this.getClient().mlsManager;
+          const isE2eeReactionDel = (this.data as any)?.mls_enabled;
+          if (isE2eeReactionDel && mlsMgrReactionDel?.initialized && event.message?.id) {
+            mlsMgrReactionDel.storage.loadE2eeMessage(event.message.id).then((local: any) => {
+              if (!local) return;
+              mlsMgrReactionDel.storage.saveE2eeMessage({
+                ...local,
+                latest_reactions: event.message?.latest_reactions,
+                reaction_counts: event.message?.reaction_counts,
+              });
+            }).catch((err: unknown) => {
+              this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.deleted', { err });
+            });
+          }
+        }
         break;
       case 'member.joined':
       case 'notification.invite_accepted':
@@ -1571,8 +2107,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const existUser = users.find((user) => user.id === event.member?.user_id);
 
           if (!existUser) {
-            const resUser = await this.getClient().queryUser(event.member?.user_id);
-            users.push(resUser);
+            try {
+              const resUser = await this.getClient().queryUser(event.member?.user_id);
+              users.push(resUser);
+            } catch (err) {
+              this._client.logger('warn', 'Failed to query user for member joined, using event member fallback', { err });
+              if (event.member?.user) users.push(event.member.user as any);
+            }
           }
 
           const user = getUserInfo(event.member.user_id, users);
@@ -1591,17 +2132,65 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           } as ChannelAPIResponse<ErmisChatGenerics>['channel'];
           this.offlineMode = true;
           this.initialized = true;
+
+          const mlsMgrAccept = this.getClient().mlsManager;
+          if (
+            event.mls_enabled &&
+            mlsMgrAccept?.initialized &&
+            event.member.user_id === this.getClient().user?.id &&
+            this.cid
+          ) {
+            mlsMgrAccept
+              .ensureChannelReady(this.type, this.id, this.cid, { source: 'invite_accepted' })
+              .catch((err: unknown) => {
+                this.getClient().logger('error', '[MLS Event] Failed to ensure channel after invite_accepted', {
+                  err,
+                  cid: this.cid,
+                });
+              });
+          }
         }
         break;
       case 'notification.invite_rejected':
         if (event.member?.user_id) {
           delete channelState.members[event.member.user_id];
 
-          // channel.data = {
-          //   ...channel.data,
-          //   member_count: Number(channel.data?.member_count) - 1,
-          //   members: channel.data?.members?.filter((m: any) => m.user_id !== event.member?.user_id) || [],
-          // } as ChannelAPIResponse<ErmisChatGenerics>['channel'];
+          const mlsMgrReject = this.getClient().mlsManager;
+          if (event.mls_enabled && mlsMgrReject?.initialized && this.cid && this.type === 'team' && this.id) {
+            const targetUserId = event.member.user_id;
+            mlsMgrReject.queuePendingEviction(this.cid, targetUserId).catch((err: unknown) => {
+              this.getClient().logger('error', '[MLS Event] Failed to queue pending eviction after invite_rejected', {
+                err,
+                cid: this.cid,
+                user_id: targetUserId,
+              });
+            });
+
+            if (Array.isArray(event.topic_cids)) {
+              for (const topicCid of event.topic_cids) {
+                const colonIdx = topicCid.indexOf(':');
+                if (colonIdx <= 0) continue;
+                if (!mlsMgrReject.ownsE2eeGroup(topicCid)) continue;
+                mlsMgrReject.queuePendingEviction(topicCid, targetUserId).catch((err: unknown) => {
+                  this.getClient().logger(
+                    'error',
+                    '[MLS Event] Failed to queue topic pending eviction after invite_rejected',
+                    {
+                      err,
+                      cid: topicCid,
+                      user_id: targetUserId,
+                    },
+                  );
+                });
+              }
+            }
+
+            // channel.data = {
+            //   ...channel.data,
+            //   member_count: Number(channel.data?.member_count) - 1,
+            //   members: channel.data?.members?.filter((m: any) => m.user_id !== event.member?.user_id) || [],
+            // } as ChannelAPIResponse<ErmisChatGenerics>['channel'];
+          }
         }
         break;
       case 'notification.invite_messaging_skipped':
@@ -1615,6 +2204,25 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           }
 
           channelState.members[event.member.user_id] = event.member;
+
+          const mlsMgrSkip = this.getClient().mlsManager;
+          if (
+            event.mls_enabled &&
+            mlsMgrSkip?.initialized &&
+            this.cid &&
+            this.type &&
+            this.id &&
+            mlsMgrSkip.isDesignatedEvictor(channel)
+          ) {
+            const targetUserId = event.member.user_id;
+            mlsMgrSkip.evictMember(this.type, this.id, this.cid, targetUserId).catch((err: unknown) => {
+              this.getClient().logger('error', '[MLS Event] Failed to evictMember after invite_messaging_skipped', {
+                err,
+                cid: this.cid,
+                user_id: targetUserId,
+              });
+            });
+          }
 
           // this.offlineMode = true;
           // this.initialized = true;
@@ -1689,6 +2297,58 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         event.user = getUserInfo(event.user?.id || '', users);
         break;
+      case 'protocol': {
+        const mlsMgrProto = this.getClient().mlsManager;
+        if (!mlsMgrProto?.initialized || !this.cid) break;
+
+        const protoMsg = (event as any).protocol_data || (event as any).message || event;
+        const protoType = protoMsg.type || protoMsg.type_field;
+        const protoUserId = protoMsg.user?.id || protoMsg.user_id;
+        const protoDeviceId = protoMsg.device_id;
+
+        switch (protoType) {
+          case 'welcome': {
+            const targetIds = (protoMsg.target_user_ids as string[]) || [];
+            if (
+              targetIds.includes(mlsMgrProto.userId) &&
+              !mlsMgrProto.getGroup(this.cid) &&
+              !mlsMgrProto.isChannelMlsSyncBlocked(this.cid)
+            ) {
+              mlsMgrProto.joinGroup(protoMsg.welcome, protoMsg.ratchet_tree).catch((err: unknown) => {
+                this.getClient().logger('error', '[MLS Event] Failed to process welcome', {
+                  err,
+                  cid: this.cid,
+                });
+              });
+            }
+            break;
+          }
+          case 'commit':
+          case 'external_commit': {
+            const isOwnDeviceCommit =
+              protoUserId === mlsMgrProto.userId && !!protoDeviceId && protoDeviceId === mlsMgrProto.deviceId;
+            if (isOwnDeviceCommit) break;
+
+            mlsMgrProto.processCommit(this.cid, protoMsg.commit, protoMsg.epoch).catch((err: unknown) => {
+              this.getClient().logger('error', '[MLS Event] Failed to process protocol commit', {
+                err,
+                cid: this.cid,
+                protocol_type: protoType,
+              });
+              mlsMgrProto.sync().catch((syncErr: unknown) => {
+                this.getClient().logger('error', '[MLS Event] Recovery sync failed after protocol commit', {
+                  err: syncErr,
+                  cid: this.cid,
+                });
+              });
+            });
+            break;
+          }
+          default:
+            break;
+        }
+        break;
+      }
       default:
     }
 
@@ -1730,6 +2390,136 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         `Channel ${this.cid} hasn't been initialized yet. Make sure to call .watch() and wait for it to resolve`,
       );
     }
+  }
+
+  async _hydrateE2eeMessagesFromLocalCache(
+    messages: MessageResponse<ErmisChatGenerics>[] = [],
+    channelData?: ChannelResponse<ErmisChatGenerics> | ChannelData<ErmisChatGenerics>,
+  ): Promise<MessageResponse<ErmisChatGenerics>[]> {
+    const isE2ee = (channelData as any)?.mls_enabled === true || (this.data as any)?.mls_enabled === true;
+    const storage = this.getClient().mlsManager?.storage;
+    if (!isE2ee || !storage || messages.length === 0) return messages;
+
+    const lookupIds = messages.flatMap((message: any) => {
+      const isEncryptedCarrier = message.content_type === 'mls' || Boolean(message.mls_ciphertext);
+      if (!isEncryptedCarrier) return [];
+      return [message.id].filter(Boolean);
+    });
+    const cachedMessages =
+      lookupIds.length > 0
+        ? storage.loadE2eeMessages
+          ? await storage.loadE2eeMessages(lookupIds).catch(() => new Map<string, any>())
+          : new Map(
+              (
+                await Promise.all(
+                  Array.from(new Set(lookupIds)).map((id) => storage.loadE2eeMessage(id).catch(() => null)),
+                )
+              )
+                .filter(Boolean)
+                .map((message: any) => [message.id, message]),
+            )
+        : new Map<string, any>();
+    const currentMessages = this.state.messageSets?.flatMap((set) => set.messages) || [];
+    const currentMessagesById = new Map(currentMessages.map((message: any) => [message.id, message]));
+    const hydrated: MessageResponse<ErmisChatGenerics>[] = [];
+
+    for (const message of messages) {
+      const messageAny = message as any;
+      const isEncryptedCarrier = messageAny.content_type === 'mls' || Boolean(messageAny.mls_ciphertext);
+      if (!isEncryptedCarrier) {
+        hydrated.push(message);
+        continue;
+      }
+
+      const storedMessage = cachedMessages.get(message.id);
+      const currentMessage = currentMessagesById.get(message.id);
+      if (!storedMessage && currentMessage) {
+        const currentAny = currentMessage as any;
+        const currentHasPlaintext =
+          currentAny.content_type === 'standard' ||
+          Boolean(currentAny.text) ||
+          Boolean(currentAny.attachments?.length) ||
+          Boolean(currentAny.sticker_url);
+        if (currentHasPlaintext) {
+          hydrated.push({
+            ...message,
+            ...currentMessage,
+            content_type: 'standard',
+            latest_reactions: messageAny.latest_reactions ?? currentAny.latest_reactions,
+            reaction_counts: messageAny.reaction_counts ?? currentAny.reaction_counts,
+            reaction_groups: messageAny.reaction_groups ?? currentAny.reaction_groups,
+            own_reactions: messageAny.own_reactions ?? currentAny.own_reactions,
+            pinned: message.pinned ?? currentAny.pinned,
+            pinned_at: message.pinned_at ?? currentAny.pinned_at,
+          } as MessageResponse<ErmisChatGenerics>);
+          continue;
+        }
+      }
+
+      if (!storedMessage) {
+        hydrated.push(message);
+        continue;
+      }
+
+      const userId = storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
+      const stateUsers = Object.values(this.getClient().state.users);
+      const stateUser = stateUsers.find((u: any) => u.id === userId);
+      const enrichedUser = stateUser || message.user || storedMessage.user || getUserInfo(userId, stateUsers);
+
+      hydrated.push({
+        ...message,
+        ...storedMessage,
+        content_type: 'standard',
+        user: enrichedUser,
+        latest_reactions: messageAny.latest_reactions ?? storedMessage.latest_reactions,
+        reaction_counts: messageAny.reaction_counts ?? storedMessage.reaction_counts,
+        reaction_groups: messageAny.reaction_groups ?? storedMessage.reaction_groups,
+        own_reactions: messageAny.own_reactions ?? storedMessage.own_reactions,
+        pinned: message.pinned ?? storedMessage.pinned,
+        pinned_at: message.pinned_at ?? storedMessage.pinned_at,
+        status: message.status,
+      } as MessageResponse<ErmisChatGenerics>);
+    }
+
+    return hydrated;
+  }
+
+  private _seedE2eeStateFromLocalCache(
+    options: ChannelQueryOptions,
+    messageSetToAddToIfDoesNotExist: MessageSetType,
+  ): void {
+    const isE2ee = (this.data as any)?.mls_enabled === true;
+    const storage = this.getClient().mlsManager?.storage;
+    const messageOptions = options?.messages as any;
+    const isWindowedQuery = Boolean(messageOptions?.id_lt || messageOptions?.id_gt || messageOptions?.id_around);
+    if (!isE2ee || !storage || !this.cid || isWindowedQuery) return;
+
+    const limit = typeof messageOptions?.limit === 'number' ? messageOptions.limit : 25;
+    storage
+      .getE2eeMessages(this.cid, limit)
+      .then((storedMessages: any[]) => {
+        if (!storedMessages.length) return;
+        const messages = storedMessages
+          .map(
+            (message: any) =>
+              ({
+                ...message,
+                content_type: 'standard',
+                user: message.user || getUserInfo(message.user_id, Object.values(this.getClient().state.users)),
+                status: 'received',
+              } as MessageResponse<ErmisChatGenerics>),
+          )
+          .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+        this.state.addMessagesSorted(messages, false, true, true, messageSetToAddToIfDoesNotExist);
+        this.getClient().dispatchEvent({
+          type: 'e2ee.local_messages_loaded' as any,
+          cid: this.cid,
+          messages,
+        } as any);
+      })
+      .catch((err: unknown) =>
+        this.getClient().logger('warn', '[E2EE] Failed to seed messages from local cache', { err }),
+      );
   }
 
   // eslint-disable-next-line sonarjs/cognitive-complexity

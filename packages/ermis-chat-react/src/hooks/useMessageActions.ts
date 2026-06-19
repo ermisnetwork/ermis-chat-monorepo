@@ -60,7 +60,9 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const isSticker = isStickerMessage(message);
     const isPinned = isPinnedFlag;
 
-    const canEdit = !isPreviewMode && !isSystem && !isSignal && !isSticker && isOwnMessage;
+    const isDeleted = message.display_type === 'deleted';
+
+    const canEdit = !isPreviewMode && !isSystem && !isSignal && !isSticker && isOwnMessage && !isDeleted;
 
     // Delete for everyone:
     // + Team channel: only the owner can perform this action natively.
@@ -68,13 +70,13 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const canDeleteForEveryoneTeam = isTeam && isOwner;
     const canDeleteForEveryoneMessaging = !isTeam && isOwnMessage;
 
-    const canDelete = !isPreviewMode && !isSystem && (canDeleteForEveryoneTeam || canDeleteForEveryoneMessaging);
-    const canDeleteForMe = !isPreviewMode && !isSystem;
-    const canReply = !isPreviewMode && !isSystem && !isSignal;
-    const canQuote = !isPreviewMode && !isSystem && !isSignal;
-    const canForward = !isPreviewMode && !isSystem && !isSignal;
-    const canPin = !isPreviewMode && !isSystem && !isSignal;
-    const canCopy = !isSystem && !isSignal && Boolean(message.text?.trim()); // Allow copy even in preview mode
+    const canDelete = !isPreviewMode && !isSystem && (canDeleteForEveryoneTeam || canDeleteForEveryoneMessaging) && !isDeleted;
+    const canDeleteForMe = !isPreviewMode && !isSystem && !isDeleted;
+    const canReply = !isPreviewMode && !isSystem && !isSignal && !isDeleted;
+    const canQuote = !isPreviewMode && !isSystem && !isSignal && !isDeleted;
+    const canForward = !isPreviewMode && !isSystem && !isSignal && !isDeleted;
+    const canPin = !isPreviewMode && !isSystem && !isSignal && !isDeleted;
+    const canCopy = !isSystem && !isSignal && Boolean(message.text?.trim()) && !isDeleted; // Allow copy even in preview mode
 
     const hasCapEdit = hasCapability('update-own-message');
     const hasCapDelete = !isTeam || isOwner || (isOwnMessage && hasCapability('delete-own-message'));
