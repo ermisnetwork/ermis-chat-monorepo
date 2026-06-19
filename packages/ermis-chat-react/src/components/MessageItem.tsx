@@ -78,6 +78,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   onMentionClick,
   onUserNameClick,
   onAddReactionClick,
+  hideAvatar,
 }) => {
   const { activeChannel, client } = useChatClient();
   const { hasCapability } = useChannelCapabilities();
@@ -150,9 +151,9 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   if (isDeletedDisplay) {
     return (
       <div className={itemClass} data-message-id={message.id}>
-        {!isOwnMessage && (
+        {!hideAvatar && !isOwnMessage && (
           <div className="ermis-message-list__item-avatar">
-            {isFirstInGroup
+            {isLastInGroup
               ? <AvatarComponent image={userAvatar} name={userName} size={36} />
               : <div style={{ width: 36 }} />
             }
@@ -183,10 +184,10 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
 
   return (
     <div className={itemClass} data-message-id={message.id}>
-      {/* Avatar area: show avatar only on first message, otherwise placeholder for alignment */}
-      {!isOwnMessage && (
+      {/* Avatar area: only render when not hidden by group wrapper */}
+      {!hideAvatar && !isOwnMessage && (
         <div className="ermis-message-list__item-avatar">
-          {isFirstInGroup
+          {isLastInGroup
             ? <AvatarComponent image={userAvatar} name={userName} size={36} />
             : <div style={{ width: 36 }} />
           }

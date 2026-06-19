@@ -827,6 +827,8 @@ export type MessageItemProps = {
   onUserNameClick?: (userId: string) => void;
   /** Handler when clicking to add a custom reaction */
   onAddReactionClick?: (e: React.MouseEvent, messageId: string) => void;
+  /** When true, the avatar column is not rendered (handled by group wrapper) */
+  hideAvatar?: boolean;
 };
 
 export type SystemMessageItemProps = {

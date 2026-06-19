@@ -116,6 +116,23 @@
   font-weight: 500;
 }
 
+/* --- Time separator (same user, time gap > 5min) --- */
+.ermis-message-list__time-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ermis-spacing-xs) 0;
+  margin: var(--ermis-spacing-xs) 0;
+  align-self: stretch;
+}
+
+.ermis-message-list__time-separator-label {
+  font-size: 10px;
+  color: var(--ermis-text-muted);
+  padding: 2px 10px;
+  white-space: nowrap;
+  font-weight: 400;
+}
 .ermis-message-list__empty {
   display: flex;
   flex-direction: column;
@@ -146,21 +163,53 @@
   color: var(--ermis-text-muted);
 }
 
+/* --- Message group (consecutive messages from same user) --- */
+.ermis-message-group {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--ermis-spacing-sm);
+  width: 100%;
+  padding-top: var(--ermis-spacing-sm);
+}
+
+.ermis-message-group--own {
+  flex-direction: row-reverse;
+}
+
+.ermis-message-group--other {
+  flex-direction: row;
+}
+
+.ermis-message-group__avatar-col {
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  align-self: flex-end;
+  z-index: 5;
+}
+
+.ermis-message-group__messages-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 75%;
+}
+
 /* --- Message item (other = left, own = right) --- */
 .ermis-message-list__item {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: var(--ermis-spacing-sm);
   width: 100%;
 }
 
-/* First message in a group (or standalone): normal top margin */
+/* First message in a group (or standalone): spacing handled by group wrapper */
 .ermis-message-list__item--group-single,
 .ermis-message-list__item--group-top {
-  padding-top: var(--ermis-spacing-sm);
+  padding-top: 0;
 }
 
-/* Continuation messages in a group: tight spacing (increased slightly per request) */
+/* Continuation messages in a group: tight spacing */
 .ermis-message-list__item--group-middle,
 .ermis-message-list__item--group-bottom {
   padding-top: 2px;

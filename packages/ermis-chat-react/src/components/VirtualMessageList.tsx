@@ -44,6 +44,20 @@ const DefaultDateSeparator: React.FC<{ label: string }> = React.memo(({ label })
 ));
 (DefaultDateSeparator as any).displayName = 'DefaultDateSeparator';
 
+/** Time gap threshold in ms: messages more than 5 minutes apart get a time separator */
+const TIME_GAP_THRESHOLD_MS = 5 * 60 * 1000;
+
+function getTimestamp(date: Date | string | undefined): number {
+  if (!date) return 0;
+  return date instanceof Date ? date.getTime() : new Date(date).getTime();
+}
+
+function formatTimeSeparator(date: Date | string | undefined): string {
+  if (!date) return '';
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 const DefaultJumpToLatest = React.memo(({ onClick, label = '↓ Jump to latest' }: any) => (
   <button className="ermis-message-list__jump-latest" onClick={onClick}>
     {label}
@@ -387,116 +401,221 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   const messageElements = useMemo(() => {
     const elements: React.ReactNode[] = [];
 
-    messages.forEach((message, index) => {
+    // Pre-compute per-message data
+    type MsgEntry = {
+      message: typeof messages[0];
+      index: number;
+      isOwnMessage: boolean;
+      messageType: MessageLabel;
+      showDateSeparator: boolean;
+      isFirstInGroup: boolean;
+      isLastInGroup: boolean;
+      validReaders: Array<{ id: string; name?: string; avatar?: string; last_read?: Date | string }>;
+      hasReaders: boolean;
+    };
+    const entries: MsgEntry[] = messages.map((message, index) => {
       const isOwnMessage =
         message.user_id === currentUserId || message.user?.id === currentUserId;
       const messageType = (message.type || 'regular') as MessageLabel;
-
-      // Date separator
       const prevMsg = index > 0 ? messages[index - 1] : null;
       const showDateSeparator =
         !prevMsg || getDateKey(message.created_at) !== getDateKey(prevMsg.created_at);
-      
-      if (showDateSeparator) {
-        elements.push(
-          <div key={`date-${getDateKey(message.created_at)}`}>
-            <DateSeparatorComponent label={formatDateLabel(message.created_at, dateLocale)} />
-          </div>
-        );
-      }
-
-      if (renderMessage) {
-        elements.push(
-          <div key={message.id || `msg-${index}`}>
-            <div>{renderMessage(message, isOwnMessage)}</div>
-          </div>
-        );
-        return;
-      }
-
-      if (messageType === 'system') {
-        elements.push(
-          <div key={message.id || `msg-${index}`}>
-            <SystemMessageItemComponent
-              message={message}
-              isOwnMessage={isOwnMessage}
-              SystemRenderer={renderers.system}
-              systemMessageTranslations={systemMessageTranslations}
-            />
-          </div>
-        );
-        return;
-      }
-
-      // Message grouping
       const prevType = (prevMsg?.type || 'regular') as MessageLabel;
       const prevValidReaders = prevMsg?.id && readByMap[prevMsg.id] ? readByMap[prevMsg.id].filter(r => r.id !== getMessageUserId(prevMsg)) : [];
       const prevHasReaders = showReadReceipts && prevValidReaders.length > 0;
-      
+      const prevTimeGap = prevMsg
+        ? Math.abs(getTimestamp(message.created_at) - getTimestamp(prevMsg.created_at)) > TIME_GAP_THRESHOLD_MS
+        : false;
       const isFirstInGroup =
         showDateSeparator ||
         !prevMsg ||
         prevType === 'system' ||
         prevType === 'signal' ||
         getMessageUserId(prevMsg) !== getMessageUserId(message) ||
-        prevHasReaders;
-
+        prevHasReaders ||
+        prevTimeGap;
       const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
       const nextType = (nextMsg?.type || 'regular') as MessageLabel;
       const nextShowDateSeparator = nextMsg
         ? getDateKey(nextMsg.created_at) !== getDateKey(message.created_at)
         : false;
-
       const validReaders = message.id && readByMap[message.id] ? readByMap[message.id].filter(r => r.id !== getMessageUserId(message)) : [];
       const hasReaders = showReadReceipts && validReaders.length > 0;
-
+      const nextTimeGap = nextMsg
+        ? Math.abs(getTimestamp(nextMsg.created_at) - getTimestamp(message.created_at)) > TIME_GAP_THRESHOLD_MS
+        : false;
       const isLastInGroup =
         !nextMsg ||
         nextShowDateSeparator ||
         nextType === 'system' ||
         nextType === 'signal' ||
         getMessageUserId(nextMsg) !== getMessageUserId(message) ||
-        hasReaders;
+        hasReaders ||
+        nextTimeGap;
+      return { message, index, isOwnMessage, messageType, showDateSeparator, isFirstInGroup, isLastInGroup, validReaders, hasReaders };
+    });
 
-      const MessageRenderer = renderers[messageType] || renderers.regular;
+    // Build groups: consecutive regular messages from same user
+    let i = 0;
+    while (i < entries.length) {
+      const entry = entries[i];
 
-      elements.push(
-        <div key={message.id || `msg-${index}`}>
-          <MessageItemComponent
-            message={message}
-            isOwnMessage={isOwnMessage}
-            isFirstInGroup={isFirstInGroup}
-            isLastInGroup={isLastInGroup}
-            isHighlighted={highlightedId === message.id}
-            AvatarComponent={AvatarComponent}
-            MessageBubble={MessageBubble}
-            MessageRenderer={MessageRenderer}
-            onClickQuote={scrollToMessage}
-            QuotedMessagePreviewComponent={QuotedMessagePreviewComponent}
-            MessageActionsBoxComponent={MessageActionsBoxComponent}
-            MessageReactionsComponent={MessageReactionsComponent}
-            deletedMessageLabel={deletedMessageLabel}
-            systemMessageTranslations={systemMessageTranslations}
-            signalMessageTranslations={signalMessageTranslations}
-            onMentionClick={onMentionClick}
-            onUserNameClick={onUserNameClick}
-            onAddReactionClick={onAddReactionClick}
-          />
-          {/* Read receipts — full width, right-aligned */}
-          {showReadReceipts && validReaders.length > 0 && (
-            <ReadReceiptsComponent
-              readers={validReaders}
-              maxAvatars={readReceiptsMaxAvatars}
-              AvatarComponent={AvatarComponent}
-              TooltipComponent={ReadReceiptsTooltipComponent}
-              isOwnMessage={isOwnMessage}
-              isLastInGroup={isLastInGroup}
-              status={message.status}
+      // Date separator before any message
+      if (entry.showDateSeparator) {
+        elements.push(
+          <div key={`date-${getDateKey(entry.message.created_at)}`}>
+            <DateSeparatorComponent label={formatDateLabel(entry.message.created_at, dateLocale)} />
+          </div>
+        );
+      }
+
+      // Custom renderMessage
+      if (renderMessage) {
+        elements.push(
+          <div key={entry.message.id || `msg-${entry.index}`}>
+            <div>{renderMessage(entry.message, entry.isOwnMessage)}</div>
+          </div>
+        );
+        i++;
+        continue;
+      }
+
+      // System messages — standalone
+      if (entry.messageType === 'system') {
+        elements.push(
+          <div key={entry.message.id || `msg-${entry.index}`}>
+            <SystemMessageItemComponent
+              message={entry.message}
+              isOwnMessage={entry.isOwnMessage}
+              SystemRenderer={renderers.system}
+              systemMessageTranslations={systemMessageTranslations}
             />
+          </div>
+        );
+        i++;
+        continue;
+      }
+
+      // Collect consecutive regular/signal messages from the same user into a group
+      // Break group on: different user, system message, date separator, or time gap > 5min
+      const groupEntries: MsgEntry[] = [entry];
+      let j = i + 1;
+      while (j < entries.length) {
+        const nextEntry = entries[j];
+        const prevEntry = entries[j - 1];
+        const timeGap = Math.abs(
+          getTimestamp(nextEntry.message.created_at) - getTimestamp(prevEntry.message.created_at)
+        );
+        // Break group if: different user, system message, date separator, or time gap
+        if (
+          nextEntry.showDateSeparator ||
+          nextEntry.messageType === 'system' ||
+          getMessageUserId(nextEntry.message) !== getMessageUserId(entry.message) ||
+          timeGap > TIME_GAP_THRESHOLD_MS
+        ) {
+          break;
+        }
+        groupEntries.push(nextEntry);
+        j++;
+      }
+
+      const isOwn = entry.isOwnMessage;
+      const userName = entry.message.user?.name || entry.message.user_id;
+      const userAvatar = entry.message.user?.avatar;
+      const groupKey = `group-${entry.message.id || `g-${entry.index}`}`;
+
+      // Check if we need a time separator BEFORE this group
+      // (when previous group was from same user but time gap split them)
+      if (i > 0) {
+        const prevEntry = entries[i - 1];
+        const timeGap = Math.abs(
+          getTimestamp(entry.message.created_at) - getTimestamp(prevEntry.message.created_at)
+        );
+        if (
+          !entry.showDateSeparator &&
+          prevEntry.messageType !== 'system' &&
+          getMessageUserId(prevEntry.message) === getMessageUserId(entry.message) &&
+          timeGap > TIME_GAP_THRESHOLD_MS
+        ) {
+          elements.push(
+            <div key={`timesep-${entry.message.id}`}>
+              <div className="ermis-message-list__time-separator">
+                <span className="ermis-message-list__time-separator-label">
+                  {formatTimeSeparator(entry.message.created_at)}
+                </span>
+              </div>
+            </div>
+          );
+        }
+      }
+
+      // Render group wrapper with sticky avatar
+      elements.push(
+        <div key={groupKey}>
+          <div className={`ermis-message-group ${isOwn ? 'ermis-message-group--own' : 'ermis-message-group--other'}`}>
+            {/* Avatar column — sticky for scroll tracking */}
+            {!isOwn && (
+              <div className="ermis-message-group__avatar-col">
+                <AvatarComponent image={userAvatar} name={userName} size={36} />
+              </div>
+            )}
+            {/* Messages column */}
+            <div className="ermis-message-group__messages-col">
+              {groupEntries.map((ge) => {
+                const MessageRenderer = renderers[ge.messageType] || renderers.regular;
+                return (
+                  <React.Fragment key={ge.message.id || `msg-${ge.index}`}>
+                    {/* Date separators within group (if needed for mid-group entries) */}
+                    {ge !== entry && ge.showDateSeparator && (
+                      <DateSeparatorComponent label={formatDateLabel(ge.message.created_at, dateLocale)} />
+                    )}
+                    <MessageItemComponent
+                      message={ge.message}
+                      isOwnMessage={ge.isOwnMessage}
+                      isFirstInGroup={ge.isFirstInGroup}
+                      isLastInGroup={ge.isLastInGroup}
+                      isHighlighted={highlightedId === ge.message.id}
+                      AvatarComponent={AvatarComponent}
+                      MessageBubble={MessageBubble}
+                      MessageRenderer={MessageRenderer}
+                      onClickQuote={scrollToMessage}
+                      QuotedMessagePreviewComponent={QuotedMessagePreviewComponent}
+                      MessageActionsBoxComponent={MessageActionsBoxComponent}
+                      MessageReactionsComponent={MessageReactionsComponent}
+                      deletedMessageLabel={deletedMessageLabel}
+                      systemMessageTranslations={systemMessageTranslations}
+                      signalMessageTranslations={signalMessageTranslations}
+                      onMentionClick={onMentionClick}
+                      onUserNameClick={onUserNameClick}
+                      onAddReactionClick={onAddReactionClick}
+                      hideAvatar
+                    />
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+          {/* Read receipts — outside group flex so they appear below avatar + bubbles */}
+          {groupEntries.map((ge) =>
+            showReadReceipts && ge.validReaders.length > 0 ? (
+              <ReadReceiptsComponent
+                key={`receipt-${ge.message.id}`}
+                readers={ge.validReaders}
+                maxAvatars={readReceiptsMaxAvatars}
+                AvatarComponent={AvatarComponent}
+                TooltipComponent={ReadReceiptsTooltipComponent}
+                isOwnMessage={ge.isOwnMessage}
+                isLastInGroup={ge.isLastInGroup}
+                status={ge.message.status}
+              />
+            ) : null
           )}
         </div>
       );
-    });
+
+      i = j;
+    }
+
 
     elementsCountRef.current = elements.length;
     return elements;
