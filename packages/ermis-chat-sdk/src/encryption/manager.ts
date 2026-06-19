@@ -61,7 +61,7 @@ import type {
 import type { ErmisChat } from '../client';
 import type { ExtendableGenerics, DefaultGenerics, E2eeRecoveryPolicy } from '../types';
 import { sdkLog } from '../logger';
-import { getUserInfo } from '../utils';
+import { getUserInfo, pickUserWithDisplayName } from '../utils';
 
 // ============================================================
 // Epoch-stale error detection
@@ -3536,7 +3536,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           return {
             ...message,
             content_type: 'standard',
-            user: stateUser || message.user || getUserInfo(message.user_id, stateUsers),
+            user: pickUserWithDisplayName(
+              message.user_id,
+              stateUser,
+              message.user,
+              getUserInfo(message.user_id, stateUsers),
+              message.user_id === this.userId ? this.client?.user : undefined,
+            ),
             status: 'received',
           };
         });
@@ -6213,9 +6219,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       ciphertext.user_id ||
       (archivedMessage.own_message ? this.userId || undefined : undefined);
     const fallbackUser =
-      activeEnvelope?.user ||
-      ciphertext.user ||
-      (fallbackUserId ? this.client?.state?.users?.[fallbackUserId] || { id: fallbackUserId } : undefined);
+      pickUserWithDisplayName(
+        fallbackUserId,
+        activeEnvelope?.user,
+        ciphertext.user,
+        fallbackUserId ? this.client?.state?.users?.[fallbackUserId] : undefined,
+        fallbackUserId === this.userId ? this.client?.user : undefined,
+      ) || (fallbackUserId ? { id: fallbackUserId } : undefined);
     const createdAt =
       this._dateishToIso(activeEnvelope?.created_at) ||
       this._dateishToIso(ciphertext.created_at) ||
@@ -6248,6 +6258,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   ): E2eeStoredMessage {
     const userId = envelope.user?.id || fallback?.user_id || '';
     const stateUser = userId ? this.client?.state?.users?.[userId] : undefined;
+    const user = pickUserWithDisplayName(
+      userId,
+      stateUser,
+      envelope.user,
+      fallback?.user,
+      userId === this.userId ? this.client?.user : undefined,
+    );
     return {
       id: envelope.id,
       cid,
@@ -6261,7 +6278,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       old_texts: payload.old_texts || fallback?.old_texts,
       is_edited: !!(payload.old_texts?.length || fallback?.old_texts?.length),
       user_id: userId,
-      user: stateUser || (envelope.user ? { ...envelope.user } : fallback?.user),
+      user,
       created_at: fallback?.created_at || envelope.created_at || new Date().toISOString(),
       updated_at: (envelope.updated_at as string | undefined) || envelope.created_at || fallback?.updated_at,
       type: this._messageTypeForPayload(payload, fallback?.type || (envelope as any).type),
@@ -6287,7 +6304,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       content_type: quoted.content_type || 'standard',
       type: quoted.type || 'regular',
       user_id: userId || quoted.user_id,
-      user: stateUser || quoted.user || (userId ? { id: userId } : undefined),
+      user: pickUserWithDisplayName(userId, stateUser, quoted.user) || (userId ? { id: userId } : undefined),
       attachments: quoted.attachments || [],
     };
   }
@@ -6578,12 +6595,19 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _buildFullMessage(stored: E2eeStoredMessage, envelope: Record<string, any>): Record<string, any> {
     const userId = stored.user_id || (stored.user as any)?.id || envelope.user?.id || envelope.user_id || '';
     const stateUser = userId ? this.client?.state?.users?.[userId] : undefined;
+    const user = pickUserWithDisplayName(
+      userId,
+      stateUser,
+      stored.user,
+      envelope.user,
+      userId === this.userId ? this.client?.user : undefined,
+    );
     return {
       // Core identity (from envelope)
       id: stored.id,
       cid: stored.cid,
       user_id: userId,
-      user: stateUser || stored.user || envelope.user,
+      user,
       type: stored.type || envelope.type || 'regular',
       created_at: stored.created_at,
       // Decrypted Standard content
@@ -6735,6 +6759,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       poll_type: payload.poll_type,
       poll_choice_counts: payload.poll_choice_counts,
       user_id: this.userId!,
+      user: pickUserWithDisplayName(
+        this.userId || undefined,
+        this.client?.user,
+        this.userId ? this.client?.state?.users?.[this.userId] : undefined,
+      ),
       created_at: now,
       type: this._messageTypeForPayload(payload),
       parent_id: options.parent_id,
@@ -6885,6 +6914,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           poll_type: payload.poll_type,
           poll_choice_counts: payload.poll_choice_counts,
           user_id: this.userId!,
+          user: pickUserWithDisplayName(
+            this.userId || undefined,
+            this.client?.user,
+            this.userId ? this.client?.state?.users?.[this.userId] : undefined,
+          ),
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           type: this._messageTypeForPayload(payload),

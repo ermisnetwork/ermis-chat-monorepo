@@ -17,11 +17,21 @@
 - After the channel list loads, the SDK prepares all loaded E2EE channels in the background with sequential external join and reports progress through a compact secure-restore banner.
 - Active E2EE channels show running/pending restore progress from local `restore_progress` records without creating fake messages.
 - Permanent restore gaps are summarized in Chat history PIN settings instead of rendering warning banners or gap badges inside each channel.
+- E2EE message rows and channel previews preserve sender display names from local user metadata when encrypted message cache entries only carry a raw user id.
 - E2EE quoted replies render from local decrypted quote data when the server event only carries `quoted_message_id`; sticker quotes render as sticker previews instead of unavailable encrypted placeholders.
 - SDK and app work now uses this monorepo as the source of truth: `packages/ermis-chat-sdk` and `apps/uhm-chat`.
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-06-19 - production E2EE sender display names
+
+- Goal: fix new encrypted messages in UHM Chat showing the current user's raw id instead of the display name/email in timeline/channel previews.
+- Code changed: SDK encrypted send/decrypt/hydrate paths now persist own message user metadata and pick a local user object with a useful display name before falling back to ids; UHM consumes the corrected SDK message state without app-level UI changes.
+- Docs changed: this README records the app behavior. SDK and React README files record the package-level behavior. SQL, Postman, and Bellboy docs are unchanged because Bellboy still stores and emits the same message/user envelope.
+- Design decision: sender display preservation is client-local E2EE hydration behavior; the server remains a relay and does not need extra plaintext display-name fields.
+- Performance: the fix adds only `O(C)` constant-candidate user selection per hydrated encrypted message, with no additional IndexedDB transactions, network requests, backend DB round trips, server payload growth, hot partitions, or contention.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
 
 ### 2026-06-19 - production E2EE quoted reply previews
 

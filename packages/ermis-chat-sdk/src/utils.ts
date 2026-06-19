@@ -377,12 +377,41 @@ export const getUserInfo = (id: string, users: any[]) => {
     };
   }
 
-  const user = users.find((u) => u.id === id);
+  const matchingUsers = users.filter((u) => u?.id === id);
+  const user =
+    matchingUsers.find((u) => {
+      const name = typeof u?.name === 'string' ? u.name.trim() : '';
+      return Boolean(name && name !== id);
+    }) ||
+    matchingUsers.find((u) => u?.avatar || u?.image) ||
+    matchingUsers[0];
   return {
     id,
     name: user?.name || id,
     avatar: user?.avatar || '',
   };
+};
+
+export const pickUserWithDisplayName = (id?: string, ...candidates: any[]) => {
+  const userId = id || candidates.find((candidate) => typeof candidate?.id === 'string' && candidate.id)?.id;
+  const users = candidates.filter((candidate) => {
+    if (!candidate || typeof candidate !== 'object') return false;
+    if (!userId || !candidate.id) return true;
+    return candidate.id === userId;
+  });
+
+  const hasUsefulName = (candidate: any) => {
+    const name = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
+    const candidateId = candidate?.id || userId;
+    return Boolean(name && name !== candidateId);
+  };
+
+  return (
+    users.find(hasUsefulName) ||
+    users.find((candidate) => candidate.avatar || candidate.image) ||
+    users[0] ||
+    (userId ? getUserInfo(userId, []) : undefined)
+  );
 };
 
 export const getDirectChannelName = (members: any[], currentUserId: string) => {

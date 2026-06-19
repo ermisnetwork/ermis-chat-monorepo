@@ -9,6 +9,7 @@ import {
   getDirectChannelName,
   getUserInfo,
   logChatPromiseExecution,
+  pickUserWithDisplayName,
   randomId,
 } from './utils';
 import { ErmisChat } from './client';
@@ -189,11 +190,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           poll_type: message.poll_type,
         });
         if (response?.message) {
+          const responseUserId =
+            response.message.user?.id || (response.message as any).user_id || this.getClient().userID || '';
           this.state.addMessageSorted(
             {
               ...response.message,
               status: 'received',
-              user: response.message.user || this.getClient().user,
+              user: pickUserWithDisplayName(
+                responseUserId,
+                response.message.user,
+                this.getClient().state.users[responseUserId],
+                this.getClient().user,
+              ),
             } as MessageResponse<ErmisChatGenerics>,
             true,
             false,
@@ -362,7 +370,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           {
             ...stored,
             content_type: 'standard',
-            user: stateUser || stored.user || this.getClient().user,
+            user: pickUserWithDisplayName(stored.user_id, stateUser, stored.user, this.getClient().user),
           } as MessageResponse<ErmisChatGenerics>,
           false,
           false,
@@ -771,8 +779,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const stateUsers = Object.values(this.getClient().state.users);
     const messages = response?.search_result?.messages.map((message: any) => {
-      const user =
-        this.getClient().state.users[message.user_id] || message.user || getUserInfo(message.user_id, stateUsers);
+      const user = pickUserWithDisplayName(
+        message.user_id,
+        this.getClient().state.users[message.user_id],
+        message.user,
+        getUserInfo(message.user_id, stateUsers),
+        message.user_id === this.getClient().userID ? this.getClient().user : undefined,
+      );
       return { ...message, user };
     });
 
@@ -791,8 +804,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const stateUsers = Object.values(this.getClient().state.users);
     const messages = matches.slice(offset, offset + 25).map((message: any) => {
-      const user =
-        this.getClient().state.users[message.user_id] || message.user || getUserInfo(message.user_id, stateUsers);
+      const user = pickUserWithDisplayName(
+        message.user_id,
+        this.getClient().state.users[message.user_id],
+        message.user,
+        getUserInfo(message.user_id, stateUsers),
+        message.user_id === this.getClient().userID ? this.getClient().user : undefined,
+      );
       return { ...message, user };
     });
 
@@ -2508,7 +2526,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         ...quoted,
         content_type: quoted.content_type || 'standard',
         type: quoted.type || 'regular',
-        user: this.getClient().state.users[userId] || quoted.user || getUserInfo(userId, stateUsers),
+        user: pickUserWithDisplayName(userId, this.getClient().state.users[userId], quoted.user, getUserInfo(userId, stateUsers)),
         attachments: quoted.attachments || [],
       };
     };
@@ -2575,7 +2593,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       const userId =
         storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
       const stateUser = this.getClient().state.users[userId];
-      const enrichedUser = stateUser || message.user || storedMessage.user || getUserInfo(userId, stateUsers);
+      const enrichedUser = pickUserWithDisplayName(
+        userId,
+        stateUser,
+        message.user,
+        storedMessage.user,
+        getUserInfo(userId, stateUsers),
+        userId === this.getClient().userID ? this.getClient().user : undefined,
+      );
 
       const mergedMessage = {
         ...message,
@@ -2625,7 +2650,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             ...quoted,
             content_type: quoted.content_type || 'standard',
             type: quoted.type || 'regular',
-            user: this.getClient().state.users[userId] || quoted.user || getUserInfo(userId, stateUsers),
+            user: pickUserWithDisplayName(userId, this.getClient().state.users[userId], quoted.user, getUserInfo(userId, stateUsers)),
             attachments: quoted.attachments || [],
           };
         };
@@ -2651,7 +2676,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             return {
               ...message,
               content_type: 'standard',
-              user: stateUser || message.user || getUserInfo(message.user_id, stateUsers),
+              user: pickUserWithDisplayName(
+                message.user_id,
+                stateUser,
+                message.user,
+                getUserInfo(message.user_id, stateUsers),
+                message.user_id === this.getClient().userID ? this.getClient().user : undefined,
+              ),
               quoted_message: quotedMessage,
               status: 'received',
             } as MessageResponse<ErmisChatGenerics>;

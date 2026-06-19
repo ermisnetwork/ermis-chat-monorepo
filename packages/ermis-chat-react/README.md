@@ -9,6 +9,7 @@ The official React UI components for Ermis Chat.
 - Channel info actions can enable E2EE for an existing standard channel when the viewer is the owner and encryption is initialized; enable uses `member_assisted` recovery by default unless the caller has already set a policy in channel data.
 - Channel message lists listen for `e2ee.message_decrypted` and refresh decrypted message content from the SDK encryption storage.
 - Channel and topic-group previews listen for E2EE decrypted/local-cache refresh events so sidebar previews replace `Encrypted message` after plaintext is available.
+- E2EE sender display names come from the richest local user metadata available, so message rows and channel previews do not fall back to raw user ids when a cache entry only contains `{ id }`.
 - Quoted reply previews fall back to the active channel state when a message has `quoted_message_id` and no renderable embedded `quoted_message`; sticker quotes render as stickers before the encrypted/unavailable fallback is considered.
 - Recovery PIN helpers expose vault state, unlocked PIN change, issue-bearing restore progress records, `repairEncryptedChannel()` for Channel Info repair, lower-level archive repair, selected-channel restore progress loading, and queue enqueueing for app-level PIN gates.
 - `useRecoveryPin()` refreshes after encryption initialization and restore progress events, including apps that mount recovery UI before `client.encryptionManager` is attached.
@@ -18,6 +19,15 @@ The official React UI components for Ermis Chat.
 - Custom Channel Info action components receive the current `channel`, allowing selected-timeline repair UI without relying on global active-channel state.
 
 ## Progress Log
+
+### 2026-06-19 - E2EE Sender Display Name Hydration
+
+- Goal: keep freshly sent encrypted messages from showing the current user's raw id in message rows or channel previews.
+- Code changed: React consumes SDK message state whose E2EE user objects are now selected from richer local metadata instead of bare cache entries; no React component API changed.
+- Docs/artifacts changed: this README records the UI behavior. SDK and UHM README files record the SDK/app-level fix. SQL, Postman, and Bellboy docs are unchanged because no server/API contract changed.
+- Design decision: display-name preservation belongs in SDK hydration so every React surface, including timeline and channel rows, receives consistent message user data.
+- Performance: no React-side complexity changes; SDK user selection adds only constant-candidate checks per hydrated encrypted message and no network/backend work.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
 
 ### 2026-06-19 - E2EE Quoted Reply Preview
 

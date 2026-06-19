@@ -14,6 +14,11 @@ The official core SDK for Ermis Chat.
 <details>
 <summary>Change log</summary>
 
+- `2026-06-19`: E2EE message hydration now preserves sender display names when local user cache only contains a bare user id.
+  - Reason: freshly sent encrypted messages can otherwise replace the current user's name/email with the raw id in timelines and channel previews.
+  - Integrator action: rebuild SDK/React clients so encrypted message state uses the richer user object already available on the client.
+  - Compatibility/default: if no display name is available locally, clients keep the existing id fallback.
+
 - `2026-06-19`: E2EE message hydration now resolves `quoted_message` from decrypted local state or IndexedDB when only `quoted_message_id` is present, including sticker quotes stored as `type: 'sticker'`.
   - Reason: quoted replies in encrypted channels must preview the replied-to plaintext without requiring Bellboy to decrypt or duplicate message bodies.
   - Integrator action: rebuild SDK/React clients so reply previews can hydrate from local encrypted-message cache.
@@ -63,6 +68,15 @@ The official core SDK for Ermis Chat.
 For quick browser integration, pass console levels directly: `logger: ['info', 'warn', 'error']`. `info` uses `console.log`; `warn` uses `console.warn`; `error` uses `console.error`. For custom routing, pass a function logger; it receives `info`, `warn`, or `error` as the first argument, the formatted message as the second argument, and optional structured metadata as the third argument.
 
 ## Progress Log
+
+### 2026-06-19 - E2EE Sender Display Name Hydration
+
+- Goal: fix freshly sent encrypted messages showing the sender's raw user id instead of the current user's display name/email in timeline and channel previews.
+- Code changed: SDK E2EE send/decrypt/hydrate paths now choose the richest local user object with a useful display name, persist own encrypted messages with the current `client.user`, and avoid downgrading message users to bare `state.users[id]` cache entries.
+- Docs/artifacts changed: this README records the SDK behavior and contract changelog. React and UHM README files record the visible UI behavior. SQL, Postman, and Bellboy server docs are unchanged because the API/schema/event contract is unchanged.
+- Design decision: keep sender identity resolution client-side and prefer already-loaded user metadata; Bellboy still transports the same user/message envelope.
+- Performance: user selection is `O(C)` over a small constant candidate list per hydrated message, with no extra IndexedDB transactions, network requests, server payload growth, database hot partitions, or contention.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
 
 ### 2026-06-19 - E2EE Quoted Reply Hydration
 

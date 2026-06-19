@@ -161,13 +161,17 @@ export function replaceMentionsForPreview(
  */
 export function buildUserMap(channelState: any, extraUsers?: Record<string, any>): Record<string, string> {
   const map: Record<string, string> = {};
+  const setDisplayName = (id: string, name?: string) => {
+    if (!id || !name) return;
+    const current = map[id];
+    if (current && current !== id) return;
+    map[id] = name;
+  };
 
   // 1. Fallback: Global user cache from client state
   if (extraUsers && typeof extraUsers === 'object') {
     for (const [id, user] of Object.entries<any>(extraUsers)) {
-      if (user?.name) {
-        map[id] = user.name;
-      }
+      setDisplayName(id, user?.name);
     }
   }
 
@@ -176,7 +180,7 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   if (members && typeof members === 'object') {
     for (const [id, member] of Object.entries<any>(members)) {
       const name = member?.user?.name || member?.user_id || id;
-      if (name) map[id] = name;
+      setDisplayName(id, name);
     }
   }
 
@@ -185,9 +189,7 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   if (Array.isArray(messages)) {
     messages.forEach((msg: any) => {
       const u = msg.user;
-      if (u?.id && !map[u.id] && u.name) {
-        map[u.id] = u.name;
-      }
+      setDisplayName(u?.id, u?.name);
     });
   }
 
@@ -195,9 +197,7 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   const watchers = channelState?.watchers;
   if (watchers && typeof watchers === 'object') {
     for (const [id, user] of Object.entries<any>(watchers)) {
-      if (!map[id] && user?.name) {
-        map[id] = user.name;
-      }
+      setDisplayName(id, user?.name);
     }
   }
 
@@ -363,7 +363,8 @@ export function getLastMessagePreview(
   }
 
   const userId = lastMsg.user_id || '';
-  const senderName = (userId && userMap[userId]) || lastMsg.user?.name || userId || '';
+  const currentUser = userId && userId === myUserId ? client?.user : undefined;
+  const senderName = currentUser?.name || lastMsg.user?.name || (userId && userMap[userId]) || userId || '';
 
   // Display 'Sticker' if message is a sticker
   const isSticker = msgType === 'sticker' || (lastMsg as any).sticker_url;
