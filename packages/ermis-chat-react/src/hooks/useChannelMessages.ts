@@ -5,6 +5,10 @@ import { isPendingMember } from '../channelRoleUtils';
 
 export type UseChannelMessagesOptions = {
   scrollToBottom: (smooth: boolean) => void;
+  /** Reads the live virtual-list metrics to decide whether the viewport is near the bottom. */
+  isNearBottom?: () => boolean;
+  /** Temporarily blocks scroll-triggered pagination while auto-following new messages. */
+  holdScrollLoadLock?: (duration?: number) => void;
   /** Shared guard ref — blocks scroll-triggered loads during channel switch */
   jumpingRef: React.MutableRefObject<boolean>;
   isAtBottomRef: React.MutableRefObject<boolean>;
@@ -42,6 +46,8 @@ const SCROLL_DELAYS = [50, 200, 500, 1000];
  */
 export function useChannelMessages({
   scrollToBottom,
+  isNearBottom,
+  holdScrollLoadLock,
   jumpingRef,
   isAtBottomRef,
   onChannelSwitch,
@@ -51,25 +57,61 @@ export function useChannelMessages({
   const { client, activeChannel, syncMessages, setMessages, setReadState } = useChatClient();
   const inviteRefreshInFlightRef = useRef<Set<string>>(new Set());
 
+  const shouldAutoScroll = useCallback(
+    () => isAtBottomRef.current || Boolean(isNearBottom?.()),
+    [isAtBottomRef, isNearBottom],
+  );
+
+  const snapToBottomAfterCommit = useCallback(
+    (force = false) => {
+      if (force) {
+        isAtBottomRef.current = true;
+      }
+      if (force || shouldAutoScroll()) {
+        holdScrollLoadLock?.(750);
+      }
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (force || shouldAutoScroll()) {
+            scrollToBottom(false);
+          }
+        });
+      });
+
+      [80, 180, 360].forEach((delay) => {
+        setTimeout(() => {
+          if (force || shouldAutoScroll()) {
+            scrollToBottom(false);
+          }
+        }, delay);
+      });
+    },
+    [scrollToBottom, shouldAutoScroll, isAtBottomRef, holdScrollLoadLock],
+  );
+
   const scheduleScrollToBottom = useCallback(
     (smooth: boolean, force = false) => {
+      if (force) {
+        isAtBottomRef.current = true;
+      }
       if (smooth) {
         // Trigger smooth scroll exactly once, otherwise browsers will
         // cancel the smooth animation if called multiple times in a row
         setTimeout(() => {
-          if (!force && !isAtBottomRef.current) return;
+          if (!force && !shouldAutoScroll()) return;
           scrollToBottom(true);
         }, 100);
       } else {
         SCROLL_DELAYS.forEach((delay) => {
           setTimeout(() => {
-            if (!force && !isAtBottomRef.current) return;
+            if (!force && !shouldAutoScroll()) return;
             scrollToBottom(false);
           }, delay);
         });
       }
     },
-    [scrollToBottom, isAtBottomRef],
+    [scrollToBottom, isAtBottomRef, shouldAutoScroll],
   );
 
   // Block scroll-triggered loadMore SYNCHRONOUSLY before browser paint.
@@ -240,26 +282,24 @@ export function useChannelMessages({
 
     const handleNewMessage = (event: Event) => {
       // Capture scroll state BEFORE sync causes re-render
-      const wasAtBottom = isAtBottomRef.current;
+      const wasAtBottom = shouldAutoScroll();
+      const isOwnMessage = event.message?.user?.id === client.userID || event.message?.user_id === client.userID;
+      const shouldFollowBottom = isOwnMessage || wasAtBottom;
+      if (shouldFollowBottom) {
+        isAtBottomRef.current = true;
+        holdScrollLoadLock?.(750);
+      }
 
       syncMessagesWithE2eeCache();
 
-      const isOwnMessage = event.message?.user?.id === client.userID || event.message?.user_id === client.userID;
-
       if (isOwnMessage) {
-        // Own messages use INSTANT scroll (no smooth animation) to avoid
+        // Own/realtime-at-bottom messages use INSTANT scroll to avoid
         // animation overlap jank during rapid typing. Multiple smooth scrolls
         // in quick succession cause the visible "jump/snap" effect because
         // each new animation cancels the previous one mid-way.
-        isAtBottomRef.current = true;
-        // Instant snap after React processes the state update
-        setTimeout(() => scrollToBottom(false), 10);
-        // Follow-up snaps to catch async height measurements (images, embeds)
-        setTimeout(() => scrollToBottom(false), 50);
-        setTimeout(() => scrollToBottom(false), 150);
-        setTimeout(() => scrollToBottom(false), 300);
+        snapToBottomAfterCommit(true);
       } else if (wasAtBottom) {
-        scheduleScrollToBottom(true, true);
+        snapToBottomAfterCommit(true);
       }
     };
 
@@ -273,8 +313,12 @@ export function useChannelMessages({
       // Read receipt avatars appear below the last message, increasing content
       // height. Auto-scroll so the user doesn't have to manually scroll down
       // to see the "seen" indicator.
-      if (isAtBottomRef.current) {
-        setTimeout(() => scrollToBottom(false), 100);
+      if (shouldAutoScroll()) {
+        setTimeout(() => {
+          if (shouldAutoScroll()) {
+            scrollToBottom(false);
+          }
+        }, 100);
       }
     };
 
@@ -343,10 +387,10 @@ export function useChannelMessages({
 
     const handleE2eeDecrypted = (event: any) => {
       if (!event?.message?.id || event.cid !== activeChannel.cid) return;
-      const wasAtBottom = isAtBottomRef.current;
+      const wasAtBottom = shouldAutoScroll();
       mergeDecryptedMessages([event.message]);
       if (wasAtBottom) {
-        scheduleScrollToBottom(false, true);
+        snapToBottomAfterCommit(true);
       }
     };
 
@@ -402,5 +446,5 @@ export function useChannelMessages({
       sub18.unsubscribe();
       sub19.unsubscribe();
     };
-  }, [activeChannel, client, scrollToBottom, scheduleScrollToBottom, syncMessages, setMessages, onChannelSwitch, setReadState]);
+  }, [activeChannel, client, scrollToBottom, scheduleScrollToBottom, shouldAutoScroll, snapToBottomAfterCommit, syncMessages, setMessages, onChannelSwitch, setReadState, holdScrollLoadLock]);
 }

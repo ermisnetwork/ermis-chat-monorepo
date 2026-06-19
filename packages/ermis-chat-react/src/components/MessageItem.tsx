@@ -57,6 +57,28 @@ const InlineStatusIcon: React.FC<{ status?: string; isOwnMessage: boolean; isLas
 });
 InlineStatusIcon.displayName = 'InlineStatusIcon';
 
+function findQuotedMessageInChannelState(channel: any, quotedMessageId?: string) {
+  if (!channel || !quotedMessageId) return undefined;
+
+  const messageSets = Array.isArray(channel.state?.messageSets) ? channel.state.messageSets : [];
+  for (const set of messageSets) {
+    const messages = Array.isArray(set?.messages) ? set.messages : [];
+    const found = messages.find((item: any) => item?.id === quotedMessageId);
+    if (found) return found;
+  }
+
+  const pinnedMessages = Array.isArray(channel.state?.pinnedMessages) ? channel.state.pinnedMessages : [];
+  return pinnedMessages.find((item: any) => item?.id === quotedMessageId);
+}
+
+function hasRenderableQuotedMessageContent(quotedMessage: any) {
+  if (!quotedMessage) return false;
+  if (typeof quotedMessage.text === 'string' && quotedMessage.text.trim()) return true;
+  if (Array.isArray(quotedMessage.attachments) && quotedMessage.attachments.length > 0) return true;
+  if (typeof quotedMessage.sticker_url === 'string' && quotedMessage.sticker_url) return true;
+  return false;
+}
+
 export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   message,
   isOwnMessage,
@@ -90,7 +112,12 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   const userName = message.user?.name || message.user_id;
   const userAvatar = message.user?.avatar;
 
-  const quotedMessage = (message as any).quoted_message;
+  const directQuotedMessage = (message as any).quoted_message;
+  const stateQuotedMessage = findQuotedMessageInChannelState(activeChannel, (message as any).quoted_message_id);
+  const quotedMessage =
+    (hasRenderableQuotedMessageContent(directQuotedMessage) ? directQuotedMessage : undefined) ||
+    (hasRenderableQuotedMessageContent(stateQuotedMessage) ? stateQuotedMessage : undefined) ||
+    directQuotedMessage;
   const isForwarded = !!(message as any).forward_cid;
   const oldTexts = (message as any).old_texts;
   const isEdited = oldTexts && oldTexts.length > 0;

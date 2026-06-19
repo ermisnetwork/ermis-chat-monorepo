@@ -15,11 +15,31 @@
 - If replay cannot recover this device, Channel Info reveals the advanced reset action that reloads encrypted state on this device while keeping already shown messages.
 - If this device has no PIN or has incomplete history restore, uhm-chat shows a soft PIN popup after login/app entry; a locked vault alone does not interrupt login.
 - After the channel list loads, the SDK prepares all loaded E2EE channels in the background with sequential external join and reports progress through a compact secure-restore banner.
-- Active E2EE channels show restore progress/gap state from local `restore_progress` records without creating fake messages.
+- Active E2EE channels show running/pending restore progress from local `restore_progress` records without creating fake messages.
+- Permanent restore gaps are summarized in Chat history PIN settings instead of rendering warning banners or gap badges inside each channel.
+- E2EE quoted replies render from local decrypted quote data when the server event only carries `quoted_message_id`.
 - SDK and app work now uses this monorepo as the source of truth: `packages/ermis-chat-sdk` and `apps/uhm-chat`.
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-06-19 - production E2EE quoted reply previews
+
+- Goal: fix reply previews in UHM Chat where own replies had no quote UI and the other participant saw `Message unavailable`.
+- Code changed: SDK optimistic/decrypted/local-cache message hydration now attaches available quoted-message plaintext from active state or IndexedDB, and React `MessageItem` falls back to active channel state when `quoted_message` is missing or only has an encrypted envelope. Reply/search jump scrolling now uses rendered VList indexes that include date separators. The message list now reads live VList bottom metrics, snaps appended own/incoming messages before paint when the viewer is at the bottom, temporarily blocks scroll-triggered pagination during that snap window, and disables browser scroll anchoring so reply sends do not briefly jump to the quoted `hahaha`-style message before returning to the newest message.
+- Docs changed: this README records the app behavior. SDK and React README files record the package-level changes. SQL, Postman, and Bellboy docs are unchanged because Bellboy still stores and emits the same reply metadata.
+- Design decision: quoted plaintext remains client-local for E2EE; the server contract stays metadata-only with `quoted_message_id`. Scroll state stays frontend-only and must account for virtualized non-message children, input reply-preview height changes, transient VList offsets during append, and browser scroll anchoring.
+- Performance: send/decrypt adds at most one local quote lookup, history hydration remains `O(M + Q)`, explicit jump index calculation is `O(M)` over loaded messages, and realtime bottom checks are `O(1)` VList metric reads; no additional network requests, backend DB round trips, server payload growth, hot partitions, or contention.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed. The latest scroll refinement was reverified with `npm run build:react` and a sequential `yarn workspace uhm-chat build`.
+
+### 2026-06-19 - production PIN settings restore diagnostics
+
+- Goal: move unavailable-history warnings out of per-channel UI and into Chat history PIN settings with channel-level details.
+- Code changed: `UhmRecoveryPinDialog` now shows a compact "Some history unavailable" panel above Change PIN with a Details dropdown listing affected channels, message counts, epochs, and primary reasons; `ChatPage` no longer renders permanent-gap channel badges or timeline banners.
+- Docs changed: this README records the account-level diagnostics UX. SDK and React README files record the recovery status field that carries issue-bearing restore progress.
+- Design decision: restore progress that is currently running remains visible in the active channel, while terminal/unavailable history moves to the PIN settings surface to reduce repeated channel-level warnings.
+- Performance: status refresh keeps `O(I + G)` time and memory where `I` is incomplete restore records and `G` is done-with-gap records from IndexedDB; it adds no network requests, server payload growth, database hot partitions, or backend contention.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
 
 ### 2026-06-17 - production encryption naming cleanup
 

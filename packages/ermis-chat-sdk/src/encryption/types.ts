@@ -1046,6 +1046,7 @@ export interface RecoveryStatus {
   hasIncompleteRestore: boolean;
   incompleteChannels: string[];
   channelsWithPermanentGaps: string[];
+  restoreProgressWithIssues: RestoreProgressRecord[];
   e2eeBootstrapRunning?: boolean;
   e2eeBootstrapCompleted?: number;
   e2eeBootstrapTotal?: number;

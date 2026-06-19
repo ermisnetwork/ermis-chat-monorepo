@@ -4,6 +4,7 @@ import { formatMessage } from '@ermis-network/ermis-chat-sdk';
 import type { VListHandle } from 'virtua';
 import { dedupMessages } from './useLoadMessages';
 import { useChatClient } from './useChatClient';
+import { getDateKey } from '../utils';
 
 export type UseScrollToMessageOptions = {
   vlistRef: React.RefObject<VListHandle | null>;
@@ -22,6 +23,23 @@ export type UseScrollToMessageReturn = {
   scrollToMessage: (messageId: string) => void;
   jumpToLatest: () => void;
 };
+
+function getRenderedMessageIndex(messages: FormatMessageResponse[], messageId: string): number {
+  let renderedIndex = 0;
+
+  for (let i = 0; i < messages.length; i += 1) {
+    const message = messages[i];
+    const prevMessage = i > 0 ? messages[i - 1] : null;
+    const showDateSeparator =
+      !prevMessage || getDateKey(message.created_at) !== getDateKey(prevMessage.created_at);
+
+    if (showDateSeparator) renderedIndex += 1;
+    if (message.id === messageId) return renderedIndex;
+    renderedIndex += 1;
+  }
+
+  return -1;
+}
 
 export function useScrollToMessage({
   vlistRef,
@@ -60,7 +78,14 @@ export function useScrollToMessage({
       // Case 1: message is already in current list
       const idx = messagesRef.current.findIndex((m) => m.id === messageId);
       if (idx !== -1) {
-        vlistRef.current?.scrollToIndex(idx, { align: 'center', smooth: true });
+        const renderedIdx = getRenderedMessageIndex(messagesRef.current, messageId);
+        if (renderedIdx !== -1) {
+          jumpingRef.current = true;
+          vlistRef.current?.scrollToIndex(renderedIdx, { align: 'center', smooth: true });
+          setTimeout(() => {
+            jumpingRef.current = false;
+          }, 500);
+        }
         highlight(messageId);
         return;
       }
@@ -93,14 +118,14 @@ export function useScrollToMessage({
 
         // Wait for VList to render, then jump while hidden, then fade in
         setTimeout(() => {
-          const newIdx = unique.findIndex((m: any) => m.id === messageId);
-          if (newIdx === -1) {
+          const renderedIdx = getRenderedMessageIndex(unique, messageId);
+          if (renderedIdx === -1) {
             jumpingRef.current = false;
             if (vlistEl) vlistEl.style.opacity = '1';
             return;
           }
 
-          vlistRef.current?.scrollToIndex(newIdx, { align: 'center' });
+          vlistRef.current?.scrollToIndex(renderedIdx, { align: 'center' });
 
           setTimeout(() => {
             if (vlistEl) {

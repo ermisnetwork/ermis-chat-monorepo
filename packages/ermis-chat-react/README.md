@@ -9,7 +9,8 @@ The official React UI components for Ermis Chat.
 - Channel info actions can enable E2EE for an existing standard channel when the viewer is the owner and encryption is initialized; enable uses `member_assisted` recovery by default unless the caller has already set a policy in channel data.
 - Channel message lists listen for `e2ee.message_decrypted` and refresh decrypted message content from the SDK encryption storage.
 - Channel and topic-group previews listen for E2EE decrypted/local-cache refresh events so sidebar previews replace `Encrypted message` after plaintext is available.
-- Recovery PIN helpers expose vault state, unlocked PIN change, `repairEncryptedChannel()` for Channel Info repair, lower-level archive repair, restore progress loading, and queue enqueueing for app-level PIN gates.
+- Quoted reply previews fall back to the active channel state when a message has `quoted_message_id` and no renderable embedded `quoted_message`.
+- Recovery PIN helpers expose vault state, unlocked PIN change, issue-bearing restore progress records, `repairEncryptedChannel()` for Channel Info repair, lower-level archive repair, selected-channel restore progress loading, and queue enqueueing for app-level PIN gates.
 - `useRecoveryPin()` refreshes after encryption initialization and restore progress events, including apps that mount recovery UI before `client.encryptionManager` is attached.
 - `CreateChannelModal` asks the SDK to archive the initial E2EE epoch after server channel creation succeeds, but does not fail channel creation if archive upload/stash is temporarily unavailable.
 - Channel info add/remove member actions use encryption member commits for E2EE channels and never fall back to standard `removeMembers` while encryption is required. Self-leave calls `channel.leaveChannelE2ee`, sending `self_remove: true` so the remaining designated encryption member can commit the eviction.
@@ -17,6 +18,15 @@ The official React UI components for Ermis Chat.
 - Custom Channel Info action components receive the current `channel`, allowing selected-timeline repair UI without relying on global active-channel state.
 
 ## Progress Log
+
+### 2026-06-19 - E2EE Quoted Reply Preview
+
+- Goal: render quoted reply UI for sent messages and avoid `Message unavailable` when the replied-to message is already decrypted locally.
+- Code changed: `MessageItem` now resolves a missing or unrenderable `quoted_message` from active channel message sets/pinned messages, and `useMessageSend` includes reply/edit state in the send callback dependencies. `useScrollToMessage` now maps message IDs to rendered VList indexes that include date separators. `VirtualMessageList` now reads live VList bottom metrics, snaps appended messages in a layout effect before paint, temporarily blocks scroll-triggered pagination while auto-following new messages, and disables browser scroll anchoring so reply sends/realtime receives do not briefly jump to the quoted message before returning to the newest message.
+- Docs/artifacts changed: this README records the React UI behavior. SDK and UHM README files record the matching cache hydration and app-level fix. SQL, Postman, and Bellboy docs are unchanged because no server/API contract changed.
+- Design decision: React keeps a synchronous render fallback for already-loaded timeline messages, while the SDK handles durable IndexedDB hydration for reload/sync paths. Scroll-to-message must use VList's rendered child indexes, not raw message-array indexes, because date separators are also VList children. Realtime bottom-follow uses instant snaps, not smooth scrolling, and suppresses load-more during the snap window because transient VList scroll offsets can otherwise prepend older history and expose an older quoted-message anchor between renders.
+- Performance: fallback lookup is `O(M)` per rendered item only when `quoted_message` is missing, rendered-index lookup is `O(M)` only on explicit quote/search jumps, and live bottom checks are `O(1)` reads from VList metrics; no network or backend work is added.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed. The latest scroll refinement was reverified with `npm run build:react` and a sequential `yarn workspace uhm-chat build`.
 
 ### 2026-06-17 - Encryption Naming API Cleanup
 
@@ -70,6 +80,12 @@ The official React UI components for Ermis Chat.
 - Goal: let consuming apps react to resumable PIN restore progress without polling.
 - Code changed: `useRecoveryPin()` now subscribes to `e2ee.initialized` and `e2ee.restore_progress`, refreshes recovery status, and exposes `loadRestoreProgress(channelType, channelId)` for active-channel badges and gap banners.
 - Verification: `npm run build:uhm` passed, including SDK, React package, and uhm-chat builds.
+
+### 2026-06-19 - PIN Settings Restore Diagnostics
+
+- Goal: let account-level PIN settings summarize unavailable history without showing permanent-gap warnings inside every channel.
+- Code changed: `useRecoveryPin()` now carries SDK `restoreProgressWithIssues` records through `recoveryStatus` so apps can render channel-level diagnostics in one settings surface.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
 
 ### 2026-06-01 - Initial Archive and Gate Refresh Fixes
 

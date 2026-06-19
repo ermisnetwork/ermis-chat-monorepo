@@ -1,9 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, KeyRound, Loader2, LockOpen, RotateCcw, ShieldPlus } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  KeyRound,
+  Loader2,
+  LockOpen,
+  RotateCcw,
+  ShieldPlus,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useChatClient, useRecoveryPin } from '@ermis-network/ermis-chat-react';
+import type { RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -20,9 +30,52 @@ type UhmRecoveryPinDialogProps = {
   onUnlocked?: () => void;
 };
 
+type ActiveChannelMember = {
+  user?: {
+    id?: unknown;
+    name?: unknown;
+    email?: unknown;
+  };
+};
+
+type ActiveChannelLookup = Record<
+  string,
+  {
+    data?: { name?: unknown };
+    state?: { members?: Record<string, ActiveChannelMember> };
+  }
+>;
+
 const DIGITS_ONLY = /^\d+$/;
 
 const toErrorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+const formatEpochs = (epochs: number[]): string => epochs.slice(0, 8).join(', ');
+
+const reasonFallbackKey = (record: RestoreProgressRecord, hasVault: boolean): string => {
+  if (!hasVault) return 'pin_not_setup';
+  if (record.requires_user_action === 'unlock_recovery_vault') return 'pin_locked';
+  return 'unknown';
+};
+
+const activeChannelName = (
+  record: RestoreProgressRecord,
+  activeChannels: ActiveChannelLookup | undefined,
+  currentUserId: string | undefined,
+): string => {
+  const channel = activeChannels?.[record.cid];
+  const named = channel?.data?.name;
+  if (typeof named === 'string' && named.trim()) return named.trim();
+
+  const members = channel?.state?.members ? Object.values(channel.state.members) : [];
+  const otherMember = members.find((member) => typeof member.user?.id === 'string' && member.user.id !== currentUserId);
+  const otherName = [otherMember?.user?.name, otherMember?.user?.email, otherMember?.user?.id].find(
+    (value): value is string => typeof value === 'string' && value.trim().length > 0,
+  );
+  if (otherName) return otherName.trim();
+
+  return record.channel_id || record.cid;
+};
 
 export function UhmRecoveryPinDialog({
   isOpen,
@@ -38,6 +91,7 @@ export function UhmRecoveryPinDialog({
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [isChanging, setIsChanging] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const isGate = variant === 'gate';
   const isRepair = variant === 'repair';
@@ -45,6 +99,59 @@ export function UhmRecoveryPinDialog({
   const hasVault = recovery.recoveryStatus?.hasVault === true;
   const unlocked = recovery.recoveryStatus?.unlocked === true;
   const working = recovery.status === 'working';
+  const issueRecords = useMemo(
+    () => recovery.recoveryStatus?.restoreProgressWithIssues || [],
+    [recovery.recoveryStatus?.restoreProgressWithIssues],
+  );
+  const activeChannels = client?.activeChannels as ActiveChannelLookup | undefined;
+  const historyIssueRows = useMemo(
+    () =>
+      issueRecords
+        .map((record) => {
+          const epochs = Array.from(
+            new Set([
+              ...(record.target_epochs || []),
+              ...(record.permanent_gaps || []).map((gap) => gap.epoch),
+              ...(record.transient_failures || []).map((failure) => failure.epoch),
+              ...(record.repair_issues || [])
+                .map((issue) => issue.mls_epoch)
+                .filter((epoch): epoch is number => typeof epoch === 'number'),
+            ]),
+          ).sort((a, b) => a - b);
+          const messageIds = new Set(
+            (record.repair_issues || [])
+              .map((issue) => issue.message_id)
+              .filter((messageId) => messageId && !messageId.startsWith('legacy-epoch-')),
+          );
+          const fallbackIssueCount =
+            (record.repair_issues || []).length ||
+            (record.permanent_gaps || []).length ||
+            (record.transient_failures || []).length ||
+            epochs.length;
+          const reasonCounts = new Map<string, number>();
+          const addReason = (reason?: string) => {
+            if (!reason) return;
+            reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+          };
+          for (const issue of record.repair_issues || []) addReason(issue.reason);
+          for (const gap of record.permanent_gaps || []) addReason(gap.reason);
+          for (const failure of record.transient_failures || []) addReason(failure.reason);
+          if (reasonCounts.size === 0) addReason(reasonFallbackKey(record, hasVault));
+          const primaryReason = Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || 'unknown';
+
+          return {
+            cid: record.cid,
+            title: activeChannelName(record, activeChannels, client?.userID),
+            messageCount: Math.max(messageIds.size || fallbackIssueCount, 1),
+            epochs,
+            primaryReason,
+          };
+        })
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    [activeChannels, client?.userID, hasVault, issueRecords],
+  );
+  const historyIssueCount = historyIssueRows.reduce((total, row) => total + row.messageCount, 0);
+  const showHistoryIssues = !isGate && !isRepair && historyIssueRows.length > 0;
   const dialogTitle = isGate
     ? t('recovery_pin.gate_title')
     : isRepair
@@ -108,6 +215,7 @@ export function UhmRecoveryPinDialog({
     setPin('');
     setConfirmPin('');
     setIsChanging(false);
+    setDetailsOpen(false);
     setLocalError(null);
     onClose();
   };
@@ -191,6 +299,72 @@ export function UhmRecoveryPinDialog({
     </Button>
   );
 
+  const issueReasonLabel = (reason: string) =>
+    t(`recovery_pin.history_issue_reason.${reason}`, {
+      defaultValue: t(`recovery_pin.gap_reason.${reason}`, {
+        defaultValue: t('recovery_pin.history_issue_reason.unknown'),
+      }),
+    });
+
+  const historyIssuesPanel = showHistoryIssues ? (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/80 text-amber-950 shadow-sm dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">
+      <div className="flex items-start gap-3 px-3 py-3">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold">{t('recovery_pin.status_restore_gaps')}</div>
+          <div className="mt-0.5 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
+            {t('recovery_pin.history_issue_summary', {
+              channels: historyIssueRows.length,
+              messages: historyIssueCount,
+            })}
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setDetailsOpen((open) => !open)}
+          className="h-7 shrink-0 px-2 text-[12px] font-semibold text-amber-800 hover:bg-amber-100 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-500/20"
+          aria-expanded={detailsOpen}
+        >
+          {t('recovery_pin.history_issue_detail_action')}
+          <ChevronDown className={`ml-1 h-3.5 w-3.5 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} />
+        </Button>
+      </div>
+      {detailsOpen && (
+        <div className="border-t border-amber-200/80 px-3 pb-3 pt-2 dark:border-amber-500/20">
+          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            {historyIssueRows.map((row) => (
+              <div
+                key={row.cid}
+                className="rounded-md border border-amber-200/70 bg-white/80 px-3 py-2 dark:border-amber-500/20 dark:bg-zinc-950/30"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-semibold text-zinc-950 dark:text-zinc-100">
+                      {row.title}
+                    </div>
+                    <div className="mt-1 text-[12px] leading-5 text-zinc-600 dark:text-zinc-300">
+                      {t('recovery_pin.history_issue_message_count', { count: row.messageCount })}
+                    </div>
+                  </div>
+                  <div className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-100">
+                    {row.epochs.length > 0
+                      ? t('recovery_pin.history_issue_epochs', { epochs: formatEpochs(row.epochs) })
+                      : t('recovery_pin.history_issue_epoch_unknown')}
+                  </div>
+                </div>
+                <div className="mt-2 text-[12px] leading-5 text-zinc-700 dark:text-zinc-200">
+                  {t('recovery_pin.history_issue_primary_reason', { reason: issueReasonLabel(row.primaryReason) })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <Dialog
       open={isOpen}
@@ -267,10 +441,13 @@ export function UhmRecoveryPinDialog({
                 </div>
               </div>
               {!isGate && (
-                <Button type="button" variant="outline" onClick={() => setIsChanging(true)} className="w-full">
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  {t('recovery_pin.change_action')}
-                </Button>
+                <>
+                  {historyIssuesPanel}
+                  <Button type="button" variant="outline" onClick={() => setIsChanging(true)} className="w-full">
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    {t('recovery_pin.change_action')}
+                  </Button>
+                </>
               )}
             </div>
           )}

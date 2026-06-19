@@ -155,10 +155,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
     const messageId = message.id!;
 
+    const quotedMessage =
+      (message as any).quoted_message ||
+      (message.quoted_message_id ? this.state.findMessage(message.quoted_message_id) : undefined);
+
     // 2. Build optimistic (fake) message and push into state immediately
     const optimisticMessage = {
       ...message,
       id: messageId,
+      quoted_message: quotedMessage,
       status: 'sending',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -2474,8 +2479,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const lookupIds = messages.flatMap((message: any) => {
       const isEncryptedCarrier = message.content_type === 'mls' || Boolean(message.mls_ciphertext);
-      if (!isEncryptedCarrier) return [];
-      return [message.id].filter(Boolean);
+      const ids: string[] = [];
+      if (isEncryptedCarrier && message.id) ids.push(message.id);
+      if (message.quoted_message_id) ids.push(message.quoted_message_id);
+      return ids;
     });
     const cachedMessages =
       lookupIds.length > 0
@@ -2493,6 +2500,34 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         : new Map<string, any>();
     const currentMessages = this.state.messageSets?.flatMap((set) => set.messages) || [];
     const currentMessagesById = new Map(currentMessages.map((message: any) => [message.id, message]));
+    const stateUsers = Object.values(this.getClient().state.users);
+    const toQuotedPreview = (quoted: any) => {
+      if (!quoted?.id) return undefined;
+      const userId = quoted.user_id || quoted.user?.id || '';
+      return {
+        ...quoted,
+        content_type: quoted.content_type || 'standard',
+        type: quoted.type || 'regular',
+        user: this.getClient().state.users[userId] || quoted.user || getUserInfo(userId, stateUsers),
+        attachments: quoted.attachments || [],
+      };
+    };
+    const isRenderableQuotedMessage = (quoted: any) => {
+      if (!quoted) return false;
+      if (typeof quoted.text === 'string' && quoted.text.trim()) return true;
+      if (Array.isArray(quoted.attachments) && quoted.attachments.length > 0) return true;
+      if (typeof quoted.sticker_url === 'string' && quoted.sticker_url) return true;
+      return false;
+    };
+    const resolveQuotedMessage = (message: any) => {
+      const explicitQuotedMessage = toQuotedPreview(message.quoted_message);
+      if (isRenderableQuotedMessage(explicitQuotedMessage)) return explicitQuotedMessage;
+      if (!message.quoted_message_id) return undefined;
+      const cachedQuotedMessage = toQuotedPreview(
+        currentMessagesById.get(message.quoted_message_id) || cachedMessages.get(message.quoted_message_id),
+      );
+      return isRenderableQuotedMessage(cachedQuotedMessage) ? cachedQuotedMessage : explicitQuotedMessage;
+    };
     const hydrated: MessageResponse<ErmisChatGenerics>[] = [];
 
     for (const message of messages) {
@@ -2513,7 +2548,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           Boolean(currentAny.attachments?.length) ||
           Boolean(currentAny.sticker_url);
         if (currentHasPlaintext) {
-          hydrated.push({
+          const mergedMessage = {
             ...message,
             ...currentMessage,
             content_type: 'standard',
@@ -2523,7 +2558,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             own_reactions: messageAny.own_reactions ?? currentAny.own_reactions,
             pinned: message.pinned ?? currentAny.pinned,
             pinned_at: message.pinned_at ?? currentAny.pinned_at,
-          } as MessageResponse<ErmisChatGenerics>);
+          } as any;
+          const quotedMessage = resolveQuotedMessage(mergedMessage);
+          if (quotedMessage) mergedMessage.quoted_message = quotedMessage;
+          hydrated.push(mergedMessage as MessageResponse<ErmisChatGenerics>);
           continue;
         }
       }
@@ -2535,11 +2573,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
       const userId =
         storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
-      const stateUsers = Object.values(this.getClient().state.users);
       const stateUser = this.getClient().state.users[userId];
       const enrichedUser = stateUser || message.user || storedMessage.user || getUserInfo(userId, stateUsers);
 
-      hydrated.push({
+      const mergedMessage = {
         ...message,
         ...storedMessage,
         content_type: 'standard',
@@ -2551,7 +2588,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         pinned: message.pinned ?? storedMessage.pinned,
         pinned_at: message.pinned_at ?? storedMessage.pinned_at,
         status: message.status,
-      } as MessageResponse<ErmisChatGenerics>);
+      } as any;
+      const quotedMessage = resolveQuotedMessage(mergedMessage);
+      if (quotedMessage) mergedMessage.quoted_message = quotedMessage;
+      hydrated.push(mergedMessage as MessageResponse<ErmisChatGenerics>);
     }
 
     return hydrated;
@@ -2573,13 +2613,44 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       .then((storedMessages: any[]) => {
         if (!storedMessages.length) return;
         const stateUsers = Object.values(this.getClient().state.users);
+        const storedMessagesById = new Map(storedMessages.map((message: any) => [message.id, message]));
+        const currentMessagesById = new Map(
+          (this.state.messageSets?.flatMap((set) => set.messages) || []).map((message: any) => [message.id, message]),
+        );
+        const toQuotedPreview = (quoted: any) => {
+          if (!quoted?.id) return undefined;
+          const userId = quoted.user_id || quoted.user?.id || '';
+          return {
+            ...quoted,
+            content_type: quoted.content_type || 'standard',
+            type: quoted.type || 'regular',
+            user: this.getClient().state.users[userId] || quoted.user || getUserInfo(userId, stateUsers),
+            attachments: quoted.attachments || [],
+          };
+        };
+        const isRenderableQuotedMessage = (quoted: any) => {
+          if (!quoted) return false;
+          if (typeof quoted.text === 'string' && quoted.text.trim()) return true;
+          if (Array.isArray(quoted.attachments) && quoted.attachments.length > 0) return true;
+          if (typeof quoted.sticker_url === 'string' && quoted.sticker_url) return true;
+          return false;
+        };
         const messages = storedMessages
           .map((message: any) => {
             const stateUser = this.getClient().state.users[message.user_id];
+            const explicitQuotedMessage = toQuotedPreview(message.quoted_message);
+            const cachedQuotedMessage = toQuotedPreview(
+              currentMessagesById.get(message.quoted_message_id) || storedMessagesById.get(message.quoted_message_id),
+            );
+            const quotedMessage =
+              (isRenderableQuotedMessage(explicitQuotedMessage) ? explicitQuotedMessage : undefined) ||
+              (isRenderableQuotedMessage(cachedQuotedMessage) ? cachedQuotedMessage : undefined) ||
+              explicitQuotedMessage;
             return {
               ...message,
               content_type: 'standard',
               user: stateUser || message.user || getUserInfo(message.user_id, stateUsers),
+              quoted_message: quotedMessage,
               status: 'received',
             } as MessageResponse<ErmisChatGenerics>;
           })

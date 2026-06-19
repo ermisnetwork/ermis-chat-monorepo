@@ -241,6 +241,22 @@
     "bootstrap_progress": "Preparing chats: {{completed}} of {{total}}",
     "gap_banner_title": "Some messages couldn't be restored",
     "gap_banner_more": "and {{count}} more.",
+    "history_issue_summary": "{{channels}} chats, {{messages}} affected messages",
+    "history_issue_detail_action": "Details",
+    "history_issue_message_count": "{{count}} affected messages",
+    "history_issue_epochs": "Epoch {{epochs}}",
+    "history_issue_epoch_unknown": "Epoch unknown",
+    "history_issue_primary_reason": "Main reason: {{reason}}",
+    "history_issue_reason": {
+      "pin_not_setup": "Could not restore because chat history PIN is not set up.",
+      "pin_locked": "Enter your PIN to restore available chat history.",
+      "network_error": "Network connection failed during restore.",
+      "server_error": "The server could not complete restore.",
+      "forward_secrecy_consumed": "This history was already consumed by forward secrecy.",
+      "missing_local_snapshot": "This device is missing local encryption state.",
+      "legacy_epoch_failure": "This older history section could not be checked.",
+      "unknown": "Some chat history is not available."
+    },
     "tabs": {
       "unlock": "Enter PIN",
       "setup": "Set up",

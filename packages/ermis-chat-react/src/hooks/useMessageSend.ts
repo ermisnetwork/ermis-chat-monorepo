@@ -164,6 +164,10 @@ export function useMessageSend({
     editableRef,
     setFiles,
     setHasContent,
+    quotedMessage,
+    clearQuotedMessage,
+    editingMessage,
+    clearEditingMessage,
   ]);
 
   return { sending, handleSend };

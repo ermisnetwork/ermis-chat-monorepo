@@ -710,8 +710,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   async getRecoveryStatus(): Promise<RecoveryStatus> {
     const vault = await this._loadRecoveryPublicMetadata();
     const deviceId = this.deviceId || (await this.storage.getDeviceId());
-    const incompleteRecords = await this.storage.loadIncompleteRestores(this.userId!, deviceId);
-    const gapRecords = await this.storage.loadRestoresWithPermanentGaps(this.userId!, deviceId);
+    const incompleteRecords = (await this.storage.loadIncompleteRestores(this.userId!, deviceId)).map((record) =>
+      this._normalizeProgress(record),
+    );
+    const gapRecords = (await this.storage.loadRestoresWithPermanentGaps(this.userId!, deviceId)).map((record) =>
+      this._normalizeProgress(record),
+    );
+    const issueRecordsByCid = new Map<string, RestoreProgressRecord>();
+    for (const record of incompleteRecords) {
+      if (this._isUserGatedRestoreProgress(record)) issueRecordsByCid.set(record.cid, record);
+    }
+    for (const record of gapRecords) issueRecordsByCid.set(record.cid, record);
     const incompleteChannels = new Set(
       incompleteRecords
         .filter((record) => this._isUserGatedRestoreProgress(record))
@@ -724,6 +733,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       hasIncompleteRestore: incompleteChannels.size > 0,
       incompleteChannels: Array.from(incompleteChannels),
       channelsWithPermanentGaps: gapRecords.map((record) => record.cid),
+      restoreProgressWithIssues: Array.from(issueRecordsByCid.values()),
       e2eeBootstrapRunning: this._e2eeBootstrapProgress.status === 'running',
       e2eeBootstrapCompleted: this._e2eeBootstrapProgress.completed,
       e2eeBootstrapTotal: this._e2eeBootstrapProgress.total,
@@ -2902,7 +2912,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             this._decryptedMsgIds.add(this._messageVersionKey(decryptedEnvelope));
             progress = this._clearRepairIssueInProgress(progress, decryptedEnvelope);
 
-            const fullMessage = this._buildFullMessage(storedMessage, decryptedEnvelope);
+            const fullMessage = await this._buildFullMessageWithQuoted(storedMessage, decryptedEnvelope);
             const existing = restoredMessagesForStateByCid.get(routeCid) || [];
             existing.push(fullMessage);
             restoredMessagesForStateByCid.set(routeCid, existing);
@@ -4340,7 +4350,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
                 await savePendingByRouteCid();
               }
               if (decrypted[0]) {
-                messageForState = this._buildFullMessage(decrypted[0], updatedMessage);
+                messageForState = await this._buildFullMessageWithQuoted(decrypted[0], updatedMessage);
               }
             } else {
               const existingMsg = await this.storage.loadE2eeMessage(updatedMessage.id);
@@ -6263,6 +6273,79 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     };
   }
 
+  private _normalizeQuotedMessagePreview(message: unknown): Record<string, any> | undefined {
+    if (!message || typeof message !== 'object') return undefined;
+
+    const quoted = message as Record<string, any>;
+    if (!quoted.id) return undefined;
+
+    const userId = quoted.user_id || quoted.user?.id;
+    const stateUser = typeof userId === 'string' && userId ? this.client?.state?.users?.[userId] : undefined;
+
+    return {
+      ...quoted,
+      content_type: quoted.content_type || 'standard',
+      type: quoted.type || 'regular',
+      user_id: userId || quoted.user_id,
+      user: stateUser || quoted.user || (userId ? { id: userId } : undefined),
+      attachments: quoted.attachments || [],
+    };
+  }
+
+  private _isRenderableQuotedMessage(message: Record<string, any> | undefined): boolean {
+    if (!message) return false;
+    if (typeof message.text === 'string' && message.text.trim()) return true;
+    if (Array.isArray(message.attachments) && message.attachments.length > 0) return true;
+    if (typeof message.sticker_url === 'string' && message.sticker_url) return true;
+    return false;
+  }
+
+  private _findQuotedMessageInActiveChannels(messageId: string): Record<string, any> | undefined {
+    const activeChannels = Object.values(this.client?.activeChannels || {});
+
+    for (const channel of activeChannels) {
+      const state = (channel as any)?.state;
+      const messageSets = Array.isArray(state?.messageSets) ? state.messageSets : [];
+
+      for (const set of messageSets) {
+        const messages = Array.isArray(set?.messages) ? set.messages : [];
+        const found = messages.find((message: any) => message?.id === messageId);
+        const normalized = this._normalizeQuotedMessagePreview(found);
+        if (normalized) return normalized;
+      }
+
+      const pinnedMessages = Array.isArray(state?.pinnedMessages) ? state.pinnedMessages : [];
+      const pinned = pinnedMessages.find((message: any) => message?.id === messageId);
+      const normalizedPinned = this._normalizeQuotedMessagePreview(pinned);
+      if (normalizedPinned) return normalizedPinned;
+    }
+
+    return undefined;
+  }
+
+  private async _resolveQuotedMessagePreview(
+    quotedMessageId?: unknown,
+    explicitQuotedMessage?: unknown,
+  ): Promise<Record<string, any> | undefined> {
+    const explicit = this._normalizeQuotedMessagePreview(explicitQuotedMessage);
+    if (this._isRenderableQuotedMessage(explicit)) return explicit;
+
+    if (typeof quotedMessageId !== 'string' || !quotedMessageId) return explicit;
+
+    const active = this._findQuotedMessageInActiveChannels(quotedMessageId);
+    if (this._isRenderableQuotedMessage(active)) return active;
+
+    try {
+      const stored = await this.storage.loadE2eeMessage(quotedMessageId);
+      const storedQuotedMessage = this._normalizeQuotedMessagePreview(stored);
+      if (this._isRenderableQuotedMessage(storedQuotedMessage)) return storedQuotedMessage;
+      return explicit;
+    } catch (err) {
+      sdkLog('warn', '[Encryption] Failed to hydrate quoted message preview:', { quotedMessageId, err });
+      return explicit;
+    }
+  }
+
   async processE2eeMessage(
     cid: string,
     message: {
@@ -6329,7 +6412,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (existing && this._storedMessageCoversVersion(existing, message)) {
         this._decryptedMsgIds.add(versionKey);
         await this._clearRepairIssue(routeCid, message);
-        return this._buildFullMessage(existing, message);
+        return await this._buildFullMessageWithQuoted(existing, message);
       }
     }
 
@@ -6352,7 +6435,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         const cached = await this.storage.loadE2eeMessage(message.id);
         if (cached && this._storedMessageCoversVersion(cached, message)) {
           await this._clearRepairIssue(routeCid, message);
-          return this._buildFullMessage(cached, message);
+          return await this._buildFullMessageWithQuoted(cached, message);
         }
         return null;
       }
@@ -6360,7 +6443,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (existing && this._storedMessageCoversVersion(existing, message)) {
         this._decryptedMsgIds.add(versionKey);
         await this._clearRepairIssue(routeCid, message);
-        return this._buildFullMessage(existing, message);
+        return await this._buildFullMessageWithQuoted(existing, message);
       }
       // Message not in sync window — fall through to normal decrypt below
     }
@@ -6379,7 +6462,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const cached = await this.storage.loadE2eeMessage(message.id);
       if (cached && this._storedMessageCoversVersion(cached, message)) {
         await this._clearRepairIssue(routeCid, message);
-        return this._buildFullMessage(cached, message);
+        return await this._buildFullMessageWithQuoted(cached, message);
       }
       // IndexedDB hasn't flushed yet — return null, UI will show "Encrypted message"
       // but the plaintext IS saved and will appear on next channel load.
@@ -6390,7 +6473,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       sdkLog('info', '[Encryption] processE2eeMessage: already decrypted (IndexedDB), skipping:', versionKey);
       this._decryptedMsgIds.add(versionKey);
       await this._clearRepairIssue(routeCid, message);
-      return this._buildFullMessage(existing, message);
+      return await this._buildFullMessageWithQuoted(existing, message);
     }
 
     const group = this.groups.get(groupCid);
@@ -6434,7 +6517,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         await this._persistProvider();
 
         // Return full Message object for channel state
-        return this._buildFullMessage(storedMsg, message);
+        return await this._buildFullMessageWithQuoted(storedMsg, message);
       }
     } catch (err) {
       const errMsg = (err as Error).message || '';
@@ -6517,7 +6600,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       // Envelope metadata (routing + notifications)
       parent_id: stored.parent_id || envelope.parent_id,
       quoted_message_id: stored.quoted_message_id || envelope.quoted_message_id,
-      quoted_message: envelope.quoted_message,
+      quoted_message: stored.quoted_message || envelope.quoted_message,
       forward_cid: envelope.forward_cid,
       mentioned_users: stored.mentioned_users || envelope.mentioned_users,
       mentioned_all: stored.mentioned_all || envelope.mentioned_all,
@@ -6528,6 +6611,18 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       pinned_at: envelope.pinned_at,
       updated_at: stored.updated_at || envelope.updated_at,
     };
+  }
+
+  private async _buildFullMessageWithQuoted(
+    stored: E2eeStoredMessage,
+    envelope: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    const message = this._buildFullMessage(stored, envelope);
+
+    const quotedMessage = await this._resolveQuotedMessagePreview(message.quoted_message_id, message.quoted_message);
+    if (quotedMessage) message.quoted_message = quotedMessage;
+
+    return message;
   }
 
   /**
@@ -6659,7 +6754,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // Return full message for channel state + server response
     return {
       ...response,
-      message: this._buildFullMessage(storedMsg, { forward_cid: options.forward_cid }),
+      message: await this._buildFullMessageWithQuoted(storedMsg, { forward_cid: options.forward_cid }),
     };
   }
 

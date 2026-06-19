@@ -241,6 +241,22 @@
     "bootstrap_progress": "Đang chuẩn bị cuộc trò chuyện: {{completed}} trên {{total}}",
     "gap_banner_title": "Một số tin nhắn chưa thể khôi phục",
     "gap_banner_more": "và {{count}} mục khác.",
+    "history_issue_summary": "{{channels}} cuộc trò chuyện, {{messages}} tin nhắn bị ảnh hưởng",
+    "history_issue_detail_action": "Chi tiết",
+    "history_issue_message_count": "{{count}} tin nhắn bị ảnh hưởng",
+    "history_issue_epochs": "Epoch {{epochs}}",
+    "history_issue_epoch_unknown": "Chưa rõ epoch",
+    "history_issue_primary_reason": "Lý do chính: {{reason}}",
+    "history_issue_reason": {
+      "pin_not_setup": "Không thể khôi phục do chưa thiết lập PIN lịch sử trò chuyện.",
+      "pin_locked": "Nhập PIN để khôi phục phần lịch sử hiện có.",
+      "network_error": "Kết nối mạng lỗi trong lúc khôi phục.",
+      "server_error": "Máy chủ chưa thể hoàn tất khôi phục.",
+      "forward_secrecy_consumed": "Phần lịch sử này đã bị tiêu thụ theo cơ chế forward secrecy.",
+      "missing_local_snapshot": "Thiết bị này thiếu trạng thái mã hóa cục bộ.",
+      "legacy_epoch_failure": "Chưa thể kiểm tra phần lịch sử cũ này.",
+      "unknown": "Một phần lịch sử trò chuyện chưa khả dụng."
+    },
     "tabs": {
       "unlock": "Nhập PIN",
       "setup": "Thiết lập",

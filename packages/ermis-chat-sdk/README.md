@@ -11,6 +11,21 @@ The official core SDK for Ermis Chat.
 
 ## E2EE Channel Helpers
 
+<details>
+<summary>Change log</summary>
+
+- `2026-06-19`: E2EE message hydration now resolves `quoted_message` from decrypted local state or IndexedDB when only `quoted_message_id` is present.
+  - Reason: quoted replies in encrypted channels must preview the replied-to plaintext without requiring Bellboy to decrypt or duplicate message bodies.
+  - Integrator action: rebuild SDK/React clients so reply previews can hydrate from local encrypted-message cache.
+  - Compatibility/default: if the quoted message is not available locally, clients keep the existing unavailable-message fallback.
+
+- `2026-06-19`: Added `restoreProgressWithIssues` to `client.encryptionManager.getRecoveryStatus()`.
+  - Reason: account-level PIN settings need channel-level unavailable-history diagnostics without showing permanent-gap warnings inside every channel.
+  - Integrator action: prefer the new records when rendering global PIN/history diagnostics; keep `getRestoreProgress(channelType, channelId)` for selected-channel progress and repair flows.
+  - Compatibility/default: existing `incompleteChannels` and `channelsWithPermanentGaps` arrays remain unchanged.
+
+</details>
+
 - `channel.removeMembersE2ee(members, e2eeOptions)` removes other members from an E2EE channel with an encryption commit and sends `self_remove: false`.
 - `channel.leaveChannelE2ee(userId)` self-leaves an E2EE channel by sending `self_remove: true`; this path does not include an encryption commit from the leaving user.
 - `client.encryptionManager.setupRecoveryPin(pin)`, `unlockRecoveryVault(pin)`, `changeUnlockedRecoveryPin(newPin)`, and the compatibility `changeRecoveryPin(oldPin, newPin)` manage the PIN recovery vault. PIN verification and rewrap remain client-side.
@@ -21,9 +36,10 @@ The official core SDK for Ermis Chat.
 - Sync cursors are stored as `{ created_at, event_id }`; the SDK commits the cursor that was actually processed, not the server batch cursor, and IndexedDB checkpoints provider bytes plus cursor in one meta transaction when available.
 - During encrypted-state repair, a local group epoch lower than known failed message epochs makes the saved sync cursor untrusted; replay starts from the membership/encryption-enabled boundary, then archive repair is attempted before reset availability is returned if the device is still behind.
 - During manual repair, archive epoch listings with no matching epoch mark the affected message-level issues as `no_archive` instead of leaving stale `decrypt_error` reasons.
+- E2EE quoted replies hydrate `quoted_message` from active decrypted state or IndexedDB when Bellboy only returns `quoted_message_id`.
 - For non-gated E2EE topics, historical restore queries parent archive material by `e2ee_group_id` and routes restored plaintext into each timeline by `ciphertext.cid`.
-- `client.encryptionManager.getRecoveryStatus()` reports vault existence, memory-only unlock state, incomplete restore channels, and channels that completed with permanent gaps.
-- `client.encryptionManager.getRestoreProgress(channelType, channelId)` returns the per-device restore progress record for channel UI badges and gap banners.
+- `client.encryptionManager.getRecoveryStatus()` reports vault existence, memory-only unlock state, incomplete restore channels, channels that completed with permanent gaps, and the issue-bearing restore progress records that account PIN settings can summarize.
+- `client.encryptionManager.getRestoreProgress(channelType, channelId)` returns the per-device restore progress record for active restore progress and diagnostics.
 - Restore progress is persisted per device in IndexedDB so interrupted history restore resumes only missing epochs after the user re-enters their PIN.
 - Message-level `repair_issues` share that existing progress record, so new failures in completed epochs are not hidden and no IndexedDB version bump is required.
 - Restore runs sequentially by channel and fetches target epochs in bounded batches/ranges before saving progress per epoch.
@@ -47,6 +63,24 @@ The official core SDK for Ermis Chat.
 For quick browser integration, pass console levels directly: `logger: ['info', 'warn', 'error']`. `info` uses `console.log`; `warn` uses `console.warn`; `error` uses `console.error`. For custom routing, pass a function logger; it receives `info`, `warn`, or `error` as the first argument, the formatted message as the second argument, and optional structured metadata as the third argument.
 
 ## Progress Log
+
+### 2026-06-19 - E2EE Quoted Reply Hydration
+
+- Goal: fix reply previews where own sent replies showed no quote UI and other users saw `Message unavailable`.
+- Code changed: `Channel.sendMessage()` adds local quoted-message data to optimistic messages; `EncryptionManager` builds decrypted/sent/restored E2EE messages with quoted previews resolved from active state or IndexedDB; channel cache hydration and local seed paths also hydrate quoted replies and ignore unrenderable server quote envelopes when local plaintext is available.
+- Docs/artifacts changed: this README records the SDK behavior and contract changelog. React and UHM README files record the UI behavior. SQL, Postman, and Bellboy server docs are unchanged because the API/schema/event contract is unchanged.
+- Design decision: keep plaintext quote preview hydration on the client; Bellboy remains a relay and only needs `quoted_message_id` metadata for encrypted replies.
+- Performance: hydrate remains `O(M + Q)` time and memory per loaded batch where `M` is message count and `Q` is unique quoted IDs loaded from local IndexedDB; it adds no network requests, server payload growth, database hot partitions, or backend contention.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
+
+### 2026-06-19 - PIN Settings Restore Diagnostics
+
+- Goal: let account PIN settings summarize unavailable encrypted-history diagnostics while channel UI stops repeating permanent-gap warnings.
+- Code changed: `RecoveryStatus` now includes `restoreProgressWithIssues`, and `EncryptionManager.getRecoveryStatus()` returns normalized incomplete/gap restore records alongside the existing CID arrays.
+- Docs/artifacts changed: this README documents the new status field and contract changelog. React and UHM README files record the consuming hook/app behavior. SQL, Postman, and Bellboy server docs are unchanged because this is local SDK/UI state only.
+- Design decision: keep existing arrays for compatibility and add records as additive metadata; no backend API, IndexedDB version, or event contract change is needed.
+- Performance: status refresh remains `O(I + G)` time and memory for incomplete and done-with-gap IndexedDB records, with the same two local IndexedDB status-index reads, no network/database server round trips, no larger server payloads, and no new hot partitions or contention.
+- Verification: `npm run build:sdk`, `npm run build:react`, `yarn workspace uhm-chat build`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
 
 ### 2026-06-17 - Inherited Topic Pending Decrypt Replay
 

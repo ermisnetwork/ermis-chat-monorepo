@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash, AlertTriangle } from 'lucide-react'
+import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
@@ -414,9 +414,7 @@ export function ChatPage() {
   const e2eeBootstrapTotal = recovery.recoveryStatus?.e2eeBootstrapTotal || 0
 
   const activeRestoreCompleted = activeRestoreProgress?.completed_epochs.length || 0
-  const activeRestoreGaps = activeRestoreProgress?.permanent_gaps || []
-
-  const getRestoreBadge = useCallback((channel: ChannelType): { label: string; tone: 'pending' | 'running' | 'gap' } | null => {
+  const getRestoreBadge = useCallback((channel: ChannelType): { label: string; tone: 'pending' | 'running' } | null => {
     const cid = channel.cid
     if (!cid) return null
     const progress = activeRestoreProgress?.cid === cid ? activeRestoreProgress : null
@@ -428,9 +426,6 @@ export function ChatPage() {
           : t('recovery_pin.status_restore_running'),
         tone: 'running',
       }
-    }
-    if (progress?.status === 'done_with_gaps' || recovery.recoveryStatus?.channelsWithPermanentGaps.includes(cid)) {
-      return { label: t('recovery_pin.status_restore_gaps'), tone: 'gap' }
     }
     if (
       (isUserGatedRestoreProgress(progress) && ['pending', 'partial', 'failed'].includes(progress?.status || '')) ||
@@ -587,13 +582,10 @@ export function ChatPage() {
           )}
           {restoreBadge && (
             <div className={`hidden md:inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold ${
-              restoreBadge.tone === 'gap'
-                ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
-                : restoreBadge.tone === 'running'
+              restoreBadge.tone === 'running'
                   ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300'
                   : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
             }`}>
-              {restoreBadge.tone === 'gap' && <AlertTriangle className="h-3.5 w-3.5" />}
               <span>{restoreBadge.label}</span>
             </div>
           )}
@@ -933,25 +925,6 @@ export function ChatPage() {
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
-
-          {activeRestoreGaps.length > 0 && (
-            <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <div className="min-w-0 space-y-1">
-                  <div className="font-semibold">{t('recovery_pin.gap_banner_title')}</div>
-                  <div className="text-[12px] leading-relaxed">
-                    {activeRestoreGaps.slice(0, 3).map((gap) => (
-                      <span key={gap.epoch} className="mr-3 inline-block">
-                        {t('recovery_pin.epoch_label', { epoch: gap.epoch })}: {t(`recovery_pin.gap_reason.${gap.reason || 'unknown'}`)}
-                      </span>
-                    ))}
-                    {activeRestoreGaps.length > 3 && t('recovery_pin.gap_banner_more', { count: activeRestoreGaps.length - 3 })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
 
           {activeRestoreProgress?.status === 'running' && activeRestoreTotal > 0 && (
             <div className="mx-4 mt-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-[12px] font-semibold text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">

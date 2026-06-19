@@ -21,6 +21,8 @@ export type UseLoadMessagesOptions = {
   messagesRef: React.MutableRefObject<FormatMessageResponse[]>;
   /** Shared guard ref — skip scroll-triggered loads during jump transitions */
   jumpingRef: React.MutableRefObject<boolean>;
+  /** Blocks scroll-triggered pagination while auto-following appended messages. */
+  scrollLoadLockRef?: React.MutableRefObject<boolean>;
   loadMoreLimit?: number;
 };
 
@@ -45,6 +47,7 @@ export function useLoadMessages({
   vlistRef,
   messagesRef,
   jumpingRef,
+  scrollLoadLockRef,
   loadMoreLimit = 25,
 }: UseLoadMessagesOptions): UseLoadMessagesReturn {
   const { activeChannel, setMessages } = useChatClient();
@@ -144,7 +147,7 @@ export function useLoadMessages({
 
   const handleScroll = useCallback(
     (offset: number) => {
-      if (jumpingRef.current) return;
+      if (jumpingRef.current || scrollLoadLockRef?.current) return;
       const handle = vlistRef.current;
       if (!handle) return;
       const { scrollSize, viewportSize } = handle;
@@ -166,7 +169,7 @@ export function useLoadMessages({
         loadNewer();
       }
     },
-    [loadMore, loadNewer],
+    [loadMore, loadNewer, scrollLoadLockRef],
   );
 
   return {
