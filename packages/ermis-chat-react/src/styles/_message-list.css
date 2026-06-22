@@ -37,10 +37,15 @@
   flex-direction: column !important;
   flex: 1;
   min-height: 0;
+  overflow-anchor: none;
   padding-left: 1rem;
   padding-right: 1rem;
   padding-top: 1rem;
   padding-bottom: 0.5rem;
+}
+
+.ermis-message-list__vlist * {
+  overflow-anchor: none;
 }
 
 /* Push content to bottom when few messages, margin collapses when content overflows */

@@ -16,7 +16,7 @@ export const UhmChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo((
   isTopic,
   isTeamChannel,
   isE2ee,
-  mlsEpoch,
+  encryptionEpoch,
 }) => {
   const { t } = useTranslation();
   const [isLightboxOpen, setIsLightboxOpen] = React.useState(false);
@@ -110,7 +110,7 @@ export const UhmChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo((
           {isE2ee && (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded border border-emerald-200 bg-emerald-50 dark:border-emerald-500/20 dark:bg-emerald-500/10">
               <LockKeyhole className="w-2.5 h-2.5" />
-              E2EE{typeof mlsEpoch === 'number' ? ` · ${mlsEpoch}` : ''}
+              E2EE{typeof encryptionEpoch === 'number' ? ` · ${encryptionEpoch}` : ''}
             </span>
           )}
         </div>

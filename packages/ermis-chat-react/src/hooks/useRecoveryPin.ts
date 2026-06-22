@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk';
+import type {
+  EncryptedChannelRepairMode,
+  EncryptedChannelRepairResult,
+  RepairMode,
+  RepairResult,
+  RestoreProgressRecord,
+} from '@ermis-network/ermis-chat-sdk';
 
 import { useChatClient } from './useChatClient';
 
@@ -11,6 +17,7 @@ export type RecoveryStatusInfo = {
   hasIncompleteRestore: boolean;
   incompleteChannels: string[];
   channelsWithPermanentGaps: string[];
+  restoreProgressWithIssues: RestoreProgressRecord[];
   e2eeBootstrapRunning?: boolean;
   e2eeBootstrapCompleted?: number;
   e2eeBootstrapTotal?: number;
@@ -34,6 +41,17 @@ export type UseRecoveryPinReturn = {
   setupRecoveryPin: (pin: string) => Promise<void>;
   unlockRecoveryVault: (pin: string) => Promise<void>;
   changeRecoveryPin: (oldPin: string, newPin: string) => Promise<void>;
+  changeUnlockedRecoveryPin: (newPin: string) => Promise<void>;
+  repairRecoveryChannel: (
+    channelType: string,
+    channelId: string,
+    options?: { mode?: RepairMode },
+  ) => Promise<RepairResult>;
+  repairEncryptedChannel: (
+    channelType: string,
+    channelId: string,
+    options?: { mode?: EncryptedChannelRepairMode },
+  ) => Promise<EncryptedChannelRepairResult>;
   enqueueRestore: (
     channelType: string,
     channelId: string,
@@ -49,10 +67,10 @@ export type UseRecoveryPinReturn = {
   refresh: () => void;
 };
 
-const requireMlsManager = (client: unknown): any => {
-  const manager = (client as any)?.mlsManager;
+const requireEncryptionManager = (client: unknown): any => {
+  const manager = (client as any)?.encryptionManager;
   if (!manager) {
-    throw new Error('MLS manager is not initialized.');
+    throw new Error('Encryption manager is not initialized.');
   }
   return manager;
 };
@@ -64,7 +82,7 @@ export const useRecoveryPin = (): UseRecoveryPinReturn => {
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatusInfo | null>(null);
   const [hasRecoveryKey, setHasRecoveryKey] = useState(() => {
     try {
-      return !!requireMlsManager(client).hasRecoveryKey?.();
+      return !!requireEncryptionManager(client).hasRecoveryKey?.();
     } catch {
       return false;
     }
@@ -73,16 +91,16 @@ export const useRecoveryPin = (): UseRecoveryPinReturn => {
   const refresh = useCallback(() => {
     void (async () => {
       try {
-        const manager = requireMlsManager(client);
+        const manager = requireEncryptionManager(client);
         const hasKey = !!manager.hasRecoveryKey?.();
         const nextStatus = manager.getRecoveryStatus ? await manager.getRecoveryStatus() : null;
         setHasRecoveryKey(hasKey);
         setRecoveryStatus(nextStatus);
-        setStatus(nextStatus?.unlocked || hasKey ? 'ready' : 'locked');
+        setStatus(nextStatus?.hasVault === false ? 'idle' : nextStatus?.unlocked ? 'ready' : 'locked');
         setError(null);
       } catch (err) {
         const nextError = err instanceof Error ? err : new Error(String(err));
-        if (nextError.message.includes('MLS manager is not initialized')) {
+        if (nextError.message.includes('Encryption manager is not initialized')) {
           setStatus('idle');
           setError(null);
           return;
@@ -93,77 +111,117 @@ export const useRecoveryPin = (): UseRecoveryPinReturn => {
     })();
   }, [client]);
 
-  const run = useCallback(async <T,>(fn: (manager: any) => Promise<T>): Promise<T> => {
-    setStatus('working');
-    setError(null);
-    try {
-      const manager = requireMlsManager(client);
-      const result = await fn(manager);
-      const hasKey = !!manager.hasRecoveryKey?.();
-      const nextStatus = manager.getRecoveryStatus ? await manager.getRecoveryStatus() : null;
-      setHasRecoveryKey(hasKey);
-      setRecoveryStatus(nextStatus);
-      setStatus(nextStatus?.unlocked || hasKey ? 'ready' : 'locked');
-      return result;
-    } catch (err) {
-      const nextError = err instanceof Error ? err : new Error(String(err));
-      setError(nextError);
-      setStatus('error');
-      throw nextError;
-    }
-  }, [client]);
-
-  const setupRecoveryPin = useCallback(async (pin: string): Promise<void> => {
-    await run((manager) => manager.setupRecoveryPin(pin));
-  }, [run]);
-
-  const unlockRecoveryVault = useCallback(async (pin: string): Promise<void> => {
-    await run((manager) => manager.unlockRecoveryVault(pin));
-  }, [run]);
-
-  const changeRecoveryPin = useCallback(async (oldPin: string, newPin: string): Promise<void> => {
-    await run((manager) => manager.changeRecoveryPin(oldPin, newPin));
-  }, [run]);
-
-  const restoreHistoricalMessages = useCallback((
-    channelType: string,
-    channelId: string,
-    options?: { fromEpoch?: number; toEpoch?: number },
-  ): Promise<RecoveryRestoredMessage[]> => (
-    run((manager) => manager.restoreHistoricalMessages(channelType, channelId, options))
-  ), [run]);
-
-  const enqueueRestore = useCallback((
-    channelType: string,
-    channelId: string,
-    priority: 'active' | 'background' = 'active',
-    options?: { fromEpoch?: number; toEpoch?: number },
-  ): void => {
-    try {
-      const manager = requireMlsManager(client);
-      manager.enqueueRestore?.(channelType, channelId, priority, options);
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setStatus('error');
-    }
-  }, [client, refresh]);
-
-  const loadRestoreProgress = useCallback(async (
-    channelType: string,
-    channelId: string,
-  ): Promise<RestoreProgressRecord | null> => {
-    try {
-      const manager = requireMlsManager(client);
-      return manager.getRestoreProgress ? await manager.getRestoreProgress(channelType, channelId) : null;
-    } catch (err) {
-      const nextError = err instanceof Error ? err : new Error(String(err));
-      if (!nextError.message.includes('MLS manager is not initialized')) {
+  const run = useCallback(
+    async <T>(fn: (manager: any) => Promise<T>): Promise<T> => {
+      setStatus('working');
+      setError(null);
+      try {
+        const manager = requireEncryptionManager(client);
+        const result = await fn(manager);
+        const hasKey = !!manager.hasRecoveryKey?.();
+        const nextStatus = manager.getRecoveryStatus ? await manager.getRecoveryStatus() : null;
+        setHasRecoveryKey(hasKey);
+        setRecoveryStatus(nextStatus);
+        setStatus(nextStatus?.hasVault === false ? 'idle' : nextStatus?.unlocked ? 'ready' : 'locked');
+        return result;
+      } catch (err) {
+        const nextError = err instanceof Error ? err : new Error(String(err));
         setError(nextError);
+        setStatus('error');
+        throw nextError;
       }
-      return null;
-    }
-  }, [client]);
+    },
+    [client],
+  );
+
+  const setupRecoveryPin = useCallback(
+    async (pin: string): Promise<void> => {
+      await run((manager) => manager.setupRecoveryPin(pin));
+    },
+    [run],
+  );
+
+  const unlockRecoveryVault = useCallback(
+    async (pin: string): Promise<void> => {
+      await run((manager) => manager.unlockRecoveryVault(pin));
+    },
+    [run],
+  );
+
+  const changeRecoveryPin = useCallback(
+    async (oldPin: string, newPin: string): Promise<void> => {
+      await run((manager) => manager.changeRecoveryPin(oldPin, newPin));
+    },
+    [run],
+  );
+
+  const changeUnlockedRecoveryPin = useCallback(
+    async (newPin: string): Promise<void> => {
+      await run((manager) => manager.changeUnlockedRecoveryPin(newPin));
+    },
+    [run],
+  );
+
+  const repairRecoveryChannel = useCallback(
+    (channelType: string, channelId: string, options?: { mode?: RepairMode }): Promise<RepairResult> =>
+      run((manager) => manager.repairRecoveryChannel(channelType, channelId, options)),
+    [run],
+  );
+
+  const repairEncryptedChannel = useCallback(
+    (
+      channelType: string,
+      channelId: string,
+      options?: { mode?: EncryptedChannelRepairMode },
+    ): Promise<EncryptedChannelRepairResult> =>
+      run((manager) => manager.repairEncryptedChannel(channelType, channelId, options)),
+    [run],
+  );
+
+  const restoreHistoricalMessages = useCallback(
+    (
+      channelType: string,
+      channelId: string,
+      options?: { fromEpoch?: number; toEpoch?: number },
+    ): Promise<RecoveryRestoredMessage[]> =>
+      run((manager) => manager.restoreHistoricalMessages(channelType, channelId, options)),
+    [run],
+  );
+
+  const enqueueRestore = useCallback(
+    (
+      channelType: string,
+      channelId: string,
+      priority: 'active' | 'background' = 'active',
+      options?: { fromEpoch?: number; toEpoch?: number },
+    ): void => {
+      try {
+        const manager = requireEncryptionManager(client);
+        manager.enqueueRestore?.(channelType, channelId, priority, options);
+        refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error(String(err)));
+        setStatus('error');
+      }
+    },
+    [client, refresh],
+  );
+
+  const loadRestoreProgress = useCallback(
+    async (channelType: string, channelId: string): Promise<RestoreProgressRecord | null> => {
+      try {
+        const manager = requireEncryptionManager(client);
+        return manager.getRestoreProgress ? await manager.getRestoreProgress(channelType, channelId) : null;
+      } catch (err) {
+        const nextError = err instanceof Error ? err : new Error(String(err));
+        if (!nextError.message.includes('Encryption manager is not initialized')) {
+          setError(nextError);
+        }
+        return null;
+      }
+    },
+    [client],
+  );
 
   useEffect(() => {
     const eventClient = client as any;
@@ -180,10 +238,10 @@ export const useRecoveryPin = (): UseRecoveryPinReturn => {
 
   useEffect(() => {
     const eventClient = client as any;
-    if (!eventClient || eventClient.mlsManager?.initialized) return;
+    if (!eventClient || eventClient.encryptionManager?.initialized) return;
     const interval = setInterval(() => {
       refresh();
-      if (eventClient.mlsManager?.initialized) clearInterval(interval);
+      if (eventClient.encryptionManager?.initialized) clearInterval(interval);
     }, 500);
     return () => clearInterval(interval);
   }, [client, refresh]);
@@ -192,29 +250,38 @@ export const useRecoveryPin = (): UseRecoveryPinReturn => {
     refresh();
   }, [refresh]);
 
-  return useMemo(() => ({
-    status,
-    error,
-    hasRecoveryKey,
-    recoveryStatus,
-    setupRecoveryPin,
-    unlockRecoveryVault,
-    changeRecoveryPin,
-    enqueueRestore,
-    loadRestoreProgress,
-    restoreHistoricalMessages,
-    refresh,
-  }), [
-    status,
-    error,
-    hasRecoveryKey,
-    recoveryStatus,
-    setupRecoveryPin,
-    unlockRecoveryVault,
-    changeRecoveryPin,
-    enqueueRestore,
-    loadRestoreProgress,
-    restoreHistoricalMessages,
-    refresh,
-  ]);
+  return useMemo(
+    () => ({
+      status,
+      error,
+      hasRecoveryKey,
+      recoveryStatus,
+      setupRecoveryPin,
+      unlockRecoveryVault,
+      changeRecoveryPin,
+      changeUnlockedRecoveryPin,
+      repairRecoveryChannel,
+      repairEncryptedChannel,
+      enqueueRestore,
+      loadRestoreProgress,
+      restoreHistoricalMessages,
+      refresh,
+    }),
+    [
+      status,
+      error,
+      hasRecoveryKey,
+      recoveryStatus,
+      setupRecoveryPin,
+      unlockRecoveryVault,
+      changeRecoveryPin,
+      changeUnlockedRecoveryPin,
+      repairRecoveryChannel,
+      repairEncryptedChannel,
+      enqueueRestore,
+      loadRestoreProgress,
+      restoreHistoricalMessages,
+      refresh,
+    ],
+  );
 };

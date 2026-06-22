@@ -1,6 +1,7 @@
 import { ChannelState } from './channel_state';
 import { normalizeFileName, isVideoFile, buildAttachmentPayload } from './attachment_utils';
 import type { VoiceRecordingMeta } from './attachment_utils';
+import { encodeEncryptionChannelFields } from './encryption/encoding';
 import {
   enrichWithUserInfo,
   ensureMembersUserInfoLoaded,
@@ -8,6 +9,7 @@ import {
   getDirectChannelName,
   getUserInfo,
   logChatPromiseExecution,
+  pickUserWithDisplayName,
   randomId,
 } from './utils';
 import { ErmisChat } from './client';
@@ -107,7 +109,22 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   private _isE2eeQuery(): boolean {
-    return (this.data as any)?.mls_enabled === true || (this._data as any)?.mls_enabled === true;
+    return this._isEffectiveE2ee();
+  }
+
+  private _isE2eeChannelData(
+    data?: ChannelData<ErmisChatGenerics> | ChannelResponse<ErmisChatGenerics>,
+  ): boolean {
+    const channelData = (data || this.data || this._data) as any;
+    if (channelData?.mls_enabled === true) return true;
+    const parentCid = typeof channelData?.parent_cid === 'string' ? channelData.parent_cid : undefined;
+    if (!parentCid) return false;
+    const parentChannel = this.getClient().activeChannels?.[parentCid] as any;
+    return parentChannel?.data?.mls_enabled === true || parentChannel?._data?.mls_enabled === true;
+  }
+
+  private _isEffectiveE2ee(): boolean {
+    return this._isE2eeChannelData(this.data) || this._isE2eeChannelData(this._data);
   }
 
   private _queryDataPayload(): ChannelData<ErmisChatGenerics> | ChannelResponse<ErmisChatGenerics> | undefined {
@@ -115,6 +132,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const data = { ...(this._data as any) };
     delete data.messages;
     return Object.keys(data).length > 0 ? data : undefined;
+  }
+
+  private _encodeE2eeChannelPayload<T extends Record<string, unknown>>(payload: T): T {
+    const encoded = encodeEncryptionChannelFields(payload) as Record<string, unknown>;
+    if (encoded.data && typeof encoded.data === 'object') {
+      encoded.data = encodeEncryptionChannelFields(encoded.data as Record<string, unknown>);
+    }
+    return encoded as T;
   }
 
   /**
@@ -131,10 +156,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
     const messageId = message.id!;
 
+    const quotedMessage =
+      (message as any).quoted_message ||
+      (message.quoted_message_id ? this.state.findMessage(message.quoted_message_id) : undefined);
+
     // 2. Build optimistic (fake) message and push into state immediately
     const optimisticMessage = {
       ...message,
       id: messageId,
+      quoted_message: quotedMessage,
       status: 'sending',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -145,11 +175,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     this.state.addMessageSorted(optimisticMessage);
 
-    const isE2ee = (this.data as any)?.mls_enabled;
-    const mlsMgr = this.getClient().mlsManager;
-    if (isE2ee && mlsMgr?.initialized) {
+    const isE2ee = this._isEffectiveE2ee();
+    const encryptionMgr = this.getClient().encryptionManager;
+    if (isE2ee && encryptionMgr?.initialized) {
       try {
-        const response = await mlsMgr.sendMessage(this.type, this.id, this.cid, message.text || '', messageId, {
+        const response = await encryptionMgr.sendMessage(this.type, this.id, this.cid, message.text || '', messageId, {
           parent_id: message.parent_id,
           quoted_message_id: message.quoted_message_id,
           mentioned_users: message.mentioned_users,
@@ -160,11 +190,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           poll_type: message.poll_type,
         });
         if (response?.message) {
+          const responseUserId =
+            response.message.user?.id || (response.message as any).user_id || this.getClient().userID || '';
           this.state.addMessageSorted(
             {
               ...response.message,
               status: 'received',
-              user: response.message.user || this.getClient().user,
+              user: pickUserWithDisplayName(
+                responseUserId,
+                response.message.user,
+                this.getClient().state.users[responseUserId],
+                this.getClient().user,
+              ),
             } as MessageResponse<ErmisChatGenerics>,
             true,
             false,
@@ -319,20 +356,21 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async editMessage(oldMessageID: string, message: EditMessage) {
-    const isE2ee = (this.data as any)?.mls_enabled;
-    const mlsMgr = this.getClient().mlsManager;
-    if (isE2ee && mlsMgr?.initialized) {
-      const response = await mlsMgr.updateMessage(this.type, this.id, this.cid, oldMessageID, message.text, {
+    const isE2ee = this._isEffectiveE2ee();
+    const encryptionMgr = this.getClient().encryptionManager;
+    if (isE2ee && encryptionMgr?.initialized) {
+      const response = await encryptionMgr.updateMessage(this.type, this.id, this.cid, oldMessageID, message.text, {
         mentioned_all: message.mentioned_all,
         mentioned_users: message.mentioned_users,
       });
-      const stored = await mlsMgr.storage?.loadE2eeMessage(oldMessageID).catch(() => null);
+      const stored = await encryptionMgr.storage?.loadE2eeMessage(oldMessageID).catch(() => null);
       if (stored) {
+        const stateUser = stored.user_id ? this.getClient().state.users[stored.user_id] : undefined;
         this.state.addMessageSorted(
           {
             ...stored,
             content_type: 'standard',
-            user: stored.user || this.getClient().user,
+            user: pickUserWithDisplayName(stored.user_id, stateUser, stored.user, this.getClient().user),
           } as MessageResponse<ErmisChatGenerics>,
           false,
           false,
@@ -371,13 +409,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void,
   ): Promise<{ file: string }> {
     // 1. Request presigned URL
-    const presignResp = await this.getClient().post<{ attachment_id: string; upload_url: string; expires_in_secs: number }>(
-      `${this._channelURL()}/file/presign`,
-      {
-        file_name: name,
-        content_type: contentType,
-      },
-    );
+    const presignResp = await this.getClient().post<{
+      attachment_id: string;
+      upload_url: string;
+      expires_in_secs: number;
+    }>(`${this._channelURL()}/file/presign`, {
+      file_name: name,
+      content_type: contentType,
+    });
 
     // 2. Upload directly to storage (R2/S3)
     await new Promise<void>((resolve, reject) => {
@@ -415,14 +454,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     });
 
     // 3. Confirm upload
-    const confirmResp = await this.getClient().post<{ file: string }>(
-      `${this._channelURL()}/file/confirm`,
-      {
-        attachment_id: presignResp.attachment_id,
-        file_name: name,
-        content_type: contentType,
-      },
-    );
+    const confirmResp = await this.getClient().post<{ file: string }>(`${this._channelURL()}/file/confirm`, {
+      attachment_id: presignResp.attachment_id,
+      file_name: name,
+      content_type: contentType,
+    });
 
     return confirmResp;
   }
@@ -571,10 +607,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async truncate(options?: { for_me?: boolean }) {
     const qs = options?.for_me ? '?for_me=true' : '';
     const response = await this.getClient().delete(this._channelURL() + '/chat' + qs);
-    
+
     // Dispatch local event so UI clears immediately
     const truncateDate = (response as any)?.channel?.truncated_at || new Date().toISOString();
-    
+
     // Unconditionally clear local state
     this.state.clearMessages();
     if (this.data) {
@@ -582,7 +618,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
 
     const eventType = options?.for_me ? 'channel.truncate_for_me' : 'channel.truncate';
-    
+
     const syntheticEvent = {
       type: eventType,
       channel: (response as any)?.channel || this.data,
@@ -595,7 +631,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this._handleChannelEvent(syntheticEvent);
     this._callChannelListeners(syntheticEvent);
     this.getClient().dispatchEvent(syntheticEvent);
-    
+
     return response;
   }
 
@@ -692,14 +728,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async searchMessage(search_term: string, offset: number) {
-    const isE2ee = (this.data as any)?.mls_enabled;
-    const mlsEnabledAt = (this.data as any)?.mls_enabled_at;
+    const isE2ee = this._isEffectiveE2ee();
+    const encryptionEnabledAt = (this.data as any)?.mls_enabled_at;
 
     if (!isE2ee) {
       return this._searchServerMessages(search_term, offset);
     }
 
-    if (!mlsEnabledAt) {
+    if (!encryptionEnabledAt) {
       return this._searchLocalE2eeMessages(search_term, offset);
     }
 
@@ -741,8 +777,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       return null;
     }
 
+    const stateUsers = Object.values(this.getClient().state.users);
     const messages = response?.search_result?.messages.map((message: any) => {
-      const user = getUserInfo(message.user_id, Object.values(this.getClient().state.users)) || message.user;
+      const user = pickUserWithDisplayName(
+        message.user_id,
+        this.getClient().state.users[message.user_id],
+        message.user,
+        getUserInfo(message.user_id, stateUsers),
+        message.user_id === this.getClient().userID ? this.getClient().user : undefined,
+      );
       return { ...message, user };
     });
 
@@ -753,18 +796,27 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   private async _searchLocalE2eeMessages(search_term: string, offset: number) {
-    const mlsManager = this.getClient().mlsManager;
-    if (!mlsManager?.storage) return null;
+    const encryptionManager = this.getClient().encryptionManager;
+    if (!encryptionManager?.storage) return null;
 
-    const matches = await mlsManager.storage.searchE2eeMessagesByCid(this.cid, search_term, 100);
+    const matches = await encryptionManager.storage.searchE2eeMessagesByCid(this.cid, search_term, 100);
     if (!matches || matches.length === 0) return null;
+
+    const stateUsers = Object.values(this.getClient().state.users);
+    const messages = matches.slice(offset, offset + 25).map((message: any) => {
+      const user = pickUserWithDisplayName(
+        message.user_id,
+        this.getClient().state.users[message.user_id],
+        message.user,
+        getUserInfo(message.user_id, stateUsers),
+        message.user_id === this.getClient().userID ? this.getClient().user : undefined,
+      );
+      return { ...message, user };
+    });
 
     return {
       total: matches.length,
-      messages: matches.slice(offset, offset + 25).map((message: any) => {
-        const user = getUserInfo(message.user_id, Object.values(this.getClient().state.users)) || message.user;
-        return { ...message, user };
-      }),
+      messages,
     };
   }
 
@@ -785,7 +837,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    * Self-leave an E2EE channel.
    *
    * Sends `self_remove: true` so the server removes channel membership without
-   * requiring an MLS remove commit from the leaving user.
+   * requiring an encryption remove commit from the leaving user.
    */
   async leaveChannelE2ee(userId: string) {
     const currentUserId = this.getClient().user?.id;
@@ -793,9 +845,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       throw new Error('[E2EE] leaveChannelE2ee can only remove the current user');
     }
     const response = await this._update({ remove_members: [userId], self_remove: true });
-    const mlsManager = this.getClient().mlsManager;
-    if (mlsManager?.initialized && this.cid) {
-      mlsManager.leaveGroup(this.cid, Date.now());
+    const encryptionManager = this.getClient().encryptionManager;
+    if (encryptionManager?.initialized && this.cid) {
+      encryptionManager.leaveGroup(this.cid, Date.now());
     }
     return response;
   }
@@ -805,7 +857,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async _update(payload: Object) {
-    const data = await this.getClient().post<UpdateChannelAPIResponse<ErmisChatGenerics>>(this._channelURL(), payload);
+    const data = await this.getClient().post<UpdateChannelAPIResponse<ErmisChatGenerics>>(
+      this._channelURL(),
+      this._encodeE2eeChannelPayload(payload as Record<string, unknown>),
+    );
     this.data = { ...this.data, ...data.channel };
     return data;
   }
@@ -1024,29 +1079,37 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       data: { ...data },
     };
 
-    const parentMlsEnabled = (this.data as any)?.mls_enabled || false;
-    const explicitMlsEnabled = data?.mls_enabled === true;
+    const parentEncryptionEnabled = this._isEffectiveE2ee();
+    const explicitEncryptionEnabled = data?.mls_enabled === true;
     const gatedTopic = data?.gate === true;
-    const ownTopicGroup = gatedTopic || (!parentMlsEnabled && explicitMlsEnabled);
-    if (parentMlsEnabled || explicitMlsEnabled) {
-      const mlsManager = this.getClient().mlsManager;
+    const ownTopicGroup = gatedTopic || (!parentEncryptionEnabled && explicitEncryptionEnabled);
+    if (parentEncryptionEnabled || explicitEncryptionEnabled) {
+      const encryptionManager = this.getClient().encryptionManager;
       payload.data.mls_enabled = true;
-      if (ownTopicGroup && mlsManager?.initialized) {
+      if (ownTopicGroup) {
+        payload.data.e2ee_recovery_policy = data?.e2ee_recovery_policy || 'member_assisted';
+      } else {
+        delete payload.data.e2ee_recovery_policy;
+      }
+      if (ownTopicGroup && encryptionManager?.initialized) {
         try {
           const memberIds = Object.keys(this.state?.members || {});
-          const bundle = await mlsManager.createE2eeTopic(topicCid, memberIds);
+          const bundle = await encryptionManager.createE2eeTopic(topicCid, memberIds);
           payload.data.commit = bundle.commit;
           payload.data.welcome = bundle.welcome;
           payload.data.ratchet_tree = bundle.ratchet_tree;
           payload.data.group_info = bundle.group_info;
           payload.data.epoch = bundle.epoch;
         } catch (err) {
-          this.getClient().logger('error', '[MLS] createTopic: failed to prepare E2EE bundle', { err, cid: topicCid });
+          this.getClient().logger('error', '[Encryption] createTopic: failed to prepare E2EE bundle', { err, cid: topicCid });
         }
       }
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this._encodeE2eeChannelPayload(payload),
+    );
 
     return state;
   }
@@ -1081,7 +1144,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       payload.data = dataPayload;
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this._encodeE2eeChannelPayload(payload),
+    );
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
     const users = Object.values(this.getClient().state.users);
@@ -1174,7 +1240,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       payload.data = dataPayload;
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', payload);
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this._encodeE2eeChannelPayload(payload),
+    );
 
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
@@ -1337,7 +1406,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async getThumbBlobVideo(file: File): Promise<Blob | null> {
     return new Promise((resolve) => {
       let timeoutId: number | null = null;
-      
+
       const cleanup = () => {
         if (timeoutId) clearTimeout(timeoutId);
         if (videoPlayer.src) URL.revokeObjectURL(videoPlayer.src);
@@ -1346,7 +1415,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
       // Đặt timeout 5 giây, nếu không lấy được ảnh thì bỏ qua để không treo upload
       timeoutId = window.setTimeout(() => {
-        console.warn('Timeout extracting video thumbnail. Skipping.');
+        this._client.logger('warn', 'channel:getThumbBlobVideo() - Timeout extracting video thumbnail', {
+          cid: this.cid,
+        });
         cleanup();
         resolve(null);
       }, 5000);
@@ -1362,7 +1433,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       const seekInterval = 1.0; // Nhảy mỗi lần 1 giây nếu gặp ảnh đen
 
       videoPlayer.addEventListener('error', () => {
-        console.error('Error when loading video file.');
+        this._client.logger('error', 'channel:getThumbBlobVideo() - Error when loading video file', { cid: this.cid });
         cleanup();
         resolve(null);
       });
@@ -1375,7 +1446,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
           if (!ctx) {
-            console.error('Failed to create canvas context.');
+            this._client.logger('error', 'channel:getThumbBlobVideo() - Failed to create canvas context', {
+              cid: this.cid,
+            });
             cleanup();
             resolve(null);
             return;
@@ -1417,7 +1490,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             (blob) => {
               cleanup();
               if (!blob) {
-                console.error('Failed to generate thumbnail.');
+                this._client.logger('error', 'channel:getThumbBlobVideo() - Failed to generate thumbnail', {
+                  cid: this.cid,
+                });
                 resolve(null);
                 return;
               }
@@ -1427,7 +1502,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             0.75,
           );
         } catch (error) {
-          console.error('Error while extracting thumbnail:', error);
+          this._client.logger('error', 'channel:getThumbBlobVideo() - Error while extracting thumbnail', {
+            cid: this.cid,
+            error,
+          });
           cleanup();
           resolve(null);
         }
@@ -1644,13 +1722,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             }
           }
 
-          const mlsMgr = this.getClient().mlsManager;
-          const isE2ee = (this.data as any)?.mls_enabled;
-          if (isE2ee && mlsMgr?.initialized && event.message.id) {
+          const encryptionMgr = this.getClient().encryptionManager;
+          const isE2ee = this._isEffectiveE2ee();
+          if (isE2ee && encryptionMgr?.initialized && event.message.id) {
             try {
-              await mlsMgr.storage.deleteE2eeMessage(event.message.id);
+              await encryptionMgr.storage.deleteE2eeMessage(event.message.id);
             } catch (err) {
-              this.getClient().logger('warn', '[MLS] Failed to delete message from local DB', {
+              this.getClient().logger('warn', '[Encryption] Failed to delete message from local DB', {
                 err,
                 message_id: event.message.id,
               });
@@ -1713,18 +1791,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           }
           event.user = userInfo;
 
-          const mlsMgr = this.getClient().mlsManager;
-          const isMlsMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
-          const isOwnDeviceMessage = ownMessage && (!mlsMgr?.deviceId || event.message.device_id === mlsMgr.deviceId);
+          const encryptionMgr = this.getClient().encryptionManager;
+          const isEncryptionMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
+          const isOwnDeviceMessage = ownMessage && (!encryptionMgr?.deviceId || event.message.device_id === encryptionMgr.deviceId);
 
           if (this.state.isUpToDate || isThreadMessage) {
-            if (!(isMlsMessage && isOwnDeviceMessage)) {
+            if (!(isEncryptionMessage && isOwnDeviceMessage)) {
               channelState.addMessageSorted(event.message, ownMessage);
             }
           }
 
-          if (!isOwnDeviceMessage && mlsMgr?.initialized && isMlsMessage && this.cid) {
-            mlsMgr
+          if (!isOwnDeviceMessage && encryptionMgr?.initialized && isEncryptionMessage && this.cid) {
+            encryptionMgr
               .processE2eeMessage(this.cid, event.message as any)
               .then((result: Record<string, unknown> | null) => {
                 if (result) {
@@ -1800,13 +1878,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             event.message.latest_reactions = enrichWithUserInfo(event.message.latest_reactions || [], users);
           }
 
-          const mlsMgr = this.getClient().mlsManager;
+          const encryptionMgr = this.getClient().encryptionManager;
           const ownMessage = event.user?.id === this.getClient().user?.id;
-          const isMlsMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
-          const isOwnDeviceMessage = ownMessage && (!mlsMgr?.deviceId || event.message.device_id === mlsMgr.deviceId);
+          const isEncryptionMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
+          const isOwnDeviceMessage = ownMessage && (!encryptionMgr?.deviceId || event.message.device_id === encryptionMgr.deviceId);
 
-          if (!isOwnDeviceMessage && mlsMgr?.initialized && isMlsMessage && this.cid) {
-            mlsMgr
+          if (!isOwnDeviceMessage && encryptionMgr?.initialized && isEncryptionMessage && this.cid) {
+            encryptionMgr
               .processE2eeMessage(this.cid, event.message as any)
               .then((result: Record<string, unknown> | null) => {
                 if (result) {
@@ -1841,7 +1919,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             break;
           }
 
-          if (isMlsMessage && isOwnDeviceMessage) {
+          if (isEncryptionMessage && isOwnDeviceMessage) {
             break;
           }
 
@@ -1929,7 +2007,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         if (removedUserId) {
           delete channelState.members[removedUserId];
 
-          const mlsMgrRemoved = this.getClient().mlsManager;
+          const encryptionMgrRemoved = this.getClient().encryptionManager;
           const actorUserId = event.user?.id;
           const currentUserId = this.getClient().user?.id;
           const currentUserWasRemoved = removedUserId === currentUserId;
@@ -1939,12 +2017,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const removalCursor = (event as any).created_at || (event as any).createdAt || event.message?.created_at;
 
           if (currentUserWasRemoved) {
-            if (mlsMgrRemoved?.initialized && this.cid) {
-              mlsMgrRemoved.leaveGroup(this.cid, removalCursor);
+            if (encryptionMgrRemoved?.initialized && this.cid) {
+              encryptionMgrRemoved.leaveGroup(this.cid, removalCursor);
               if (Array.isArray(event.topic_cids)) {
                 for (const topicCid of event.topic_cids) {
-                  if (mlsMgrRemoved.ownsE2eeGroup(topicCid)) {
-                    mlsMgrRemoved.leaveGroup(topicCid, removalCursor);
+                  if (encryptionMgrRemoved.ownsE2eeGroup(topicCid)) {
+                    encryptionMgrRemoved.leaveGroup(topicCid, removalCursor);
                   }
                 }
               }
@@ -1952,14 +2030,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           } else if (
             selfRemoveEvent &&
             event.mls_enabled &&
-            mlsMgrRemoved?.initialized &&
+            encryptionMgrRemoved?.initialized &&
             this.cid &&
             this.type &&
             this.id &&
-            mlsMgrRemoved.isDesignatedEvictor(channel)
+            encryptionMgrRemoved.isDesignatedEvictor(channel)
           ) {
-            mlsMgrRemoved.evictMember(this.type, this.id, this.cid, removedUserId, true).catch((err: unknown) => {
-              this.getClient().logger('error', '[MLS Event] evictMember after member.removed failed', {
+            encryptionMgrRemoved.evictMember(this.type, this.id, this.cid, removedUserId, true).catch((err: unknown) => {
+              this.getClient().logger('error', '[Encryption Event] evictMember after member.removed failed', {
                 err,
                 cid: this.cid,
                 user_id: removedUserId,
@@ -1968,12 +2046,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
             if (Array.isArray(event.topic_cids)) {
               for (const topicCid of event.topic_cids) {
-                if (!mlsMgrRemoved.ownsE2eeGroup(topicCid)) continue;
+                if (!encryptionMgrRemoved.ownsE2eeGroup(topicCid)) continue;
                 const colonIdx = topicCid.indexOf(':');
                 const topicType = topicCid.substring(0, colonIdx);
                 const topicId = topicCid.substring(colonIdx + 1);
-                mlsMgrRemoved.evictMember(topicType, topicId, topicCid, removedUserId, true).catch((err: unknown) => {
-                  this.getClient().logger('error', '[MLS Event] topic evictMember after member.removed failed', {
+                encryptionMgrRemoved.evictMember(topicType, topicId, topicCid, removedUserId, true).catch((err: unknown) => {
+                  this.getClient().logger('error', '[Encryption Event] topic evictMember after member.removed failed', {
                     err,
                     cid: topicCid,
                     user_id: removedUserId,
@@ -2007,19 +2085,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             own_capabilities: event.channel?.own_capabilities ?? channel.data?.own_capabilities,
           };
 
-          const mlsMgr = this.getClient().mlsManager;
+          const encryptionMgr = this.getClient().encryptionManager;
           const channelData = event.channel as any;
           if (
-            mlsMgr?.initialized &&
+            encryptionMgr?.initialized &&
             channelData?.mls_enabled &&
             channelData?.mls_enabled_at &&
             this.cid &&
-            !mlsMgr.isChannelMlsSyncBlocked(this.cid)
+            !encryptionMgr.isChannelEncryptionSyncBlocked(this.cid)
           ) {
-            mlsMgr
+            encryptionMgr
               .ensureChannelReady(this.type, this.id, this.cid, { source: 'channel_updated' })
               .catch((err: unknown) => {
-                this.getClient().logger('error', '[MLS Event] Failed to ensure channel after channel.updated', {
+                this.getClient().logger('error', '[Encryption Event] Failed to ensure channel after channel.updated', {
                   err,
                   cid: this.cid,
                 });
@@ -2048,19 +2126,22 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           event.message = channelState.addReaction(event.reaction, event.message);
 
           // Patch E2EE local cache with updated reaction metadata
-          const mlsMgrReaction = this.getClient().mlsManager;
-          const isE2eeReaction = (this.data as any)?.mls_enabled;
-          if (isE2eeReaction && mlsMgrReaction?.initialized && event.message?.id) {
-            mlsMgrReaction.storage.loadE2eeMessage(event.message.id).then((local: any) => {
-              if (!local) return;
-              mlsMgrReaction.storage.saveE2eeMessage({
-                ...local,
-                latest_reactions: event.message?.latest_reactions,
-                reaction_counts: event.message?.reaction_counts,
+          const encryptionMgrReaction = this.getClient().encryptionManager;
+          const isE2eeReaction = this._isEffectiveE2ee();
+          if (isE2eeReaction && encryptionMgrReaction?.initialized && event.message?.id) {
+            encryptionMgrReaction.storage
+              .loadE2eeMessage(event.message.id)
+              .then((local: any) => {
+                if (!local) return;
+                encryptionMgrReaction.storage.saveE2eeMessage({
+                  ...local,
+                  latest_reactions: event.message?.latest_reactions,
+                  reaction_counts: event.message?.reaction_counts,
+                });
+              })
+              .catch((err: unknown) => {
+                this.getClient().logger('warn', '[Encryption] Failed to update E2EE cache for reaction.new', { err });
               });
-            }).catch((err: unknown) => {
-              this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.new', { err });
-            });
           }
         }
         break;
@@ -2085,19 +2166,22 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         // Patch E2EE local cache with updated reaction metadata
         {
-          const mlsMgrReactionDel = this.getClient().mlsManager;
-          const isE2eeReactionDel = (this.data as any)?.mls_enabled;
-          if (isE2eeReactionDel && mlsMgrReactionDel?.initialized && event.message?.id) {
-            mlsMgrReactionDel.storage.loadE2eeMessage(event.message.id).then((local: any) => {
-              if (!local) return;
-              mlsMgrReactionDel.storage.saveE2eeMessage({
-                ...local,
-                latest_reactions: event.message?.latest_reactions,
-                reaction_counts: event.message?.reaction_counts,
+          const encryptionMgrReactionDel = this.getClient().encryptionManager;
+          const isE2eeReactionDel = this._isEffectiveE2ee();
+          if (isE2eeReactionDel && encryptionMgrReactionDel?.initialized && event.message?.id) {
+            encryptionMgrReactionDel.storage
+              .loadE2eeMessage(event.message.id)
+              .then((local: any) => {
+                if (!local) return;
+                encryptionMgrReactionDel.storage.saveE2eeMessage({
+                  ...local,
+                  latest_reactions: event.message?.latest_reactions,
+                  reaction_counts: event.message?.reaction_counts,
+                });
+              })
+              .catch((err: unknown) => {
+                this.getClient().logger('warn', '[Encryption] Failed to update E2EE cache for reaction.deleted', { err });
               });
-            }).catch((err: unknown) => {
-              this.getClient().logger('warn', '[MLS] Failed to update E2EE cache for reaction.deleted', { err });
-            });
           }
         }
         break;
@@ -2111,7 +2195,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               const resUser = await this.getClient().queryUser(event.member?.user_id);
               users.push(resUser);
             } catch (err) {
-              this._client.logger('warn', 'Failed to query user for member joined, using event member fallback', { err });
+              this._client.logger('warn', 'Failed to query user for member joined, using event member fallback', {
+                err,
+              });
               if (event.member?.user) users.push(event.member.user as any);
             }
           }
@@ -2133,17 +2219,21 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           this.offlineMode = true;
           this.initialized = true;
 
-          const mlsMgrAccept = this.getClient().mlsManager;
+          const encryptionMgrAccept = this.getClient().encryptionManager;
           if (
             event.mls_enabled &&
-            mlsMgrAccept?.initialized &&
+            encryptionMgrAccept?.initialized &&
             event.member.user_id === this.getClient().user?.id &&
             this.cid
           ) {
-            mlsMgrAccept
+            encryptionMgrAccept
               .ensureChannelReady(this.type, this.id, this.cid, { source: 'invite_accepted' })
+              .then(async () => {
+                if (!encryptionMgrAccept.isRecoveryVaultUnlocked()) return;
+                await encryptionMgrAccept.repairRecoveryChannel(this.type, this.id, { mode: 'recheck_channel' });
+              })
               .catch((err: unknown) => {
-                this.getClient().logger('error', '[MLS Event] Failed to ensure channel after invite_accepted', {
+                this.getClient().logger('error', '[Encryption Event] Failed to prepare recovery after invite_accepted', {
                   err,
                   cid: this.cid,
                 });
@@ -2155,11 +2245,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         if (event.member?.user_id) {
           delete channelState.members[event.member.user_id];
 
-          const mlsMgrReject = this.getClient().mlsManager;
-          if (event.mls_enabled && mlsMgrReject?.initialized && this.cid && this.type === 'team' && this.id) {
+          const encryptionMgrReject = this.getClient().encryptionManager;
+          if (event.mls_enabled && encryptionMgrReject?.initialized && this.cid && this.type === 'team' && this.id) {
             const targetUserId = event.member.user_id;
-            mlsMgrReject.queuePendingEviction(this.cid, targetUserId).catch((err: unknown) => {
-              this.getClient().logger('error', '[MLS Event] Failed to queue pending eviction after invite_rejected', {
+            encryptionMgrReject.queuePendingEviction(this.cid, targetUserId).catch((err: unknown) => {
+              this.getClient().logger('error', '[Encryption Event] Failed to queue pending eviction after invite_rejected', {
                 err,
                 cid: this.cid,
                 user_id: targetUserId,
@@ -2170,11 +2260,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               for (const topicCid of event.topic_cids) {
                 const colonIdx = topicCid.indexOf(':');
                 if (colonIdx <= 0) continue;
-                if (!mlsMgrReject.ownsE2eeGroup(topicCid)) continue;
-                mlsMgrReject.queuePendingEviction(topicCid, targetUserId).catch((err: unknown) => {
+                if (!encryptionMgrReject.ownsE2eeGroup(topicCid)) continue;
+                encryptionMgrReject.queuePendingEviction(topicCid, targetUserId).catch((err: unknown) => {
                   this.getClient().logger(
                     'error',
-                    '[MLS Event] Failed to queue topic pending eviction after invite_rejected',
+                    '[Encryption Event] Failed to queue topic pending eviction after invite_rejected',
                     {
                       err,
                       cid: topicCid,
@@ -2205,18 +2295,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
           channelState.members[event.member.user_id] = event.member;
 
-          const mlsMgrSkip = this.getClient().mlsManager;
+          const encryptionMgrSkip = this.getClient().encryptionManager;
           if (
             event.mls_enabled &&
-            mlsMgrSkip?.initialized &&
+            encryptionMgrSkip?.initialized &&
             this.cid &&
             this.type &&
             this.id &&
-            mlsMgrSkip.isDesignatedEvictor(channel)
+            encryptionMgrSkip.isDesignatedEvictor(channel)
           ) {
             const targetUserId = event.member.user_id;
-            mlsMgrSkip.evictMember(this.type, this.id, this.cid, targetUserId).catch((err: unknown) => {
-              this.getClient().logger('error', '[MLS Event] Failed to evictMember after invite_messaging_skipped', {
+            encryptionMgrSkip.evictMember(this.type, this.id, this.cid, targetUserId).catch((err: unknown) => {
+              this.getClient().logger('error', '[Encryption Event] Failed to evictMember after invite_messaging_skipped', {
                 err,
                 cid: this.cid,
                 user_id: targetUserId,
@@ -2298,8 +2388,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         event.user = getUserInfo(event.user?.id || '', users);
         break;
       case 'protocol': {
-        const mlsMgrProto = this.getClient().mlsManager;
-        if (!mlsMgrProto?.initialized || !this.cid) break;
+        const encryptionMgrProto = this.getClient().encryptionManager;
+        if (!encryptionMgrProto?.initialized || !this.cid) break;
+
+        if (encryptionMgrProto.isScopeRepairing(this.cid)) {
+          encryptionMgrProto.requestScopeSyncAfterRepair(this.cid);
+          break;
+        }
 
         const protoMsg = (event as any).protocol_data || (event as any).message || event;
         const protoType = protoMsg.type || protoMsg.type_field;
@@ -2310,12 +2405,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           case 'welcome': {
             const targetIds = (protoMsg.target_user_ids as string[]) || [];
             if (
-              targetIds.includes(mlsMgrProto.userId) &&
-              !mlsMgrProto.getGroup(this.cid) &&
-              !mlsMgrProto.isChannelMlsSyncBlocked(this.cid)
+              targetIds.includes(encryptionMgrProto.userId) &&
+              !encryptionMgrProto.getGroup(this.cid) &&
+              !encryptionMgrProto.isChannelEncryptionSyncBlocked(this.cid)
             ) {
-              mlsMgrProto.joinGroup(protoMsg.welcome, protoMsg.ratchet_tree).catch((err: unknown) => {
-                this.getClient().logger('error', '[MLS Event] Failed to process welcome', {
+              encryptionMgrProto.joinGroup(protoMsg.welcome, protoMsg.ratchet_tree).catch((err: unknown) => {
+                this.getClient().logger('error', '[Encryption Event] Failed to process welcome', {
                   err,
                   cid: this.cid,
                 });
@@ -2326,17 +2421,17 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           case 'commit':
           case 'external_commit': {
             const isOwnDeviceCommit =
-              protoUserId === mlsMgrProto.userId && !!protoDeviceId && protoDeviceId === mlsMgrProto.deviceId;
+              protoUserId === encryptionMgrProto.userId && !!protoDeviceId && protoDeviceId === encryptionMgrProto.deviceId;
             if (isOwnDeviceCommit) break;
 
-            mlsMgrProto.processCommit(this.cid, protoMsg.commit, protoMsg.epoch).catch((err: unknown) => {
-              this.getClient().logger('error', '[MLS Event] Failed to process protocol commit', {
+            encryptionMgrProto.processCommit(this.cid, protoMsg.commit, protoMsg.epoch).catch((err: unknown) => {
+              this.getClient().logger('error', '[Encryption Event] Failed to process protocol commit', {
                 err,
                 cid: this.cid,
                 protocol_type: protoType,
               });
-              mlsMgrProto.sync().catch((syncErr: unknown) => {
-                this.getClient().logger('error', '[MLS Event] Recovery sync failed after protocol commit', {
+              encryptionMgrProto.sync().catch((syncErr: unknown) => {
+                this.getClient().logger('error', '[Encryption Event] Recovery sync failed after protocol commit', {
                   err: syncErr,
                   cid: this.cid,
                 });
@@ -2396,14 +2491,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     messages: MessageResponse<ErmisChatGenerics>[] = [],
     channelData?: ChannelResponse<ErmisChatGenerics> | ChannelData<ErmisChatGenerics>,
   ): Promise<MessageResponse<ErmisChatGenerics>[]> {
-    const isE2ee = (channelData as any)?.mls_enabled === true || (this.data as any)?.mls_enabled === true;
-    const storage = this.getClient().mlsManager?.storage;
+    const isE2ee = this._isE2eeChannelData(channelData);
+    const storage = this.getClient().encryptionManager?.storage;
     if (!isE2ee || !storage || messages.length === 0) return messages;
 
     const lookupIds = messages.flatMap((message: any) => {
       const isEncryptedCarrier = message.content_type === 'mls' || Boolean(message.mls_ciphertext);
-      if (!isEncryptedCarrier) return [];
-      return [message.id].filter(Boolean);
+      const ids: string[] = [];
+      if (isEncryptedCarrier && message.id) ids.push(message.id);
+      if (message.quoted_message_id) ids.push(message.quoted_message_id);
+      return ids;
     });
     const cachedMessages =
       lookupIds.length > 0
@@ -2421,6 +2518,35 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         : new Map<string, any>();
     const currentMessages = this.state.messageSets?.flatMap((set) => set.messages) || [];
     const currentMessagesById = new Map(currentMessages.map((message: any) => [message.id, message]));
+    const stateUsers = Object.values(this.getClient().state.users);
+    const toQuotedPreview = (quoted: any) => {
+      if (!quoted?.id) return undefined;
+      const userId = quoted.user_id || quoted.user?.id || '';
+      return {
+        ...quoted,
+        content_type: quoted.content_type || 'standard',
+        type: quoted.type || 'regular',
+        user: pickUserWithDisplayName(userId, this.getClient().state.users[userId], quoted.user, getUserInfo(userId, stateUsers)),
+        attachments: quoted.attachments || [],
+      };
+    };
+    const isRenderableQuotedMessage = (quoted: any) => {
+      if (!quoted) return false;
+      if (typeof quoted.text === 'string' && quoted.text.trim()) return true;
+      if (Array.isArray(quoted.attachments) && quoted.attachments.length > 0) return true;
+      if (typeof quoted.sticker_url === 'string' && quoted.sticker_url) return true;
+      if (quoted.type === 'sticker') return true;
+      return false;
+    };
+    const resolveQuotedMessage = (message: any) => {
+      const explicitQuotedMessage = toQuotedPreview(message.quoted_message);
+      if (isRenderableQuotedMessage(explicitQuotedMessage)) return explicitQuotedMessage;
+      if (!message.quoted_message_id) return undefined;
+      const cachedQuotedMessage = toQuotedPreview(
+        currentMessagesById.get(message.quoted_message_id) || cachedMessages.get(message.quoted_message_id),
+      );
+      return isRenderableQuotedMessage(cachedQuotedMessage) ? cachedQuotedMessage : explicitQuotedMessage;
+    };
     const hydrated: MessageResponse<ErmisChatGenerics>[] = [];
 
     for (const message of messages) {
@@ -2441,7 +2567,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           Boolean(currentAny.attachments?.length) ||
           Boolean(currentAny.sticker_url);
         if (currentHasPlaintext) {
-          hydrated.push({
+          const mergedMessage = {
             ...message,
             ...currentMessage,
             content_type: 'standard',
@@ -2451,7 +2577,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             own_reactions: messageAny.own_reactions ?? currentAny.own_reactions,
             pinned: message.pinned ?? currentAny.pinned,
             pinned_at: message.pinned_at ?? currentAny.pinned_at,
-          } as MessageResponse<ErmisChatGenerics>);
+          } as any;
+          const quotedMessage = resolveQuotedMessage(mergedMessage);
+          if (quotedMessage) mergedMessage.quoted_message = quotedMessage;
+          hydrated.push(mergedMessage as MessageResponse<ErmisChatGenerics>);
           continue;
         }
       }
@@ -2461,12 +2590,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         continue;
       }
 
-      const userId = storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
-      const stateUsers = Object.values(this.getClient().state.users);
-      const stateUser = stateUsers.find((u: any) => u.id === userId);
-      const enrichedUser = stateUser || message.user || storedMessage.user || getUserInfo(userId, stateUsers);
+      const userId =
+        storedMessage.user_id || (storedMessage.user as any)?.id || (message as any).user_id || message.user?.id || '';
+      const stateUser = this.getClient().state.users[userId];
+      const enrichedUser = pickUserWithDisplayName(
+        userId,
+        stateUser,
+        message.user,
+        storedMessage.user,
+        getUserInfo(userId, stateUsers),
+        userId === this.getClient().userID ? this.getClient().user : undefined,
+      );
 
-      hydrated.push({
+      const mergedMessage = {
         ...message,
         ...storedMessage,
         content_type: 'standard',
@@ -2478,7 +2614,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         pinned: message.pinned ?? storedMessage.pinned,
         pinned_at: message.pinned_at ?? storedMessage.pinned_at,
         status: message.status,
-      } as MessageResponse<ErmisChatGenerics>);
+      } as any;
+      const quotedMessage = resolveQuotedMessage(mergedMessage);
+      if (quotedMessage) mergedMessage.quoted_message = quotedMessage;
+      hydrated.push(mergedMessage as MessageResponse<ErmisChatGenerics>);
     }
 
     return hydrated;
@@ -2488,8 +2627,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     options: ChannelQueryOptions,
     messageSetToAddToIfDoesNotExist: MessageSetType,
   ): void {
-    const isE2ee = (this.data as any)?.mls_enabled === true;
-    const storage = this.getClient().mlsManager?.storage;
+    const isE2ee = this._isEffectiveE2ee();
+    const storage = this.getClient().encryptionManager?.storage;
     const messageOptions = options?.messages as any;
     const isWindowedQuery = Boolean(messageOptions?.id_lt || messageOptions?.id_gt || messageOptions?.id_around);
     if (!isE2ee || !storage || !this.cid || isWindowedQuery) return;
@@ -2499,16 +2638,55 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       .getE2eeMessages(this.cid, limit)
       .then((storedMessages: any[]) => {
         if (!storedMessages.length) return;
+        const stateUsers = Object.values(this.getClient().state.users);
+        const storedMessagesById = new Map(storedMessages.map((message: any) => [message.id, message]));
+        const currentMessagesById = new Map(
+          (this.state.messageSets?.flatMap((set) => set.messages) || []).map((message: any) => [message.id, message]),
+        );
+        const toQuotedPreview = (quoted: any) => {
+          if (!quoted?.id) return undefined;
+          const userId = quoted.user_id || quoted.user?.id || '';
+          return {
+            ...quoted,
+            content_type: quoted.content_type || 'standard',
+            type: quoted.type || 'regular',
+            user: pickUserWithDisplayName(userId, this.getClient().state.users[userId], quoted.user, getUserInfo(userId, stateUsers)),
+            attachments: quoted.attachments || [],
+          };
+        };
+        const isRenderableQuotedMessage = (quoted: any) => {
+          if (!quoted) return false;
+          if (typeof quoted.text === 'string' && quoted.text.trim()) return true;
+          if (Array.isArray(quoted.attachments) && quoted.attachments.length > 0) return true;
+          if (typeof quoted.sticker_url === 'string' && quoted.sticker_url) return true;
+          if (quoted.type === 'sticker') return true;
+          return false;
+        };
         const messages = storedMessages
-          .map(
-            (message: any) =>
-              ({
-                ...message,
-                content_type: 'standard',
-                user: message.user || getUserInfo(message.user_id, Object.values(this.getClient().state.users)),
-                status: 'received',
-              } as MessageResponse<ErmisChatGenerics>),
-          )
+          .map((message: any) => {
+            const stateUser = this.getClient().state.users[message.user_id];
+            const explicitQuotedMessage = toQuotedPreview(message.quoted_message);
+            const cachedQuotedMessage = toQuotedPreview(
+              currentMessagesById.get(message.quoted_message_id) || storedMessagesById.get(message.quoted_message_id),
+            );
+            const quotedMessage =
+              (isRenderableQuotedMessage(explicitQuotedMessage) ? explicitQuotedMessage : undefined) ||
+              (isRenderableQuotedMessage(cachedQuotedMessage) ? cachedQuotedMessage : undefined) ||
+              explicitQuotedMessage;
+            return {
+              ...message,
+              content_type: 'standard',
+              user: pickUserWithDisplayName(
+                message.user_id,
+                stateUser,
+                message.user,
+                getUserInfo(message.user_id, stateUsers),
+                message.user_id === this.getClient().userID ? this.getClient().user : undefined,
+              ),
+              quoted_message: quotedMessage,
+              status: 'received',
+            } as MessageResponse<ErmisChatGenerics>;
+          })
           .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
         this.state.addMessagesSorted(messages, false, true, true, messageSetToAddToIfDoesNotExist);
         this.getClient().dispatchEvent({

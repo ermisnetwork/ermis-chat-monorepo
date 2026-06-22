@@ -13,6 +13,7 @@ import {
 } from './types';
 import { MediaStreamSender } from './media_stream_sender';
 import { MediaStreamReceiver } from './media_stream_receiver';
+import { sdkLog } from './logger';
 
 export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   wasmPath: string;
@@ -162,7 +163,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
       this.callNode = new WasmWorkerProxy(new URL(this.workerPath, window.location.origin));
       await this.callNode.init(this.wasmPath);
     } catch (error) {
-      console.error('Failed to load ErmisCall WASM Worker:', error);
+      sdkLog('error', 'Failed to load ErmisCall WASM Worker:', error);
       throw error;
     }
   }
@@ -210,17 +211,17 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
         },
 
         onRequestConfig: () => {
-          console.log('📤 Responding to REQUEST_CONFIG by sending configs');
+          sdkLog('info', '📤 Responding to REQUEST_CONFIG by sending configs');
           this.mediaSender?.sendConfigs();
         },
 
         onRequestKeyFrame: () => {
-          console.log('📤 Responding to REQUEST_KEY_FRAME by forcing key frame');
+          sdkLog('info', '📤 Responding to REQUEST_KEY_FRAME by forcing key frame');
           this.mediaSender?.requestKeyFrame();
         },
 
         onEndCall: () => {
-          console.log('📥 Received END_CALL from remote peer');
+          sdkLog('info', '📥 Received END_CALL from remote peer');
           this.destroy();
         },
       });
@@ -230,7 +231,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
       return proxy;
     } catch (error) {
-      console.error('Failed to initialize Ermis SDK:', error);
+      sdkLog('error', 'Failed to initialize Ermis SDK:', error);
       throw error;
     }
   }
@@ -240,7 +241,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
       await this.initialize();
 
       if (!this.callNode) {
-        console.error('ErmisCall is not initialized.');
+        sdkLog('error', 'ErmisCall is not initialized.');
         return null;
       }
 
@@ -250,7 +251,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
       }
       return address;
     } catch (error) {
-      console.error('Failed to get address from ErmisCall:', error);
+      sdkLog('error', 'Failed to get address from ErmisCall:', error);
       return null;
     }
   }
@@ -309,7 +310,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
       return { audioDevices, videoDevices };
     } catch (error) {
-      console.error('Error enumerating devices:', error);
+      sdkLog('error', 'Error enumerating devices:', error);
       return { audioDevices: [], videoDevices: [] };
     }
   }
@@ -363,7 +364,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
       const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
       return this.applyLocalStream(stream);
     } catch (error: any) {
-      console.warn('Error getting user media:', error?.message);
+      sdkLog('warn', 'Error getting user media:', error?.message);
 
       // Video call: try fallback to audio-only (camera not available)
       if (this.callType === 'video' && mediaConstraints.video) {
@@ -717,7 +718,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
         metadata: { address },
       });
     } catch (error) {
-      console.error('Failed to create call:', error);
+      sdkLog('error', 'Failed to create call:', error);
       throw error;
     }
   }
@@ -743,7 +744,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
         await this.mediaSender.sendConfigs();
       }
     } catch (error) {
-      console.error('Failed to accept call:', error);
+      sdkLog('error', 'Failed to accept call:', error);
       throw error;
     }
   }
@@ -802,7 +803,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
         await this.mediaSender?.sendTransceiverState(audioEnable, videoEnable);
       }
     } catch (error) {
-      console.error('Failed to upgrade call:', error);
+      sdkLog('error', 'Failed to upgrade call:', error);
       throw error;
     }
   }
@@ -898,7 +899,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
         this.onScreenShareChange(false);
       }
     } catch (error) {
-      console.error('Error stopping screen share and reverting to camera:', error);
+      sdkLog('error', 'Error stopping screen share and reverting to camera:', error);
     }
   }
 
@@ -932,7 +933,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
       // Validate device exists in available devices
       const targetDevice = this.availableAudioDevices.find((device) => device.deviceId === deviceId);
       if (!targetDevice) {
-        console.error('Audio device not found:', deviceId);
+        sdkLog('error', 'Audio device not found:', deviceId);
         if (this.onError) {
           this.onError('Selected microphone not found');
         }
@@ -974,7 +975,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
       return true;
     } catch (error) {
-      console.error('Error switching audio device:', error);
+      sdkLog('error', 'Error switching audio device:', error);
       if (this.onError) {
         this.onError('Failed to switch microphone');
       }
@@ -988,7 +989,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
       // Validate device exists in available devices
       const targetDevice = this.availableVideoDevices.find((device) => device.deviceId === deviceId);
       if (!targetDevice) {
-        console.error('Video device not found:', deviceId);
+        sdkLog('error', 'Video device not found:', deviceId);
         if (this.onError) {
           this.onError('Selected camera not found');
         }
@@ -1030,7 +1031,7 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
       return true;
     } catch (error) {
-      console.error('Error switching video device:', error);
+      sdkLog('error', 'Error switching video device:', error);
       if (this.onError) {
         this.onError('Failed to switch camera');
       }

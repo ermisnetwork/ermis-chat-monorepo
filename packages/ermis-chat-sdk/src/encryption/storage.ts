@@ -1,8 +1,8 @@
 /**
- * MLS Storage — Persistence layer for MLS (E2EE) state
+ * Encryption Storage — Persistence layer for encryption (E2EE) state
  *
- * Defines the `MlsStorageAdapter` interface for platform abstraction
- * and provides `IndexedDBMlsStorage` as the default browser implementation.
+ * Defines the `EncryptionStorageAdapter` interface for platform abstraction
+ * and provides `IndexedDBEncryptionStorage` as the default browser implementation.
  *
  * Stores:
  * - Device ID (per browser)
@@ -13,245 +13,28 @@
  * - Sync timestamps
  */
 
-import { randomId } from './utils';
+import { normalizeRequiredBytes } from './encoding';
+import { randomId } from '../utils';
+import type { Logger } from '../types';
+import { setSdkLogger, sdkLog } from '../logger';
 import MiniSearch from 'minisearch';
 
-// ============================================================
-// Storage Adapter Interface
-// ============================================================
-
-export interface E2eeStoredMessage {
-  // Core identity
-  id: string;
-  cid: string;
-  /** 'mls' for encrypted E2EE messages, 'standard' for plaintext (system messages, etc.) */
-  content_type: 'mls' | 'standard';
-  /** Message type: 'regular' | 'reply' | 'system' etc. */
-  type: string;
-  created_at: string;
-  updated_at?: string;
-  // Sender
-  user_id: string;
-  user?: { id: string; name?: string; image?: string; [key: string]: unknown };
-
-  // Decrypted content (MessageContent::Standard)
-  text: string;
-  attachments?: unknown[];
-  sticker_url?: string;
-  poll_type?: string;
-  poll_choice_counts?: Record<string, number>;
-  latest_poll_choices?: unknown[];
-  is_edited?: boolean;
-  old_texts?: Array<{ text: string; created_at: string }>;
-
-  // Thread / reply routing
-  parent_id?: string;
-  quoted_message_id?: string;
-  quoted_message?: unknown;
-
-  // Notification metadata
-  mentioned_users?: string[];
-  mentioned_all?: boolean;
-
-  // State
-  pinned?: boolean;
-  pinned_at?: string;
-  reaction_counts?: Record<string, number>;
-  latest_reactions?: unknown[];
-
-  // Catch-all for future fields
-  [key: string]: unknown;
-}
-
-export interface PendingE2eeSnapshot {
-  cid: string;
-  event_type: 'application' | 'message_updated';
-  message_id: string;
-  mls_epoch?: number;
-  message: Record<string, unknown>;
-  version: string;
-  received_cursor?: string;
-  event_time?: string;
-}
-
-export interface RemovedSyncCursor {
-  removed_at: string;
-  event_id: string;
-}
-
-export interface EventCursor {
-  created_at: string;
-  event_id: string;
-}
-
-export interface PendingArchiveUpload {
-  cid: string;
-  channel_type: string;
-  channel_id: string;
-  epoch: number;
-  scope: 'account_owned';
-  upload: unknown;
-  retry_count: number;
-  created_at: number;
-}
-
-export interface PendingDeferredArchive {
-  cid: string;
-  channel_type: string;
-  channel_id: string;
-  epoch: number;
-  scope: 'account_owned';
-  archive_blob_id: string;
-  encrypted_archive: {
-    ciphertext: number[];
-    nonce: number[];
-    aead_aad: number[];
-  };
-  snapshot: {
-    snapshot_bytes: number[];
-    snapshot_hash: string;
-  };
-  encrypted_adk: {
-    ciphertext: number[];
-    nonce: number[];
-  };
-  retry_count: number;
-  created_at: number;
-  updated_at: number;
-}
-
-export type ArchiveAckStatus = 'uploaded' | 'idempotent' | 'duplicate_cap';
-
-export interface ArchiveAckRecord {
-  cid: string;
-  epoch: number;
-  recovery_key_id: string;
-  status: ArchiveAckStatus;
-  archive_blob_id?: string;
-  updated_at: number;
-}
-
-export type RestoreStatus = 'pending' | 'running' | 'partial' | 'done' | 'done_with_gaps' | 'failed';
-
-export type RestorePermanentGapReason =
-  | 'no_archive'
-  | 'no_matching_wrap'
-  | 'missing_snapshot'
-  | 'expired_restore_window'
-  | 'decrypt_error';
-
-export type RestoreTransientFailureReason = 'network_error' | 'server_error' | 'decrypt_error';
-
-export interface RestoreProgressRecord {
-  device_id: string;
-  cid: string;
-  user_id: string;
-  channel_type: string;
-  channel_id: string;
-  status: RestoreStatus;
-  target_epochs?: number[];
-  completed_epochs: number[];
-  permanent_gaps: Array<{
-    epoch: number;
-    reason: RestorePermanentGapReason;
-    updated_at: number;
-  }>;
-  transient_failures: Array<{
-    epoch: number;
-    reason: RestoreTransientFailureReason;
-    retry_count: number;
-    max_retries: number;
-    updated_at: number;
-  }>;
-  last_checked_at: number;
-  updated_at: number;
-}
-
-/**
- * Platform-agnostic storage adapter for MLS state.
- *
- * Implement this interface to provide custom storage (e.g., SQLite for React Native).
- * The default `IndexedDBMlsStorage` uses browser IndexedDB.
- *
- * NOTE: `getDeviceId()` is a GLOBAL (per-browser) operation and does NOT
- * require a userId — it identifies the physical device, not the user.
- */
-export interface MlsStorageAdapter {
-  // ---- Device ID (global, per-browser) ----
-  getDeviceId(): Promise<string>;
-
-  // ---- Identity ----
-  saveIdentity(userId: string, deviceId: string, identityBytes: Uint8Array): Promise<void>;
-  loadIdentity(userId: string, deviceId: string): Promise<Uint8Array | null>;
-
-  // ---- E2EE Messages ----
-  saveE2eeMessage(message: E2eeStoredMessage): Promise<void>;
-  loadE2eeMessage(messageId: string): Promise<E2eeStoredMessage | null>;
-  loadE2eeMessages?(messageIds: string[]): Promise<Map<string, E2eeStoredMessage>>;
-  deleteE2eeMessage(messageId: string): Promise<void>;
-  getE2eeMessages(cid: string, limit?: number): Promise<E2eeStoredMessage[]>;
-  clearE2eeMessages(cid: string): Promise<void>;
-
-  // ---- E2EE Message Search ----
-  /** Search all E2EE messages across all channels by text content. */
-  searchE2eeMessages(searchTerm: string, limit?: number): Promise<E2eeStoredMessage[]>;
-  /** Search E2EE messages within a specific channel by text content. */
-  searchE2eeMessagesByCid(cid: string, searchTerm: string, limit?: number): Promise<E2eeStoredMessage[]>;
-
-  // ---- Group State ----
-  saveGroupState(cid: string, marker: unknown): Promise<void>;
-  loadGroupState(cid: string): Promise<unknown | null>;
-  listGroupCids(): Promise<string[]>;
-  deleteGroup(cid: string): Promise<void>;
-
-  // ---- Provider State ----
-  saveProviderState(userId: string, deviceId: string, providerBytes: Uint8Array): Promise<void>;
-  loadProviderState(userId: string, deviceId: string): Promise<Uint8Array | null>;
-
-  // ---- Sync Timestamps ----
-  saveSyncTimestamp(cid: string, timestamp: string): Promise<void>;
-  loadSyncTimestamp(cid: string): Promise<string | null>;
-
-  // ---- Batch Sync Cursors (for unified sync API) ----
-  loadAllSyncTimestamps(): Promise<Record<string, string>>;
-  saveAllSyncTimestamps(cursors: Record<string, string>): Promise<void>;
-  loadScopeSyncCursor?(scopeCid: string): Promise<EventCursor | null>;
-  saveScopeSyncCursor?(scopeCid: string, cursor: EventCursor): Promise<void>;
-  loadAllScopeSyncCursors?(): Promise<Record<string, EventCursor>>;
-  saveAllScopeSyncCursors?(cursors: Record<string, EventCursor>): Promise<void>;
-  loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null>;
-  saveRemovedSyncCursor(cursor: RemovedSyncCursor): Promise<void>;
-
-  // ---- Pending E2EE encrypted snapshots ----
-  loadPendingE2eeSnapshots(cid: string): Promise<PendingE2eeSnapshot[]>;
-  savePendingE2eeSnapshots(cid: string, messages: PendingE2eeSnapshot[]): Promise<void>;
-
-  // ---- Pending Evictions (offline recovery persistence) ----
-  // Map: cid → array of user_ids to evict
-  loadPendingEvictions(): Promise<Record<string, string[]>>;
-  savePendingEvictions(data: Record<string, string[]>): Promise<void>;
-
-  // ---- PIN Epoch Archive recovery ----
-  saveArchiveUpload(upload: PendingArchiveUpload): Promise<void>;
-  loadPendingArchiveUploads(): Promise<PendingArchiveUpload[]>;
-  deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
-  saveDeferredArchive(archive: PendingDeferredArchive): Promise<void>;
-  loadPendingDeferredArchives(): Promise<PendingDeferredArchive[]>;
-  deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
-  saveArchiveAck(record: ArchiveAckRecord): Promise<void>;
-  loadArchiveAck(cid: string, epoch: number, recoveryKeyId: string): Promise<ArchiveAckRecord | null>;
-  saveArchiveStashKey(key: CryptoKey): Promise<void>;
-  loadArchiveStashKey(): Promise<CryptoKey | null>;
-  saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void>;
-  loadRecoveryPublicKey(userId: string): Promise<Uint8Array | null>;
-
-  // ---- Restore Progress (required SDK contract) ----
-  saveRestoreProgress(record: RestoreProgressRecord): Promise<void>;
-  loadRestoreProgress(userId: string, deviceId: string, cid: string): Promise<RestoreProgressRecord | null>;
-  loadIncompleteRestores(userId: string, deviceId: string): Promise<RestoreProgressRecord[]>;
-  loadRestoresWithPermanentGaps(userId: string, deviceId: string): Promise<RestoreProgressRecord[]>;
-  deleteRestoreProgress(userId: string, deviceId: string, cid: string): Promise<void>;
-}
+import type {
+  ArchiveAckRecord,
+  ArchiveScope,
+  ChannelRepairState,
+  EpochArchiveCheckpoint,
+  E2eeStoredMessage,
+  EventCursor,
+  EncryptionStorageAdapter,
+  EncryptionSyncCheckpoint,
+  PendingArchiveUpload,
+  PendingDeferredArchive,
+  PendingE2eeSnapshot,
+  RemovedSyncCursor,
+  RestoreProgressRecord,
+  RestoreStatus,
+} from './types';
 
 // ============================================================
 // IndexedDB Implementation (Browser Default)
@@ -273,10 +56,49 @@ const STORE_RESTORE_PROGRESS = 'restore_progress';
 const ARCHIVE_STASH_KEY_META = 'archive_stash_key';
 const LEGACY_SYNC_PREFIX = 'sync:';
 const SCOPE_SYNC_PREFIX = 'scope_sync:';
+const CHANNEL_REPAIR_PREFIX = 'channel_repair:';
+const CHANNEL_REPAIR_LOCK_PREFIX = 'channel_repair_lock:';
+const EPOCH_ARCHIVE_CHECKPOINT_PREFIX = 'epoch_archive_checkpoint:';
 const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** localStorage key for device_id — global, per-browser */
 const DEVICE_ID_LS_KEY = 'ermis_device_id';
+
+function normalizeDeferredArchiveRecord(record: PendingDeferredArchive): PendingDeferredArchive {
+  return {
+    ...record,
+    encrypted_archive: {
+      ciphertext: normalizeRequiredBytes(record.encrypted_archive.ciphertext, 'encrypted_archive.ciphertext'),
+      nonce: normalizeRequiredBytes(record.encrypted_archive.nonce, 'encrypted_archive.nonce'),
+      aead_aad: normalizeRequiredBytes(record.encrypted_archive.aead_aad, 'encrypted_archive.aead_aad'),
+    },
+    snapshot: {
+      ...record.snapshot,
+      snapshot_bytes: normalizeRequiredBytes(record.snapshot.snapshot_bytes, 'snapshot.snapshot_bytes'),
+    },
+    encrypted_adk: {
+      ciphertext: normalizeRequiredBytes(record.encrypted_adk.ciphertext, 'encrypted_adk.ciphertext'),
+      nonce: normalizeRequiredBytes(record.encrypted_adk.nonce, 'encrypted_adk.nonce'),
+    },
+  };
+}
+
+function normalizeEpochArchiveCheckpoint(record: EpochArchiveCheckpoint): EpochArchiveCheckpoint {
+  return {
+    ...record,
+    encrypted_archive_bytes: {
+      ciphertext: normalizeRequiredBytes(
+        record.encrypted_archive_bytes.ciphertext,
+        'encrypted_archive_bytes.ciphertext',
+      ),
+      nonce: normalizeRequiredBytes(record.encrypted_archive_bytes.nonce, 'encrypted_archive_bytes.nonce'),
+    },
+    snapshot: {
+      ...record.snapshot,
+      snapshot_bytes: normalizeRequiredBytes(record.snapshot.snapshot_bytes, 'snapshot.snapshot_bytes'),
+    },
+  };
+}
 
 function eventCursorFromStoredValue(value: unknown): EventCursor | null {
   if (!value) return null;
@@ -297,7 +119,7 @@ function eventCursorFromStoredValue(value: unknown): EventCursor | null {
 }
 
 /**
- * Default MLS storage adapter using browser IndexedDB.
+ * Default encryption storage adapter using browser IndexedDB.
  *
  * Each user gets their own IndexedDB database (`ermis_mls_{userId}`) to
  * prevent cross-user state contamination during login/logout cycles.
@@ -305,20 +127,21 @@ function eventCursorFromStoredValue(value: unknown): EventCursor | null {
  *
  * @example
  * ```ts
- * const storage = new IndexedDBMlsStorage('user123');
+ * const storage = new IndexedDBEncryptionStorage('user123');
  * const deviceId = await storage.getDeviceId();
  * ```
  */
-export class IndexedDBMlsStorage implements MlsStorageAdapter {
+export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private readonly dbName: string;
 
   /**
    * @param userId - The current user's ID. Used to scope the IndexedDB
-   *                 database name so each user's MLS state is isolated.
+   *                 database name so each user's encryption state is isolated.
    *                 Pass empty string for legacy/global access (migration only).
    */
-  constructor(userId: string = '') {
+  constructor(userId: string = '', logger?: Logger) {
+    if (logger) setSdkLogger(logger);
     if (userId) {
       this.dbName = `${DB_NAME_PREFIX}_${userId}`;
     } else {
@@ -485,7 +308,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
             db.close();
             if (legacyId && typeof localStorage !== 'undefined') {
               localStorage.setItem(DEVICE_ID_LS_KEY, legacyId);
-              console.log('[MLS Storage] Migrated device_id from IndexedDB to localStorage:', legacyId);
+              sdkLog('info', '[Encryption Storage] Migrated device_id from IndexedDB to localStorage:', legacyId);
               resolve(legacyId);
             } else {
               resolve(null);
@@ -756,7 +579,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
 
       this._indexReady = true;
       this._indexBuildPromise = null;
-      console.log(`[MLS Storage] Search index built: ${indexable.length} messages indexed`);
+      sdkLog('info', `[Encryption Storage] Search index built: ${indexable.length} messages indexed`);
     })();
 
     return this._indexBuildPromise;
@@ -778,7 +601,7 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       this._searchIndex.add(message);
       this._indexedIds.add(message.id);
     } catch (err) {
-      console.warn('[MLS Storage] Failed to index message:', message.id, err);
+      sdkLog('warn', '[Encryption Storage] Failed to index message:', message.id, err);
     }
   }
 
@@ -1006,6 +829,114 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     });
   }
 
+  async loadChannelRepairState(scopeCid: string): Promise<ChannelRepairState | null> {
+    const db = await this.openDB();
+    return new Promise<ChannelRepairState | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const request = store.get(`${CHANNEL_REPAIR_PREFIX}${scopeCid}`);
+      request.onsuccess = () => resolve((request.result as ChannelRepairState) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveChannelRepairState(state: ChannelRepairState): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(state, `${CHANNEL_REPAIR_PREFIX}${state.scope_cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async deleteChannelRepairState(scopeCid: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.delete(`${CHANNEL_REPAIR_PREFIX}${scopeCid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async saveEncryptionSyncCheckpoint(checkpoint: EncryptionSyncCheckpoint): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+
+      store.put(checkpoint.provider_bytes, `provider:${checkpoint.user_id}:${checkpoint.device_id}`);
+
+      for (const [scopeCid, cursor] of Object.entries(checkpoint.scope_cursors || {})) {
+        store.put(cursor, `${SCOPE_SYNC_PREFIX}${scopeCid}`);
+      }
+
+      for (const [cid, snapshots] of Object.entries(checkpoint.pending_snapshots || {})) {
+        const key = `pending_e2ee_snapshots:${cid}`;
+        if (snapshots.length === 0) {
+          store.delete(key);
+        } else {
+          store.put(snapshots, key);
+        }
+      }
+
+      for (const state of checkpoint.repair_states || []) {
+        store.put(state, `${CHANNEL_REPAIR_PREFIX}${state.scope_cid}`);
+      }
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async tryAcquireRepairLock(scopeCid: string, ownerId: string, ttlMs: number): Promise<boolean> {
+    const db = await this.openDB();
+    return new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      const key = `${CHANNEL_REPAIR_LOCK_PREFIX}${scopeCid}`;
+      const request = store.get(key);
+      let acquired = false;
+
+      request.onsuccess = () => {
+        const now = Date.now();
+        const current = request.result as { owner_id?: string; expires_at?: number } | undefined;
+        if (current?.owner_id && current.expires_at && current.expires_at > now && current.owner_id !== ownerId) {
+          acquired = false;
+          return;
+        }
+        acquired = true;
+        store.put({ scope_cid: scopeCid, owner_id: ownerId, expires_at: now + ttlMs, updated_at: now }, key);
+      };
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve(acquired);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async releaseRepairLock(scopeCid: string, ownerId: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      const key = `${CHANNEL_REPAIR_LOCK_PREFIX}${scopeCid}`;
+      const request = store.get(key);
+
+      request.onsuccess = () => {
+        const current = request.result as { owner_id?: string } | undefined;
+        if (!current || current.owner_id === ownerId) {
+          store.delete(key);
+        }
+      };
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   async saveAllSyncTimestamps(timestamps: Record<string, string>): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -1187,7 +1118,8 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
       const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readonly');
       const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
       const request = store.getAll();
-      request.onsuccess = () => resolve((request.result as PendingDeferredArchive[]) || []);
+      request.onsuccess = () =>
+        resolve(((request.result as PendingDeferredArchive[]) || []).map(normalizeDeferredArchiveRecord));
       request.onerror = () => reject(request.error);
     });
   }
@@ -1220,20 +1152,101 @@ export class IndexedDBMlsStorage implements MlsStorageAdapter {
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readwrite');
       const store = tx.objectStore(STORE_ARCHIVE_ACKS);
-      store.put(record, `${record.cid}:${record.epoch}:${record.recovery_key_id}`);
+      store.put(record, `${record.cid}:${record.epoch}:${record.scope}:${record.coverage_key}`);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  async loadArchiveAck(cid: string, epoch: number, recoveryKeyId: string): Promise<ArchiveAckRecord | null> {
+  async loadArchiveAck(
+    cid: string,
+    epoch: number,
+    scope: ArchiveScope,
+    coverageKey: string,
+  ): Promise<ArchiveAckRecord | null> {
     const db = await this.openDB();
     return new Promise<ArchiveAckRecord | null>((resolve, reject) => {
       const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readonly');
       const store = tx.objectStore(STORE_ARCHIVE_ACKS);
-      const request = store.get(`${cid}:${epoch}:${recoveryKeyId}`);
-      request.onsuccess = () => resolve((request.result as ArchiveAckRecord) || null);
+      const request = store.get(`${cid}:${epoch}:${scope}:${coverageKey}`);
+      request.onsuccess = () => {
+        if (request.result || scope !== 'account_owned') {
+          resolve((request.result as ArchiveAckRecord) || null);
+          return;
+        }
+        const legacyRequest = store.get(`${cid}:${epoch}:${coverageKey}`);
+        legacyRequest.onsuccess = () => {
+          const legacy = legacyRequest.result as ArchiveAckRecord | undefined;
+          resolve(
+            legacy
+              ? {
+                  ...legacy,
+                  scope: 'account_owned',
+                  coverage_key: coverageKey,
+                  recovery_key_id: legacy.recovery_key_id || coverageKey,
+                }
+              : null,
+          );
+        };
+        legacyRequest.onerror = () => reject(legacyRequest.error);
+      };
       request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveEpochArchiveCheckpoint(checkpoint: EpochArchiveCheckpoint): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).put(
+        checkpoint,
+        `${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${checkpoint.scope_cid}:${checkpoint.epoch}`,
+      );
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<EpochArchiveCheckpoint | null> {
+    const db = await this.openDB();
+    return new Promise<EpochArchiveCheckpoint | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const request = tx.objectStore(STORE_META).get(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
+      request.onsuccess = () =>
+        resolve(request.result ? normalizeEpochArchiveCheckpoint(request.result as EpochArchiveCheckpoint) : null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async loadEpochArchiveCheckpoints(): Promise<EpochArchiveCheckpoint[]> {
+    const db = await this.openDB();
+    return new Promise<EpochArchiveCheckpoint[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const checkpoints: EpochArchiveCheckpoint[] = [];
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(checkpoints);
+          return;
+        }
+        if (String(cursor.key).startsWith(EPOCH_ARCHIVE_CHECKPOINT_PREFIX)) {
+          checkpoints.push(normalizeEpochArchiveCheckpoint(cursor.value as EpochArchiveCheckpoint));
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).delete(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 

@@ -8,7 +8,10 @@ import WebSocket from 'isomorphic-ws';
 import { Channel } from './channel';
 import { ClientState } from './client_state';
 import { StableWSConnection } from './connection';
-import { IndexedDBMlsStorage } from './mls_storage';
+import { E2EE_BYTES_HEADER, E2EE_BYTES_WIRE_FORMAT, normalizeE2eeEventBytes } from './encryption/encoding';
+import { IndexedDBEncryptionStorage } from './encryption/storage';
+import { IndexedDBUserCache } from './user_cache';
+import { getLogger, setSdkLogger } from './logger';
 
 import { TokenManager } from './token_manager';
 
@@ -22,7 +25,6 @@ import {
   getDirectChannelImage,
   getDirectChannelName,
   getLatestCreatedAt,
-  isFunction,
   randomId,
 } from './utils';
 
@@ -107,13 +109,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   /** Tracks consecutive REST API failures for exponential backoff purposes. */
   consecutiveFailures: number;
   defaultWSTimeout: number;
-  /** Device ID used by MLS/E2EE sessions and sent to Bellboy over WS/HTTP. */
+  /** Device ID used by encryption/E2EE sessions and sent to Bellboy over WS/HTTP. */
   deviceId?: string;
   /** Latest current-device KeyPackage count reported by health.check. */
   latestKeyPackagesRemaining?: number;
-  /** MLS Manager instance set by MlsManager.initialize() for E2EE event handling. */
+  /** Encryption Manager instance set by EncryptionManager.initialize() for E2EE event handling. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mlsManager?: any;
+  encryptionManager?: any;
+  private userCache?: IndexedDBUserCache<ErmisChatGenerics>;
+  private userCacheKey?: string;
+  private userCacheSyncPromise: Promise<UsersResponse<ErmisChatGenerics> | void> | null = null;
 
   private eventSource: EventSourcePolyfill | null = null;
 
@@ -167,7 +172,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     this.axiosInstance.defaults.paramsSerializer = axiosParamsSerializer;
 
-    this.logger = isFunction(inputOptions.logger) ? inputOptions.logger : () => null;
+    this.logger = getLogger(inputOptions.logger);
+    setSdkLogger(inputOptions.logger);
     this.recoverStateOnReconnect = this.options.recoverStateOnReconnect;
   }
 
@@ -279,8 +285,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
      * If the user id remains the same we don't throw error
      */
     if (this.userID === connectionUser.id && this.setUserPromise) {
-      console.warn(
+      this.logger(
+        'warn',
         'Consecutive calls to connectUser is detected, ideally you should only call this function once in your app.',
+        { tags: ['connection', 'client'] },
       );
       return this.setUserPromise;
     }
@@ -292,15 +300,17 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
 
     if (this.node && !this.options.allowServerSideConnect) {
-      console.warn(
+      this.logger(
+        'warn',
         'Please do not use connectUser server side. connectUser impacts MAU and concurrent connection usage and thus your bill. If you have a valid use-case, add "allowServerSideConnect: true" to the client options to disable this warning.',
+        { tags: ['connection', 'client'] },
       );
     }
 
     if (this.browser && !this.deviceId) {
       try {
-        const mlsStorage = new IndexedDBMlsStorage();
-        this.deviceId = await mlsStorage.getDeviceId();
+        const encryptionStorage = new IndexedDBEncryptionStorage('', this.logger);
+        this.deviceId = await encryptionStorage.getDeviceId();
         this.logger('info', `client:connectUser() - deviceId initialized: ${this.deviceId}`, {
           tags: ['connection', 'client', 'e2ee'],
         });
@@ -314,14 +324,18 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     // we generate the client id client side
     this.userID = connectionUser.id;
+    await this._hydrateUserCacheFromStorage();
 
     const setTokenPromise = this._setToken(connectionUser, connectionToken);
     this._setUser(connectionUser);
-    this.state.updateUser({
-      id: connectionUser.id,
-      name: connectionUser?.name || connectionUser.id,
-      avatar: connectionUser?.avatar || '',
-    });
+    this._upsertUser(
+      {
+        id: connectionUser.id,
+        name: connectionUser?.name || connectionUser.id,
+        avatar: connectionUser?.avatar || '',
+      } as UserResponse<ErmisChatGenerics>,
+      { updateReferences: false },
+    );
 
     const wsPromise = this.openConnection();
 
@@ -333,12 +347,14 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       const result = await this.setUserPromise;
       // Call SSE after successful connect
       await this.connectToSSE();
+      this._scheduleUserCacheSync();
 
       // Automatically fetch full profile asynchronously and dispatch event
       this.queryUser(connectionUser.id)
         .then((fullProfile) => {
-          this.user = { ...this.user, ...fullProfile };
-          this.state.updateUser(this.user);
+          const mergedUser = { ...(this.user || connectionUser), ...fullProfile } as UserResponse<ErmisChatGenerics>;
+          this.user = mergedUser;
+          this._upsertUser(mergedUser, { updateReferences: true });
           this.dispatchEvent({
             type: 'user.updated',
             me: this.user,
@@ -363,6 +379,106 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   _setUser(user: UserResponse<ErmisChatGenerics>) {
     this.user = { ...user };
     this.userID = user.id;
+  }
+
+  private _getUserCache(): IndexedDBUserCache<ErmisChatGenerics> | null {
+    if (!this.browser || !this.userID) return null;
+    const key = `${this.projectId}:${this.userID}`;
+    if (!this.userCache || this.userCacheKey !== key) {
+      this.userCache = new IndexedDBUserCache<ErmisChatGenerics>(this.projectId, this.userID);
+      this.userCacheKey = key;
+    }
+    return this.userCache;
+  }
+
+  private _persistUsersToCache(users: Array<UserResponse<ErmisChatGenerics>>): void {
+    const cache = this._getUserCache();
+    const validUsers = users.filter((user) => user?.id);
+    if (!cache || validUsers.length === 0) return;
+
+    cache.saveUsers(validUsers).catch((err) => {
+      this.logger('warn', 'client:userCache - failed to persist users', { err });
+    });
+  }
+
+  private _shouldRefreshUserReferences(
+    existing: UserResponse<ErmisChatGenerics> | undefined,
+    incoming: UserResponse<ErmisChatGenerics>,
+  ): boolean {
+    if (!existing) return true;
+    return (
+      existing.name !== incoming.name ||
+      existing.avatar !== incoming.avatar ||
+      existing.about_me !== incoming.about_me ||
+      existing.email !== incoming.email ||
+      existing.phone !== incoming.phone
+    );
+  }
+
+  private _upsertUsers(
+    users: Array<UserResponse<ErmisChatGenerics>>,
+    options: { persist?: boolean; updateReferences?: boolean } = {},
+  ): void {
+    const { persist = true, updateReferences = true } = options;
+    const validUsers = users.filter((user) => user?.id);
+    if (validUsers.length === 0) return;
+    const usersNeedingReferenceUpdate = updateReferences
+      ? validUsers.filter((user) => this._shouldRefreshUserReferences(this.state.users[user.id], user))
+      : [];
+
+    this.state.updateUsers(validUsers);
+    if (persist) {
+      this._persistUsersToCache(validUsers);
+    }
+
+    for (const user of validUsers) {
+      if (this.user?.id === user.id) {
+        this.user = { ...this.user, ...user };
+      }
+    }
+
+    for (const user of usersNeedingReferenceUpdate) {
+      const updatedUser = this.state.users[user.id] || user;
+      this._updateMemberWatcherReferences(updatedUser);
+      this._updateUserMessageReferences(updatedUser);
+    }
+
+    if (usersNeedingReferenceUpdate.length > 0) {
+      this.dispatchEvent({
+        type: 'users.updated' as any,
+        users: usersNeedingReferenceUpdate,
+      } as any);
+    }
+  }
+
+  private _upsertUser(
+    user: UserResponse<ErmisChatGenerics>,
+    options: { persist?: boolean; updateReferences?: boolean } = {},
+  ): void {
+    this._upsertUsers([user], options);
+  }
+
+  private async _hydrateUserCacheFromStorage(): Promise<void> {
+    const cache = this._getUserCache();
+    if (!cache) return;
+
+    try {
+      const cachedUsers = await cache.loadUsers();
+      this._upsertUsers(cachedUsers, { persist: false, updateReferences: false });
+    } catch (err) {
+      this.logger('warn', 'client:userCache - failed to hydrate users from IndexedDB', { err });
+    }
+  }
+
+  private _scheduleUserCacheSync(): void {
+    if (!this.browser || this.userCacheSyncPromise) return;
+    this.userCacheSyncPromise = this.syncUserCache(10000, 1)
+      .catch((err) => {
+        this.logger('warn', 'client:userCache - failed to sync users', { err });
+      })
+      .finally(() => {
+        this.userCacheSyncPromise = null;
+      });
   }
 
   closeConnection = async (timeout?: number) => {
@@ -414,12 +530,15 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       tags: ['connection', 'client'],
     });
 
-    const mlsMgr = this.mlsManager;
-    if (mlsMgr && typeof mlsMgr.destroy === 'function') {
-      mlsMgr.destroy();
-      this.mlsManager = undefined;
+    const encryptionMgr = this.encryptionManager;
+    if (encryptionMgr && typeof encryptionMgr.destroy === 'function') {
+      encryptionMgr.destroy();
+      this.encryptionManager = undefined;
     }
     this.deviceId = undefined;
+    this.userCache = undefined;
+    this.userCacheKey = undefined;
+    this.userCacheSyncPromise = null;
 
     // remove the user specific fields
     delete this.user;
@@ -701,22 +820,24 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         const result = channel._handleChannelEvent(event);
         if (result && typeof (result as any).then === 'function') {
           // Async path: defer listeners until state mutations complete
-          (result as Promise<void>).then(() => {
-            this._callClientListeners(event);
-            if (channel) {
-              channel._callChannelListeners(event);
-            }
-            postListenerCallbacks.forEach((c) => c());
-          }).catch((err) => {
-            this.logger('error', 'client:_handleChannelEvent() failed', { err, event });
-            // Even if state mutation failed partially, we must still notify listeners
-            // otherwise UI gets permanently stuck and misses the event.
-            this._callClientListeners(event);
-            if (channel) {
-              channel._callChannelListeners(event);
-            }
-            postListenerCallbacks.forEach((c) => c());
-          });
+          (result as Promise<void>)
+            .then(() => {
+              this._callClientListeners(event);
+              if (channel) {
+                channel._callChannelListeners(event);
+              }
+              postListenerCallbacks.forEach((c) => c());
+            })
+            .catch((err) => {
+              this.logger('error', 'client:_handleChannelEvent() failed', { err, event });
+              // Even if state mutation failed partially, we must still notify listeners
+              // otherwise UI gets permanently stuck and misses the event.
+              this._callClientListeners(event);
+              if (channel) {
+                channel._callChannelListeners(event);
+              }
+              postListenerCallbacks.forEach((c) => c());
+            });
           return;
         }
       }
@@ -793,7 +914,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   handleEvent = (messageEvent: WebSocket.MessageEvent) => {
     // dispatch the event to the channel listeners
     const jsonString = messageEvent.data as string;
-    const event = JSON.parse(jsonString) as Event<ErmisChatGenerics>;
+    const event = normalizeE2eeEventBytes(JSON.parse(jsonString) as Event<ErmisChatGenerics>);
     this.dispatchEvent(event);
   };
 
@@ -928,9 +1049,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       if (typeof remaining === 'number') {
         this.latestKeyPackagesRemaining = remaining;
       }
-      if (this.mlsManager?.initialized && typeof remaining === 'number') {
-        this.mlsManager.ensureKeyPackages(remaining).catch((err: unknown) => {
-          this.logger('warn', '[MLS] Failed to top up key packages', { err });
+      if (this.encryptionManager?.initialized && typeof remaining === 'number') {
+        this.encryptionManager.ensureKeyPackages(remaining).catch((err: unknown) => {
+          this.logger('warn', '[Encryption] Failed to top up key packages', { err });
         });
       }
     }
@@ -954,13 +1075,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
     if (event.type === 'notification.invite_rejected') {
       if (event.member?.user_id === this.userID && event.cid) {
-        if (event.mls_enabled && this.mlsManager?.initialized) {
+        if (event.mls_enabled && this.encryptionManager?.initialized) {
           const rejectTimestamp = event.created_at || event.createdAt || event.message?.created_at || Date.now();
-          this.mlsManager.leaveGroup(event.cid, rejectTimestamp);
+          this.encryptionManager.leaveGroup(event.cid, rejectTimestamp);
           if (Array.isArray(event.topic_cids)) {
             for (const topicCid of event.topic_cids) {
-              if (this.mlsManager.ownsE2eeGroup(topicCid)) {
-                this.mlsManager.leaveGroup(topicCid, rejectTimestamp);
+              if (this.encryptionManager.ownsE2eeGroup(topicCid)) {
+                this.encryptionManager.leaveGroup(topicCid, rejectTimestamp);
               }
             }
           }
@@ -1138,8 +1259,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       tags: ['connection'],
     });
 
-    if (this.mlsManager?.initialized) {
-      this.mlsManager.markSyncStart();
+    if (this.encryptionManager?.initialized) {
+      this.encryptionManager.markSyncStart();
     }
 
     const cids = Object.keys(this.activeChannels);
@@ -1165,11 +1286,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       } as Event<ErmisChatGenerics>);
     }
 
-    if (this.mlsManager?.initialized) {
+    if (this.encryptionManager?.initialized) {
       try {
-        await this.mlsManager.sync();
+        await this.encryptionManager.sync();
       } catch (err) {
-        this.logger('error', '[MLS] Failed to sync on reconnect', { err });
+        this.logger('error', '[Encryption] Failed to sync on reconnect', { err });
       }
     }
 
@@ -1248,17 +1369,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         }
 
         // 2. Update Client State
-        this.state.updateUser(userInfo);
-
-        const minimalUserInfo = {
-          id: userInfo.id,
-          name: userInfo.name || userInfo.id,
-          avatar: userInfo.avatar || '',
-        };
-
-        // 3. Update references and trigger re-renders
-        this._updateMemberWatcherReferences(minimalUserInfo);
-        this._updateUserMessageReferences(minimalUserInfo);
+        this._upsertUser(userInfo);
 
         if (onCallBack) {
           onCallBack(data);
@@ -1299,61 +1410,74 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
   }
 
-  async queryUsers(page_size?: string, page?: number): Promise<UsersResponse> {
-    const defaultOptions = {
-      presence: false,
-    };
-
+  async queryUsers(page_size?: number, page?: number): Promise<UsersResponse<ErmisChatGenerics>> {
     // Make sure we wait for the connect promise if there is a pending one
     await this.wsPromise;
+    const userIDAtRequest = this.userID;
 
     let project_id = this.projectId;
     // Return a list of users
-    const data = await this.get<UsersResponse>(this.userBaseURL + '/users', {
+    const data = await this.get<UsersResponse<ErmisChatGenerics>>(this.userBaseURL + '/users', {
       project_id,
       page,
       page_size,
     });
 
-    this.state.updateUsers(data.data);
+    if (userIDAtRequest && this.userID === userIDAtRequest) {
+      this._upsertUsers(data.data);
+    }
 
     return data;
   }
 
+  async syncUserCache(page_size = 10000, page = 1): Promise<UsersResponse<ErmisChatGenerics>> {
+    return await this.queryUsers(page_size, page);
+  }
+
   async queryUser(user_id: string): Promise<UserResponse<ErmisChatGenerics>> {
+    const userIDAtRequest = this.userID;
     const project_id = this.projectId;
 
     const userResponse = await this.get<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/' + user_id, {
       project_id,
     });
 
-    this.state.updateUser(userResponse);
+    if (userIDAtRequest && this.userID === userIDAtRequest) {
+      this._upsertUser(userResponse);
+    }
     return userResponse;
   }
 
   async getBatchUsers(users: string[], page?: number, page_size?: number) {
+    const userIDAtRequest = this.userID;
     let project_id = this.projectId;
 
-    const usersRepsonse = await this.post<UsersResponse>(
+    const usersRepsonse = await this.post<UsersResponse<ErmisChatGenerics>>(
       this.userBaseURL + '/users/batch?page=1&page_size=10000',
       { users, project_id },
       { page, page_size },
     );
 
-    this.state.updateUsers(usersRepsonse.data);
+    if (userIDAtRequest && this.userID === userIDAtRequest) {
+      this._upsertUsers(usersRepsonse.data);
+    }
 
     return usersRepsonse.data || [];
   }
 
-  async searchUsers(page: number, page_size: number, name?: string): Promise<UsersResponse> {
+  async searchUsers(page: number, page_size: number, name?: string): Promise<UsersResponse<ErmisChatGenerics>> {
     let project_id = this.projectId;
 
-    const usersResponse = await this.post<UsersResponse>(this.userBaseURL + '/users/search', undefined, {
-      page,
-      page_size,
-      name,
-      project_id,
-    });
+    const usersResponse = await this.post<UsersResponse<ErmisChatGenerics>>(
+      this.userBaseURL + '/users/search',
+      undefined,
+      {
+        page,
+        page_size,
+        name,
+        project_id,
+      },
+    );
 
     // this.state.updateUsers(usersResponse.data);
 
@@ -1410,16 +1534,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     if (this.user) {
       this.user.avatar = response.avatar;
       const new_user = { ...this.user, avatar: response.avatar };
-      this.state.updateUser(new_user);
-
-      const userInfo = {
-        id: this.user.id,
-        name: this.user.name ? this.user.name : this.user.id,
-        avatar: this.user?.avatar || '',
-      };
-
-      this._updateMemberWatcherReferences(userInfo);
-      this._updateUserMessageReferences(userInfo);
+      this._upsertUser(new_user);
 
       this.dispatchEvent({
         type: 'user.updated',
@@ -1432,18 +1547,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   async updateProfile(updates: Partial<UserResponse<ErmisChatGenerics>>) {
     let response = await this.patch<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/update', updates);
     this.user = response;
-    this.state.updateUser(response);
+    this._upsertUser(response);
 
     if (this.user) {
-      const userInfo = {
-        id: this.user.id,
-        name: this.user.name ? this.user.name : this.user.id,
-        avatar: this.user?.avatar || '',
-      };
-
-      this._updateMemberWatcherReferences(userInfo);
-      this._updateUserMessageReferences(userInfo);
-
       this.dispatchEvent({
         type: 'user.updated',
         me: this.user,
@@ -1544,7 +1650,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     // Hydrate E2EE messages from local cache BEFORE initializing state.
     // Without this, encrypted API messages overwrite decrypted local messages,
     // causing the UI to show "encrypted message" until the user switches channels.
-    if (this.mlsManager?.storage) {
+    if (this.encryptionManager?.storage) {
       await Promise.all(
         data.channels.map(async (channelState) => {
           const isE2ee = (channelState.channel as any)?.mls_enabled === true;
@@ -1853,6 +1959,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         ...(this.deviceId ? { 'X-Device-ID': this.deviceId } : {}),
         ...options.headers,
         ...(axiosRequestConfigHeaders || {}),
+        [E2EE_BYTES_HEADER]: E2EE_BYTES_WIRE_FORMAT,
       },
 
       ...options.config,

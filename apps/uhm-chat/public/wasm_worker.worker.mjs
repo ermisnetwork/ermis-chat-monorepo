@@ -728,7 +728,8 @@ async function __wbg_load(module2, imports) {
       } catch (e) {
         const validResponse = module2.ok && EXPECTED_RESPONSE_TYPES.has(module2.type);
         if (validResponse && module2.headers.get("Content-Type") !== "application/wasm") {
-          console.warn(
+          globalThis.__ermisSdkLog?.(
+            "warn",
             "`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n",
             e
           );
@@ -1033,7 +1034,7 @@ function __wbg_get_imports() {
     return ret;
   };
   imports.wbg.__wbg_log_ee0138cca4957740 = function(arg0, arg1) {
-    console.log(getStringFromWasm0(arg0, arg1));
+    globalThis.__ermisSdkLog?.("info", getStringFromWasm0(arg0, arg1));
   };
   imports.wbg.__wbg_message_bd42dbe3f2f3ed8e = function(arg0, arg1) {
     const ret = getObject(arg1).message;
@@ -1412,7 +1413,7 @@ function initSync(module2) {
     if (Object.getPrototypeOf(module2) === Object.prototype) {
       ({ module: module2 } = module2);
     } else {
-      console.warn("using deprecated parameters for `initSync()`; pass a single object instead");
+      globalThis.__ermisSdkLog?.("warn", "using deprecated parameters for `initSync()`; pass a single object instead");
     }
   }
   const imports = __wbg_get_imports();
@@ -1428,7 +1429,7 @@ async function __wbg_init(module_or_path) {
     if (Object.getPrototypeOf(module_or_path) === Object.prototype) {
       ({ module_or_path } = module_or_path);
     } else {
-      console.warn("using deprecated parameters for the initialization function; pass a single object instead");
+      globalThis.__ermisSdkLog?.("warn", "using deprecated parameters for the initialization function; pass a single object instead");
     }
   }
   if (typeof module_or_path === "undefined") {
@@ -1443,6 +1444,9 @@ async function __wbg_init(module_or_path) {
 }
 
 // src/wasm_worker.ts
+globalThis.__ermisSdkLog = (logLevel, ...args) => {
+  self.postMessage({ type: "sdk_log", logLevel, args });
+};
 var ermisCall = null;
 var isRecvActive = false;
 function sendResult(id, data) {

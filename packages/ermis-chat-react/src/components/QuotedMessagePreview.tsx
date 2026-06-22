@@ -2,6 +2,13 @@ import React, { useMemo } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { replaceMentionsForPreview, buildUserMap } from '../utils';
 import type { QuotedMessagePreviewProps } from '../types';
+import {
+  isImageAttachment,
+  isLinkPreviewAttachment,
+  isStickerMessage,
+  isVideoAttachment,
+  isVoiceRecordingAttachment,
+} from '../messageTypeUtils';
 
 export type { QuotedMessagePreviewProps } from '../types';
 
@@ -12,10 +19,49 @@ function truncateText(text: string, maxLength: number): string {
   return text.slice(0, maxLength).trimEnd() + '…';
 }
 
+function getAttachmentPreview(
+  attachments: NonNullable<QuotedMessagePreviewProps['quotedMessage']['attachments']>,
+  attachmentLabel: string,
+): string {
+  const firstAttachment = attachments[0];
+  if (!firstAttachment) return attachmentLabel;
+
+  if (isLinkPreviewAttachment(firstAttachment) && firstAttachment.title) {
+    return firstAttachment.title;
+  }
+
+  if (firstAttachment.title || firstAttachment.file_name) {
+    return firstAttachment.title || firstAttachment.file_name || attachmentLabel;
+  }
+
+  if (isImageAttachment(firstAttachment)) return attachmentLabel;
+  if (isVideoAttachment(firstAttachment)) return attachmentLabel;
+  if (isVoiceRecordingAttachment(firstAttachment)) return attachmentLabel;
+
+  return attachmentLabel;
+}
+
+function hasUnavailableContent(quotedMessage: QuotedMessagePreviewProps['quotedMessage']): boolean {
+  const hasText = Boolean(quotedMessage.text?.trim());
+  if (hasText) return false;
+  if (isStickerMessage(quotedMessage)) return false;
+  if (quotedMessage.attachments?.length) return false;
+
+  return (
+    quotedMessage.content_type === 'mls' ||
+    Boolean(quotedMessage.mls_ciphertext) ||
+    quotedMessage.e2ee_status === 'failed' ||
+    quotedMessage.e2ee_status === 'decrypting'
+  );
+}
+
 export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.memo(({
   quotedMessage,
   isOwnMessage,
   onClick,
+  attachmentLabel = 'Attachment',
+  unavailableMessageLabel = 'Message unavailable',
+  stickerLabel = 'Sticker',
 }) => {
   const { activeChannel } = useChatClient();
 
@@ -25,12 +71,46 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
 
   const authorName = quotedMessage.user?.name || quotedMessage.user?.id || 'Unknown';
   
-  const rawText = quotedMessage.text || '';
-  const formattedText = useMemo(() => replaceMentionsForPreview(rawText, quotedMessage as any, userMap), [rawText, quotedMessage, userMap]);
-  
-  const previewText = formattedText
-    ? truncateText(formattedText, MAX_PREVIEW_LENGTH)
-    : 'Attachment';
+  const rawText = quotedMessage.text?.trim() || '';
+  const formattedText = useMemo(
+    () => replaceMentionsForPreview(rawText, quotedMessage, userMap),
+    [rawText, quotedMessage, userMap],
+  );
+
+  const preview = useMemo(() => {
+    if (formattedText) {
+      return {
+        text: truncateText(formattedText, MAX_PREVIEW_LENGTH),
+        unavailable: false,
+      };
+    }
+
+    if (isStickerMessage(quotedMessage)) {
+      return {
+        text: stickerLabel,
+        unavailable: false,
+      };
+    }
+
+    if (quotedMessage.attachments?.length) {
+      return {
+        text: getAttachmentPreview(quotedMessage.attachments, attachmentLabel),
+        unavailable: false,
+      };
+    }
+
+    if (hasUnavailableContent(quotedMessage)) {
+      return {
+        text: unavailableMessageLabel,
+        unavailable: true,
+      };
+    }
+
+    return {
+      text: unavailableMessageLabel,
+      unavailable: true,
+    };
+  }, [attachmentLabel, formattedText, quotedMessage, stickerLabel, unavailableMessageLabel]);
 
   const handleClick = () => {
     onClick(quotedMessage.id);
@@ -38,7 +118,9 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
 
   return (
     <div
-      className={`ermis-quoted-message ${isOwnMessage ? 'ermis-quoted-message--own' : ''}`}
+      className={`ermis-quoted-message ${isOwnMessage ? 'ermis-quoted-message--own' : ''}${
+        preview.unavailable ? ' ermis-quoted-message--unavailable' : ''
+      }`}
       onClick={handleClick}
       role="button"
       tabIndex={0}
@@ -47,7 +129,7 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
       }}
     >
       <span className="ermis-quoted-message__author">{authorName}</span>
-      <span className="ermis-quoted-message__text">{previewText}</span>
+      <span className="ermis-quoted-message__text">{preview.text}</span>
     </div>
   );
 });

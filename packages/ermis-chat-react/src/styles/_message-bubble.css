@@ -16,10 +16,23 @@
   background-color: var(--ermis-quote-other-bg-hover);
 }
 
+.ermis-quoted-message--unavailable {
+  border-left-color: var(--ermis-text-muted);
+  background-color: var(--ermis-bg-hover);
+}
+
+.ermis-quoted-message--unavailable:hover {
+  background-color: var(--ermis-bg-hover);
+}
+
 .ermis-quoted-message__author {
   font-size: var(--ermis-font-size-xs);
   font-weight: 600;
   color: var(--ermis-accent);
+}
+
+.ermis-quoted-message--unavailable .ermis-quoted-message__author {
+  color: var(--ermis-text-muted);
 }
 
 .ermis-quoted-message__text {
@@ -28,6 +41,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ermis-quoted-message--unavailable .ermis-quoted-message__text {
+  font-style: italic;
 }
 
 /* Light theme: same approach works since we darken the accent bg */

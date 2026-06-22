@@ -15,7 +15,7 @@
  * # Example
  * ```javascript
  * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) console.warn("Invalid KeyPackage!");
+ * if (!isValid) globalThis.__ermisSdkLog?.('warn', "Invalid KeyPackage!");
  * ```
  */
 export function validate_key_package_bytes(bytes: Uint8Array): boolean;

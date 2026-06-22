@@ -3,6 +3,7 @@ import { StableWSConnection } from './connection';
 import { EVENT_MAP } from './events';
 
 export type Role = 'owner' | 'moder' | 'member' | 'pending' | 'skipped' | string;
+export type E2eeRecoveryPolicy = 'member_assisted' | 'self_owned_only';
 
 /* Unknown Record */
 export type UR = Record<string, unknown>;
@@ -65,6 +66,7 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     mls_enabled_at?: string;
     mls_epoch?: number;
     e2ee_group_id?: string;
+    e2ee_recovery_policy?: E2eeRecoveryPolicy;
   };
 
 export type QueryChannelsAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = APIResponse & {
@@ -140,7 +142,7 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     latest_reactions?: ReactionResponse<ErmisChatGenerics>[];
     mentioned_users?: string[];
     device_id?: string;
-    mls_ciphertext?: number[];
+    mls_ciphertext?: Uint8Array;
     mls_epoch?: number;
     e2ee_group_id?: string;
     old_texts?: Array<{ text: string; created_at: string }>;
@@ -247,7 +249,7 @@ export type ErmisChatOptions = AxiosRequestConfig & {
   browser?: boolean;
   enableInsights?: boolean;
   /** experimental feature, please contact support if you want this feature enabled for you */
-  logger?: Logger;
+  logger?: LoggerOption;
   /**
    * When network is recovered, we re-query the active channels on client. But in single query, you can recover
    * only 30 channels. So its not guaranteed that all the channels in activeChannels object have updated state.
@@ -299,9 +301,10 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
     type?: 'commit' | 'welcome' | 'external_commit' | 'proposal' | string;
     type_field?: string;
     cid?: string;
-    commit?: number[];
-    welcome?: number[];
-    ratchet_tree?: number[];
+    commit?: Uint8Array;
+    welcome?: Uint8Array;
+    ratchet_tree?: Uint8Array;
+    proposal?: Uint8Array;
     epoch?: number;
     target_user_ids?: string[];
     device_id?: string;
@@ -347,6 +350,7 @@ export type CreateTopicData = {
   image?: string;
   gate?: boolean;
   mls_enabled?: boolean;
+  e2ee_recovery_policy?: E2eeRecoveryPolicy;
   [key: string]: any;
 };
 
@@ -406,30 +410,31 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     name?: string;
     is_pinned?: boolean;
     mls_enabled?: boolean;
+    e2ee_recovery_policy?: E2eeRecoveryPolicy;
     e2ee_group_id?: string;
     gate?: boolean;
     /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
-    commit?: number[];
-    welcome?: number[];
-    ratchet_tree?: number[];
-    group_info?: number[];
+    commit?: Uint8Array;
+    welcome?: Uint8Array;
+    ratchet_tree?: Uint8Array;
+    group_info?: Uint8Array;
     epoch?: number;
   };
 
-/** MLS protocol fields required for E2EE add_members operations. */
+/** Encryption protocol fields required for E2EE add_members operations. */
 export type E2EEAddMembersOptions = {
-  commit: number[];
-  welcome: number[];
-  ratchet_tree: number[];
+  commit: Uint8Array;
+  welcome: Uint8Array;
+  ratchet_tree: Uint8Array;
   epoch: number;
-  group_info: number[];
+  group_info: Uint8Array;
 };
 
-/** MLS protocol fields required for E2EE remove_members operations. */
+/** Encryption protocol fields required for E2EE remove_members operations. */
 export type E2EERemoveMembersOptions = {
-  commit: number[];
+  commit: Uint8Array;
   epoch: number;
-  group_info: number[];
+  group_info: Uint8Array;
 };
 
 export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
@@ -453,6 +458,8 @@ export type LiteralStringForUnion = string & {};
 export type LogLevel = 'info' | 'error' | 'warn';
 
 export type Logger = (logLevel: LogLevel, message: string, extraData?: Record<string, unknown>) => void;
+
+export type LoggerOption = Logger | LogLevel[];
 
 export type Message<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = Partial<
   MessageBase<ErmisChatGenerics>
@@ -521,6 +528,7 @@ export type MessageSetType = 'latest' | 'current' | 'new';
 
 export type APIErrorResponse = {
   code: number;
+  ermis_code?: number;
   duration: string;
   message: string;
   more_info: string;

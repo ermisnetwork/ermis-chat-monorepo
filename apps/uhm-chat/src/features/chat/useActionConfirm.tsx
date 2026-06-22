@@ -35,6 +35,10 @@ const CONFIRM_ACTIONS: Record<string, { titleKey: string; messageKey: string }> 
     titleKey: 'actions.confirm_truncate_title',
     messageKey: 'actions.confirm_truncate_message',
   },
+  reset_encrypted: {
+    titleKey: 'actions.confirm_reset_encrypted_title',
+    messageKey: 'actions.confirm_reset_encrypted_message',
+  },
 }
 
 /* ----------------------------------------------------------

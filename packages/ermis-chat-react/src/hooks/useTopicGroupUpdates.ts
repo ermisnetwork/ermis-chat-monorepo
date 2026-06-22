@@ -52,6 +52,17 @@ export function useTopicGroupUpdates(
   // Subscribe to realtime events on parent + all topics
   useEffect(() => {
     const subs: { unsubscribe: () => void }[] = [];
+    const client = channel.getClient();
+    const isTopicGroupCid = (cid?: string) => {
+      if (!cid) return false;
+      if (cid === channel.cid) return true;
+      return (channel.state?.topics || []).some((topic: Channel) => topic.cid === cid);
+    };
+    const handleE2eePreviewUpdate = (event: any) => {
+      if (isTopicGroupCid(event?.cid)) {
+        bump();
+      }
+    };
 
     // Parent channel events
     subs.push(channel.on('message.new', bump));
@@ -61,6 +72,9 @@ export function useTopicGroupUpdates(
     subs.push(channel.on('channel.topic.created', bump));
     subs.push(channel.on('channel.pinned', bump));
     subs.push(channel.on('channel.unpinned', bump));
+    subs.push(client.on('e2ee.message_decrypted' as any, handleE2eePreviewUpdate));
+    subs.push(client.on('e2ee.local_messages_loaded' as any, handleE2eePreviewUpdate));
+    subs.push(client.on('e2ee.post_join_sync' as any, handleE2eePreviewUpdate));
 
     // Topic children events
     const currentTopics = channel.state?.topics || [];
@@ -194,4 +208,3 @@ export function useTopicGroupUpdates(
 
   return { topics, aggregatedUnreadCount, hasUnread, updateCount, latestMessagePreview };
 }
-

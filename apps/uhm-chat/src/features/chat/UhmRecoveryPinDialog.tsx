@@ -1,542 +1,489 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-import { KeyRound, Loader2, LockOpen, RefreshCw, RotateCcw, ShieldPlus, X } from 'lucide-react'
-import { useChatClient, useRecoveryPin } from '@ermis-network/ermis-chat-react'
-import type { RecoveryRestoredMessage } from '@ermis-network/ermis-chat-react'
-import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk'
-import { Button } from '@/components/ui/button'
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { RECOVERY_PIN_CONFIG } from '@/utils/constants'
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  KeyRound,
+  Loader2,
+  LockOpen,
+  RotateCcw,
+  ShieldPlus,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { useChatClient, useRecoveryPin } from '@ermis-network/ermis-chat-react';
+import type { RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { RECOVERY_PIN_CONFIG } from '@/utils/constants';
 
-type RecoveryMode = 'unlock' | 'setup' | 'change' | 'restore'
-type RecoveryDialogVariant = 'channel' | 'gate'
+type RecoveryDialogVariant = 'account' | 'gate' | 'repair';
 
 type UhmRecoveryPinDialogProps = {
-  isOpen: boolean
-  onClose: () => void
-  channel: ChannelType | null | undefined
-  variant?: RecoveryDialogVariant
-  onSkip?: () => void
-  onUnlocked?: () => void
-}
+  isOpen: boolean;
+  onClose: () => void;
+  variant?: RecoveryDialogVariant;
+  onSkip?: () => void;
+  onUnlocked?: () => void;
+};
 
-type MlsRecoveryManager = {
-  initialized?: boolean
-  archiveCurrentEpoch?: (channelType: string, channelId: string) => Promise<void>
-  getEpoch?: (cid: string) => number
-}
+type ActiveChannelMember = {
+  user?: {
+    id?: unknown;
+    name?: unknown;
+    email?: unknown;
+  };
+};
 
-const DIGITS_ONLY = /^\d+$/
-
-const toErrorMessage = (err: unknown): string => (
-  err instanceof Error ? err.message : String(err)
-)
-
-const getRestoredText = (plaintext: unknown): string => {
-  if (typeof plaintext === 'string') return plaintext
-  if (plaintext && typeof plaintext === 'object') {
-    const text = (plaintext as { text?: unknown }).text
-    if (typeof text === 'string') return text
-    try {
-      return JSON.stringify(plaintext)
-    } catch {
-      return ''
-    }
+type ActiveChannelLookup = Record<
+  string,
+  {
+    data?: { name?: unknown };
+    state?: { members?: Record<string, ActiveChannelMember> };
   }
-  return ''
-}
+>;
+
+const DIGITS_ONLY = /^\d+$/;
+
+const toErrorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+const formatEpochs = (epochs: number[]): string => epochs.slice(0, 8).join(', ');
+
+const reasonFallbackKey = (record: RestoreProgressRecord, hasVault: boolean): string => {
+  if (!hasVault) return 'pin_not_setup';
+  if (record.requires_user_action === 'unlock_recovery_vault') return 'pin_locked';
+  return 'unknown';
+};
+
+const activeChannelName = (
+  record: RestoreProgressRecord,
+  activeChannels: ActiveChannelLookup | undefined,
+  currentUserId: string | undefined,
+): string => {
+  const channel = activeChannels?.[record.cid];
+  const named = channel?.data?.name;
+  if (typeof named === 'string' && named.trim()) return named.trim();
+
+  const members = channel?.state?.members ? Object.values(channel.state.members) : [];
+  const otherMember = members.find((member) => typeof member.user?.id === 'string' && member.user.id !== currentUserId);
+  const otherName = [otherMember?.user?.name, otherMember?.user?.email, otherMember?.user?.id].find(
+    (value): value is string => typeof value === 'string' && value.trim().length > 0,
+  );
+  if (otherName) return otherName.trim();
+
+  return record.channel_id || record.cid;
+};
 
 export function UhmRecoveryPinDialog({
   isOpen,
   onClose,
-  channel,
-  variant = 'channel',
+  variant = 'account',
   onSkip,
   onUnlocked,
 }: UhmRecoveryPinDialogProps) {
-  const { t } = useTranslation()
-  const { client } = useChatClient()
-  const recovery = useRecoveryPin()
-  const { refresh } = recovery
-  const mlsManager = client?.mlsManager as MlsRecoveryManager | undefined
-  const mlsInitialized = mlsManager?.initialized === true
-  const isGate = variant === 'gate'
-  const isE2eeChannel = channel?.data?.mls_enabled === true
-  const currentEpoch = channel?.cid && typeof mlsManager?.getEpoch === 'function'
-    ? mlsManager.getEpoch(channel.cid)
-    : undefined
+  const { t } = useTranslation();
+  const { client } = useChatClient();
+  const recovery = useRecoveryPin();
+  const { refresh } = recovery;
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [isChanging, setIsChanging] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const isGate = variant === 'gate';
+  const isRepair = variant === 'repair';
+  const encryptionInitialized = client?.encryptionManager?.initialized === true;
+  const hasVault = recovery.recoveryStatus?.hasVault === true;
+  const unlocked = recovery.recoveryStatus?.unlocked === true;
+  const working = recovery.status === 'working';
+  const issueRecords = useMemo(
+    () => recovery.recoveryStatus?.restoreProgressWithIssues || [],
+    [recovery.recoveryStatus?.restoreProgressWithIssues],
+  );
+  const activeChannels = client?.activeChannels as ActiveChannelLookup | undefined;
+  const historyIssueRows = useMemo(
+    () =>
+      issueRecords
+        .map((record) => {
+          const epochs = Array.from(
+            new Set([
+              ...(record.target_epochs || []),
+              ...(record.permanent_gaps || []).map((gap) => gap.epoch),
+              ...(record.transient_failures || []).map((failure) => failure.epoch),
+              ...(record.repair_issues || [])
+                .map((issue) => issue.mls_epoch)
+                .filter((epoch): epoch is number => typeof epoch === 'number'),
+            ]),
+          ).sort((a, b) => a - b);
+          const messageIds = new Set(
+            (record.repair_issues || [])
+              .map((issue) => issue.message_id)
+              .filter((messageId) => messageId && !messageId.startsWith('legacy-epoch-')),
+          );
+          const fallbackIssueCount =
+            (record.repair_issues || []).length ||
+            (record.permanent_gaps || []).length ||
+            (record.transient_failures || []).length ||
+            epochs.length;
+          const reasonCounts = new Map<string, number>();
+          const addReason = (reason?: string) => {
+            if (!reason) return;
+            reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+          };
+          for (const issue of record.repair_issues || []) addReason(issue.reason);
+          for (const gap of record.permanent_gaps || []) addReason(gap.reason);
+          for (const failure of record.transient_failures || []) addReason(failure.reason);
+          if (reasonCounts.size === 0) addReason(reasonFallbackKey(record, hasVault));
+          const primaryReason = Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || 'unknown';
 
-  const [mode, setMode] = useState<RecoveryMode>('unlock')
-  const [pin, setPin] = useState('')
-  const [confirmPin, setConfirmPin] = useState('')
-  const [oldPin, setOldPin] = useState('')
-  const [newPin, setNewPin] = useState('')
-  const [fromEpoch, setFromEpoch] = useState('')
-  const [toEpoch, setToEpoch] = useState('')
-  const [restored, setRestored] = useState<RecoveryRestoredMessage[] | null>(null)
-  const [localError, setLocalError] = useState<string | null>(null)
+          return {
+            cid: record.cid,
+            title: activeChannelName(record, activeChannels, client?.userID),
+            messageCount: Math.max(messageIds.size || fallbackIssueCount, 1),
+            epochs,
+            primaryReason,
+          };
+        })
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    [activeChannels, client?.userID, hasVault, issueRecords],
+  );
+  const historyIssueCount = historyIssueRows.reduce((total, row) => total + row.messageCount, 0);
+  const showHistoryIssues = !isGate && !isRepair && historyIssueRows.length > 0;
+  const dialogTitle = isGate
+    ? t('recovery_pin.gate_title')
+    : isRepair
+    ? t(hasVault ? 'recovery_pin.repair_title' : 'recovery_pin.repair_setup_title')
+    : t('recovery_pin.account_title');
+  const setupDescription = isRepair
+    ? t('recovery_pin.repair_setup_description')
+    : isGate
+    ? t('recovery_pin.gate_setup_description')
+    : t('recovery_pin.setup_note');
+  const setupActionLabel = isRepair ? t('recovery_pin.repair_setup_action') : t('recovery_pin.setup_action');
+  const unlockDescription = isRepair
+    ? t('recovery_pin.repair_description')
+    : isGate
+    ? t('recovery_pin.gate_generic_description')
+    : t('recovery_pin.unlock_description');
+  const unlockActionLabel = isRepair
+    ? t('recovery_pin.repair_unlock_action')
+    : isGate
+    ? t('recovery_pin.gate_restore_action')
+    : t('recovery_pin.unlock_action');
 
   useEffect(() => {
-    if (!isOpen) {
-      setPin('')
-      setConfirmPin('')
-      setOldPin('')
-      setNewPin('')
-      setFromEpoch('')
-      setToEpoch('')
-      setRestored(null)
-      setLocalError(null)
-      return
-    }
+    if (isOpen) refresh();
+  }, [isOpen, refresh]);
 
-    if (mlsInitialized) {
-      refresh()
-    }
-  }, [isOpen, mlsInitialized, refresh])
+  const validatePin = useCallback(
+    (value: string): string | null => {
+      if (!value) return null;
+      if (!DIGITS_ONLY.test(value)) return t('recovery_pin.errors.digits_only');
+      if (value.length < RECOVERY_PIN_CONFIG.MIN_DIGITS) {
+        return t('recovery_pin.errors.min_digits', { count: RECOVERY_PIN_CONFIG.MIN_DIGITS });
+      }
+      return null;
+    },
+    [t],
+  );
 
-  useEffect(() => {
-    if (isOpen && !isGate && recovery.hasRecoveryKey) {
-      setMode('restore')
-    }
-  }, [isGate, isOpen, recovery.hasRecoveryKey])
-
-  const validatePin = useCallback((value: string): string | null => {
-    if (!value) return null
-    if (!DIGITS_ONLY.test(value)) return t('recovery_pin.errors.digits_only')
-    if (value.length < RECOVERY_PIN_CONFIG.MIN_DIGITS) {
-      return t('recovery_pin.errors.min_digits', { count: RECOVERY_PIN_CONFIG.MIN_DIGITS })
-    }
-    return null
-  }, [t])
-
-  const parseOptionalEpoch = useCallback((value: string, label: string): number | undefined => {
-    const trimmed = value.trim()
-    if (!trimmed) return undefined
-    const parsed = Number(trimmed)
-    if (!Number.isInteger(parsed) || parsed < 0) {
-      throw new Error(t('recovery_pin.errors.invalid_epoch', { label }))
-    }
-    return parsed
-  }, [t])
-
-  const archiveCurrentChannel = useCallback(async () => {
-    if (!channel?.id || !channel.type || !mlsManager?.archiveCurrentEpoch || !isE2eeChannel) return
-    await mlsManager.archiveCurrentEpoch(channel.type, channel.id)
-  }, [channel?.id, channel?.type, isE2eeChannel, mlsManager])
+  const validationError =
+    validatePin(pin) || (confirmPin && pin !== confirmPin ? t('recovery_pin.errors.pin_mismatch') : null);
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
-    setLocalError(null)
+    setLocalError(null);
     try {
-      await action()
+      await action();
     } catch (err) {
-      const message = toErrorMessage(err)
-      setLocalError(message)
-      toast.error(message)
+      const message = toErrorMessage(err);
+      setLocalError(message);
+      toast.error(message);
     }
-  }, [])
+  }, []);
 
-  const setupError = validatePin(pin) || (confirmPin && pin !== confirmPin ? t('recovery_pin.errors.pin_mismatch') : null)
-  const unlockError = validatePin(pin)
-  const changeError = validatePin(oldPin) || validatePin(newPin)
-  const working = recovery.status === 'working'
-  const restoredCount = restored?.filter((item) => !item.gap).length ?? 0
-  const gapCount = restored?.filter((item) => item.gap).length ?? 0
+  const finishUnlock = () => {
+    setPin('');
+    setConfirmPin('');
+    setIsChanging(false);
+    onUnlocked?.();
+  };
 
-  const tabs = useMemo(() => ([
-    { id: 'unlock' as const, label: t('recovery_pin.tabs.unlock'), icon: LockOpen },
-    { id: 'setup' as const, label: t('recovery_pin.tabs.setup'), icon: ShieldPlus },
-    { id: 'change' as const, label: t('recovery_pin.tabs.change'), icon: RotateCcw },
-    { id: 'restore' as const, label: t('recovery_pin.tabs.restore'), icon: RefreshCw },
-  ]), [t])
+  const handleClose = () => {
+    setPin('');
+    setConfirmPin('');
+    setIsChanging(false);
+    setDetailsOpen(false);
+    setLocalError(null);
+    onClose();
+  };
 
   const handleSetup = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (setupError || working) return
-    runAction(async () => {
-      await recovery.setupRecoveryPin(pin)
-      try {
-        await archiveCurrentChannel()
-      } catch (err) {
-        console.warn('[PIN Recovery] Current epoch archive failed', err)
-        toast.warning(t('recovery_pin.archive_warning'))
-      }
-      toast.success(t('recovery_pin.setup_success'))
-      setPin('')
-      setConfirmPin('')
-      if (isGate) {
-        onUnlocked?.()
-        return
-      }
-      setMode('restore')
-    })
-  }
+    event.preventDefault();
+    if (!pin || !confirmPin || validationError || working) return;
+    void runAction(async () => {
+      await recovery.setupRecoveryPin(pin);
+      toast.success(t('recovery_pin.setup_success'));
+      finishUnlock();
+    });
+  };
 
   const handleUnlock = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (unlockError || !pin || working) return
-    runAction(async () => {
-      await recovery.unlockRecoveryVault(pin)
-      toast.success(t('recovery_pin.unlock_success'))
-      setPin('')
-      if (isGate) {
-        onUnlocked?.()
-        return
-      }
-      setMode('restore')
-    })
-  }
+    event.preventDefault();
+    if (!pin || validationError || working) return;
+    void runAction(async () => {
+      await recovery.unlockRecoveryVault(pin);
+      toast.success(t('recovery_pin.unlock_success'));
+      finishUnlock();
+    });
+  };
 
   const handleChange = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (changeError || !oldPin || !newPin || working) return
-    runAction(async () => {
-      await recovery.changeRecoveryPin(oldPin, newPin)
-      toast.success(t('recovery_pin.change_success'))
-      setOldPin('')
-      setNewPin('')
-      setMode('restore')
-    })
-  }
+    event.preventDefault();
+    if (!pin || !confirmPin || validationError || working) return;
+    void runAction(async () => {
+      await recovery.changeUnlockedRecoveryPin(pin);
+      toast.success(t('recovery_pin.change_success'));
+      setPin('');
+      setConfirmPin('');
+      setIsChanging(false);
+    });
+  };
 
-  const handleRestore = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!channel?.id || !channel.type || working) return
-    runAction(async () => {
-      const from = parseOptionalEpoch(fromEpoch, t('recovery_pin.from_epoch'))
-      const to = parseOptionalEpoch(toEpoch, t('recovery_pin.to_epoch'))
-      const options = from === undefined && to === undefined ? undefined : { fromEpoch: from, toEpoch: to }
-      const result = await recovery.restoreHistoricalMessages(channel.type, channel.id!, options)
-      setRestored(result)
-      const ok = result.filter((item) => !item.gap).length
-      const gaps = result.length - ok
-      toast.success(t('recovery_pin.restore_success', { count: ok, gaps }))
-    })
-  }
-
-  const renderBody = () => {
-    if (!mlsInitialized) {
-      return (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
-          {t('recovery_pin.mls_unavailable')}
+  const renderPinFields = (confirm: boolean) => (
+    <div className={confirm ? 'grid grid-cols-2 gap-3' : undefined}>
+      <div className="space-y-1.5">
+        <Label htmlFor="recovery-pin" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
+          {confirm ? t('recovery_pin.new_pin_label') : t('recovery_pin.pin_label')}
+        </Label>
+        <Input
+          id="recovery-pin"
+          type="password"
+          inputMode="numeric"
+          autoComplete={confirm ? 'new-password' : 'current-password'}
+          value={pin}
+          onChange={(event) => setPin(event.target.value)}
+          placeholder={t('recovery_pin.pin_placeholder')}
+          disabled={working}
+          className="h-10"
+          autoFocus
+        />
+      </div>
+      {confirm && (
+        <div className="space-y-1.5">
+          <Label htmlFor="recovery-pin-confirm" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
+            {t('recovery_pin.confirm_pin_label')}
+          </Label>
+          <Input
+            id="recovery-pin-confirm"
+            type="password"
+            inputMode="numeric"
+            autoComplete="new-password"
+            value={confirmPin}
+            onChange={(event) => setConfirmPin(event.target.value)}
+            placeholder={t('recovery_pin.confirm_pin_placeholder')}
+            disabled={working}
+            className="h-10"
+          />
         </div>
-      )
-    }
+      )}
+    </div>
+  );
 
-    if (!isGate && !isE2eeChannel) {
-      return (
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[13px] font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-300">
-          {t('recovery_pin.e2ee_required')}
+  const actionButton = (label: string) => (
+    <Button type="submit" disabled={!pin || !!validationError || working} className="w-full">
+      {working && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+      {label}
+    </Button>
+  );
+
+  const issueReasonLabel = (reason: string) =>
+    t(`recovery_pin.history_issue_reason.${reason}`, {
+      defaultValue: t(`recovery_pin.gap_reason.${reason}`, {
+        defaultValue: t('recovery_pin.history_issue_reason.unknown'),
+      }),
+    });
+
+  const historyIssuesPanel = showHistoryIssues ? (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/80 text-amber-950 shadow-sm dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">
+      <div className="flex items-start gap-3 px-3 py-3">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold">{t('recovery_pin.status_restore_gaps')}</div>
+          <div className="mt-0.5 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
+            {t('recovery_pin.history_issue_summary', {
+              channels: historyIssueRows.length,
+              messages: historyIssueCount,
+            })}
+          </div>
         </div>
-      )
-    }
-
-    const activeMode = isGate
-      ? recovery.recoveryStatus?.hasVault === false ? 'setup' : 'unlock'
-      : mode
-
-    return (
-      <>
-        {isGate && activeMode === 'unlock' && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] font-medium text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">
-            {(recovery.recoveryStatus?.incompleteChannels.length || 0) > 0
-              ? t('recovery_pin.gate_description', {
-                count: recovery.recoveryStatus?.incompleteChannels.length || 0,
-              })
-              : t('recovery_pin.gate_generic_description')}
-          </div>
-        )}
-
-        {isGate && activeMode === 'setup' && (
-          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[13px] font-medium text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
-            {t('recovery_pin.gate_setup_description')}
-          </div>
-        )}
-
-        {!isGate && (
-          <div className="grid grid-cols-4 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800/60">
-            {tabs.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setMode(id)
-                  setLocalError(null)
-                }}
-                className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-md text-[12px] font-semibold transition-colors ${
-                  mode === id
-                    ? 'bg-white text-zinc-950 shadow-sm dark:bg-zinc-950 dark:text-zinc-50'
-                    : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100'
-                }`}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setDetailsOpen((open) => !open)}
+          className="h-7 shrink-0 px-2 text-[12px] font-semibold text-amber-800 hover:bg-amber-100 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-500/20"
+          aria-expanded={detailsOpen}
+        >
+          {t('recovery_pin.history_issue_detail_action')}
+          <ChevronDown className={`ml-1 h-3.5 w-3.5 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} />
+        </Button>
+      </div>
+      {detailsOpen && (
+        <div className="border-t border-amber-200/80 px-3 pb-3 pt-2 dark:border-amber-500/20">
+          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            {historyIssueRows.map((row) => (
+              <div
+                key={row.cid}
+                className="rounded-md border border-amber-200/70 bg-white/80 px-3 py-2 dark:border-amber-500/20 dark:bg-zinc-950/30"
               >
-                <Icon className="h-3.5 w-3.5" />
-                <span className="truncate">{label}</span>
-              </button>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-semibold text-zinc-950 dark:text-zinc-100">
+                      {row.title}
+                    </div>
+                    <div className="mt-1 text-[12px] leading-5 text-zinc-600 dark:text-zinc-300">
+                      {t('recovery_pin.history_issue_message_count', { count: row.messageCount })}
+                    </div>
+                  </div>
+                  <div className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-100">
+                    {row.epochs.length > 0
+                      ? t('recovery_pin.history_issue_epochs', { epochs: formatEpochs(row.epochs) })
+                      : t('recovery_pin.history_issue_epoch_unknown')}
+                  </div>
+                </div>
+                <div className="mt-2 text-[12px] leading-5 text-zinc-700 dark:text-zinc-200">
+                  {t('recovery_pin.history_issue_primary_reason', { reason: issueReasonLabel(row.primaryReason) })}
+                </div>
+              </div>
             ))}
           </div>
-        )}
-
-        {activeMode === 'unlock' && (
-          <form className="space-y-4" onSubmit={handleUnlock}>
-            <div className="space-y-1.5">
-              <Label htmlFor="recovery-unlock-pin" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
-                {t('recovery_pin.pin_label')}
-              </Label>
-              <Input
-                id="recovery-unlock-pin"
-                type="password"
-                inputMode="numeric"
-                autoComplete="current-password"
-                value={pin}
-                onChange={(event) => setPin(event.target.value)}
-                placeholder={t('recovery_pin.pin_placeholder')}
-                disabled={working}
-                className="h-10"
-              />
-            </div>
-            {unlockError && <ErrorText>{unlockError}</ErrorText>}
-            <Button type="submit" disabled={!pin || !!unlockError || working} className="w-full">
-              {working && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isGate ? t('recovery_pin.gate_restore_action') : t('recovery_pin.unlock_action')}
-            </Button>
-            {isGate && onSkip && (
-              <Button type="button" variant="ghost" disabled={working} onClick={onSkip} className="w-full">
-                {t('recovery_pin.gate_skip_action')}
-              </Button>
-            )}
-          </form>
-        )}
-
-        {activeMode === 'setup' && (
-          <form className="space-y-4" onSubmit={handleSetup}>
-            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] font-medium text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
-              {t('recovery_pin.setup_note')}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="recovery-new-pin" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
-                  {t('recovery_pin.new_pin_label')}
-                </Label>
-                <Input
-                  id="recovery-new-pin"
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="new-password"
-                  value={pin}
-                  onChange={(event) => setPin(event.target.value)}
-                  placeholder={t('recovery_pin.pin_placeholder')}
-                  disabled={working}
-                  className="h-10"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="recovery-confirm-pin" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
-                  {t('recovery_pin.confirm_pin_label')}
-                </Label>
-                <Input
-                  id="recovery-confirm-pin"
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="new-password"
-                  value={confirmPin}
-                  onChange={(event) => setConfirmPin(event.target.value)}
-                  placeholder={t('recovery_pin.confirm_pin_placeholder')}
-                  disabled={working}
-                  className="h-10"
-                />
-              </div>
-            </div>
-            {setupError && <ErrorText>{setupError}</ErrorText>}
-            <Button type="submit" disabled={!pin || !confirmPin || !!setupError || working} className="w-full">
-              {working && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t('recovery_pin.setup_action')}
-            </Button>
-            {isGate && onSkip && (
-              <Button type="button" variant="ghost" disabled={working} onClick={onSkip} className="w-full">
-                {t('recovery_pin.gate_skip_action')}
-              </Button>
-            )}
-          </form>
-        )}
-
-        {!isGate && mode === 'change' && (
-          <form className="space-y-4" onSubmit={handleChange}>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="recovery-old-pin" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
-                  {t('recovery_pin.current_pin_label')}
-                </Label>
-                <Input
-                  id="recovery-old-pin"
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="current-password"
-                  value={oldPin}
-                  onChange={(event) => setOldPin(event.target.value)}
-                  placeholder={t('recovery_pin.current_pin_placeholder')}
-                  disabled={working}
-                  className="h-10"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="recovery-change-pin" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
-                  {t('recovery_pin.new_pin_label')}
-                </Label>
-                <Input
-                  id="recovery-change-pin"
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="new-password"
-                  value={newPin}
-                  onChange={(event) => setNewPin(event.target.value)}
-                  placeholder={t('recovery_pin.pin_placeholder')}
-                  disabled={working}
-                  className="h-10"
-                />
-              </div>
-            </div>
-            {changeError && <ErrorText>{changeError}</ErrorText>}
-            <Button type="submit" disabled={!oldPin || !newPin || !!changeError || working} className="w-full">
-              {working && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t('recovery_pin.change_action')}
-            </Button>
-          </form>
-        )}
-
-        {!isGate && mode === 'restore' && (
-          <form className="space-y-4" onSubmit={handleRestore}>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="recovery-from-epoch" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
-                  {t('recovery_pin.from_epoch')}
-                </Label>
-                <Input
-                  id="recovery-from-epoch"
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={fromEpoch}
-                  onChange={(event) => setFromEpoch(event.target.value)}
-                  placeholder={t('recovery_pin.epoch_placeholder')}
-                  disabled={working}
-                  className="h-10"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="recovery-to-epoch" className="text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
-                  {t('recovery_pin.to_epoch')}
-                </Label>
-                <Input
-                  id="recovery-to-epoch"
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={toEpoch}
-                  onChange={(event) => setToEpoch(event.target.value)}
-                  placeholder={typeof currentEpoch === 'number' && currentEpoch >= 0 ? String(currentEpoch) : t('recovery_pin.epoch_placeholder')}
-                  disabled={working}
-                  className="h-10"
-                />
-              </div>
-            </div>
-            <Button type="submit" disabled={!channel?.id || working} className="w-full">
-              {working && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t('recovery_pin.restore_action')}
-            </Button>
-
-            {restored && (
-              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-                <div className="mb-2 text-[12px] font-semibold text-zinc-600 dark:text-zinc-300">
-                  {t('recovery_pin.restore_summary', { count: restoredCount, gaps: gapCount })}
-                </div>
-                <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
-                  {restored.slice(0, RECOVERY_PIN_CONFIG.RESTORE_PREVIEW_LIMIT).map((item, index) => (
-                    <div
-                      key={`${item.epoch}:${item.messageId || index}`}
-                      className="rounded-md bg-white px-3 py-2 text-[12px] text-zinc-700 shadow-sm dark:bg-zinc-950/60 dark:text-zinc-200"
-                    >
-                      <div className="mb-1 flex items-center justify-between gap-2 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                        <span>{t('recovery_pin.epoch_label', { epoch: item.epoch })}</span>
-                        {item.messageId && <span className="truncate font-mono">{item.messageId}</span>}
-                      </div>
-                      {item.gap ? (
-                        <span className="text-amber-700 dark:text-amber-300">
-                          {t(`recovery_pin.gap_reason.${item.reason || 'unknown'}`)}
-                        </span>
-                      ) : (
-                        <span className="line-clamp-3">{getRestoredText(item.plaintext) || t('recovery_pin.empty_plaintext')}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </form>
-        )}
-
-        {(localError || recovery.error) && (
-          <ErrorText>{localError || recovery.error?.message}</ErrorText>
-        )}
-      </>
-    )
-  }
+        </div>
+      )}
+    </div>
+  ) : null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-[480px] gap-0 overflow-hidden p-0">
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) handleClose();
+      }}
+    >
+      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-[480px]">
         <DialogHeader className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
           <DialogTitle className="flex items-center gap-2 text-[16px]">
             <KeyRound className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
-            {isGate ? t('recovery_pin.gate_title') : t('recovery_pin.title')}
+            {dialogTitle}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 p-5">
-          {!isGate && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/30">
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                  {channel?.data?.name || channel?.id || t('recovery_pin.no_channel')}
-                </div>
-                <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                  {typeof currentEpoch === 'number' && currentEpoch >= 0
-                    ? t('recovery_pin.current_epoch', { epoch: currentEpoch })
-                    : t('recovery_pin.epoch_unknown')}
-                </div>
-              </div>
-              <div className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold ${
-                recovery.hasRecoveryKey
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                  : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
-              }`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${recovery.hasRecoveryKey ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
-                {recovery.hasRecoveryKey ? t('recovery_pin.status_ready') : t('recovery_pin.status_locked')}
-              </div>
+          {!encryptionInitialized && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+              {t('recovery_pin.encryption_unavailable')}
             </div>
           )}
 
-          {renderBody()}
+          {encryptionInitialized && recovery.recoveryStatus === null && (
+            <div className="flex items-center justify-center py-8 text-zinc-500">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          )}
+
+          {encryptionInitialized && recovery.recoveryStatus && !hasVault && (
+            <form className="space-y-4" onSubmit={handleSetup}>
+              <div className="flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-[12px] font-medium text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
+                <ShieldPlus className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{setupDescription}</span>
+              </div>
+              {renderPinFields(true)}
+              {validationError && <ErrorText>{validationError}</ErrorText>}
+              {actionButton(setupActionLabel)}
+              {isGate && onSkip && (
+                <Button type="button" variant="ghost" disabled={working} onClick={onSkip} className="w-full">
+                  {t('recovery_pin.gate_skip_action')}
+                </Button>
+              )}
+            </form>
+          )}
+
+          {encryptionInitialized && hasVault && !unlocked && (
+            <form className="space-y-4" onSubmit={handleUnlock}>
+              <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] font-medium text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">
+                <LockOpen className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{unlockDescription}</span>
+              </div>
+              {renderPinFields(false)}
+              {validationError && <ErrorText>{validationError}</ErrorText>}
+              {actionButton(unlockActionLabel)}
+              {isGate && onSkip && (
+                <Button type="button" variant="ghost" disabled={working} onClick={onSkip} className="w-full">
+                  {t('recovery_pin.gate_skip_action')}
+                </Button>
+              )}
+            </form>
+          )}
+
+          {encryptionInitialized && hasVault && unlocked && !isChanging && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                <div>
+                  <div className="text-[13px] font-semibold text-emerald-900 dark:text-emerald-100">
+                    {t('recovery_pin.active_title')}
+                  </div>
+                  <div className="mt-0.5 text-[12px] text-emerald-700 dark:text-emerald-300">
+                    {t('recovery_pin.active_description')}
+                  </div>
+                </div>
+              </div>
+              {!isGate && (
+                <>
+                  {historyIssuesPanel}
+                  <Button type="button" variant="outline" onClick={() => setIsChanging(true)} className="w-full">
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    {t('recovery_pin.change_action')}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
+          {encryptionInitialized && hasVault && unlocked && isChanging && (
+            <form className="space-y-4" onSubmit={handleChange}>
+              {renderPinFields(true)}
+              {validationError && <ErrorText>{validationError}</ErrorText>}
+              {actionButton(t('recovery_pin.save_new_pin'))}
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={working}
+                onClick={() => {
+                  setPin('');
+                  setConfirmPin('');
+                  setIsChanging(false);
+                }}
+                className="w-full"
+              >
+                {t('common.cancel', 'Cancel')}
+              </Button>
+            </form>
+          )}
+
+          {(localError || recovery.error) && <ErrorText>{localError || recovery.error?.message}</ErrorText>}
         </div>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
 
-function ErrorText({ children }: { children: string | null | undefined }) {
-  if (!children) return null
-
+function ErrorText({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-[12px] font-medium text-red-600 dark:bg-red-500/10 dark:text-red-300">
-      <X className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>{children}</span>
+    <div className="rounded-md bg-red-50 px-3 py-2 text-[12px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300">
+      {children}
     </div>
-  )
+  );
 }

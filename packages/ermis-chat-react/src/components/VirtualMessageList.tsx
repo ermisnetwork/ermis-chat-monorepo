@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect, useLayoutEffect } from 'react';
 import { VList as _VList, type VListHandle } from 'virtua';
 
 // Workaround for React 19 JSX element type mismatch with virtua's VList
@@ -168,6 +168,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   collapseLabel,
   unpinLabel,
   stickerLabel,
+  attachmentLabel = 'Attachment',
+  unavailableMessageLabel = 'Message unavailable',
   typingIndicatorLabel,
   deletedMessageLabel = 'This message was deleted',
   systemMessageTranslations,
@@ -302,11 +304,26 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       return;
     }
 
+    if (!smooth && handle.scrollSize > handle.viewportSize) {
+      handle.scrollTo(Math.max(0, handle.scrollSize - handle.viewportSize));
+    }
     handle.scrollToIndex(count - 1, { align: 'end', smooth });
   }, []);
 
   // Shared guard: skip scroll-triggered loads during jump transitions
   const jumpingRef = useRef(false);
+  const scrollLoadLockRef = useRef(false);
+  const scrollLoadLockTokenRef = useRef(0);
+  const holdScrollLoadLock = useCallback((duration = 750) => {
+    const token = scrollLoadLockTokenRef.current + 1;
+    scrollLoadLockTokenRef.current = token;
+    scrollLoadLockRef.current = true;
+    setTimeout(() => {
+      if (scrollLoadLockTokenRef.current === token) {
+        scrollLoadLockRef.current = false;
+      }
+    }, duration);
+  }, []);
 
   /* ---------- Hooks ---------- */
   const {
@@ -320,8 +337,22 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     vlistRef,
     messagesRef,
     jumpingRef,
+    scrollLoadLockRef,
     loadMoreLimit,
   });
+
+  const isNearBottom = useCallback(() => {
+    const handle = vlistRef.current;
+    if (!handle) return isAtBottomRef.current;
+
+    const { scrollOffset, scrollSize, viewportSize } = handle;
+    if (!Number.isFinite(scrollOffset) || !Number.isFinite(scrollSize) || !Number.isFinite(viewportSize)) {
+      return isAtBottomRef.current;
+    }
+    if (scrollSize <= viewportSize || viewportSize <= 0) return true;
+
+    return scrollSize - (scrollOffset + viewportSize) <= 160;
+  }, [isAtBottomRef]);
 
   const { highlightedId, scrollToMessage, jumpToLatest } = useScrollToMessage({
     vlistRef,
@@ -343,6 +374,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
   useChannelMessages({
     scrollToBottom,
+    isNearBottom,
+    holdScrollLoadLock,
     jumpingRef,
     isAtBottomRef,
     onChannelSwitch: useCallback(() => {
@@ -354,6 +387,34 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     includeHiddenMessages,
     containerRef,
   });
+
+  const lastAutoScrollKeyRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage?.id || !currentUserId) return;
+
+    const key = `${activeChannel?.cid || ''}:${lastMessage.id}`;
+    if (lastAutoScrollKeyRef.current === key) return;
+
+    const isOwnLastMessage =
+      lastMessage.user_id === currentUserId || lastMessage.user?.id === currentUserId;
+    if (!isOwnLastMessage && !isAtBottomRef.current && !isNearBottom()) return;
+    if (!isOwnLastMessage && jumpingRef.current) return;
+    if (loadingMoreRef.current || loadingNewerRef.current) return;
+
+    lastAutoScrollKeyRef.current = key;
+    isAtBottomRef.current = true;
+    holdScrollLoadLock(750);
+
+    scrollToBottom(false);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollToBottom(false));
+    });
+    setTimeout(() => scrollToBottom(false), 80);
+    setTimeout(() => scrollToBottom(false), 180);
+    setTimeout(() => scrollToBottom(false), 360);
+  }, [activeChannel?.cid, currentUserId, messages, scrollToBottom, isNearBottom, holdScrollLoadLock]);
 
   const hasOverlay = Boolean(isClosedTopic || isPending || isBanned || isBlocked || isSkipped);
   const prevOverlayRef = useRef(hasOverlay);
@@ -463,35 +524,41 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     while (i < entries.length) {
       const entry = entries[i];
 
-      // Date separator before any message
-      if (entry.showDateSeparator) {
-        elements.push(
-          <div key={`date-${getDateKey(entry.message.created_at)}`}>
-            <DateSeparatorComponent label={formatDateLabel(entry.message.created_at, dateLocale)} />
-          </div>
-        );
-      }
-
-      // Custom renderMessage
-      if (renderMessage) {
-        elements.push(
-          <div key={entry.message.id || `msg-${entry.index}`}>
-            <div>{renderMessage(entry.message, entry.isOwnMessage)}</div>
-          </div>
-        );
-        i++;
-        continue;
-      }
-
-      // System messages — standalone
-      if (entry.messageType === 'system') {
-        elements.push(
-          <div key={entry.message.id || `msg-${entry.index}`}>
-            <SystemMessageItemComponent
-              message={entry.message}
-              isOwnMessage={entry.isOwnMessage}
-              SystemRenderer={renderers.system}
-              systemMessageTranslations={systemMessageTranslations}
+      elements.push(
+        <div key={message.id || `msg-${index}`}>
+          <MessageItemComponent
+            message={message}
+            isOwnMessage={isOwnMessage}
+            isFirstInGroup={isFirstInGroup}
+            isLastInGroup={isLastInGroup}
+            isHighlighted={highlightedId === message.id}
+            AvatarComponent={AvatarComponent}
+            MessageBubble={MessageBubble}
+            MessageRenderer={MessageRenderer}
+            onClickQuote={scrollToMessage}
+            QuotedMessagePreviewComponent={QuotedMessagePreviewComponent}
+            MessageActionsBoxComponent={MessageActionsBoxComponent}
+            MessageReactionsComponent={MessageReactionsComponent}
+            deletedMessageLabel={deletedMessageLabel}
+            attachmentLabel={attachmentLabel}
+            unavailableMessageLabel={unavailableMessageLabel}
+            stickerLabel={stickerLabel}
+            systemMessageTranslations={systemMessageTranslations}
+            signalMessageTranslations={signalMessageTranslations}
+            onMentionClick={onMentionClick}
+            onUserNameClick={onUserNameClick}
+            onAddReactionClick={onAddReactionClick}
+          />
+          {/* Read receipts — full width, right-aligned */}
+          {showReadReceipts && validReaders.length > 0 && (
+            <ReadReceiptsComponent
+              readers={validReaders}
+              maxAvatars={readReceiptsMaxAvatars}
+              AvatarComponent={AvatarComponent}
+              TooltipComponent={ReadReceiptsTooltipComponent}
+              isOwnMessage={isOwnMessage}
+              isLastInGroup={isLastInGroup}
+              status={message.status}
             />
           </div>
         );
@@ -718,6 +785,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             collapseLabel={collapseLabel}
             unpinLabel={unpinLabel}
             stickerLabel={stickerLabel}
+            attachmentLabel={attachmentLabel}
+            unavailableMessageLabel={unavailableMessageLabel}
           />
         )}
 

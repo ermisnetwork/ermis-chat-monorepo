@@ -8,13 +8,15 @@
  */
 
 import { INodeCall } from './types';
+import { sdkLog } from './logger';
 
 /** Response types từ Worker */
 type WorkerResponse =
   | { id: number; type: 'result'; data?: any }
   | { id: number; type: 'error'; error: string }
   | { type: 'recv_data'; data: Uint8Array }
-  | { type: 'recv_error'; error: string };
+  | { type: 'recv_error'; error: string }
+  | { type: 'sdk_log'; logLevel: 'info' | 'warn' | 'error'; args: unknown[] };
 
 export class WasmWorkerProxy implements INodeCall {
   private worker: Worker;
@@ -53,7 +55,7 @@ export class WasmWorkerProxy implements INodeCall {
 
     this.worker.onmessage = (e: MessageEvent<WorkerResponse>) => this.handleMessage(e.data);
     this.worker.onerror = (e) => {
-      console.error('🔴 WASM Worker error:', e.message);
+      sdkLog('error', 'WASM Worker error:', e.message);
       // Reject all pending calls
       this.pendingCalls.forEach(({ reject }) => reject(new Error(`Worker error: ${e.message}`)));
       this.pendingCalls.clear();
@@ -66,10 +68,7 @@ export class WasmWorkerProxy implements INodeCall {
   async init(wasmPath?: string): Promise<void> {
     // Fetch WASM bytes 1 lần duy nhất trên Main Thread
     if (!WasmWorkerProxy.cachedWasmBytes) {
-      const absoluteWasmPath = new URL(
-        wasmPath || '/ermis_call_node_wasm_bg.wasm',
-        window.location.origin,
-      ).href;
+      const absoluteWasmPath = new URL(wasmPath || '/ermis_call_node_wasm_bg.wasm', window.location.origin).href;
       const response = await fetch(absoluteWasmPath);
       WasmWorkerProxy.cachedWasmBytes = await response.arrayBuffer();
     }
@@ -211,6 +210,11 @@ export class WasmWorkerProxy implements INodeCall {
         this.recvResolveQueue.shift(); // Remove paired resolve
         reject(error);
       }
+      return;
+    }
+
+    if (msg.type === 'sdk_log') {
+      sdkLog(msg.logLevel, ...msg.args);
       return;
     }
 

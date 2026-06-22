@@ -2,6 +2,7 @@ import FormData from 'form-data';
 import { ExtendableGenerics, DefaultGenerics, MessageResponse, FormatMessageResponse, ForwardMessage } from './types';
 import { AxiosRequestConfig } from 'axios';
 import { ErmisChat } from './client';
+import { sdkLog } from './logger';
 
 /**
  * logChatPromiseExecution - utility function for logging the execution of a promise..
@@ -13,7 +14,7 @@ import { ErmisChat } from './client';
  */
 export function logChatPromiseExecution<T>(promise: Promise<T>, name: string) {
   promise.then().catch((error) => {
-    console.warn(`failed to do ${name}, ran into error: `, error);
+    sdkLog('warn', `failed to do ${name}, ran into error: `, error);
   });
 }
 
@@ -82,7 +83,6 @@ export function addFileToFormData(
   return data;
 }
 
-
 /**
  * retryInterval - A retry interval which increases acc to number of failures
  *
@@ -149,10 +149,6 @@ function getRandomBytes(length: number): Uint8Array {
   getRandomValues(bytes);
   return bytes;
 }
-
-
-
-
 
 /**
  * listenForConnectionChanges - Adds an event listener fired on browser going online or offline
@@ -381,12 +377,41 @@ export const getUserInfo = (id: string, users: any[]) => {
     };
   }
 
-  const user = users.find((u) => u.id === id);
+  const matchingUsers = users.filter((u) => u?.id === id);
+  const user =
+    matchingUsers.find((u) => {
+      const name = typeof u?.name === 'string' ? u.name.trim() : '';
+      return Boolean(name && name !== id);
+    }) ||
+    matchingUsers.find((u) => u?.avatar || u?.image) ||
+    matchingUsers[0];
   return {
     id,
     name: user?.name || id,
     avatar: user?.avatar || '',
   };
+};
+
+export const pickUserWithDisplayName = (id?: string, ...candidates: any[]) => {
+  const userId = id || candidates.find((candidate) => typeof candidate?.id === 'string' && candidate.id)?.id;
+  const users = candidates.filter((candidate) => {
+    if (!candidate || typeof candidate !== 'object') return false;
+    if (!userId || !candidate.id) return true;
+    return candidate.id === userId;
+  });
+
+  const hasUsefulName = (candidate: any) => {
+    const name = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
+    const candidateId = candidate?.id || userId;
+    return Boolean(name && name !== candidateId);
+  };
+
+  return (
+    users.find(hasUsefulName) ||
+    users.find((candidate) => candidate.avatar || candidate.image) ||
+    users[0] ||
+    (userId ? getUserInfo(userId, []) : undefined)
+  );
 };
 
 export const getDirectChannelName = (members: any[], currentUserId: string) => {
@@ -472,7 +497,7 @@ export async function ensureMembersUserInfoLoaded<ErmisChatGenerics extends Exte
           try {
             await client.getBatchUsers(idsToFetch);
           } catch (e) {
-            console.error('Failed to get batch users', e);
+            client.logger('error', 'utils:ensureMembersUserInfoLoaded() - Failed to get batch users', { err: e });
           }
         }
         if (resolveFn) resolveFn();

@@ -224,6 +224,11 @@
     position: relative;
     z-index: 1;
     background: transparent !important;
+    overflow-anchor: none;
+
+    * {
+      overflow-anchor: none;
+    }
   }
 
   /* Ensure Empty state is above pattern */
