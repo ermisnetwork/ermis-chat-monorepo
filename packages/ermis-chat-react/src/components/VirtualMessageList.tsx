@@ -524,41 +524,35 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     while (i < entries.length) {
       const entry = entries[i];
 
-      elements.push(
-        <div key={message.id || `msg-${index}`}>
-          <MessageItemComponent
-            message={message}
-            isOwnMessage={isOwnMessage}
-            isFirstInGroup={isFirstInGroup}
-            isLastInGroup={isLastInGroup}
-            isHighlighted={highlightedId === message.id}
-            AvatarComponent={AvatarComponent}
-            MessageBubble={MessageBubble}
-            MessageRenderer={MessageRenderer}
-            onClickQuote={scrollToMessage}
-            QuotedMessagePreviewComponent={QuotedMessagePreviewComponent}
-            MessageActionsBoxComponent={MessageActionsBoxComponent}
-            MessageReactionsComponent={MessageReactionsComponent}
-            deletedMessageLabel={deletedMessageLabel}
-            attachmentLabel={attachmentLabel}
-            unavailableMessageLabel={unavailableMessageLabel}
-            stickerLabel={stickerLabel}
-            systemMessageTranslations={systemMessageTranslations}
-            signalMessageTranslations={signalMessageTranslations}
-            onMentionClick={onMentionClick}
-            onUserNameClick={onUserNameClick}
-            onAddReactionClick={onAddReactionClick}
-          />
-          {/* Read receipts — full width, right-aligned */}
-          {showReadReceipts && validReaders.length > 0 && (
-            <ReadReceiptsComponent
-              readers={validReaders}
-              maxAvatars={readReceiptsMaxAvatars}
-              AvatarComponent={AvatarComponent}
-              TooltipComponent={ReadReceiptsTooltipComponent}
-              isOwnMessage={isOwnMessage}
-              isLastInGroup={isLastInGroup}
-              status={message.status}
+      // Date separator before any message
+      if (entry.showDateSeparator) {
+        elements.push(
+          <div key={`date-${getDateKey(entry.message.created_at)}`}>
+            <DateSeparatorComponent label={formatDateLabel(entry.message.created_at, dateLocale)} />
+          </div>
+        );
+      }
+
+      // Custom renderMessage
+      if (renderMessage) {
+        elements.push(
+          <div key={entry.message.id || `msg-${entry.index}`}>
+            <div>{renderMessage(entry.message, entry.isOwnMessage)}</div>
+          </div>
+        );
+        i++;
+        continue;
+      }
+
+      // System messages — standalone
+      if (entry.messageType === 'system') {
+        elements.push(
+          <div key={entry.message.id || `msg-${entry.index}`}>
+            <SystemMessageItemComponent
+              message={entry.message}
+              isOwnMessage={entry.isOwnMessage}
+              SystemRenderer={renderers.system}
+              systemMessageTranslations={systemMessageTranslations}
             />
           </div>
         );
