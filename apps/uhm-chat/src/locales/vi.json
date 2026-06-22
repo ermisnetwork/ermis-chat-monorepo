@@ -548,6 +548,8 @@
     "member_promoted": "Bạn đã được thăng quyền quản trị viên trong {{channel}}.",
     "member_demoted": "Bạn đã bị gỡ quyền quản trị viên trong {{channel}}.",
     "member_banned": "Bạn đã bị cấm khỏi {{channel}}.",
-    "member_unbanned": "Bạn đã được gỡ cấm khỏi {{channel}}."
+    "member_unbanned": "Bạn đã được gỡ cấm khỏi {{channel}}.",
+    "browser_title": "Uhm Chat",
+    "new_message": "Tin nhắn mới"
   }
 }

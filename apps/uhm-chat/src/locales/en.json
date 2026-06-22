@@ -548,6 +548,8 @@
     "member_promoted": "You were promoted to moderator in {{channel}}.",
     "member_demoted": "You are no longer a moderator in {{channel}}.",
     "member_banned": "You have been banned from {{channel}}.",
-    "member_unbanned": "You have been unbanned from {{channel}}."
+    "member_unbanned": "You have been unbanned from {{channel}}.",
+    "browser_title": "Uhm Chat",
+    "new_message": "New message"
   }
 }

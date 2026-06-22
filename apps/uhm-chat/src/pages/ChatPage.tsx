@@ -39,6 +39,7 @@ import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
+import { useNotification } from '@/hooks/useNotification'
 import { isSafari } from '@/utils/browser'
 import { toast } from 'sonner'
 export function ChatPage() {
@@ -48,6 +49,7 @@ export function ChatPage() {
   const recovery = useRecoveryPin()
   const { status, retryConnection } = useConnectionStatus(client)
   const totalUnreadCount = useTotalUnreadCount()
+  useNotification(activeChannel)
 
   // Directly update browser tab title with unread count (more reliable than Helmet)
   useEffect(() => {

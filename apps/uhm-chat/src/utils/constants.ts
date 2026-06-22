@@ -4,6 +4,11 @@ export const STORAGE_KEYS = {
   CALL_SESSION_ID: 'call_session_id',
   LOCALE: 'locale',
   THEME: 'theme',
+  NOTIFICATION_SOUND_ENABLED: 'notification_sound_enabled',
+} as const;
+
+export const NOTIFICATION_CONFIG = {
+  SOUND_THROTTLE_MS: 2000,
 } as const;
 
 export const API_DEFAULTS = {
