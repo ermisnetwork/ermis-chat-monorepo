@@ -861,7 +861,25 @@ export function ChatPage() {
               {isSearchMode && (
                 <SearchPanel
                   searchQuery={searchQuery}
-                  onSelectChannel={() => { setIsSearchMode(false); setSearchQuery('') }}
+                  onSelectChannel={(channel) => { 
+                    setIsSearchMode(false); 
+                    setSearchQuery('');
+                    
+                    if (isTopicChannel(channel) && channel.data?.parent_cid) {
+                      const parentCid = channel.data.parent_cid as string
+                      const parent = client.activeChannels[parentCid]
+                      if (parent) {
+                        setDrillDownChannel(parent)
+                        setActivePanel('topics')
+                      }
+                    } else if (isGroupChannel(channel) && channel.data?.topics_enabled) {
+                      setDrillDownChannel(channel)
+                      setActivePanel('topics')
+                    } else {
+                      setDrillDownChannel(null)
+                      setActivePanel('channels')
+                    }
+                  }}
                 />
               )}
             </div>
