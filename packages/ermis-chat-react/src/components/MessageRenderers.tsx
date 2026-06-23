@@ -544,7 +544,7 @@ function renderTextWithMentions(
   userMap: Record<string, string>,
   onMentionClick?: (userId: string) => void,
 ): React.ReactNode {
-  const mentionedUsers: string[] = (message as any).mentioned_users ?? [];
+  const mentionedUsers: any[] = (message as any).mentioned_users ?? [];
   const mentionedAll: boolean = (message as any).mentioned_all ?? false;
 
   // If no mentions, just linkify the text
@@ -555,10 +555,17 @@ function renderTextWithMentions(
   // Build a list of patterns to replace: @userId → @userName
   const replacements: { pattern: string; label: string; id: string }[] = [];
 
-  for (const userId of mentionedUsers) {
+  for (const userItem of mentionedUsers) {
+    if (!userItem) continue;
+    const userId = typeof userItem === 'string' ? userItem : userItem.id;
+    if (!userId) continue;
+    
+    const itemObjName = typeof userItem === 'object' ? userItem.name : undefined;
+    const name = userMap[userId] ?? itemObjName ?? userId;
+
     replacements.push({
       pattern: `@${userId}`,
-      label: `@${userMap[userId] ?? userId}`,
+      label: `@${name}`,
       id: userId,
     });
   }

@@ -113,11 +113,11 @@ export function getMessageUserId(message: FormatMessageResponse): string {
  */
 export function replaceMentionsForPreview(
   text: string,
-  message: FormatMessageResponse | { mentioned_users?: string[]; mentioned_all?: boolean },
+  message: FormatMessageResponse | { mentioned_users?: any[]; mentioned_all?: boolean },
   userMap: Record<string, string>,
   renderWrapper?: (userId: string, name: string) => string,
 ): string {
-  const mentionedUsers: string[] = (message as any).mentioned_users ?? [];
+  const mentionedUsers: any[] = (message as any).mentioned_users ?? [];
   const mentionedAll: boolean = (message as any).mentioned_all ?? false;
 
   // If no mentions, nothing to replace
@@ -127,9 +127,12 @@ export function replaceMentionsForPreview(
 
   const replacements: { pattern: string; label: string }[] = [];
 
-  for (const userId of mentionedUsers) {
+  for (const userItem of mentionedUsers) {
+    if (!userItem) continue;
+    const userId = typeof userItem === 'string' ? userItem : userItem.id;
     if (!userId) continue;
-    const name = userMap[userId] ?? userId;
+    const itemObjName = typeof userItem === 'object' ? userItem.name : undefined;
+    const name = userMap[userId] ?? itemObjName ?? userId;
     replacements.push({
       pattern: `@${userId}`,
       label: renderWrapper ? renderWrapper(userId, name) : `@${name}`,

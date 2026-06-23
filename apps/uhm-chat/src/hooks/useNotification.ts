@@ -131,6 +131,20 @@ export function useNotification(activeChannel: ChannelType | null | undefined) {
       // Get message preview text
       let messageText = event.message?.text ? event.message.text.substring(0, 100) : '';
 
+      // Replace mentioned user IDs with their display names
+      if (messageText && event.message?.mentioned_users?.length) {
+        const mentionedUsers = event.message.mentioned_users as any[];
+        mentionedUsers.forEach((userItem) => {
+          // Handle both cases where mentioned_users might be array of strings or array of user objects
+          const userId = typeof userItem === 'string' ? userItem : userItem.id;
+          if (userId) {
+            const member = channel.state?.members?.[userId];
+            const displayName = member?.user?.name || (typeof userItem === 'object' && userItem.name) || userId;
+            messageText = messageText.replace(new RegExp(`@${userId}`, 'g'), `@${displayName}`);
+          }
+        });
+      }
+
       if (!messageText && event.message?.attachments?.length > 0) {
         const firstAttachment = event.message.attachments[0];
         const type = firstAttachment.type;
