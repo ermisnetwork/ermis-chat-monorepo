@@ -80,7 +80,7 @@ export const UhmChannelInfoTabHeader: React.FC<ChannelInfoTabHeaderProps> = ({
           `}
         >
           <TabIcon type={tab} />
-          <span>{getTabLabel(tab)}</span>
+          <span className="whitespace-nowrap">{getTabLabel(tab)}</span>
           {tabCounts[tab] > 0 && (
             <span className={`
               ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold transition-colors duration-200

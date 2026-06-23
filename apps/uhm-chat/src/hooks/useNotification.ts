@@ -4,6 +4,13 @@ import { useChatClient, isDirectChannel, isPendingMember, isSkippedMember } from
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk';
 import { NOTIFICATION_CONFIG } from '@/utils/constants';
 
+const isEffectiveE2eeChannel = (channel: ChannelType | null | undefined, client: any) => {
+  if (channel?.data?.mls_enabled === true) return true;
+  const parentCid = channel?.data?.parent_cid as string | undefined;
+  if (!parentCid) return false;
+  return client?.activeChannels?.[parentCid]?.data?.mls_enabled === true;
+};
+
 /**
  * Generates a short notification beep using the Web Audio API.
  * Returns a function that plays the beep when called.
@@ -130,6 +137,18 @@ export function useNotification(activeChannel: ChannelType | null | undefined) {
 
       // Get message preview text
       let messageText = event.message?.text ? event.message.text.substring(0, 100) : '';
+
+      // For E2EE channels, the text might be an encrypted payload.
+      if (isEffectiveE2eeChannel(channel, client)) {
+        const stateMsg = channel.state?.messages?.find((m: any) => m.id === event.message?.id);
+        const isEncryptedPayload = (text: string) => text && (text.includes('0x') || text.match(/^\d+\n\d+\n/));
+        
+        if (stateMsg && stateMsg.text && !isEncryptedPayload(stateMsg.text)) {
+          messageText = stateMsg.text.substring(0, 100);
+        } else if (isEncryptedPayload(messageText)) {
+          messageText = ''; // Fallback to 'New message' below
+        }
+      }
 
       // Replace mentioned user IDs with their display names
       if (messageText && event.message?.mentioned_users?.length) {

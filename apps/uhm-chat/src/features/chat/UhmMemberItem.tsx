@@ -93,7 +93,8 @@ export const UhmMemberItem: React.FC<UhmMemberItemProps> = React.memo(({
                     ? 'text-zinc-700 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 dark:hover:text-blue-400'
                     : 'text-zinc-700 dark:text-zinc-300 hover:bg-amber-50 dark:hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-400'
                     }`}
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     const id = member.user?.id || member.user_id;
                     if (canPromote && onPromote) onPromote(id);
                     else if (canDemote && onDemote) onDemote(id);
@@ -116,7 +117,8 @@ export const UhmMemberItem: React.FC<UhmMemberItemProps> = React.memo(({
                     ? 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10'
                     : 'text-zinc-700 dark:text-zinc-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400'
                     }`}
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     const id = member.user?.id || member.user_id;
                     if (!member.banned && onBan) onBan(id);
                     else if (member.banned && onUnban) onUnban(id);
@@ -134,7 +136,7 @@ export const UhmMemberItem: React.FC<UhmMemberItemProps> = React.memo(({
               {canRemove && onRemove && (
                 <button
                   className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] font-medium rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all group/item"
-                  onClick={() => { onRemove(member.user?.id || member.user_id); setAnchorRect(null); }}
+                  onClick={(e) => { e.stopPropagation(); onRemove(member.user?.id || member.user_id); setAnchorRect(null); }}
                 >
                   <Trash2 className="w-4 h-4 text-red-400 group-hover/item:text-red-500 transition-colors" />
                   {t('actions_member.remove_member')}

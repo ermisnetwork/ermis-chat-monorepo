@@ -1013,8 +1013,8 @@ export function ChatPage() {
       </div>
 
       {/* Right Panel — ChannelInfo (instant layout snap + smooth content fade) */}
-      <div className={`shrink-0 overflow-hidden border-l border-zinc-200/50 dark:border-zinc-800/50 ${showChannelInfo ? 'w-[360px]' : 'w-0 border-l-0'}`}>
-        <div className={`w-[360px] h-full bg-white dark:bg-[#1a1828] transition-opacity duration-200 ease-in ${showChannelInfo ? 'opacity-100' : 'opacity-0'}`}>
+      <div className={`shrink-0 overflow-hidden border-l border-zinc-200/50 dark:border-zinc-800/50 ${showChannelInfo ? 'w-[380px]' : 'w-0 border-l-0'}`}>
+        <div className={`w-[380px] h-full bg-white dark:bg-[#1a1828] transition-opacity duration-200 ease-in ${showChannelInfo ? 'opacity-100' : 'opacity-0'}`}>
           {hasOpenedInfo && (
             <ChannelInfo
               channel={infoChannel || undefined}
