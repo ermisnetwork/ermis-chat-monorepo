@@ -22,12 +22,15 @@ export function removeAccents(str: string): string {
 }
 
 /**
- * Format a Date or date-string to a short time string (HH:MM).
+ * Format a Date or date-string to a short time string (HH:MM, 24-hour).
+ * Matches Telegram's compact time display.
  */
 export function formatTime(date: Date | string | undefined): string {
   if (!date) return '';
   const d = date instanceof Date ? date : new Date(date);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
 }
 
 /**

@@ -107,7 +107,7 @@
   /* Message bubbles */
   --ermis-bubble-own-bg: var(--ermis-accent);
   --ermis-bubble-own-text: #ffffff;
-  --ermis-bubble-other-bg: #f3f4f6;
+  --ermis-bubble-other-bg: #f0f2f5;
   --ermis-bubble-other-text: var(--ermis-text-primary);
 
   /* Quote message */

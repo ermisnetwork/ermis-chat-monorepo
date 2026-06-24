@@ -174,7 +174,7 @@
   align-items: flex-end;
   gap: var(--ermis-spacing-sm);
   width: 100%;
-  padding-top: var(--ermis-spacing-sm);
+  padding-top: 4px;
 }
 
 .ermis-message-group--own {

@@ -254,6 +254,23 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
               signalMessageTranslations={signalMessageTranslations}
               onMentionClick={onMentionClick}
             />
+
+            {/* Message Reactions — inside bubble */}
+            {MessageReactionsComponent && (
+              <>
+                <div className="ermis-message-reactions-break" style={{ width: '100%', display: 'block' }}></div>
+                <MessageReactionsComponent
+                  reactionCounts={(message as any).reaction_counts}
+                  ownReactions={(message as any).own_reactions}
+                  latestReactions={(message as any).latest_reactions}
+                  onClickReaction={handleReactionToggle}
+                  disabled={!canReact}
+                  isOwnMessage={isOwnMessage}
+                />
+              </>
+            )}
+
+            {/* Time rendered AFTER text/reactions for bottom-right alignment */}
             {!isSignalMessage(message) && (isLastInGroup || isEdited || message.status === 'error' || message.status === 'failed_offline') && (
               <span className="ermis-message-list__item-time">
                 {isEdited && (
@@ -277,18 +294,6 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
               />
             )}
           </MessageBubble>
-
-          {/* Message Reactions */}
-          {MessageReactionsComponent && (
-            <MessageReactionsComponent
-              reactionCounts={(message as any).reaction_counts}
-              ownReactions={(message as any).own_reactions}
-              latestReactions={(message as any).latest_reactions}
-              onClickReaction={handleReactionToggle}
-              disabled={!canReact}
-              isOwnMessage={isOwnMessage}
-            />
-          )}
         </div>
       </div>
     </div>

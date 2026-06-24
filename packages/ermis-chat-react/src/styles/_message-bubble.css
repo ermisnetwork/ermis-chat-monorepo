@@ -97,20 +97,28 @@
   opacity: 0.7;
 }
 
-/* Timestamp inside bubble — bottom right */
+/* Timestamp inside bubble — inline float (WhatsApp-style) */
 .ermis-message-list__item-time {
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   color: var(--ermis-text-muted);
-  margin-left: 0;
-  padding-top: 4px;
   white-space: nowrap;
   line-height: 1;
-  align-self: flex-start;
-  text-align: left;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 3px;
+  gap: 2px;
+  float: right;
+  margin-left: 6px;
+  margin-top: 4px;
+  position: relative;
+}
+
+/* Invisible spacer at end of text — ONLY when time is shown (sibling selector) */
+.ermis-message-list__item-time~.ermis-message-list__item-text::after,
+.ermis-message-list__item-time~* .ermis-message-list__item-text::after {
+  content: '';
+  display: inline-block;
+  width: 15px;
+  height: 0;
 }
 
 .ermis-message-list__edited-indicator {
@@ -152,6 +160,11 @@
 .ermis-message-bubble--own .ermis-message-list__item-time {
   color: var(--ermis-bubble-own-text);
   opacity: 0.6;
+}
+
+.ermis-message-bubble--own .ermis-message-list__item-time~.ermis-message-list__item-text::after,
+.ermis-message-bubble--own .ermis-message-list__item-time~* .ermis-message-list__item-text::after {
+  width: 30px;
 }
 
 .ermis-message-list__item-text {
@@ -212,14 +225,12 @@
 /* --- Message Bubble --- */
 .ermis-message-bubble {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
+  display: flow-root;
+  /* contains floats, allowing bottom-right time alignment */
+  padding: 8px 10px;
   border-radius: var(--ermis-radius-lg);
   /* width: 100%; */
   word-break: break-word;
-  border: 1px solid var(--ermis-border);
   overflow: visible;
 }
 
@@ -227,6 +238,17 @@
   background-color: var(--ermis-bubble-own-bg);
   color: var(--ermis-bubble-own-text);
   border-color: var(--ermis-bubble-own-bg);
+}
+
+/* Text selection inside own bubble: white bg + black text for readability */
+.ermis-message-bubble--own ::selection {
+  background-color: rgba(255, 255, 255, 0.9);
+  color: #111827;
+}
+
+.ermis-message-bubble--own::selection {
+  background-color: rgba(255, 255, 255, 0.9);
+  color: #111827;
 }
 
 /* --- Override muted text inside own bubble --- */
@@ -283,35 +305,41 @@
   border-bottom-left-radius: 0;
 }
 
-/* --- Pointed Tail (Telegram-style) --- */
-/* Tail for OTHER messages (bottom-left triangle) — last in group */
+/* --- Pointed Tail (Telegram-style curved SVG) --- */
+/* Tail for OTHER messages (left curved tail) — last in group */
 .ermis-message-list__item--other.ermis-message-list__item--group-bottom .ermis-message-bubble::after,
 .ermis-message-list__item--other.ermis-message-list__item--group-single .ermis-message-bubble::after {
   content: '';
   position: absolute;
-  bottom: -1px;
-  left: -7px;
-  width: 0;
-  height: 0;
-  border-top: 10px solid transparent;
-  border-right: 8px solid var(--ermis-bubble-other-bg);
-  border-bottom: 0;
-  border-left: 0;
+  bottom: 0px;
+  left: -9px;
+  width: 9px;
+  height: 17px;
+  background-color: var(--ermis-bubble-other-bg);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg width='9' height='17' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 17h6V0c-.193 2.84-.876 5.767-2.05 8.782-.904 2.325-2.446 4.485-4.625 6.48A1 1 0 003 17z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg width='9' height='17' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 17h6V0c-.193 2.84-.876 5.767-2.05 8.782-.904 2.325-2.446 4.485-4.625 6.48A1 1 0 003 17z'/%3E%3C/svg%3E");
+  -webkit-mask-size: 9px 17px;
+  mask-size: 9px 17px;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
-/* Tail for OWN messages (bottom-right triangle) — last in group */
+/* Tail for OWN messages (right curved tail) — last in group */
 .ermis-message-list__item--own.ermis-message-list__item--group-bottom .ermis-message-bubble::after,
 .ermis-message-list__item--own.ermis-message-list__item--group-single .ermis-message-bubble::after {
   content: '';
   position: absolute;
-  bottom: -1px;
-  right: -7px;
-  width: 0;
-  height: 0;
-  border-top: 10px solid transparent;
-  border-left: 8px solid var(--ermis-bubble-own-bg);
-  border-bottom: 0;
-  border-right: 0;
+  bottom: 0px;
+  right: -9px;
+  width: 9px;
+  height: 17px;
+  background-color: var(--ermis-bubble-own-bg);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg width='9' height='17' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg width='9' height='17' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z'/%3E%3C/svg%3E");
+  -webkit-mask-size: 9px 17px;
+  mask-size: 9px 17px;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 /* Remove border-radius and border at tail corner for seamless connection */
@@ -1008,7 +1036,7 @@
 
 .ermis-read-receipts--other {
   justify-content: flex-start;
-  padding-left: 2rem;
+  padding-left: 2.75rem;
 }
 
 @keyframes ermis-receipt-pop {

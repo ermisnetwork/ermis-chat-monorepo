@@ -2,12 +2,12 @@
    Message Reactions
    ============================================================ */
 .ermis-message-reactions {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 2px;
-  margin-top: 2px;
-  max-width: 280px;
+  margin-top: 4px;
+  max-width: 100%;
+  vertical-align: middle;
 }
 
 .ermis-message-reactions--disabled {
@@ -26,7 +26,7 @@
   gap: 4px;
   padding: 2px 6px;
   border-radius: 12px;
-  background-color: var(--ermis-surface);
+  background-color: var(--ermis-bg-hover);
   border: 1px solid var(--ermis-border);
   font-size: 11px;
   line-height: 1.2;
@@ -36,12 +36,23 @@
   user-select: none;
 }
 
-
-
 .ermis-message-reactions__item--active {
   background-color: var(--ermis-bg-active, rgba(99, 102, 241, 0.12));
   border-color: var(--ermis-accent);
   color: var(--ermis-accent);
+}
+
+/* Own bubble overrides — pills need contrast against accent bg */
+.ermis-message-bubble--own .ermis-message-reactions__item {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.ermis-message-bubble--own .ermis-message-reactions__item--active {
+  background-color: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.6);
+  color: #ffffff;
 }
 
 .ermis-message-reactions__emoji {

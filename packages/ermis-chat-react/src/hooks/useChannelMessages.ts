@@ -308,7 +308,7 @@ export function useChannelMessages({
           }, 100);
         });
     } else {
-      // Already queried or disabled: sync cache, scroll and fade in quickly
+      // Already queried: sync cache immediately for instant UI, scroll and fade in quickly
       syncMessagesWithE2eeCache({ includeStoredWindow: true });
       ensureE2eeChannelReady();
       // Sync initial read state from SDK so read receipts show immediately
@@ -322,6 +322,19 @@ export function useChannelMessages({
       setTimeout(() => {
         jumpingRef.current = false;
       }, 100);
+
+      // Background re-query to ensure messages are fresh (e.g. after scrollToMessage
+      // replaced messages with a small window, or after a stale reconnect).
+      // This does NOT block the UI — cached messages are already visible.
+      activeChannel
+        .query({ messages: { limit: 25, include_hidden_messages: includeHiddenMessages } })
+        .then(() => {
+          syncMessagesWithE2eeCache({ includeStoredWindow: true });
+          setReadState({ ...activeChannel.state.read });
+        })
+        .catch((err: any) => {
+          console.warn('Background re-query for channel messages failed', err);
+        });
     }
 
     const handleNewMessage = (event: Event) => {

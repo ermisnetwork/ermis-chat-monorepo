@@ -485,8 +485,6 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       const showDateSeparator =
         !prevMsg || getDateKey(message.created_at) !== getDateKey(prevMsg.created_at);
       const prevType = (prevMsg?.type || 'regular') as MessageLabel;
-      const prevValidReaders = prevMsg?.id && readByMap[prevMsg.id] ? readByMap[prevMsg.id].filter(r => r.id !== getMessageUserId(prevMsg)) : [];
-      const prevHasReaders = showReadReceipts && prevValidReaders.length > 0;
       const prevTimeGap = prevMsg
         ? Math.abs(getTimestamp(message.created_at) - getTimestamp(prevMsg.created_at)) > TIME_GAP_THRESHOLD_MS
         : false;
@@ -496,7 +494,6 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         prevType === 'system' ||
         prevType === 'signal' ||
         getMessageUserId(prevMsg) !== getMessageUserId(message) ||
-        prevHasReaders ||
         prevTimeGap;
       const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
       const nextType = (nextMsg?.type || 'regular') as MessageLabel;
@@ -514,7 +511,6 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         nextType === 'system' ||
         nextType === 'signal' ||
         getMessageUserId(nextMsg) !== getMessageUserId(message) ||
-        hasReaders ||
         nextTimeGap;
       return { message, index, isOwnMessage, messageType, showDateSeparator, isFirstInGroup, isLastInGroup, validReaders, hasReaders };
     });
@@ -659,21 +655,34 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
               })}
             </div>
           </div>
-          {/* Read receipts — outside group flex so they appear below avatar + bubbles */}
-          {groupEntries.map((ge) =>
-            showReadReceipts && ge.validReaders.length > 0 ? (
+          {/* Read receipts — consolidated: merge all readers in this group into one row */}
+          {(() => {
+            if (!showReadReceipts) return null;
+            const allReaders: Array<{ id: string; name?: string; avatar?: string; last_read?: Date | string }> = [];
+            const seen = new Set<string>();
+            for (const ge of groupEntries) {
+              for (const r of ge.validReaders) {
+                if (!seen.has(r.id)) {
+                  seen.add(r.id);
+                  allReaders.push(r);
+                }
+              }
+            }
+            if (allReaders.length === 0) return null;
+            const lastEntry = groupEntries[groupEntries.length - 1];
+            return (
               <ReadReceiptsComponent
-                key={`receipt-${ge.message.id}`}
-                readers={ge.validReaders}
+                key={`receipt-${lastEntry.message.id}`}
+                readers={allReaders}
                 maxAvatars={readReceiptsMaxAvatars}
                 AvatarComponent={AvatarComponent}
                 TooltipComponent={ReadReceiptsTooltipComponent}
-                isOwnMessage={ge.isOwnMessage}
-                isLastInGroup={ge.isLastInGroup}
-                status={ge.message.status}
+                isOwnMessage={lastEntry.isOwnMessage}
+                isLastInGroup={lastEntry.isLastInGroup}
+                status={lastEntry.message.status}
               />
-            ) : null
-          )}
+            );
+          })()}
         </div>
       );
 
