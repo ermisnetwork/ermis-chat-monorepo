@@ -9,6 +9,7 @@ import {
   isVideoAttachment,
   isVoiceRecordingAttachment,
 } from '../messageTypeUtils';
+import { isDeletedDisplayMessage } from '../messageTypeUtils';
 
 export type { QuotedMessagePreviewProps } from '../types';
 
@@ -62,6 +63,7 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
   stickerLabel = 'Sticker',
+  deletedMessageLabel = 'This message was deleted',
 }) => {
   const { activeChannel } = useChatClient();
 
@@ -99,6 +101,13 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
       };
     }
 
+    if (isDeletedDisplayMessage(quotedMessage)) {
+      return {
+        text: deletedMessageLabel,
+        unavailable: true,
+      };
+    }
+
     if (hasUnavailableContent(quotedMessage)) {
       return {
         text: unavailableMessageLabel,
@@ -110,7 +119,7 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
       text: unavailableMessageLabel,
       unavailable: true,
     };
-  }, [attachmentLabel, formattedText, quotedMessage, stickerLabel, unavailableMessageLabel]);
+  }, [attachmentLabel, formattedText, quotedMessage, stickerLabel, unavailableMessageLabel, deletedMessageLabel]);
 
   const handleClick = () => {
     onClick(quotedMessage.id);

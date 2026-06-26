@@ -63,6 +63,20 @@ export function isVideo(attachment: any): boolean {
   return !!(isVideoAttachment(attachment) || (!attachment.type && attachment.mime_type?.startsWith('video/')));
 }
 
+export function isAudioAttachment(attachment: any): boolean {
+  return attachment?.type === ATTACHMENT_TYPES.AUDIO;
+}
+
+export function isAudio(attachment: any): boolean {
+  return !!(
+    isAudioAttachment(attachment) ||
+    isVoiceRecordingAttachment(attachment) ||
+    attachment.mime_type?.startsWith('audio/') ||
+    attachment.file_name?.toLowerCase().endsWith('.mp3') ||
+    attachment.title?.toLowerCase().endsWith('.mp3')
+  );
+}
+
 export const MESSAGE_DISPLAY_TYPES = {
   NORMAL: 'normal',
   DELETED: 'deleted',

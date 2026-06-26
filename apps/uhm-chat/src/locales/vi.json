@@ -449,7 +449,11 @@
     "user_id_label": "User ID",
     "email_label": "Email",
     "phone_label": "Điện thoại",
-    "open_chat": "Mở đoạn chat"
+    "open_chat": "Mở đoạn chat",
+    "notification_sound_label": "Âm báo tin nhắn",
+    "upload_sound": "Tải âm thanh lên",
+    "default_sound": "Mặc định (noti.mp3)",
+    "error_sound_large": "File âm thanh quá lớn (tối đa 1MB)"
   },
   "overlays": {
     "bannedTitle": "Bạn đã bị cấm",

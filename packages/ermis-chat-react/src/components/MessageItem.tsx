@@ -240,6 +240,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
             attachmentLabel={attachmentLabel}
             unavailableMessageLabel={unavailableMessageLabel}
             stickerLabel={stickerLabel}
+            deletedMessageLabel={typeof deletedMessageLabel === 'string' ? deletedMessageLabel : 'This message was deleted'}
           />
         )}
         <div className="ermis-message-list__bubble-wrapper">

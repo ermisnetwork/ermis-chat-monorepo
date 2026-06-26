@@ -346,13 +346,11 @@
 .ermis-message-list__item--other.ermis-message-list__item--group-bottom .ermis-message-bubble,
 .ermis-message-list__item--other.ermis-message-list__item--group-single .ermis-message-bubble {
   border-bottom-left-radius: 0;
-  border-bottom-left-color: transparent;
 }
 
 .ermis-message-list__item--own.ermis-message-list__item--group-bottom .ermis-message-bubble,
 .ermis-message-list__item--own.ermis-message-list__item--group-single .ermis-message-bubble {
   border-bottom-right-radius: 0;
-  border-bottom-right-color: transparent;
 }
 
 /* --- System messages --- */
@@ -856,6 +854,36 @@
 
 .ermis-message-bubble--own .ermis-custom-audio-duration {
   color: var(--ermis-bubble-own-text);
+}
+
+.ermis-custom-audio-download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ermis-colors-text-muted, #72767d);
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.ermis-custom-audio-download-btn:hover {
+  background-color: var(--ermis-colors-bg-hover, rgba(0, 0, 0, 0.05));
+  color: var(--ermis-colors-text-normal, #36393f);
+}
+
+.ermis-message-bubble--own .ermis-custom-audio-download-btn {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.ermis-message-bubble--own .ermis-custom-audio-download-btn:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
 }
 
 .ermis-custom-audio-hidden {

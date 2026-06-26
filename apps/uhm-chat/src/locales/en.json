@@ -449,7 +449,11 @@
     "user_id_label": "User ID",
     "email_label": "Email",
     "phone_label": "Phone",
-    "open_chat": "Open Chat"
+    "open_chat": "Open Chat",
+    "notification_sound_label": "Notification Sound",
+    "upload_sound": "Upload Sound",
+    "default_sound": "Default (noti.mp3)",
+    "error_sound_large": "Audio file is too large (max 1MB)"
   },
   "overlays": {
     "bannedTitle": "You are banned",

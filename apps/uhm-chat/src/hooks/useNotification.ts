@@ -12,36 +12,30 @@ const isEffectiveE2eeChannel = (channel: ChannelType | null | undefined, client:
 };
 
 /**
- * Generates a short notification beep using the Web Audio API.
- * Returns a function that plays the beep when called.
+ * Plays a notification sound using the HTML5 Audio API.
+ * Returns a function that plays the sound when called.
  */
 function createBeepPlayer(): () => void {
-  let audioCtx: AudioContext | null = null;
+  const audio = typeof Audio !== 'undefined' ? new Audio() : null;
 
   return () => {
     try {
-      if (!audioCtx) {
-        audioCtx = new AudioContext();
+      if (audio) {
+        const customSound = localStorage.getItem('custom_notification_sound');
+        const src = customSound || '/noti.mp3';
+        
+        // Only update src if it changed
+        if (!audio.src || (audio.src !== src && audio.src !== window.location.origin + src)) {
+          audio.src = src;
+        }
+        
+        audio.currentTime = 0;
+        audio.play().catch((err) => {
+          console.error('Không thể tự động phát âm thanh do chính sách trình duyệt (Autoplay policy) hoặc file bị lỗi:', err);
+        });
       }
-
-      const oscillator = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-
-      // Pleasant two-tone notification sound
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
-      oscillator.frequency.setValueAtTime(1108.73, audioCtx.currentTime + 0.08); // C#6
-
-      gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
-
-      oscillator.start(audioCtx.currentTime);
-      oscillator.stop(audioCtx.currentTime + 0.25);
-    } catch {
-      // AudioContext may not be available in all environments
+    } catch (err) {
+      console.error('Lỗi khi phát âm thanh:', err);
     }
   };
 }

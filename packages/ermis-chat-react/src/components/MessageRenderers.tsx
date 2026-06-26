@@ -14,7 +14,8 @@ import {
   isVoiceRecordingAttachment,
   isLinkPreviewAttachment,
   isImage,
-  isVideo
+  isVideo,
+  isAudio
 } from '../messageTypeUtils';
 
 /* ----------------------------------------------------------
@@ -262,10 +263,26 @@ const MicIcon = () => (
   </svg>
 );
 
-const CustomAudioPlayer: React.FC<{ src: string; durationLabel: string }> = ({ src, durationLabel }) => {
+const DownloadIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
+const CustomAudioPlayer: React.FC<{ src: string; durationLabel: string; fileName?: string }> = ({ src, durationLabel, fileName }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [dynamicDuration, setDynamicDuration] = useState(durationLabel);
   const audioRef = React.useRef<HTMLAudioElement>(null);
+  const { downloadFile } = useDownloadHandler();
+
+  const handleDownload = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await downloadFile(src, fileName || 'audio.mp3');
+  }, [downloadFile, src, fileName]);
 
   React.useEffect(() => {
     const audio = audioRef.current;
@@ -277,13 +294,22 @@ const CustomAudioPlayer: React.FC<{ src: string; durationLabel: string }> = ({ s
       setIsPlaying(false);
       setProgress(0);
     };
+    const onLoadedMetadata = () => {
+      if (audio.duration && audio.duration !== Infinity && durationLabel === '0:00') {
+        const mins = Math.floor(audio.duration / 60);
+        const secs = Math.floor(audio.duration % 60);
+        setDynamicDuration(`${mins}:${secs.toString().padStart(2, '0')}`);
+      }
+    };
     audio.addEventListener('timeupdate', updateProgress);
     audio.addEventListener('ended', onEnded);
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
     return () => {
       audio.removeEventListener('timeupdate', updateProgress);
       audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
     };
-  }, []);
+  }, [durationLabel]);
 
   const togglePlay = () => {
     if (audioRef.current) {
@@ -317,7 +343,10 @@ const CustomAudioPlayer: React.FC<{ src: string; durationLabel: string }> = ({ s
           <div className="ermis-custom-audio-progress-thumb" style={{ left: `${progress}%` }} />
         </div>
       </div>
-      <span className="ermis-custom-audio-duration">{durationLabel}</span>
+      <span className="ermis-custom-audio-duration">{dynamicDuration}</span>
+      <button className="ermis-custom-audio-download-btn" onClick={handleDownload} title="Download" type="button">
+        <DownloadIcon />
+      </button>
       <audio ref={audioRef} src={src} preload="metadata" className="ermis-custom-audio-hidden" />
     </div>
   );
@@ -331,8 +360,9 @@ const VoiceRecordingAttachment: React.FC<AttachmentProps> = React.memo(({ attach
   const mins = Math.floor(durationSec / 60);
   const secs = Math.round(durationSec % 60);
   const durationLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
+  const fileName = attachment.file_name || attachment.title || 'audio.mp3';
 
-  return <CustomAudioPlayer src={src} durationLabel={durationLabel} />;
+  return <CustomAudioPlayer src={src} durationLabel={durationLabel} fileName={fileName} />;
 }, (prev, next) => {
   return (prev.attachment.asset_url || prev.attachment.url) ===
     (next.attachment.asset_url || next.attachment.url);
@@ -401,7 +431,7 @@ const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(({ attachmen
 export const MessageAttachment: React.FC<AttachmentProps> = ({ attachment }) => {
   if (isImage(attachment)) return <ImageAttachment attachment={attachment} />;
   if (isVideo(attachment)) return <VideoAttachment attachment={attachment} />;
-  if (isVoiceRecordingAttachment(attachment)) return <VoiceRecordingAttachment attachment={attachment} />;
+  if (isAudio(attachment)) return <VoiceRecordingAttachment attachment={attachment} />;
   if (isLinkPreviewAttachment(attachment)) return <LinkPreviewAttachment attachment={attachment} />;
   return <FileAttachment attachment={attachment} />;
 };
@@ -411,8 +441,8 @@ export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = React.me
 
   // Group by type
   const media = attachments.filter((a) => isImage(a) || isVideo(a));
-  const files = attachments.filter((a) => !isImage(a) && !isVideo(a) && !isVoiceRecordingAttachment(a) && !isLinkPreviewAttachment(a));
-  const voices = attachments.filter(isVoiceRecordingAttachment);
+  const files = attachments.filter((a) => !isImage(a) && !isVideo(a) && !isAudio(a) && !isLinkPreviewAttachment(a));
+  const voices = attachments.filter(isAudio);
   const links = attachments.filter(isLinkPreviewAttachment);
 
   // Lightbox state

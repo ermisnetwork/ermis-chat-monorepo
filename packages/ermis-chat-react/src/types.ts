@@ -1068,6 +1068,7 @@ export type QuotedMessagePreviewProps = {
     e2ee_status?: string;
     sticker_url?: string;
     type?: string;
+    display_type?: string;
     mentioned_users?: string[];
     mentioned_all?: boolean;
   };
@@ -1081,6 +1082,8 @@ export type QuotedMessagePreviewProps = {
   unavailableMessageLabel?: string;
   /** I18n Label for sticker quoted messages */
   stickerLabel?: string;
+  /** I18n Label for deleted messages */
+  deletedMessageLabel?: string;
 };
 
 /* ----------------------------------------------------------
