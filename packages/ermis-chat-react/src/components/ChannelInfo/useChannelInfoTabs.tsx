@@ -15,7 +15,7 @@ import {
   canRemoveTargetMember,
   canBanTargetMember,
   canPromoteTargetMember,
-  canDemoteTargetMember
+  canDemoteTargetMember,
 } from '../../channelRoleUtils';
 
 export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
@@ -52,7 +52,7 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
   const availableTabs: MediaTab[] = useMemo(() => {
     let tabs = isMessaging ? MESSAGING_TABS : ALL_TABS;
     if (isTopic) {
-      tabs = tabs.filter(t => t !== 'members');
+      tabs = tabs.filter((t) => t !== 'members');
     }
     return tabs;
   }, [isMessaging, isTopic]);
@@ -65,31 +65,34 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
   const lastFetchedCidRef = useRef<string | null>(null);
   const transitionRafRef = useRef<any>(null);
 
-  const handleTabChange = useCallback((tab: MediaTab) => {
-    if (tab === activeTab) return;
+  const handleTabChange = useCallback(
+    (tab: MediaTab) => {
+      if (tab === activeTab) return;
 
-    // 1. Instant UI update for the tab button
-    setActiveTab(tab);
+      // 1. Instant UI update for the tab button
+      setActiveTab(tab);
 
-    if (transitionRafRef.current) clearTimeout(transitionRafRef.current);
+      if (transitionRafRef.current) clearTimeout(transitionRafRef.current);
 
-    // Check if data is already available for this channel
-    const hasData = tab === 'members' || attachmentsFetchedForCid === channel?.cid;
+      // Check if data is already available for this channel
+      const hasData = tab === 'members' || attachmentsFetchedForCid === channel?.cid;
 
-    if (hasData) {
-      // If data exists, switch content immediately without loading state
-      setContentTab(tab);
-      setIsPending(false);
-    } else {
-      // If no data, use isPending to show Skeleton while waiting for API
-      setIsPending(true);
-      transitionRafRef.current = setTimeout(() => {
+      if (hasData) {
+        // If data exists, switch content immediately without loading state
         setContentTab(tab);
         setIsPending(false);
-        setAttachmentsFetchedForCid((prev) => prev || channel?.cid || null);
-      }, 350);
-    }
-  }, [activeTab, channel?.cid, attachmentsFetchedForCid]);
+      } else {
+        // If no data, use isPending to show Skeleton while waiting for API
+        setIsPending(true);
+        transitionRafRef.current = setTimeout(() => {
+          setContentTab(tab);
+          setIsPending(false);
+          setAttachmentsFetchedForCid((prev) => prev || channel?.cid || null);
+        }, 350);
+      }
+    },
+    [activeTab, channel?.cid, attachmentsFetchedForCid],
+  );
 
   // Reset tab when user switches channels
   useEffect(() => {
@@ -128,7 +131,7 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
 
   const forceRefreshAttachments = useCallback(() => {
     lastFetchedCidRef.current = null;
-    setRefreshAttachmentsCount(c => c + 1);
+    setRefreshAttachmentsCount((c) => c + 1);
   }, []);
 
   const sortedMembers = useMemo(() => {
@@ -140,19 +143,16 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
   }, [members]);
 
   // Categorize attachments by type
-  const mediaItems = useMemo(() =>
-    allAttachments.filter(a => a.attachment_type === 'image' || a.attachment_type === 'video'),
-    [allAttachments]
+  const mediaItems = useMemo(
+    () => allAttachments.filter((a) => a.attachment_type === 'image' || a.attachment_type === 'video'),
+    [allAttachments],
   );
 
-  const linkItems = useMemo(() =>
-    allAttachments.filter(a => a.attachment_type === 'linkPreview'),
-    [allAttachments]
-  );
+  const linkItems = useMemo(() => allAttachments.filter((a) => a.attachment_type === 'linkPreview'), [allAttachments]);
 
-  const fileItems = useMemo(() =>
-    allAttachments.filter(a => a.attachment_type === 'file' || a.attachment_type === 'voiceRecording'),
-    [allAttachments]
+  const fileItems = useMemo(
+    () => allAttachments.filter((a) => a.attachment_type === 'file' || a.attachment_type === 'voiceRecording'),
+    [allAttachments],
   );
 
   useEffect(() => {
@@ -183,7 +183,7 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
           lastFetchedCidRef.current = channel?.cid || null;
         }
       } catch (err) {
-        console.error("Failed to query media for channel info", err);
+        console.error('Failed to query media for channel info', err);
         if (active) setAllAttachments([]);
       } finally {
         if (active) setLoading(false);
@@ -191,7 +191,9 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
     };
 
     fetchMedia();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [channel, isBanned, isBlocked, isPreviewMode, attachmentsFetchedForCid, isVisible, refreshAttachmentsCount]);
 
   // Listen to realtime events to automatically refresh attachments
@@ -217,30 +219,40 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
 
   const { downloadFile } = useDownloadHandler();
 
-  const handleDownloadFile = useCallback(async (url: string, filename?: string) => {
-    await downloadFile(url, filename);
-  }, [downloadFile]);
+  const handleDownloadFile = useCallback(
+    async (url: string, filename?: string) => {
+      await downloadFile(url, filename);
+    },
+    [downloadFile],
+  );
 
   // Lightbox state for media tab
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
   const lightboxItems = useMemo<MediaLightboxItem[]>(() => {
-    return mediaItems.map(item => ({
-      type: (item.attachment_type === 'video' ? 'video' : 'image') as 'image' | 'video',
-      src: item.url,
-      alt: item.file_name,
-      posterSrc: item.thumb_url || undefined,
-    }));
+    return mediaItems
+      .filter((item) => !item.e2ee_manifest && !item.e2ee_manifest_missing)
+      .map((item) => ({
+        type: (item.attachment_type === 'video' ? 'video' : 'image') as 'image' | 'video',
+        src: item.url,
+        alt: item.file_name,
+        posterSrc: item.thumb_url || undefined,
+      }));
   }, [mediaItems]);
 
-  const handleMediaClick = useCallback((url: string) => {
-    const idx = mediaItems.findIndex(item => item.url === url);
-    if (idx >= 0) {
-      setLightboxIndex(idx);
-      setLightboxOpen(true);
-    }
-  }, [mediaItems]);
+  const handleMediaClick = useCallback(
+    (url: string) => {
+      const idx = mediaItems
+        .filter((item) => !item.e2ee_manifest && !item.e2ee_manifest_missing)
+        .findIndex((item) => item.url === url);
+      if (idx >= 0) {
+        setLightboxIndex(idx);
+        setLightboxOpen(true);
+      }
+    },
+    [mediaItems],
+  );
 
   const closeLightbox = useCallback(() => {
     setLightboxOpen(false);
@@ -263,103 +275,132 @@ export const useChannelInfoTabs = (props: ChannelInfoTabsProps) => {
         if (onAddMemberClick) {
           items.push({ type: 'add-member' });
         }
-        sortedMembers.forEach(member => {
+        sortedMembers.forEach((member) => {
           items.push({ type: 'member', data: member });
         });
         return items;
       }
       case 'media':
-        return mediaRows.map(row => ({ type: 'media-row', data: row }));
+        return mediaRows.map((row) => ({ type: 'media-row', data: row }));
       case 'links':
-        return linkItems.map(item => ({ type: 'link', data: item }));
+        return linkItems.map((item) => ({ type: 'link', data: item }));
       case 'files':
-        return fileItems.map(item => ({ type: 'file', data: item }));
+        return fileItems.map((item) => ({ type: 'file', data: item }));
       default:
         return [];
     }
   }, [contentTab, sortedMembers, mediaRows, mediaItems, linkItems, fileItems, onAddMemberClick]);
 
   // Render function for VList items
-  const renderVlistItem = useCallback((item: any, index: number) => {
-    switch (item.type) {
-      case 'add-member':
-        if (AddMemberButtonComponent) {
+  const renderVlistItem = useCallback(
+    (item: any, index: number) => {
+      switch (item.type) {
+        case 'add-member':
+          if (AddMemberButtonComponent) {
+            return (
+              <div key="__add-member__" className="ermis-channel-info__add-member-wrap">
+                <AddMemberButtonComponent onClick={onAddMemberClick!} label={addMemberButtonLabel} />
+              </div>
+            );
+          }
           return (
             <div key="__add-member__" className="ermis-channel-info__add-member-wrap">
-              <AddMemberButtonComponent onClick={onAddMemberClick!} label={addMemberButtonLabel} />
+              <button className="ermis-channel-info__add-member-btn" onClick={onAddMemberClick}>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="8.5" cy="7" r="4"></circle>
+                  <line x1="20" y1="8" x2="20" y2="14"></line>
+                  <line x1="23" y1="11" x2="17" y2="11"></line>
+                </svg>
+                {addMemberButtonLabel}
+              </button>
             </div>
           );
-        }
-        return (
-          <div key="__add-member__" className="ermis-channel-info__add-member-wrap">
-            <button className="ermis-channel-info__add-member-btn" onClick={onAddMemberClick}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                <circle cx="8.5" cy="7" r="4"></circle>
-                <line x1="20" y1="8" x2="20" y2="14"></line>
-                <line x1="23" y1="11" x2="17" y2="11"></line>
-              </svg>
-              {addMemberButtonLabel}
-            </button>
-          </div>
-        );
-      case 'member': {
-        const member = item.data;
-        const role = member.channel_role || CHANNEL_ROLES.MEMBER;
-        const isTargetRemovable = canRemoveTargetMember(currentUserRole, role);
-        const canRemove = Boolean(isTargetRemovable && member.user_id !== currentUserId);
-        const canBan = Boolean(canBanTargetMember(currentUserRole, role) && member.user_id !== currentUserId && !member.banned);
-        const canUnban = Boolean(canBanTargetMember(currentUserRole, role) && member.user_id !== currentUserId && member.banned);
-        const canPromote = canPromoteTargetMember(currentUserRole, role) && member.user_id !== currentUserId;
-        const canDemote = canDemoteTargetMember(currentUserRole, role) && member.user_id !== currentUserId;
+        case 'member': {
+          const member = item.data;
+          const role = member.channel_role || CHANNEL_ROLES.MEMBER;
+          const isTargetRemovable = canRemoveTargetMember(currentUserRole, role);
+          const canRemove = Boolean(isTargetRemovable && member.user_id !== currentUserId);
+          const canBan = Boolean(
+            canBanTargetMember(currentUserRole, role) && member.user_id !== currentUserId && !member.banned,
+          );
+          const canUnban = Boolean(
+            canBanTargetMember(currentUserRole, role) && member.user_id !== currentUserId && member.banned,
+          );
+          const canPromote = canPromoteTargetMember(currentUserRole, role) && member.user_id !== currentUserId;
+          const canDemote = canDemoteTargetMember(currentUserRole, role) && member.user_id !== currentUserId;
 
-        return (
-          <MemberItem
-            key={member?.user_id || index}
-            member={member}
-            AvatarComponent={AvatarComponent}
-            onRemove={onRemoveMember}
-            canRemove={canRemove}
-            onBan={onBanMember}
-            canBan={canBan}
-            onUnban={onUnbanMember}
-            canUnban={canUnban}
-            onPromote={onPromoteMember}
-            canPromote={canPromote}
-            onDemote={onDemoteMember}
-            canDemote={canDemote}
-          />
-        );
+          return (
+            <MemberItem
+              key={member?.user_id || index}
+              member={member}
+              AvatarComponent={AvatarComponent}
+              onRemove={onRemoveMember}
+              canRemove={canRemove}
+              onBan={onBanMember}
+              canBan={canBan}
+              onUnban={onUnbanMember}
+              canUnban={canUnban}
+              onPromote={onPromoteMember}
+              canPromote={canPromote}
+              onDemote={onDemoteMember}
+              canDemote={canDemote}
+            />
+          );
+        }
+        case 'media-row':
+          return (
+            <MediaRow
+              key={item.data[0]?.id || index}
+              row={item.data}
+              onClick={handleMediaClick}
+              MediaItemComponent={MediaItem}
+            />
+          );
+        case 'link':
+          return <LinkItem key={item.data.id || index} item={item.data} />;
+        case 'file':
+          const fileItem = item.data as AttachmentItem;
+          return (
+            <FileItem
+              key={fileItem.id || index}
+              item={fileItem}
+              onClick={(url: string) => handleDownloadFile(url, fileItem.file_name)}
+            />
+          );
+        default:
+          return null;
       }
-      case 'media-row':
-        return (
-          <MediaRow
-            key={item.data[0]?.id || index}
-            row={item.data}
-            onClick={handleMediaClick}
-            MediaItemComponent={MediaItem}
-          />
-        );
-      case 'link':
-        return <LinkItem key={item.data.id || index} item={item.data} />;
-      case 'file':
-        const fileItem = item.data as AttachmentItem;
-        return (
-          <FileItem
-            key={fileItem.id || index}
-            item={fileItem}
-            onClick={(url: string) => handleDownloadFile(url, fileItem.file_name)}
-          />
-        );
-      default:
-        return null;
-    }
-  }, [
-    onAddMemberClick, AddMemberButtonComponent, addMemberButtonLabel,
-    currentUserRole, currentUserId, AvatarComponent, onRemoveMember, onBanMember, onUnbanMember, onPromoteMember, onDemoteMember,
-    handleMediaClick, MediaItem, handleDownloadFile,
-    MemberItem, LinkItem, FileItem
-  ]);
+    },
+    [
+      onAddMemberClick,
+      AddMemberButtonComponent,
+      addMemberButtonLabel,
+      currentUserRole,
+      currentUserId,
+      AvatarComponent,
+      onRemoveMember,
+      onBanMember,
+      onUnbanMember,
+      onPromoteMember,
+      onDemoteMember,
+      handleMediaClick,
+      MediaItem,
+      handleDownloadFile,
+      MemberItem,
+      LinkItem,
+      FileItem,
+    ],
+  );
 
   const isTabEmpty = vlistData.length === 0 && !(loading && contentTab !== 'members');
   const emptyLabel = contentTab === 'members' ? 'members' : contentTab;

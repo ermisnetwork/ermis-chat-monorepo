@@ -7,6 +7,7 @@
  */
 
 import type { APIResponse, E2eeRecoveryPolicy } from '../types';
+import type { E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
 
 // ============================================================
 // Storage Adapter Interface
@@ -264,6 +265,12 @@ export interface EncryptionStorageAdapter {
   getE2eeMessages(cid: string, limit?: number): Promise<E2eeStoredMessage[]>;
   clearE2eeMessages(cid: string): Promise<void>;
 
+  // ---- Pending E2EE Sends ----
+  savePendingE2eeSend(record: PendingE2eeSendRecord): Promise<void>;
+  loadPendingE2eeSend(messageId: string): Promise<PendingE2eeSendRecord | null>;
+  listPendingE2eeSends(statuses?: string[]): Promise<PendingE2eeSendRecord[]>;
+  deletePendingE2eeSend(messageId: string): Promise<void>;
+
   // ---- E2EE Message Search ----
   /** Search all E2EE messages across all channels by text content. */
   searchE2eeMessages(searchTerm: string, limit?: number): Promise<E2eeStoredMessage[]>;
@@ -485,7 +492,140 @@ export interface SendE2eeMessageRequest {
     parent_id?: string;
     quoted_message_id?: string;
     forward_cid?: string;
+    forward_message_id?: string;
+    forward_parent_cid?: string;
+    e2ee_attachment_ids?: string[];
   };
+}
+
+export type E2eeAttachmentAssetKind = 'original' | 'preview';
+
+export interface InitE2eeAttachmentRequest {
+  idempotency_key: string;
+  assets: Array<{
+    kind: E2eeAttachmentAssetKind;
+    cipher_size_estimate: number;
+  }>;
+}
+
+export interface InitE2eeAttachmentAssetResponse {
+  asset_id: string;
+  kind: E2eeAttachmentAssetKind;
+  put_url: string;
+  staging_object_key?: string;
+  final_object_key?: string;
+  cipher_size_estimate: number;
+}
+
+export interface InitE2eeAttachmentResponse extends APIResponse {
+  attachment_id: string;
+  status: string;
+  upload_expires_at: string;
+  assets: InitE2eeAttachmentAssetResponse[];
+}
+
+export interface CompleteE2eeAttachmentRequest {
+  completion_lease_id: string;
+}
+
+export interface CompleteE2eeAttachmentResponse extends APIResponse {
+  attachment_id: string;
+  status: string;
+  assets: unknown[];
+}
+
+export interface DownloadE2eeAttachmentGrantResponse extends APIResponse {
+  attachment_id: string;
+  asset_id: string;
+  download_url: string;
+  expires_at: string;
+}
+
+export interface QueryE2eeAttachmentsCursor {
+  created_at: string;
+  attachment_id: string;
+}
+
+export interface QueryE2eeAttachmentsRequest {
+  limit?: number;
+  cursor?: QueryE2eeAttachmentsCursor | null;
+}
+
+export interface QueryE2eeAttachmentAssetProjection {
+  asset_id: string;
+  kind: E2eeAttachmentAssetKind | string;
+  cipher_size: number;
+}
+
+export interface QueryE2eeAttachmentProjection {
+  attachment_id: string;
+  message_id: string;
+  cid: string;
+  created_by_user_id: string;
+  created_at: string;
+  updated_at: string;
+  assets: QueryE2eeAttachmentAssetProjection[];
+}
+
+export interface QueryE2eeAttachmentsResponse extends APIResponse {
+  attachments: QueryE2eeAttachmentProjection[];
+  next_cursor?: QueryE2eeAttachmentsCursor | null;
+  has_more: boolean;
+}
+
+export interface DeleteE2eeAttachmentResponse extends APIResponse {
+  attachment_id: string;
+  status: string;
+}
+
+export interface E2eeAttachmentManifestAsset {
+  asset_id: string;
+  kind: E2eeAttachmentAssetKind;
+  cipher_size: number;
+  cipher_sha256: string;
+  frame_size: number;
+  content_key: string;
+  nonce_prefix: string;
+  plaintext_size?: number;
+  plaintext_sha256?: string;
+  display?: Record<string, unknown>;
+}
+
+export interface E2eeAttachmentManifest {
+  version: 1;
+  attachment_id: string;
+  assets: E2eeAttachmentManifestAsset[];
+}
+
+export type PendingE2eeSendStatus =
+  | 'generating_preview'
+  | 'uploading'
+  | 'uploaded'
+  | 'encrypting'
+  | 'sending'
+  | 'sent'
+  | 'failed_retryable'
+  | 'failed_terminal'
+  | 'canceled';
+
+export interface PendingE2eeSendRecord {
+  message_id: string;
+  cid: string;
+  e2ee_group_id: string;
+  mls_ciphertext?: Uint8Array;
+  mls_ciphertext_sha256?: string;
+  mls_epoch?: number;
+  e2ee_attachment_ids?: string[];
+  aad_metadata?: Record<string, unknown>;
+  forward_cid?: string;
+  forward_message_id?: string;
+  forward_parent_cid?: string;
+  manifest?: E2eeAttachmentManifest[];
+  retry_count: number;
+  last_error?: string;
+  status: PendingE2eeSendStatus;
+  created_at: number;
+  updated_at: number;
 }
 
 export interface UpdateE2eeMessageRequest {
@@ -709,7 +849,7 @@ export type E2eeSyncEvent =
     }
   | {
       type: 'protocol';
-          /** Encryption protocol payload — `created_at` is at `data.created_at` (consistent with application variant) */
+      /** Encryption protocol payload — `created_at` is at `data.created_at` (consistent with application variant) */
       data: {
         epoch: number;
         user: { id: string; [key: string]: unknown };
@@ -894,6 +1034,13 @@ export interface EncryptionManagerOptions {
   wasmModule?: any;
   /** Disable group-sponsored epoch archives for a staged rollout. Account-owned recovery remains enabled. */
   enableSponsoredArchives?: boolean;
+  /**
+   * Crypto provider for E2EE attachment asset encryption/hash/randomness.
+   * Web defaults to WebCrypto + noble SHA-256. React Native must inject a
+   * native-backed provider; AsyncStorage/plain JS crypto is not sufficient for
+   * durable pending-send attachment state.
+   */
+  attachmentCryptoProvider?: E2eeAttachmentCryptoProvider;
 }
 
 /**
@@ -906,7 +1053,7 @@ export interface E2eePayload {
   /** Message text */
   text: string;
   /** File/image/video attachments metadata */
-  attachments?: unknown[];
+  attachments?: E2eeAttachmentManifest[] | unknown[];
   /** Sticker URL */
   sticker_url?: string;
   /** Poll type: 'single' | 'multiple' */
@@ -925,6 +1072,7 @@ export interface DecryptResult {
   messageType: number;
   senderIndex: number;
   epoch: number;
+  aad?: Uint8Array;
 }
 
 export interface WaterfallResult {

@@ -34,6 +34,12 @@ import type {
   GetKeyPackagesByCidResponse,
   GetKeyPackagesResponse,
   HistoricalCiphertext,
+  CompleteE2eeAttachmentRequest,
+  CompleteE2eeAttachmentResponse,
+  DeleteE2eeAttachmentResponse,
+  DownloadE2eeAttachmentGrantResponse,
+  InitE2eeAttachmentRequest,
+  InitE2eeAttachmentResponse,
   KeyPackageCountResponse,
   KeyRotationRequest,
   ListArchiveAvailabilityResponse,
@@ -43,6 +49,8 @@ import type {
   QueryArchiveMaterialRequest,
   QueryEpochArchivesRequest,
   QueryEpochArchivesResponse,
+  QueryE2eeAttachmentsRequest,
+  QueryE2eeAttachmentsResponse,
   QuerySponsoredArchiveRecipientsResponse,
   RecoveryPublicKeyResponse,
   RecoveryVaultResponse,
@@ -296,6 +304,13 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     });
   }
 
+  /** DELETE with X-Device-ID header */
+  private async _delete<T>(url: string): Promise<T> {
+    return await (this.client as any).doAxiosRequest('delete', url, null, {
+      headers: this.deviceHeaders,
+    });
+  }
+
   // ---- KeyPackage Management ----
 
   /** Upload TLS-serialized KeyPackages for the current device. Requires `X-Device-ID` header. */
@@ -527,6 +542,62 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/message`,
       encodeSendMessageRequest(data),
+    );
+  }
+
+  /** Initialize E2EE attachment upload and receive presigned PUT URLs. */
+  async initAttachment(
+    channelType: string,
+    channelId: string,
+    data: InitE2eeAttachmentRequest,
+  ): Promise<InitE2eeAttachmentResponse> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/init`, data);
+  }
+
+  /** Query confirmed E2EE attachment projections for Channel Info media/files tabs. */
+  async queryE2eeAttachments(
+    channelType: string,
+    channelId: string,
+    data: QueryE2eeAttachmentsRequest = {},
+  ): Promise<QueryE2eeAttachmentsResponse> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/query`, data);
+  }
+
+  /** Complete an E2EE attachment after direct object upload. */
+  async completeAttachment(
+    channelType: string,
+    channelId: string,
+    attachmentId: string,
+    data: CompleteE2eeAttachmentRequest,
+  ): Promise<CompleteE2eeAttachmentResponse> {
+    return await this._post(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/${attachmentId}/complete`,
+      data,
+    );
+  }
+
+  /** Request a presigned GET URL for a confirmed E2EE attachment asset. */
+  async downloadAttachmentGrant(
+    channelType: string,
+    channelId: string,
+    attachmentId: string,
+    assetId: string,
+  ): Promise<DownloadE2eeAttachmentGrantResponse> {
+    return await this._post(
+      this.baseURL +
+        `/v1/e2ee/channels/${channelType}/${channelId}/attachments/${attachmentId}/assets/${assetId}/download-grant`,
+      {},
+    );
+  }
+
+  /** Cancel an unbound E2EE attachment. */
+  async deleteAttachment(
+    channelType: string,
+    channelId: string,
+    attachmentId: string,
+  ): Promise<DeleteE2eeAttachmentResponse> {
+    return await this._delete(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/${attachmentId}`,
     );
   }
 

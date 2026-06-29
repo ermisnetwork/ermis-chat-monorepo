@@ -145,6 +145,8 @@ export type MessageResponseBase<ErmisChatGenerics extends ExtendableGenerics = D
     mls_ciphertext?: Uint8Array;
     mls_epoch?: number;
     e2ee_group_id?: string;
+    e2ee_attachment_ids?: string[];
+    forward_parent_cid?: string;
     old_texts?: Array<{ text: string; created_at: string }>;
     e2ee_status?: string;
     own_reactions?: ReactionResponse<ErmisChatGenerics>[] | null;
@@ -470,6 +472,8 @@ export type Message<ErmisChatGenerics extends ExtendableGenerics = DefaultGeneri
   cid?: string;
   forward_cid?: string;
   forward_message_id?: string;
+  forward_parent_cid?: string;
+  e2ee_attachment_ids?: string[];
   poll_type?: string; // single | multiple
   poll_choices?: string[];
   sticker_url?: string;
@@ -485,6 +489,8 @@ export type ForwardMessage<ErmisChatGenerics extends ExtendableGenerics = Defaul
   cid: string;
   forward_cid: string;
   forward_message_id: string;
+  forward_parent_cid?: string;
+  e2ee_attachment_ids?: string[];
   id?: string;
   text?: string;
   attachments?: Attachment<ErmisChatGenerics>[];

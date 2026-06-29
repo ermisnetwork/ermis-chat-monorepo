@@ -746,6 +746,104 @@
   color: var(--ermis-accent);
 }
 
+.ermis-attachment--e2ee {
+  max-width: 320px;
+  border: 1px solid color-mix(in srgb, var(--ermis-accent) 20%, transparent);
+}
+
+.ermis-e2ee-attachment__open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ermis-e2ee-attachment__open:disabled,
+.ermis-attachment__file-download:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.ermis-e2ee-attachment-media {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ermis-spacing-xs);
+  width: 100%;
+  max-width: 320px;
+}
+
+.ermis-e2ee-attachment-media .ermis-attachment-aspect-box {
+  max-width: 320px;
+}
+
+.ermis-e2ee-attachment-placeholder {
+  padding: 0;
+  border: 0;
+  color: var(--ermis-text-primary);
+  cursor: pointer;
+}
+
+.ermis-e2ee-attachment-placeholder:disabled {
+  cursor: wait;
+}
+
+.ermis-e2ee-attachment-placeholder__center {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--ermis-spacing-md);
+  text-align: center;
+}
+
+.ermis-e2ee-attachment-placeholder__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--ermis-radius-full);
+  background: color-mix(in srgb, var(--ermis-accent) 14%, var(--ermis-bg-secondary));
+  color: var(--ermis-accent);
+}
+
+.ermis-e2ee-attachment-placeholder__title {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ermis-text-primary);
+  font-size: var(--ermis-font-size-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ermis-e2ee-attachment-placeholder__meta,
+.ermis-e2ee-attachment-actions__label {
+  color: var(--ermis-text-muted);
+  font-size: var(--ermis-font-size-xs);
+}
+
+.ermis-e2ee-attachment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ermis-spacing-xs);
+  min-width: 0;
+}
+
+.ermis-e2ee-attachment-actions__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ermis-message-bubble--own .ermis-attachment__file-name {
   color: var(--ermis-bubble-own-text);
 }
@@ -768,6 +866,26 @@
 .ermis-message-bubble--own .ermis-attachment__file-download:hover {
   background-color: color-mix(in srgb, var(--ermis-bubble-own-text) 15%, transparent);
   color: inherit;
+}
+
+.ermis-message-bubble--own .ermis-attachment--e2ee {
+  border-color: color-mix(in srgb, var(--ermis-bubble-own-text) 25%, transparent);
+}
+
+.ermis-message-bubble--own .ermis-e2ee-attachment-placeholder,
+.ermis-message-bubble--own .ermis-e2ee-attachment-placeholder__title {
+  color: var(--ermis-bubble-own-text);
+}
+
+.ermis-message-bubble--own .ermis-e2ee-attachment-placeholder__meta,
+.ermis-message-bubble--own .ermis-e2ee-attachment-actions__label {
+  color: var(--ermis-bubble-own-text);
+  opacity: 0.8;
+}
+
+.ermis-message-bubble--own .ermis-e2ee-attachment-placeholder__icon {
+  background: color-mix(in srgb, var(--ermis-bubble-own-text) 20%, transparent);
+  color: var(--ermis-bubble-own-text);
 }
 
 /* --- Custom Audio Player --- */

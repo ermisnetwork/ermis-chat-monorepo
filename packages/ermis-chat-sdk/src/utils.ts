@@ -622,6 +622,7 @@ export const createForwardMessagePayload = <ErmisChatGenerics extends Extendable
     cid: targetCid,
     forward_cid: activeCid,
     forward_message_id: message.id as string,
+    forward_parent_cid: (message as any).parent_cid || (message as any).cid,
   };
 
   if (

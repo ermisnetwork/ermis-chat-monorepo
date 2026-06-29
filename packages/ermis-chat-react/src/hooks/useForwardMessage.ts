@@ -1,9 +1,29 @@
 import { useState, useMemo, useCallback } from 'react';
-import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
+import type { Channel, E2eeAttachmentManifest, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
 import { removeAccents, buildUserMap } from '../utils';
 import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
+
+function isE2eeAttachmentManifest(attachment: unknown): attachment is E2eeAttachmentManifest {
+  return Boolean(
+    attachment &&
+      typeof attachment === 'object' &&
+      (attachment as E2eeAttachmentManifest).version === 1 &&
+      typeof (attachment as E2eeAttachmentManifest).attachment_id === 'string',
+  );
+}
+
+function isEffectiveE2ee(channel: Channel | null | undefined): boolean {
+  if (!channel) return false;
+  return typeof (channel as any)._isEffectiveE2ee === 'function'
+    ? (channel as any)._isEffectiveE2ee()
+    : channel.data?.mls_enabled === true;
+}
+
+function attachmentUrl(attachment: any): string | undefined {
+  return attachment?.asset_url || attachment?.image_url || attachment?.url || attachment?.thumb_url;
+}
 
 export function useForwardMessage(message: FormatMessageResponse, onDismiss: () => void) {
   const { client, activeChannel } = useChatClient();
@@ -93,13 +113,50 @@ export function useForwardMessage(message: FormatMessageResponse, onDismiss: () 
       const targetChannel = channels.find((c) => c.cid === cid);
       if (!targetChannel) continue;
       try {
+        if (!['messaging', 'team', 'topic'].includes(activeChannel.type)) {
+          throw new Error('Forward source channel type is not allowed');
+        }
+        if (formattedMessage.quoted_message_id || formattedMessage.parent_id) {
+          throw new Error('Reply/thread messages cannot be forwarded');
+        }
+        if (formattedMessage.mentioned_all || (formattedMessage.mentioned_users?.length || 0) > 0) {
+          throw new Error('Mention messages cannot be forwarded');
+        }
+        const targetIsE2ee = isEffectiveE2ee(targetChannel);
+        const sourceIsE2ee = isEffectiveE2ee(activeChannel);
+        if (sourceIsE2ee && !targetIsE2ee) {
+          const accepted =
+            typeof window === 'undefined' ||
+            window.confirm('Forwarding this encrypted message to a standard channel will remove E2EE protection.');
+          if (!accepted) throw new Error('Privacy downgrade canceled');
+        }
         const forwardPayload = createForwardMessagePayload(
           formattedMessage,
           targetChannel.cid as string,
           activeChannel.cid as string,
         );
 
-        await activeChannel.forwardMessage(forwardPayload, {
+        if (targetIsE2ee && formattedMessage.attachments && formattedMessage.attachments.length > 0) {
+          const manager = client.encryptionManager;
+          if (!manager?.initialized) throw new Error('E2EE forward requires an initialized encryption manager');
+          const blobs: Blob[] = [];
+          for (const attachment of formattedMessage.attachments as any[]) {
+            if (isE2eeAttachmentManifest(attachment)) {
+              blobs.push(await manager.downloadE2eeAttachmentAsset(activeChannel.type, activeChannel.id!, attachment, 'original'));
+              continue;
+            }
+            const url = attachmentUrl(attachment);
+            if (!url) throw new Error('Forward source attachment has no downloadable URL');
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Forward source attachment download failed: HTTP ${response.status}`);
+            blobs.push(await response.blob());
+          }
+          const prepared = await manager.uploadE2eeAttachments(targetChannel.type, targetChannel.id!, blobs);
+          forwardPayload.attachments = prepared.attachments as any;
+          forwardPayload.e2ee_attachment_ids = prepared.e2ee_attachment_ids;
+        }
+
+        await targetChannel.forwardMessage(forwardPayload, {
           type: targetChannel.type,
           channelID: targetChannel.id!,
         });

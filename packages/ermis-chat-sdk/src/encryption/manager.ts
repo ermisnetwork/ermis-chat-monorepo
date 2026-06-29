@@ -23,6 +23,7 @@ import type {
   ChannelRepairState,
   CiphertextCursor,
   DecryptResult,
+  E2eeAttachmentManifest,
   E2eeBootstrapProgress,
   E2eeBootstrapStatus,
   E2eePayload,
@@ -39,8 +40,11 @@ import type {
   EncryptionStorageAdapter,
   PendingArchiveUpload,
   PendingDeferredArchive,
+  PendingE2eeSendRecord,
   PendingE2eeSnapshot,
   QueryEpochArchivesResponse,
+  QueryE2eeAttachmentProjection,
+  QueryE2eeAttachmentsRequest,
   RecoveryStatus,
   RecoveryVaultResponse,
   RemovedSyncCursor,
@@ -58,6 +62,19 @@ import type {
   UploadEpochArchiveRequest,
   WaterfallResult,
 } from './types';
+import { buildE2eeMessageAadV1, bytesEqual, canonicalAttachmentIds, hasE2eeAadMetadata } from './aad';
+import {
+  buildAttachmentManifest,
+  buildManifestAsset,
+  ciphertextSha256,
+  decryptE2eeAsset,
+  downloadEncryptedAsset,
+  encryptE2eeAsset,
+  generateE2eeAttachmentPreview,
+  newUuid,
+  putPresignedObject,
+} from './attachments';
+import { defaultE2eeAttachmentCryptoProvider, type E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
 import type { ErmisChat } from '../client';
 import type { ExtendableGenerics, DefaultGenerics, E2eeRecoveryPolicy } from '../types';
 import { sdkLog } from '../logger';
@@ -341,6 +358,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _expectedDecryptLogKeys = new Map<string, number>();
   private _waterfallSummaryLogKeys = new Map<string, number>();
   private _deferredEncryptionEventLogKeys = new Map<string, number>();
+  private _attachmentCryptoProvider: E2eeAttachmentCryptoProvider = defaultE2eeAttachmentCryptoProvider;
   private _restoreQueue: RestoreQueueEntry[] = [];
   private _restoreQueueRunning = false;
   private _restoreInflight = new Map<string, Promise<RestoredMessage[]>>();
@@ -387,7 +405,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * @param userId - Current user ID
    * @param options - Optional storage adapter and WASM path
    */
-  async initialize(client: ErmisChat<ErmisChatGenerics>, userId: string, options?: EncryptionManagerOptions): Promise<void> {
+  async initialize(
+    client: ErmisChat<ErmisChatGenerics>,
+    userId: string,
+    options?: EncryptionManagerOptions,
+  ): Promise<void> {
     if (this.initialized) return;
 
     this.client = client;
@@ -407,6 +429,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
     if (options?.enableSponsoredArchives === false) {
       this._sponsoredArchiveDisabled = true;
+    }
+    if (options?.attachmentCryptoProvider) {
+      this._attachmentCryptoProvider = options.attachmentCryptoProvider;
     }
 
     // Reuse deviceId if already eagerly initialized in connectUser(),
@@ -722,9 +747,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
     for (const record of gapRecords) issueRecordsByCid.set(record.cid, record);
     const incompleteChannels = new Set(
-      incompleteRecords
-        .filter((record) => this._isUserGatedRestoreProgress(record))
-        .map((record) => record.cid),
+      incompleteRecords.filter((record) => this._isUserGatedRestoreProgress(record)).map((record) => record.cid),
     );
 
     return {
@@ -1286,7 +1309,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (this._isRecentMembership(activeChannel)) return;
 
     const existing = await this.storage.loadRestoreProgress(this.userId, this.deviceId, channel.cid);
-    const progress = existing ? this._normalizeProgress(existing) : this._newRestoreProgressRecord(channel.channelType, channel.channelId);
+    const progress = existing
+      ? this._normalizeProgress(existing)
+      : this._newRestoreProgressRecord(channel.channelType, channel.channelId);
     if (progress.status === 'done' || progress.status === 'done_with_gaps') return;
     if (this._isUserGatedRestoreProgress(progress)) return;
 
@@ -1472,7 +1497,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     try {
       await this.archiveCurrentEpoch(channelType, channelId, sponsorRole, primaryUserId);
     } catch (err) {
-      sdkLog('warn', '[Encryption] Archive current epoch failed; continuing encryption flow:', channelType, channelId, err);
+      sdkLog(
+        'warn',
+        '[Encryption] Archive current epoch failed; continuing encryption flow:',
+        channelType,
+        channelId,
+        err,
+      );
     }
   }
 
@@ -3383,8 +3414,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (compareEventCursor(persistedCursor, membershipCursor) < 0) return false;
     }
 
-    const processedCursor =
-      syncState.processed_event_cursor || { created_at: syncState.processed_cursor, event_id: ZERO_EVENT_ID };
+    const processedCursor = syncState.processed_event_cursor || {
+      created_at: syncState.processed_cursor,
+      event_id: ZERO_EVENT_ID,
+    };
     if (compareEventCursor(persistedCursor, processedCursor) < 0) return false;
 
     const repairState = await this._loadChannelRepairState(scopeCid);
@@ -3465,7 +3498,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     await this.storage.savePendingE2eeSnapshots(cid, this._dedupePendingSnapshots(messages));
   }
 
-  private _pendingSnapshotEventType(message: { created_at?: string; updated_at?: string }): 'application' | 'message_updated' {
+  private _pendingSnapshotEventType(message: {
+    created_at?: string;
+    updated_at?: string;
+  }): 'application' | 'message_updated' {
     return message.updated_at && message.updated_at !== message.created_at ? 'message_updated' : 'application';
   }
 
@@ -3972,7 +4008,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     for (const pendingCid of pendingCids) {
       pendingEncryptionMessages.push(...(await this.storage.loadPendingE2eeSnapshots(pendingCid)));
     }
-    pendingEncryptionMessages.splice(0, pendingEncryptionMessages.length, ...this._dedupePendingSnapshots(pendingEncryptionMessages));
+    pendingEncryptionMessages.splice(
+      0,
+      pendingEncryptionMessages.length,
+      ...this._dedupePendingSnapshots(pendingEncryptionMessages),
+    );
     await retryPendingMessages();
 
     for (const event of events) {
@@ -4132,7 +4172,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
                       const queue = this._pendingEvictions.get(e2eeGroupId) ?? new Set<string>();
                       queue.add(leftUserId);
                       this._pendingEvictions.set(e2eeGroupId, queue);
-                      sdkLog('info', '[Encryption] Queued eviction (offline recovery) for', leftUserId, 'in', e2eeGroupId);
+                      sdkLog(
+                        'info',
+                        '[Encryption] Queued eviction (offline recovery) for',
+                        leftUserId,
+                        'in',
+                        e2eeGroupId,
+                      );
                       // Persist immediately so the queue survives a crash/reconnect
                       // even after the sync cursor has advanced past this SystemMessage.
                       this._persistPendingEvictions().catch((err) => sdkLog('warn', err));
@@ -4228,7 +4274,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
                 queue.add(removedUserId);
                 this._pendingEvictions.set(eventGroupId, queue);
                 await this._persistPendingEvictions();
-                sdkLog('info', '[Encryption] Queued eviction from member_removed sync for', removedUserId, 'in', eventGroupId);
+                sdkLog(
+                  'info',
+                  '[Encryption] Queued eviction from member_removed sync for',
+                  removedUserId,
+                  'in',
+                  eventGroupId,
+                );
               }
             } catch (_err) {
               // members_by_user_id may fail if group is in invalid state — safe to ignore
@@ -4930,7 +4982,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (channelType === 'messaging') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const projectId = (this.client as any)?.projectId;
-      if (!projectId) throw new Error('[Encryption] createE2eeChannel: client.projectId is required for messaging E2EE');
+      if (!projectId)
+        throw new Error('[Encryption] createE2eeChannel: client.projectId is required for messaging E2EE');
       channelId = wasmModule.hash_channel_id(projectId, allMemberUserIds);
       cid = `messaging:${channelId}`;
       sdkLog('info', '[Encryption] createE2eeChannel: computed messaging channelId:', channelId);
@@ -5269,7 +5322,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }
 
       if (!this.isDesignatedEvictor(activeChannel)) {
-        sdkLog('info', '[Encryption] _drainPendingEvictions: keep queued for', cid, '— this client is not designated evictor');
+        sdkLog(
+          'info',
+          '[Encryption] _drainPendingEvictions: keep queued for',
+          cid,
+          '— this client is not designated evictor',
+        );
         continue;
       }
 
@@ -5491,9 +5549,15 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     return true;
   }
 
-  private _logDeferredEncryptionEventOnce(reason: string, routeCid: string, groupCid: string, messageId?: string): void {
+  private _logDeferredEncryptionEventOnce(
+    reason: string,
+    routeCid: string,
+    groupCid: string,
+    messageId?: string,
+  ): void {
     const key = `${reason}:${routeCid}:${groupCid}:${messageId || ''}`;
-    if (!this._shouldLogThrottled(this._deferredEncryptionEventLogKeys, key, ENCRYPTION_EXPECTED_DECRYPT_LOG_TTL_MS)) return;
+    if (!this._shouldLogThrottled(this._deferredEncryptionEventLogKeys, key, ENCRYPTION_EXPECTED_DECRYPT_LOG_TTL_MS))
+      return;
     sdkLog('info', '[Encryption] Deferred encryption event until channel state is ready:', {
       reason,
       cid: routeCid,
@@ -5944,13 +6008,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * text, attachments, sticker_url, etc. are all inside the
    * opaque ciphertext — matching bellboy's MessageContent::Standard.
    */
-  encryptMessage(cid: string, payload: E2eePayload): Uint8Array {
+  encryptMessage(cid: string, payload: E2eePayload, aad?: Uint8Array): Uint8Array {
     const group = this.groups.get(cid);
     if (!group) throw new Error(`[Encryption] No group for cid: ${cid}`);
 
     const encoder = new TextEncoder();
     const payloadJson = JSON.stringify(payload);
-    const ciphertext = group.create_message(this.provider, this.identity, encoder.encode(payloadJson));
+    const plaintext = encoder.encode(payloadJson);
+    const ciphertext = aad
+      ? group.create_message_with_aad(this.provider, this.identity, plaintext, aad)
+      : group.create_message(this.provider, this.identity, plaintext);
 
     // CRITICAL: Persist encryption ratchet state after create_message().
     // create_message() advances the sender's secret tree generation in-memory.
@@ -5972,7 +6039,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * Handles both the new structured JSON payload and legacy
    * plain-text format (backward compatible).
    */
-  decryptMessage(cid: string, ciphertext: Uint8Array): DecryptResult {
+  decryptMessage(cid: string, ciphertext: Uint8Array, expectedAad?: Uint8Array): DecryptResult {
     const group = this.groups.get(cid);
     if (!group) throw new Error(`[Encryption] No group for cid: ${cid}`);
 
@@ -5988,6 +6055,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // DO NOT reload Group from Provider — this reverts BOTH decryption AND
     // encryption ratchets, causing the other side to miss our next message.
     const processed = group.process_message(this.provider, new Uint8Array(ciphertext));
+    const processedAad = processed.aad ? new Uint8Array(processed.aad) : undefined;
+    if (expectedAad && !bytesEqual(processedAad, expectedAad)) {
+      throw new Error('[Encryption] MLS AAD mismatch');
+    }
 
     // CRITICAL: Persist updated ratchet state to Provider storage.
     // process_message advances the decryption ratchet (secret tree) in the
@@ -6025,6 +6096,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       messageType: processed.message_type,
       senderIndex: processed.sender_index,
       epoch: Number(processed.epoch),
+      aad: processedAad,
     };
   }
 
@@ -6125,7 +6197,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (errMsg.includes('missing a proposal')) {
         sdkLog('warn', '[Encryption] processCommit: missing proposal — repair reset required for', cid);
         this.provider = wasmModule.Provider.from_bytes(new Uint8Array(snapshot));
-        const missingProposalError = new Error(`[Encryption] Missing proposal while processing commit for ${cid}`) as Error & {
+        const missingProposalError = new Error(
+          `[Encryption] Missing proposal while processing commit for ${cid}`,
+        ) as Error & {
           code?: string;
         };
         missingProposalError.code = 'missing_proposal';
@@ -6284,6 +6358,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       type: this._messageTypeForPayload(payload, fallback?.type || (envelope as any).type),
       parent_id: (envelope as any).parent_id || fallback?.parent_id,
       quoted_message_id: (envelope as any).quoted_message_id || fallback?.quoted_message_id,
+      forward_cid: (envelope as any).forward_cid || (fallback as any)?.forward_cid,
+      forward_message_id: (envelope as any).forward_message_id || (fallback as any)?.forward_message_id,
+      forward_parent_cid: (envelope as any).forward_parent_cid || (fallback as any)?.forward_parent_cid,
+      e2ee_attachment_ids: (envelope as any).e2ee_attachment_ids || (fallback as any)?.e2ee_attachment_ids,
       mentioned_users: (envelope as any).mentioned_users || fallback?.mentioned_users,
       mentioned_all:
         (envelope as any).mentioned_all !== undefined ? (envelope as any).mentioned_all : fallback?.mentioned_all,
@@ -6364,6 +6442,66 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
   }
 
+  private _expectedAadForMessage(
+    routeCid: string,
+    groupCid: string,
+    message: { id: string; [key: string]: unknown },
+  ): Uint8Array | undefined {
+    const e2eeAttachmentIds = Array.isArray((message as any).e2ee_attachment_ids)
+      ? ((message as any).e2ee_attachment_ids as string[])
+      : undefined;
+    const params = {
+      cid: routeCid,
+      e2ee_group_id: groupCid,
+      message_id: message.id,
+      forward_cid:
+        typeof (message as any).forward_cid === 'string' ? ((message as any).forward_cid as string) : undefined,
+      forward_message_id:
+        typeof (message as any).forward_message_id === 'string'
+          ? ((message as any).forward_message_id as string)
+          : undefined,
+      forward_parent_cid:
+        typeof (message as any).forward_parent_cid === 'string'
+          ? ((message as any).forward_parent_cid as string)
+          : undefined,
+      e2ee_attachment_ids: e2eeAttachmentIds,
+    };
+    return hasE2eeAadMetadata(params) ? buildE2eeMessageAadV1(params) : undefined;
+  }
+
+  private _manifestAttachmentIds(payload: E2eePayload): string[] {
+    if (!Array.isArray(payload.attachments)) return [];
+    const ids: string[] = [];
+    for (const attachment of payload.attachments as unknown[]) {
+      if (
+        attachment &&
+        typeof attachment === 'object' &&
+        (attachment as E2eeAttachmentManifest).version === 1 &&
+        typeof (attachment as E2eeAttachmentManifest).attachment_id === 'string'
+      ) {
+        ids.push((attachment as E2eeAttachmentManifest).attachment_id);
+      }
+    }
+    return ids;
+  }
+
+  private _validateEnvelopeAttachmentIds(message: Record<string, unknown>, payload: E2eePayload): void {
+    const envelopeIds = Array.isArray((message as any).e2ee_attachment_ids)
+      ? ((message as any).e2ee_attachment_ids as string[])
+      : [];
+    const manifestIds = this._manifestAttachmentIds(payload);
+    const canonicalEnvelope = canonicalAttachmentIds(envelopeIds);
+    const canonicalManifest = canonicalAttachmentIds(manifestIds);
+    if (canonicalEnvelope.length !== canonicalManifest.length) {
+      throw new Error('[Encryption] E2EE attachment manifest/envelope id mismatch');
+    }
+    for (let i = 0; i < canonicalEnvelope.length; i += 1) {
+      if (canonicalEnvelope[i] !== canonicalManifest[i]) {
+        throw new Error('[Encryption] E2EE attachment manifest/envelope id mismatch');
+      }
+    }
+  }
+
   async processE2eeMessage(
     cid: string,
     message: {
@@ -6379,7 +6517,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   ): Promise<Record<string, unknown> | null> {
     const versionKey = this._messageVersionKey(message);
     if (this._decryptPromises.has(versionKey)) {
-      sdkLog('info', '[Encryption] processE2eeMessage: deduplicating concurrent request via EncryptionPlaintextCache:', versionKey);
+      sdkLog(
+        'info',
+        '[Encryption] processE2eeMessage: deduplicating concurrent request via EncryptionPlaintextCache:',
+        versionKey,
+      );
       return this._decryptPromises.get(versionKey)!;
     }
 
@@ -6514,7 +6656,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     try {
       // Ensure ciphertext is Uint8Array (WS may deliver as regular array)
       const ctBytes = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext as any);
-      const { payload, messageType } = this.decryptMessage(groupCid, ctBytes);
+      const expectedAad = this._expectedAadForMessage(routeCid, groupCid, message);
+      const { payload, messageType } = this.decryptMessage(groupCid, ctBytes, expectedAad);
+      this._validateEnvelopeAttachmentIds(message, payload);
 
       // Mark as decrypted IMMEDIATELY after process_message succeeds —
       // before any async IndexedDB writes. This is the in-memory dedup
@@ -6627,6 +6771,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       quoted_message_id: stored.quoted_message_id || envelope.quoted_message_id,
       quoted_message: stored.quoted_message || envelope.quoted_message,
       forward_cid: envelope.forward_cid,
+      forward_message_id: envelope.forward_message_id,
+      forward_parent_cid: envelope.forward_parent_cid,
+      e2ee_attachment_ids: envelope.e2ee_attachment_ids || (stored as any).e2ee_attachment_ids,
       mentioned_users: stored.mentioned_users || envelope.mentioned_users,
       mentioned_all: stored.mentioned_all || envelope.mentioned_all,
       // State (from envelope, server-managed)
@@ -6650,6 +6797,272 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     return message;
   }
 
+  async uploadE2eeAttachments(
+    channelType: string,
+    channelId: string,
+    files: Blob[],
+    options: {
+      onProgress?: (progress: {
+        fileIndex: number;
+        phase: 'generating_preview' | 'encrypting' | 'uploading' | 'completing';
+        loaded: number;
+        total: number;
+        percentage: number;
+      }) => void;
+    } = {},
+  ): Promise<{ attachments: E2eeAttachmentManifest[]; e2ee_attachment_ids: string[] }> {
+    if (!this.e2eeClient) throw new Error('[Encryption] E2EE client is not initialized');
+    const e2eeClient = this.e2eeClient;
+    if (files.length === 0) return { attachments: [], e2ee_attachment_ids: [] };
+    if (files.length > 10) throw new Error('[Encryption] E2EE messages support at most 10 attachments');
+
+    const attachments: E2eeAttachmentManifest[] = [];
+    const ids: string[] = [];
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index] as Blob & { name?: string; type?: string };
+      options.onProgress?.({
+        fileIndex: index,
+        phase: 'generating_preview',
+        loaded: 0,
+        total: file.size,
+        percentage: 0,
+      });
+      const previewBlob = await generateE2eeAttachmentPreview(file);
+      options.onProgress?.({
+        fileIndex: index,
+        phase: 'generating_preview',
+        loaded: file.size,
+        total: file.size,
+        percentage: 100,
+      });
+
+      const originalEncrypted = await encryptE2eeAsset(file, {
+        kind: 'original',
+        cryptoProvider: this._attachmentCryptoProvider,
+        display: {
+          name: file.name,
+          mime_type: file.type,
+          size: file.size,
+        },
+        onProgress: (progress) => options.onProgress?.({ fileIndex: index, ...progress }),
+      });
+
+      let previewEncrypted: Awaited<ReturnType<typeof encryptE2eeAsset>> | undefined;
+      if (previewBlob) {
+        try {
+          previewEncrypted = await encryptE2eeAsset(previewBlob, {
+            kind: 'preview',
+            cryptoProvider: this._attachmentCryptoProvider,
+            display: {
+              name: file.name ? `${file.name}.preview.jpg` : undefined,
+              mime_type: 'image/jpeg',
+              size: previewBlob.size,
+              preview_of: 'original',
+            },
+            onProgress: (progress) => options.onProgress?.({ fileIndex: index, ...progress }),
+          });
+        } catch {
+          previewEncrypted = undefined;
+        }
+      }
+
+      const completeOriginalOnly = async () => {
+        const init = await e2eeClient.initAttachment(channelType, channelId, {
+          idempotency_key: newUuid(this._attachmentCryptoProvider),
+          assets: [{ kind: 'original', cipher_size_estimate: originalEncrypted.cipher_size }],
+        });
+        const initAsset = init.assets.find((asset) => asset.kind === 'original');
+        if (!initAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
+        await putPresignedObject(initAsset.put_url, originalEncrypted.encryptedBlob, (progress) =>
+          options.onProgress?.({ fileIndex: index, ...progress }),
+        );
+        options.onProgress?.({
+          fileIndex: index,
+          phase: 'completing',
+          loaded: originalEncrypted.cipher_size,
+          total: originalEncrypted.cipher_size,
+          percentage: 100,
+        });
+        await e2eeClient.completeAttachment(channelType, channelId, init.attachment_id, {
+          completion_lease_id: newUuid(this._attachmentCryptoProvider),
+        });
+        return buildAttachmentManifest({
+          attachment_id: init.attachment_id,
+          assets: [buildManifestAsset(initAsset.asset_id, originalEncrypted)],
+        });
+      };
+
+      if (!previewEncrypted) {
+        const manifest = await completeOriginalOnly();
+        attachments.push(manifest);
+        ids.push(manifest.attachment_id);
+        continue;
+      }
+
+      const init = await e2eeClient.initAttachment(channelType, channelId, {
+        idempotency_key: newUuid(this._attachmentCryptoProvider),
+        assets: [
+          { kind: 'original', cipher_size_estimate: originalEncrypted.cipher_size },
+          { kind: 'preview', cipher_size_estimate: previewEncrypted.cipher_size },
+        ],
+      });
+      const originalInitAsset = init.assets.find((asset) => asset.kind === 'original');
+      const previewInitAsset = init.assets.find((asset) => asset.kind === 'preview');
+      if (!originalInitAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
+      if (!previewInitAsset) throw new Error('[Encryption] E2EE attachment init did not return preview asset');
+
+      await putPresignedObject(originalInitAsset.put_url, originalEncrypted.encryptedBlob, (progress) =>
+        options.onProgress?.({ fileIndex: index, ...progress }),
+      );
+      try {
+        await putPresignedObject(previewInitAsset.put_url, previewEncrypted.encryptedBlob, (progress) =>
+          options.onProgress?.({ fileIndex: index, ...progress }),
+        );
+      } catch {
+        const manifest = await completeOriginalOnly();
+        attachments.push(manifest);
+        ids.push(manifest.attachment_id);
+        continue;
+      }
+
+      options.onProgress?.({
+        fileIndex: index,
+        phase: 'completing',
+        loaded: originalEncrypted.cipher_size + previewEncrypted.cipher_size,
+        total: originalEncrypted.cipher_size + previewEncrypted.cipher_size,
+        percentage: 100,
+      });
+      await e2eeClient.completeAttachment(channelType, channelId, init.attachment_id, {
+        completion_lease_id: newUuid(this._attachmentCryptoProvider),
+      });
+      const manifest = buildAttachmentManifest({
+        attachment_id: init.attachment_id,
+        assets: [
+          buildManifestAsset(originalInitAsset.asset_id, originalEncrypted),
+          buildManifestAsset(previewInitAsset.asset_id, previewEncrypted),
+        ],
+      });
+      attachments.push(manifest);
+      ids.push(init.attachment_id);
+    }
+
+    return { attachments, e2ee_attachment_ids: ids };
+  }
+
+  async downloadE2eeAttachmentAsset(
+    channelType: string,
+    channelId: string,
+    manifest: E2eeAttachmentManifest,
+    kind: 'original' | 'preview' = 'original',
+  ): Promise<Blob> {
+    if (!this.e2eeClient) throw new Error('[Encryption] E2EE client is not initialized');
+    const asset =
+      manifest.assets.find((item) => item.kind === kind) || (kind === 'original' ? manifest.assets[0] : undefined);
+    if (!asset) throw new Error('[Encryption] E2EE attachment manifest has no assets');
+    const grant = await this.e2eeClient.downloadAttachmentGrant(
+      channelType,
+      channelId,
+      manifest.attachment_id,
+      asset.asset_id,
+    );
+    const encrypted = await downloadEncryptedAsset(grant.download_url);
+    return await decryptE2eeAsset(encrypted, asset, this._attachmentCryptoProvider);
+  }
+
+  async queryE2eeAttachmentMessages(
+    channelType: string,
+    channelId: string,
+    options: QueryE2eeAttachmentsRequest = {},
+  ): Promise<{ attachments: any[]; next_cursor?: unknown; has_more: boolean }> {
+    if (!this.e2eeClient) throw new Error('[Encryption] E2EE client is not initialized');
+    const response = await this.e2eeClient.queryE2eeAttachments(channelType, channelId, options);
+    const messageIds = response.attachments.map((item) => item.message_id);
+    const storedMessages = this.storage.loadE2eeMessages
+      ? await this.storage.loadE2eeMessages(messageIds)
+      : new Map<string, E2eeStoredMessage>();
+    if (!this.storage.loadE2eeMessages) {
+      for (const messageId of messageIds) {
+        const stored = await this.storage.loadE2eeMessage(messageId);
+        if (stored) storedMessages.set(messageId, stored);
+      }
+    }
+
+    const attachments = response.attachments.map((projection) =>
+      this._mapE2eeAttachmentProjectionToDisplayItem(projection, storedMessages.get(projection.message_id)),
+    );
+    return {
+      attachments,
+      next_cursor: response.next_cursor,
+      has_more: response.has_more,
+    };
+  }
+
+  private _mapE2eeAttachmentProjectionToDisplayItem(
+    projection: QueryE2eeAttachmentProjection,
+    stored?: E2eeStoredMessage,
+  ): Record<string, unknown> {
+    const manifests = Array.isArray(stored?.attachments) ? stored?.attachments : [];
+    const manifest = manifests.find((attachment): attachment is E2eeAttachmentManifest => {
+      return Boolean(
+        attachment &&
+          typeof attachment === 'object' &&
+          (attachment as E2eeAttachmentManifest).version === 1 &&
+          (attachment as E2eeAttachmentManifest).attachment_id === projection.attachment_id &&
+          Array.isArray((attachment as E2eeAttachmentManifest).assets),
+      );
+    });
+    const projectionOriginal = projection.assets.find((asset) => asset.kind === 'original') || projection.assets[0];
+    if (!manifest) {
+      return {
+        id: projection.attachment_id,
+        attachment_type: 'file',
+        user_id: projection.created_by_user_id,
+        cid: projection.cid,
+        url: '',
+        thumb_url: '',
+        file_name: 'Encrypted attachment',
+        content_type: 'application/octet-stream',
+        content_length: projectionOriginal?.cipher_size || 0,
+        content_disposition: 'attachment',
+        message_id: projection.message_id,
+        created_at: projection.created_at,
+        updated_at: projection.updated_at,
+        e2ee_manifest_missing: true,
+      };
+    }
+
+    const original = manifest.assets.find((asset) => asset.kind === 'original') || manifest.assets[0];
+    const display = original?.display || {};
+    const nameValue = display.name;
+    const mimeValue = display.mime_type;
+    const sizeValue = display.size;
+    const fileName = typeof nameValue === 'string' && nameValue.trim() ? nameValue : 'Encrypted attachment';
+    const mimeType = typeof mimeValue === 'string' && mimeValue.trim() ? mimeValue : 'application/octet-stream';
+    const size =
+      typeof sizeValue === 'number' && Number.isFinite(sizeValue)
+        ? sizeValue
+        : original?.plaintext_size || projectionOriginal?.cipher_size || original?.cipher_size || 0;
+    const attachmentType = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('video/') ? 'video' : 'file';
+
+    return {
+      id: projection.attachment_id,
+      attachment_type: attachmentType,
+      user_id: projection.created_by_user_id,
+      cid: projection.cid,
+      url: '',
+      thumb_url: '',
+      file_name: fileName,
+      content_type: mimeType,
+      content_length: size,
+      content_disposition: 'attachment',
+      message_id: projection.message_id,
+      created_at: projection.created_at,
+      updated_at: projection.updated_at,
+      e2ee_manifest: manifest,
+    };
+  }
+
   /**
    * Send an encrypted E2EE message.
    *
@@ -6671,6 +7084,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       mentioned_users?: string[];
       mentioned_all?: boolean;
       forward_cid?: string;
+      forward_message_id?: string;
+      forward_parent_cid?: string;
+      e2ee_attachment_ids?: string[];
       /** Attachment metadata — encrypted inside E2EE payload */
       attachments?: unknown[];
       /** Sticker URL — encrypted inside E2EE payload */
@@ -6713,9 +7129,46 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // Encrypt and send with epoch-stale retry:
     // After enableE2ee or when offline, other members may commit (external_join,
     // key rotation) advancing the server epoch. Sync group state and retry once.
-    let ciphertext = this.encryptMessage(e2eeGroupId, payload);
+    const manifestAttachmentIds = this._manifestAttachmentIds(payload);
+    const e2eeAttachmentIds = options.e2ee_attachment_ids || manifestAttachmentIds;
+    if (e2eeAttachmentIds.length > 0) {
+      this._validateEnvelopeAttachmentIds({ e2ee_attachment_ids: e2eeAttachmentIds }, payload);
+    }
+    const aadParams = {
+      cid,
+      e2ee_group_id: e2eeGroupId,
+      message_id: messageId,
+      forward_cid: options.forward_cid,
+      forward_message_id: options.forward_message_id,
+      forward_parent_cid: options.forward_parent_cid,
+      e2ee_attachment_ids: e2eeAttachmentIds,
+    };
+    const aad = hasE2eeAadMetadata(aadParams) ? buildE2eeMessageAadV1(aadParams) : undefined;
+
+    let ciphertext = this.encryptMessage(e2eeGroupId, payload, aad);
     let group = this.getGroup(e2eeGroupId)!;
     let response: any;
+    const nowForPending = Date.now();
+    const pendingRecordBase: PendingE2eeSendRecord = {
+      message_id: messageId,
+      cid,
+      e2ee_group_id: e2eeGroupId,
+      mls_ciphertext: ciphertext,
+      mls_ciphertext_sha256: ciphertextSha256(ciphertext, this._attachmentCryptoProvider),
+      mls_epoch: Number(group.epoch()),
+      e2ee_attachment_ids: e2eeAttachmentIds,
+      aad_metadata: aad ? aadParams : undefined,
+      forward_cid: options.forward_cid,
+      forward_message_id: options.forward_message_id,
+      forward_parent_cid: options.forward_parent_cid,
+      manifest: payload.attachments as E2eeAttachmentManifest[] | undefined,
+      retry_count: 0,
+      status: 'sending',
+      created_at: nowForPending,
+      updated_at: nowForPending,
+    };
+    await this._persistProvider();
+    await this.storage.savePendingE2eeSend(pendingRecordBase);
     try {
       response = await this.e2eeClient!.sendMessage(channelType, channelId, {
         message: {
@@ -6723,6 +7176,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           mls_ciphertext: ciphertext,
           mls_epoch: Number(group.epoch()),
           e2ee_group_id: e2eeGroupId,
+          ...(e2eeAttachmentIds.length > 0 ? { e2ee_attachment_ids: e2eeAttachmentIds } : {}),
           ...envelopeOptions,
         },
       });
@@ -6731,21 +7185,56 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         sdkLog('warn', '[Encryption] sendMessage: epoch_stale — syncing group and retrying...');
         await this.sync();
         // Re-encrypt with updated epoch after sync
-        ciphertext = this.encryptMessage(e2eeGroupId, payload);
+        ciphertext = this.encryptMessage(e2eeGroupId, payload, aad);
         group = this.getGroup(e2eeGroupId)!;
-        response = await this.e2eeClient!.sendMessage(channelType, channelId, {
-          message: {
-            id: messageId,
-            mls_ciphertext: ciphertext,
-            mls_epoch: Number(group.epoch()),
-            e2ee_group_id: e2eeGroupId,
-            ...envelopeOptions,
-          },
+        await this._persistProvider();
+        await this.storage.savePendingE2eeSend({
+          ...pendingRecordBase,
+          mls_ciphertext: ciphertext,
+          mls_ciphertext_sha256: ciphertextSha256(ciphertext, this._attachmentCryptoProvider),
+          mls_epoch: Number(group.epoch()),
+          retry_count: pendingRecordBase.retry_count + 1,
+          updated_at: Date.now(),
         });
+        try {
+          response = await this.e2eeClient!.sendMessage(channelType, channelId, {
+            message: {
+              id: messageId,
+              mls_ciphertext: ciphertext,
+              mls_epoch: Number(group.epoch()),
+              e2ee_group_id: e2eeGroupId,
+              ...(e2eeAttachmentIds.length > 0 ? { e2ee_attachment_ids: e2eeAttachmentIds } : {}),
+              ...envelopeOptions,
+            },
+          });
+        } catch (retryErr) {
+          await this.storage.savePendingE2eeSend({
+            ...pendingRecordBase,
+            mls_ciphertext: ciphertext,
+            mls_ciphertext_sha256: ciphertextSha256(ciphertext, this._attachmentCryptoProvider),
+            mls_epoch: Number(group.epoch()),
+            retry_count: pendingRecordBase.retry_count + 1,
+            status: 'failed_retryable',
+            last_error: getApiErrorMessage(retryErr),
+            updated_at: Date.now(),
+          });
+          throw retryErr;
+        }
       } else {
+        await this.storage.savePendingE2eeSend({
+          ...pendingRecordBase,
+          status: 'failed_retryable',
+          last_error: getApiErrorMessage(err),
+          updated_at: Date.now(),
+        });
         throw err;
       }
     }
+    await this.storage.savePendingE2eeSend({
+      ...pendingRecordBase,
+      status: 'sent',
+      updated_at: Date.now(),
+    });
 
     // Save to local DB with full decrypted Standard content
     const now = new Date().toISOString();
@@ -6770,6 +7259,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       quoted_message_id: options.quoted_message_id,
       mentioned_users: options.mentioned_users,
       mentioned_all: options.mentioned_all,
+      forward_cid: options.forward_cid,
+      forward_message_id: options.forward_message_id,
+      forward_parent_cid: options.forward_parent_cid,
+      e2ee_attachment_ids: e2eeAttachmentIds,
     };
     await this.storage.saveE2eeMessage(storedMsg);
 
@@ -6784,7 +7277,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // Return full message for channel state + server response
     return {
       ...response,
-      message: await this._buildFullMessageWithQuoted(storedMsg, { forward_cid: options.forward_cid }),
+      message: await this._buildFullMessageWithQuoted(storedMsg, {
+        forward_cid: options.forward_cid,
+        forward_message_id: options.forward_message_id,
+        forward_parent_cid: options.forward_parent_cid,
+        e2ee_attachment_ids: e2eeAttachmentIds,
+      }),
     };
   }
 

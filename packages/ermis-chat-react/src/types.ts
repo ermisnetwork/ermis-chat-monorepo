@@ -7,6 +7,7 @@ import type {
   ChannelSort,
   ChannelQueryOptions,
   E2eeRecoveryPolicy,
+  E2eeAttachmentManifest,
   UserCallInfo,
   SystemMessageTranslations,
   SignalMessageTranslations,
@@ -1179,6 +1180,8 @@ export type FilePreviewItem = {
   previewUrl?: string;
   /** Upload status */
   status: 'pending' | 'uploading' | 'done' | 'error';
+  /** E2EE upload phase when the file is handled by MLS attachment flow */
+  e2eePhase?: 'generating_preview' | 'encrypting' | 'uploading' | 'completing' | 'sending' | 'retrying' | 'failed';
   /** Upload progress percentage (0-100) */
   progress?: number;
   /** Error message if upload failed */
@@ -1270,6 +1273,8 @@ export type AttachmentItem = {
   og_scrape_url?: string;
   image_url?: string;
   text?: string;
+  e2ee_manifest?: E2eeAttachmentManifest;
+  e2ee_manifest_missing?: boolean;
 };
 
 export type MediaTab = 'members' | 'media' | 'links' | 'files';

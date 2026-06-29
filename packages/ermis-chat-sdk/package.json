@@ -58,6 +58,7 @@
     "/public"
   ],
   "dependencies": {
+    "@noble/hashes": "1.4.0",
     "@types/event-source-polyfill": "^1.0.5",
     "@types/ws": "^7.4.0",
     "axios": "^1.6.0",
