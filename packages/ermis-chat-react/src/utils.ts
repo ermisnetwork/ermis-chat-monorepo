@@ -338,6 +338,8 @@ export function getLastMessagePreview(
     videoMessageLabel?: React.ReactNode;
     voiceRecordingMessageLabel?: React.ReactNode;
     fileMessageLabel?: React.ReactNode;
+    encryptedMessageLabel?: React.ReactNode;
+    encryptedMessageUnavailableLabel?: React.ReactNode;
     systemMessageTranslations?: SystemMessageTranslations;
     signalMessageTranslations?: SignalMessageTranslations;
   },
@@ -383,8 +385,8 @@ export function getLastMessagePreview(
   if (!displayText && isEncrypted) {
     displayText =
       (lastMsg as any).e2ee_status === 'failed'
-        ? 'Encrypted message unavailable'
-        : 'Encrypted message';
+        ? (options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable')
+        : (options?.encryptedMessageLabel || 'Encrypted message');
   }
   if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
     const att = lastMsg.attachments[0];

@@ -481,6 +481,8 @@ export type TopicListProps = {
   videoMessageLabel?: React.ReactNode;
   voiceRecordingMessageLabel?: React.ReactNode;
   fileMessageLabel?: React.ReactNode;
+  encryptedMessageLabel?: React.ReactNode;
+  encryptedMessageUnavailableLabel?: React.ReactNode;
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
 };
@@ -529,6 +531,10 @@ export type ChannelListProps = {
   voiceRecordingMessageLabel?: React.ReactNode;
   /** Label for file messages in the preview strip (default: '📎 File') */
   fileMessageLabel?: React.ReactNode;
+  /** Label for encrypted messages in the preview strip (default: 'Encrypted message') */
+  encryptedMessageLabel?: React.ReactNode;
+  /** Label for encrypted messages that failed in the preview strip (default: 'Encrypted message unavailable') */
+  encryptedMessageUnavailableLabel?: React.ReactNode;
   /** Custom translation templates for system messages in the preview strip */
   systemMessageTranslations?: SystemMessageTranslations;
   /** Custom translation templates for signal (call) messages in the preview strip */
@@ -588,6 +594,12 @@ export type MessageRendererProps = {
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
   onMentionClick?: (userId: string) => void;
+  /** I18n Label for encrypted messages (default: 'Encrypted message') */
+  encryptedMessageLabel?: string;
+  /** I18n Label for encrypted messages that failed to decrypt (default: 'Encrypted message could not be decrypted') */
+  encryptedMessageFailedLabel?: string;
+  /** I18n Label for encrypted messages being decrypted (default: 'Decrypting encrypted message...') */
+  encryptedMessageDecryptingLabel?: string;
 };
 
 export type MessageBubbleProps = {
@@ -726,6 +738,14 @@ export type MessageListProps = {
   attachmentLabel?: string;
   /** I18n Label for messages whose contents are unavailable */
   unavailableMessageLabel?: string;
+  /** I18n Label for encrypted messages (default: 'Encrypted message') */
+  encryptedMessageLabel?: string;
+  /** I18n Label for encrypted messages that failed to decrypt (default: 'Encrypted message could not be decrypted') */
+  encryptedMessageFailedLabel?: string;
+  /** I18n Label for encrypted messages being decrypted (default: 'Decrypting encrypted message...') */
+  encryptedMessageDecryptingLabel?: string;
+  /** I18n Label for encrypted messages unavailable in sidebar preview (default: 'Encrypted message unavailable') */
+  encryptedMessageUnavailableLabel?: string;
   /** Custom translation templates for system messages */
   systemMessageTranslations?: SystemMessageTranslations;
   /** Custom translation templates for signal (call) messages */
@@ -834,6 +854,12 @@ export type MessageItemProps = {
   unavailableMessageLabel?: string;
   /** I18n Label for sticker message previews */
   stickerLabel?: string;
+  /** I18n Label for encrypted messages (default: 'Encrypted message') */
+  encryptedMessageLabel?: string;
+  /** I18n Label for encrypted messages that failed to decrypt (default: 'Encrypted message could not be decrypted') */
+  encryptedMessageFailedLabel?: string;
+  /** I18n Label for encrypted messages being decrypted (default: 'Decrypting encrypted message...') */
+  encryptedMessageDecryptingLabel?: string;
   /** Custom translation templates for system messages */
   systemMessageTranslations?: SystemMessageTranslations;
   /** Custom translation templates for signal (call) messages */

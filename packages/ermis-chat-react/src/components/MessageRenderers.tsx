@@ -635,16 +635,22 @@ function renderTextWithMentions(
 }
 
 /** Regular message: text with @mentions + attachments */
-export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ message, onMentionClick }) => {
+export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({
+  message,
+  onMentionClick,
+  encryptedMessageLabel = 'Encrypted message',
+  encryptedMessageFailedLabel = 'Encrypted message could not be decrypted',
+  encryptedMessageDecryptingLabel = 'Decrypting encrypted message...',
+}) => {
   const { activeChannel } = useChatClient();
   
   const isEncrypted = message.content_type === 'mls' || Boolean((message as any).mls_ciphertext);
   const hasRawAttachments = Boolean(message.attachments?.length);
   const rawText = message.text || '';
   const isEncryptedSentinelText =
-    !isEncrypted &&
     hasRawAttachments &&
-    (rawText === 'Encrypted message' || rawText === 'Encrypted message unavailable');
+    (rawText === 'Encrypted message' || rawText === 'Encrypted message unavailable'
+      || rawText === encryptedMessageLabel);
 
   const userMap = useMemo<Record<string, string>>(() => {
     return buildUserMap(activeChannel?.state);
@@ -671,10 +677,10 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({ mess
   const encryptedPlaceholder = isEncrypted && !message.text ? (
     <span className="ermis-message-list__item-text ermis-message-list__item-text--encrypted">
       {(message as any).e2ee_status === 'failed'
-        ? 'Encrypted message could not be decrypted'
+        ? encryptedMessageFailedLabel
         : (message as any).e2ee_status === 'decrypting'
-          ? 'Decrypting encrypted message...'
-          : 'Encrypted message'}
+          ? encryptedMessageDecryptingLabel
+          : encryptedMessageLabel}
     </span>
   ) : null;
 

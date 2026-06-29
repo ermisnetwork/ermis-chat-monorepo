@@ -99,6 +99,9 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
   stickerLabel = 'Sticker',
+  encryptedMessageLabel,
+  encryptedMessageFailedLabel,
+  encryptedMessageDecryptingLabel,
   systemMessageTranslations,
   signalMessageTranslations,
   onMentionClick,
@@ -254,6 +257,9 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
               onMentionClick={onMentionClick}
+              encryptedMessageLabel={encryptedMessageLabel}
+              encryptedMessageFailedLabel={encryptedMessageFailedLabel}
+              encryptedMessageDecryptingLabel={encryptedMessageDecryptingLabel}
             />
 
             {/* Message Reactions — inside bubble */}

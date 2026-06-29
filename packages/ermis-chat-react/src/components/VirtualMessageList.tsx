@@ -170,6 +170,10 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   stickerLabel,
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
+  encryptedMessageLabel,
+  encryptedMessageFailedLabel,
+  encryptedMessageDecryptingLabel,
+  encryptedMessageUnavailableLabel,
   typingIndicatorLabel,
   deletedMessageLabel = 'This message was deleted',
   systemMessageTranslations,
@@ -646,6 +650,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
                       attachmentLabel={attachmentLabel}
                       unavailableMessageLabel={unavailableMessageLabel}
                       stickerLabel={stickerLabel}
+                      encryptedMessageLabel={encryptedMessageLabel}
+                      encryptedMessageFailedLabel={encryptedMessageFailedLabel}
+                      encryptedMessageDecryptingLabel={encryptedMessageDecryptingLabel}
                       systemMessageTranslations={systemMessageTranslations}
                       signalMessageTranslations={signalMessageTranslations}
                       onMentionClick={onMentionClick}
@@ -719,6 +726,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     onMentionClick,
     onUserNameClick,
     onAddReactionClick,
+    encryptedMessageLabel,
+    encryptedMessageFailedLabel,
+    encryptedMessageDecryptingLabel,
   ]);
 
   if (isBanned || isBlocked) {

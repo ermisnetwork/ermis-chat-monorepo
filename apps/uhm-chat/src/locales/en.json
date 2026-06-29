@@ -106,6 +106,10 @@
     "preview_attachment": "Attachment",
     "message_unavailable": "Message unavailable",
     "preview_sticker": "Sticker",
+    "encrypted_message": "Encrypted message",
+    "encrypted_message_failed": "Encrypted message could not be decrypted",
+    "encrypted_message_decrypting": "Decrypting encrypted message...",
+    "encrypted_message_unavailable": "Encrypted message unavailable",
     "call": {
       "incoming": "Incoming {{type}} call",
       "outgoing": "Outgoing {{type}} call",

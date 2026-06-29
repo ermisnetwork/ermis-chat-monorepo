@@ -849,6 +849,8 @@ export function ChatPage() {
               videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
               voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
               fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
+              encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
+              encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
             />
@@ -902,6 +904,8 @@ export function ChatPage() {
               videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
               voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
               fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
+              encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
+              encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
             />
@@ -985,6 +989,10 @@ export function ChatPage() {
             stickerLabel={t('overlays.sticker')}
             attachmentLabel={t('chat.preview_attachment', 'Attachment')}
             unavailableMessageLabel={t('chat.message_unavailable', 'Message unavailable')}
+            encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
+            encryptedMessageFailedLabel={t('chat.encrypted_message_failed', 'Encrypted message could not be decrypted')}
+            encryptedMessageDecryptingLabel={t('chat.encrypted_message_decrypting', 'Decrypting encrypted message...')}
+            encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
             typingIndicatorLabel={(users) => {
               const names = users.map((u) => u.name || u.id);
               if (names.length === 1) {

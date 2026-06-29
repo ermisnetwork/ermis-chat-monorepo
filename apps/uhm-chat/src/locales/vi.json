@@ -106,6 +106,10 @@
     "preview_attachment": "Tệp đính kèm",
     "message_unavailable": "Tin nhắn không khả dụng",
     "preview_sticker": "Nhãn dán",
+    "encrypted_message": "Tin nhắn được mã hóa",
+    "encrypted_message_failed": "Không thể giải mã tin nhắn",
+    "encrypted_message_decrypting": "Đang giải mã tin nhắn...",
+    "encrypted_message_unavailable": "Tin nhắn mã hóa không khả dụng",
     "call": {
       "incoming": "Cuộc gọi {{type}} đến",
       "outgoing": "Cuộc gọi {{type}} đi",

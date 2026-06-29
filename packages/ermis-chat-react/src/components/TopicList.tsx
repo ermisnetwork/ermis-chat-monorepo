@@ -58,6 +58,8 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
   videoMessageLabel,
   voiceRecordingMessageLabel,
   fileMessageLabel,
+  encryptedMessageLabel,
+  encryptedMessageUnavailableLabel,
   systemMessageTranslations,
   signalMessageTranslations,
 }) => {
@@ -173,6 +175,8 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
         videoMessageLabel={videoMessageLabel}
         voiceRecordingMessageLabel={voiceRecordingMessageLabel}
         fileMessageLabel={fileMessageLabel}
+        encryptedMessageLabel={encryptedMessageLabel}
+        encryptedMessageUnavailableLabel={encryptedMessageUnavailableLabel}
         systemMessageTranslations={systemMessageTranslations}
         signalMessageTranslations={signalMessageTranslations}
       />
@@ -203,6 +207,8 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
           videoMessageLabel={videoMessageLabel}
           voiceRecordingMessageLabel={voiceRecordingMessageLabel}
           fileMessageLabel={fileMessageLabel}
+          encryptedMessageLabel={encryptedMessageLabel}
+          encryptedMessageUnavailableLabel={encryptedMessageUnavailableLabel}
           systemMessageTranslations={systemMessageTranslations}
           signalMessageTranslations={signalMessageTranslations}
         />

@@ -27,6 +27,8 @@ interface TopicsPanelProps {
   videoMessageLabel?: React.ReactNode
   voiceRecordingMessageLabel?: React.ReactNode
   fileMessageLabel?: React.ReactNode
+  encryptedMessageLabel?: React.ReactNode
+  encryptedMessageUnavailableLabel?: React.ReactNode
   systemMessageTranslations?: SystemMessageTranslations
   signalMessageTranslations?: SignalMessageTranslations
 }
@@ -64,6 +66,8 @@ export function TopicsPanel({
   videoMessageLabel,
   voiceRecordingMessageLabel,
   fileMessageLabel,
+  encryptedMessageLabel,
+  encryptedMessageUnavailableLabel,
   systemMessageTranslations,
   signalMessageTranslations,
 }: TopicsPanelProps) {
@@ -166,6 +170,8 @@ export function TopicsPanel({
             videoMessageLabel={videoMessageLabel}
             voiceRecordingMessageLabel={voiceRecordingMessageLabel}
             fileMessageLabel={fileMessageLabel}
+            encryptedMessageLabel={encryptedMessageLabel}
+            encryptedMessageUnavailableLabel={encryptedMessageUnavailableLabel}
             systemMessageTranslations={systemMessageTranslations}
             signalMessageTranslations={signalMessageTranslations}
           />

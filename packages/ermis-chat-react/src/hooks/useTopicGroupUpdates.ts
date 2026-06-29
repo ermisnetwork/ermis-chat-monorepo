@@ -21,6 +21,8 @@ export type TopicGroupUpdatesOptions = {
   videoMessageLabel?: React.ReactNode;
   voiceRecordingMessageLabel?: React.ReactNode;
   fileMessageLabel?: React.ReactNode;
+  encryptedMessageLabel?: React.ReactNode;
+  encryptedMessageUnavailableLabel?: React.ReactNode;
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
 };
@@ -202,6 +204,8 @@ export function useTopicGroupUpdates(
     options?.videoMessageLabel,
     options?.voiceRecordingMessageLabel,
     options?.fileMessageLabel,
+    options?.encryptedMessageLabel,
+    options?.encryptedMessageUnavailableLabel,
     options?.systemMessageTranslations,
     options?.signalMessageTranslations,
   ]);

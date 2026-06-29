@@ -281,6 +281,8 @@ type ChannelRowProps = {
   videoMessageLabel?: React.ReactNode;
   voiceRecordingMessageLabel?: React.ReactNode;
   fileMessageLabel?: React.ReactNode;
+  encryptedMessageLabel?: React.ReactNode;
+  encryptedMessageUnavailableLabel?: React.ReactNode;
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
 };
@@ -313,6 +315,8 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   videoMessageLabel,
   voiceRecordingMessageLabel,
   fileMessageLabel,
+  encryptedMessageLabel,
+  encryptedMessageUnavailableLabel,
   systemMessageTranslations,
   signalMessageTranslations,
 }) => {
@@ -340,6 +344,8 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
         videoMessageLabel,
         voiceRecordingMessageLabel,
         fileMessageLabel,
+        encryptedMessageLabel,
+        encryptedMessageUnavailableLabel,
         systemMessageTranslations,
         signalMessageTranslations,
       }),
@@ -355,6 +361,8 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       videoMessageLabel,
       voiceRecordingMessageLabel,
       fileMessageLabel,
+      encryptedMessageLabel,
+      encryptedMessageUnavailableLabel,
       systemMessageTranslations,
       signalMessageTranslations,
     ]
@@ -453,6 +461,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   videoMessageLabel,
   voiceRecordingMessageLabel,
   fileMessageLabel,
+  encryptedMessageLabel,
+  encryptedMessageUnavailableLabel,
   systemMessageTranslations,
   signalMessageTranslations,
   showTopicPills = false,
@@ -670,6 +680,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               videoMessageLabel={videoMessageLabel}
               voiceRecordingMessageLabel={voiceRecordingMessageLabel}
               fileMessageLabel={fileMessageLabel}
+              encryptedMessageLabel={encryptedMessageLabel}
+              encryptedMessageUnavailableLabel={encryptedMessageUnavailableLabel}
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
             />
@@ -749,6 +761,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               videoMessageLabel={videoMessageLabel}
               voiceRecordingMessageLabel={voiceRecordingMessageLabel}
               fileMessageLabel={fileMessageLabel}
+              encryptedMessageLabel={encryptedMessageLabel}
+              encryptedMessageUnavailableLabel={encryptedMessageUnavailableLabel}
               systemMessageTranslations={systemMessageTranslations}
               signalMessageTranslations={signalMessageTranslations}
             />
