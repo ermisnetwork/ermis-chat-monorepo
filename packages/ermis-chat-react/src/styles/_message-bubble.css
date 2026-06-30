@@ -133,8 +133,8 @@
 }
 
 /* Invisible spacer at end of text — ONLY when time is shown (sibling selector) */
-.ermis-message-list__item-time~.ermis-message-list__item-text::after,
-.ermis-message-list__item-time~* .ermis-message-list__item-text::after {
+.ermis-message-list__item-time ~ .ermis-message-list__item-text::after,
+.ermis-message-list__item-time ~ * .ermis-message-list__item-text::after {
   content: '';
   display: inline-block;
   width: 15px;
@@ -182,8 +182,8 @@
   opacity: 0.6;
 }
 
-.ermis-message-bubble--own .ermis-message-list__item-time~.ermis-message-list__item-text::after,
-.ermis-message-bubble--own .ermis-message-list__item-time~* .ermis-message-list__item-text::after {
+.ermis-message-bubble--own .ermis-message-list__item-time ~ .ermis-message-list__item-text::after,
+.ermis-message-bubble--own .ermis-message-list__item-time ~ * .ermis-message-list__item-text::after {
   width: 30px;
 }
 
@@ -484,11 +484,27 @@
   width: 100%;
 }
 
+.ermis-message-list__item-content--has-attachments:has(.ermis-message-content--with-e2ee-attachments) {
+  width: fit-content;
+  max-width: min(86vw, 350px);
+}
+
+.ermis-message-list__item-content--has-attachments:has(.ermis-message-content--with-e2ee-attachments)
+  .ermis-message-bubble {
+  width: auto;
+  max-width: 100%;
+}
+
 /* Container for messages with both text + attachments */
 .ermis-message-content--with-attachments {
   display: flex;
   flex-direction: column;
   width: 100%;
+  max-width: 100%;
+}
+
+.ermis-message-content--with-e2ee-attachments {
+  width: fit-content;
 }
 
 .ermis-message-content--with-attachments .ermis-message-list__item-text {
@@ -502,6 +518,11 @@
   gap: var(--ermis-spacing-xs);
   margin-top: var(--ermis-spacing-xs);
   width: 100%;
+  max-width: 100%;
+}
+
+.ermis-message-content--with-e2ee-attachments .ermis-attachment-list {
+  width: fit-content;
 }
 
 /* Media grid (images + videos) */
@@ -549,7 +570,7 @@
 }
 
 /* If odd number of media in multi-grid, last item spans full width */
-.ermis-attachment-grid--multi> :last-child:nth-child(odd) {
+.ermis-attachment-grid--multi > :last-child:nth-child(odd) {
   grid-column: 1 / -1;
 }
 
@@ -747,6 +768,8 @@
 }
 
 .ermis-attachment--e2ee {
+  width: min(320px, calc(100vw - 96px));
+  min-width: 220px;
   max-width: 320px;
   border: 1px solid color-mix(in srgb, var(--ermis-accent) 20%, transparent);
 }
@@ -770,12 +793,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--ermis-spacing-xs);
-  width: 100%;
-  max-width: 320px;
+  width: fit-content;
+  max-width: min(100%, 340px);
 }
 
 .ermis-e2ee-attachment-media .ermis-attachment-aspect-box {
-  max-width: 320px;
+  max-width: 100%;
 }
 
 .ermis-e2ee-attachment-placeholder {
@@ -834,6 +857,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--ermis-spacing-xs);
+  width: 100%;
   min-width: 0;
 }
 
@@ -894,9 +918,30 @@
   align-items: center;
   gap: var(--ermis-spacing-sm);
   min-width: 240px;
-  /* base comfortable width */
   width: 100%;
-  /* stretch to fill bubble if text makes it wider */
+}
+
+.ermis-e2ee-voice-attachment {
+  width: min(320px, calc(100vw - 96px));
+  max-width: 100%;
+}
+
+.ermis-e2ee-voice-attachment .ermis-custom-audio-player {
+  width: min(320px, calc(100vw - 96px));
+  min-width: 260px;
+  max-width: 100%;
+}
+
+.ermis-custom-audio-player--placeholder {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ermis-custom-audio-player--placeholder:disabled {
+  cursor: wait;
 }
 
 .ermis-custom-audio-play-btn {
@@ -1235,7 +1280,7 @@
 }
 
 /* Stack overlapping */
-.ermis-read-receipts__avatar+.ermis-read-receipts__avatar {
+.ermis-read-receipts__avatar + .ermis-read-receipts__avatar {
   margin-left: -4px;
 }
 

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { preloadImage, isImagePreloaded } from '../../utils';
-import type { AttachmentItem } from '../../types';
+import type { AttachmentItem, MediaLightboxItem } from '../../types';
+import { MediaLightbox } from '../MediaLightbox';
 import { useChatClient } from '../../hooks/useChatClient';
 import { E2EE_PREVIEW_MAX_CONCURRENT, useE2eeAttachmentRenderer } from '../../hooks/useE2eeAttachmentRenderer';
 
@@ -28,8 +29,10 @@ const E2eeMediaGridItem: React.FC<{
   const manifest = item.e2ee_manifest;
   const preview = useE2eeAttachmentRenderer(activeChannel, manifest, 'preview');
   const original = useE2eeAttachmentRenderer(activeChannel, manifest, 'original');
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const hasPreview = Boolean(manifest?.assets.some((asset) => asset.kind === 'preview'));
   const isVideo = item.attachment_type === 'video';
+  const isImage = item.attachment_type === 'image';
 
   useEffect(() => {
     if (!manifest || !hasPreview || preview.url || preview.loading || preview.error) return;
@@ -54,13 +57,38 @@ const E2eeMediaGridItem: React.FC<{
     return () => observer.disconnect();
   }, [hasPreview, manifest, preview.error, preview.load, preview.loading, preview.url]);
 
+  const progressLabel = original.progress?.percentage
+    ? `${original.progress.phase} ${original.progress.percentage}%`
+    : original.loading
+    ? original.progress?.phase || 'Loading'
+    : undefined;
+
   const openOriginal = useCallback(async () => {
     if (!manifest) return;
-    const url = await original.load();
-    if (url && typeof window !== 'undefined') {
-      window.open(url, '_blank', 'noopener,noreferrer');
+    if (isImage || isVideo) {
+      setLightboxOpen(true);
+      if (!original.url && !original.loading) void original.load();
+      return;
     }
-  }, [manifest, original]);
+    await original.download(item.file_name);
+  }, [isImage, isVideo, item.file_name, manifest, original]);
+
+  const lightboxItems = useMemo<MediaLightboxItem[]>(
+    () => [
+      {
+        type: isVideo ? 'video' : 'image',
+        src: original.url,
+        posterSrc: preview.url,
+        alt: item.file_name,
+        loading: original.loading || (lightboxOpen && !original.url && !original.error),
+        progressLabel,
+        download: async () => {
+          await original.download(item.file_name);
+        },
+      },
+    ],
+    [isVideo, item.file_name, lightboxOpen, original, preview.url, progressLabel],
+  );
 
   return (
     <div className="ermis-channel-info__media-item" onClick={openOriginal} ref={previewRef} title={item.file_name}>
@@ -68,11 +96,15 @@ const E2eeMediaGridItem: React.FC<{
       {preview.url ? (
         <div className={isVideo ? 'ermis-channel-info__media-video-thumb' : undefined}>
           <img src={preview.url} alt={item.file_name || 'encrypted media'} loading="lazy" decoding="async" />
-          {isVideo && (
+          {(isVideo || original.loading) && (
             <div className="ermis-channel-info__media-play-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
+              {original.loading ? (
+                <span className="ermis-channel-info__media-spinner" />
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+              )}
             </div>
           )}
         </div>
@@ -84,6 +116,9 @@ const E2eeMediaGridItem: React.FC<{
             </svg>
           </div>
         </div>
+      )}
+      {lightboxOpen && (
+        <MediaLightbox items={lightboxItems} isOpen={lightboxOpen} onClose={() => setLightboxOpen(false)} />
       )}
     </div>
   );

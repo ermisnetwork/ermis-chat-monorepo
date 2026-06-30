@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Channel, E2eeAttachmentManifest } from '@ermis-network/ermis-chat-sdk';
+import type { Channel, E2eeAttachmentManifest, E2eeAttachmentTransferProgress } from '@ermis-network/ermis-chat-sdk';
 
 export const E2EE_PREVIEW_MAX_CONCURRENT = 3;
 export const E2EE_PREVIEW_CACHE_LIMIT = 100;
@@ -18,6 +18,7 @@ export type E2eeAttachmentRenderState = {
   blob?: Blob;
   loading: boolean;
   error?: string;
+  progress?: E2eeAttachmentTransferProgress;
   load: () => Promise<string | undefined>;
   download: (filename?: string) => Promise<void>;
   revoke: () => void;
@@ -70,6 +71,7 @@ export function useE2eeAttachmentRenderer(
   const [blob, setBlob] = useState<Blob | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [progress, setProgress] = useState<E2eeAttachmentTransferProgress | undefined>();
   const cachedPreviewRef = useRef(false);
 
   const revoke = useCallback(() => {
@@ -78,6 +80,7 @@ export function useE2eeAttachmentRenderer(
       return undefined;
     });
     setBlob(undefined);
+    setProgress(undefined);
     cachedPreviewRef.current = false;
   }, [kind]);
 
@@ -103,8 +106,11 @@ export function useE2eeAttachmentRenderer(
     }
     setLoading(true);
     setError(undefined);
+    setProgress(undefined);
     try {
-      const downloaded = await manager.downloadE2eeAttachmentAsset(channel.type, channel.id, manifest, kind);
+      const downloaded = await manager.downloadE2eeAttachmentAsset(channel.type, channel.id, manifest, kind, {
+        onProgress: setProgress,
+      });
       const mimeType = manifestDisplayString(manifest, kind, 'mime_type');
       const typedBlob =
         mimeType && downloaded.type !== mimeType ? new Blob([downloaded], { type: mimeType }) : downloaded;
@@ -144,5 +150,5 @@ export function useE2eeAttachmentRenderer(
 
   useEffect(() => revoke, [revoke]);
 
-  return { url, blob, loading, error, load, download, revoke };
+  return { url, blob, loading, error, progress, load, download, revoke };
 }

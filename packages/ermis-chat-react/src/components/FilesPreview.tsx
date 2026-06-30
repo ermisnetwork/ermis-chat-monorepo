@@ -37,7 +37,7 @@ export const FilesPreview: React.FC<FilesPreviewProps> = React.memo(({ files, on
         const fileName = item.file?.name || item.originalAttachment?.title || 'Unknown file';
         const fileSize = item.file?.size || item.originalAttachment?.file_size || 0;
 
-        const isHeic = item.file ? isHeicFile(item.file) : (fileType === 'image/heic' || fileType === 'image/heif');
+        const isHeic = item.file ? isHeicFile(item.file) : fileType === 'image/heic' || fileType === 'image/heif';
         const isImage = fileType.startsWith('image/') && !isHeic;
         const isVideo = fileType.startsWith('video/');
         const isUploading = item.status === 'uploading';
@@ -62,17 +62,9 @@ export const FilesPreview: React.FC<FilesPreviewProps> = React.memo(({ files, on
 
             {/* Preview content */}
             {isImage && previewUrl ? (
-              <img
-                className="ermis-files-preview__thumb"
-                src={previewUrl}
-                alt={fileName}
-              />
+              <img className="ermis-files-preview__thumb" src={previewUrl} alt={fileName} />
             ) : isVideo && previewUrl ? (
-              <video
-                className="ermis-files-preview__thumb"
-                src={previewUrl}
-                muted
-              />
+              <video className="ermis-files-preview__thumb" src={previewUrl} muted />
             ) : (
               <div className="ermis-files-preview__file-icon">
                 <span>{getFileIcon(fileType)}</span>
@@ -88,9 +80,6 @@ export const FilesPreview: React.FC<FilesPreviewProps> = React.memo(({ files, on
             {/* Upload status overlay */}
             {isUploading && (
               <div className="ermis-files-preview__uploading">
-                {item.e2eePhase && (
-                  <span className="ermis-files-preview__phase">{item.e2eePhase}</span>
-                )}
                 {item.progress !== undefined ? (
                   <span className="ermis-files-preview__progress">{item.progress}%</span>
                 ) : (

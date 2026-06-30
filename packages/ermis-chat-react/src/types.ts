@@ -622,9 +622,12 @@ export type JumpToLatestProps = {
    ---------------------------------------------------------- */
 export type MediaLightboxItem = {
   type: 'image' | 'video';
-  src: string;
+  src?: string;
   alt?: string;
   posterSrc?: string;
+  loading?: boolean;
+  progressLabel?: string;
+  download?: () => Promise<void> | void;
 };
 
 export type MediaLightboxProps = {

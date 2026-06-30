@@ -73,6 +73,7 @@ import {
   generateE2eeAttachmentPreview,
   newUuid,
   putPresignedObject,
+  type E2eeAttachmentTransferProgress,
 } from './attachments';
 import { defaultE2eeAttachmentCryptoProvider, type E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
 import type { ErmisChat } from '../client';
@@ -6809,6 +6810,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         total: number;
         percentage: number;
       }) => void;
+      displayOverrides?: Map<number, Record<string, unknown>>;
     } = {},
   ): Promise<{ attachments: E2eeAttachmentManifest[]; e2ee_attachment_ids: string[] }> {
     if (!this.e2eeClient) throw new Error('[Encryption] E2EE client is not initialized');
@@ -6828,7 +6830,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         total: file.size,
         percentage: 0,
       });
-      const previewBlob = await generateE2eeAttachmentPreview(file);
+      const previewResult = await generateE2eeAttachmentPreview(file);
+      const previewBlob = previewResult?.blob;
+      const displayOverrides = options.displayOverrides?.get(index) || {};
       options.onProgress?.({
         fileIndex: index,
         phase: 'generating_preview',
@@ -6844,6 +6848,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           name: file.name,
           mime_type: file.type,
           size: file.size,
+          width: previewResult?.originalWidth,
+          height: previewResult?.originalHeight,
+          duration: previewResult?.duration,
+          ...displayOverrides,
         },
         onProgress: (progress) => options.onProgress?.({ fileIndex: index, ...progress }),
       });
@@ -6859,6 +6867,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               mime_type: 'image/jpeg',
               size: previewBlob.size,
               preview_of: 'original',
+              width: previewResult?.previewWidth,
+              height: previewResult?.previewHeight,
             },
             onProgress: (progress) => options.onProgress?.({ fileIndex: index, ...progress }),
           });
@@ -6955,19 +6965,22 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     channelId: string,
     manifest: E2eeAttachmentManifest,
     kind: 'original' | 'preview' = 'original',
+    options: { onProgress?: (progress: E2eeAttachmentTransferProgress) => void } = {},
   ): Promise<Blob> {
     if (!this.e2eeClient) throw new Error('[Encryption] E2EE client is not initialized');
     const asset =
       manifest.assets.find((item) => item.kind === kind) || (kind === 'original' ? manifest.assets[0] : undefined);
     if (!asset) throw new Error('[Encryption] E2EE attachment manifest has no assets');
+    options.onProgress?.({ phase: 'granting', loaded: 0, total: 1, percentage: 0 });
     const grant = await this.e2eeClient.downloadAttachmentGrant(
       channelType,
       channelId,
       manifest.attachment_id,
       asset.asset_id,
     );
-    const encrypted = await downloadEncryptedAsset(grant.download_url);
-    return await decryptE2eeAsset(encrypted, asset, this._attachmentCryptoProvider);
+    options.onProgress?.({ phase: 'granting', loaded: 1, total: 1, percentage: 100 });
+    const encrypted = await downloadEncryptedAsset(grant.download_url, options.onProgress);
+    return await decryptE2eeAsset(encrypted, asset, this._attachmentCryptoProvider, options.onProgress);
   }
 
   async queryE2eeAttachmentMessages(
@@ -7037,13 +7050,21 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const nameValue = display.name;
     const mimeValue = display.mime_type;
     const sizeValue = display.size;
+    const attachmentTypeValue = display.attachment_type;
     const fileName = typeof nameValue === 'string' && nameValue.trim() ? nameValue : 'Encrypted attachment';
     const mimeType = typeof mimeValue === 'string' && mimeValue.trim() ? mimeValue : 'application/octet-stream';
     const size =
       typeof sizeValue === 'number' && Number.isFinite(sizeValue)
         ? sizeValue
         : original?.plaintext_size || projectionOriginal?.cipher_size || original?.cipher_size || 0;
-    const attachmentType = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('video/') ? 'video' : 'file';
+    const attachmentType =
+      attachmentTypeValue === 'voiceRecording'
+        ? 'voiceRecording'
+        : mimeType.startsWith('image/')
+        ? 'image'
+        : mimeType.startsWith('video/')
+        ? 'video'
+        : 'file';
 
     return {
       id: projection.attachment_id,

@@ -382,12 +382,6 @@ export function getLastMessagePreview(
 
   // Regular / other
   let displayText: React.ReactNode = rawText;
-  if (!displayText && isEncrypted) {
-    displayText =
-      (lastMsg as any).e2ee_status === 'failed'
-        ? (options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable')
-        : (options?.encryptedMessageLabel || 'Encrypted message');
-  }
   if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
     const att = lastMsg.attachments[0];
     const type = att.type || '';
@@ -414,13 +408,23 @@ export function getLastMessagePreview(
       }
     }
   }
+  if (!displayText && isEncrypted) {
+    displayText =
+      (lastMsg as any).e2ee_status === 'failed'
+        ? options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable'
+        : options?.encryptedMessageLabel || 'Encrypted message';
+  }
 
   // Format mentions if necessary
   const lastMsgRecord = lastMsg as any;
   const mentionedUsers = lastMsgRecord.mentioned_users as string[] | undefined;
   const mentionedAll = lastMsgRecord.mentioned_all as boolean | undefined;
 
-  if (typeof displayText === 'string' && displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
+  if (
+    typeof displayText === 'string' &&
+    displayText &&
+    (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))
+  ) {
     displayText = replaceMentionsForPreview(displayText, lastMsg as any, userMap);
   }
 

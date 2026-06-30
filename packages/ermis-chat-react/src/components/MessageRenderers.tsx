@@ -16,13 +16,7 @@ import { getFileIcon } from './ChannelInfo/utils';
 import type { AttachmentProps, MessageRendererProps, MessageBubbleProps, MediaLightboxItem } from '../types';
 
 export type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
-import {
-  isVoiceRecordingAttachment,
-  isLinkPreviewAttachment,
-  isImage,
-  isVideo,
-  isAudio
-} from '../messageTypeUtils';
+import { isVoiceRecordingAttachment, isLinkPreviewAttachment, isImage, isVideo, isAudio } from '../messageTypeUtils';
 
 /* ----------------------------------------------------------
    Attachment renderers
@@ -123,6 +117,40 @@ function e2eeDisplayNumber(display: Record<string, unknown> | undefined, key: st
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function formatE2eeProgress(progress?: {
+  phase: string;
+  loaded: number;
+  total: number;
+  percentage?: number;
+}): string | undefined {
+  if (!progress) return undefined;
+  const phaseLabel =
+    progress.phase === 'granting'
+      ? 'Getting access'
+      : progress.phase === 'downloading'
+      ? 'Downloading'
+      : progress.phase === 'verifying'
+      ? 'Verifying'
+      : progress.phase === 'decrypting'
+      ? 'Decrypting'
+      : 'Loading';
+  if (typeof progress.percentage === 'number') return `${phaseLabel} ${progress.percentage}%`;
+  return phaseLabel;
+}
+
+function e2eeAspectStyle(width?: number, height?: number): React.CSSProperties {
+  const ratio = width && height && width > 0 && height > 0 ? width / height : 4 / 3;
+  const maxWidth = 340;
+  const maxHeight = 420;
+  const targetWidth = Math.max(160, Math.min(maxWidth, Math.round(maxHeight * ratio)));
+  return {
+    aspectRatio: `${width && height ? width : 4} / ${width && height ? height : 3}`,
+    width: `min(100%, ${targetWidth}px)`,
+    maxWidth: `${maxWidth}px`,
+    maxHeight: `${maxHeight}px`,
+  };
+}
+
 function formatFileSize(size?: number): string | undefined {
   if (!size || size <= 0) return undefined;
   if (size < 1024) return `${size} B`;
@@ -143,6 +171,13 @@ function isLikelyVideo(name: string, mimeType?: string): boolean {
   return Boolean(mimeType?.startsWith('video/') || /\.(mov|m4v|mp4|mpeg|mpg|ogv|webm)$/i.test(name));
 }
 
+function isLikelyAudio(name: string, mimeType?: string, attachmentType?: string): boolean {
+  return Boolean(
+    attachmentType === 'voiceRecording' ||
+      mimeType?.startsWith('audio/') ||
+      /\.(aac|flac|m4a|mp3|oga|ogg|opus|wav|webm)$/i.test(name),
+  );
+}
 
 function E2eePlayIcon() {
   return (
@@ -168,190 +203,291 @@ function scheduleE2eePreviewLoad(load: () => Promise<unknown>): void {
   else queuedE2eePreviewLoads.push(run);
 }
 
-const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest }> = React.memo(({ attachment }) => {
-  const { activeChannel } = useChatClient();
-  const original = useE2eeAttachmentRenderer(activeChannel, attachment, 'original');
-  const preview = useE2eeAttachmentRenderer(activeChannel, attachment, 'preview');
-  const [mediaError, setMediaError] = useState(false);
-  const previewRef = useRef<HTMLDivElement | null>(null);
-  const asset = attachment.assets.find((item) => item.kind === 'original') || attachment.assets[0];
-  const hasPreview = attachment.assets.some((item) => item.kind === 'preview');
-  const display = asset?.display;
-  const title = e2eeDisplayString(display, 'name') || 'Encrypted attachment';
-  const mimeType = e2eeDisplayString(display, 'mime_type');
-  const size = e2eeDisplayNumber(display, 'size') || asset?.plaintext_size || asset?.cipher_size;
-  const ext = extensionForName(title);
-  const sizeLabel = formatFileSize(size);
-  const isImageAsset = isLikelyImage(title, mimeType);
-  const isVideoAsset = isLikelyVideo(title, mimeType);
-  const loadedUrl = original.url || preview.url;
-  const loading = original.loading || preview.loading;
-  const error = original.error || preview.error;
-  const statusLabel = mediaError
-    ? 'Preview unavailable, download file'
-    : loading
-    ? 'Decrypting...'
-    : error
-    ? 'Unavailable'
-    : original.url
-    ? 'Decrypted locally'
-    : preview.url
-    ? 'Preview decrypted'
-    : 'Encrypted';
+const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?: boolean }> = React.memo(
+  ({ attachment, grantReady = true }) => {
+    const { activeChannel } = useChatClient();
+    const original = useE2eeAttachmentRenderer(activeChannel, attachment, 'original');
+    const preview = useE2eeAttachmentRenderer(activeChannel, attachment, 'preview');
+    const [mediaError, setMediaError] = useState(false);
+    const [lightboxOpen, setLightboxOpen] = useState(false);
+    const [naturalPreviewSize, setNaturalPreviewSize] = useState<{ width: number; height: number } | undefined>();
+    const previewRef = useRef<HTMLDivElement | null>(null);
+    const asset = attachment.assets.find((item) => item.kind === 'original') || attachment.assets[0];
+    const previewAsset = attachment.assets.find((item) => item.kind === 'preview');
+    const hasPreview = Boolean(previewAsset);
+    const display = asset?.display;
+    const previewDisplay = previewAsset?.display;
+    const title = e2eeDisplayString(display, 'name') || 'Encrypted attachment';
+    const mimeType = e2eeDisplayString(display, 'mime_type');
+    const attachmentType = e2eeDisplayString(display, 'attachment_type');
+    const size = e2eeDisplayNumber(display, 'size') || asset?.plaintext_size || asset?.cipher_size;
+    const ext = extensionForName(title);
+    const sizeLabel = formatFileSize(size);
+    const isImageAsset = isLikelyImage(title, mimeType);
+    const isVideoAsset = isLikelyVideo(title, mimeType);
+    const isAudioAsset = isLikelyAudio(title, mimeType, attachmentType);
+    const loadedUrl = preview.url || original.url;
+    const loading = original.loading || preview.loading;
+    const error = original.error || preview.error;
+    const width =
+      e2eeDisplayNumber(display, 'width') || e2eeDisplayNumber(previewDisplay, 'width') || naturalPreviewSize?.width;
+    const height =
+      e2eeDisplayNumber(display, 'height') || e2eeDisplayNumber(previewDisplay, 'height') || naturalPreviewSize?.height;
+    const aspectStyle = e2eeAspectStyle(width, height);
+    const progressLabel = formatE2eeProgress(original.progress || preview.progress);
+    const statusLabel = mediaError
+      ? 'Preview unavailable, download file'
+      : !grantReady
+      ? 'Sending'
+      : progressLabel
+      ? progressLabel
+      : error
+      ? 'Unavailable'
+      : original.url
+      ? 'Ready'
+      : preview.url
+      ? 'Preview ready'
+      : 'Encrypted';
 
-  useEffect(() => {
-    if (!hasPreview || !(isImageAsset || isVideoAsset) || preview.url || preview.loading || preview.error) return;
-    const element = previewRef.current;
-    if (!element || typeof IntersectionObserver === 'undefined') {
-      scheduleE2eePreviewLoad(preview.load);
-      return;
-    }
-    let scheduled = false;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (scheduled) return;
-        if (entries.some((entry) => entry.isIntersecting)) {
-          scheduled = true;
-          observer.disconnect();
-          scheduleE2eePreviewLoad(preview.load);
-        }
-      },
-      { rootMargin: '160px' },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [hasPreview, isImageAsset, isVideoAsset, preview.error, preview.load, preview.loading, preview.url]);
+    useEffect(() => {
+      if (!grantReady) return;
+      if (!hasPreview || !(isImageAsset || isVideoAsset) || preview.url || preview.loading || preview.error) return;
+      const element = previewRef.current;
+      if (!element || typeof IntersectionObserver === 'undefined') {
+        scheduleE2eePreviewLoad(preview.load);
+        return;
+      }
+      let scheduled = false;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (scheduled) return;
+          if (entries.some((entry) => entry.isIntersecting)) {
+            scheduled = true;
+            observer.disconnect();
+            scheduleE2eePreviewLoad(preview.load);
+          }
+        },
+        { rootMargin: '160px' },
+      );
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, [grantReady, hasPreview, isImageAsset, isVideoAsset, preview.error, preview.load, preview.loading, preview.url]);
 
-  const handleLoad = useCallback(
-    (event?: React.MouseEvent) => {
-      event?.preventDefault();
-      event?.stopPropagation();
+    const ensureOriginal = useCallback(() => {
+      if (!grantReady) return;
       setMediaError(false);
-      void original.load();
-    },
-    [original],
-  );
+      if (!original.url && !original.loading) void original.load();
+    }, [grantReady, original]);
 
-  const handleDownload = useCallback(
-    (event: React.MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void original.download(title);
-    },
-    [original, title],
-  );
+    const openViewer = useCallback(
+      (event?: React.MouseEvent) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        setLightboxOpen(true);
+        ensureOriginal();
+      },
+      [ensureOriginal],
+    );
 
-  if ((isImageAsset || isVideoAsset) && loadedUrl && !mediaError) {
-    const showingOriginal = Boolean(original.url);
-    return (
-      <div className="ermis-e2ee-attachment-media" ref={previewRef}>
-        <div className="ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3">
-          {isVideoAsset && showingOriginal ? (
-            <video
-              className="ermis-attachment ermis-attachment--video ermis-attachment--loaded"
-              src={loadedUrl}
-              controls
-              preload="metadata"
-              onError={() => setMediaError(true)}
-            />
+    const handleLoad = useCallback(
+      (event?: React.MouseEvent) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        ensureOriginal();
+      },
+      [ensureOriginal],
+    );
+
+    const handleDownload = useCallback(
+      (event?: React.MouseEvent) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        if (!grantReady) return;
+        void original.download(title);
+      },
+      [grantReady, original, title],
+    );
+
+    const lightboxItems = useMemo<MediaLightboxItem[]>(
+      () => [
+        {
+          type: isVideoAsset ? 'video' : 'image',
+          src: original.url,
+          posterSrc: preview.url,
+          alt: title,
+          loading: original.loading || (lightboxOpen && !original.url && !original.error),
+          progressLabel: formatE2eeProgress(original.progress),
+          download: async () => {
+            await original.download(title);
+          },
+        },
+      ],
+      [isVideoAsset, lightboxOpen, original, preview.url, title],
+    );
+
+    if (isAudioAsset) {
+      const durationSec = e2eeDisplayNumber(display, 'duration') || 0;
+      const mins = Math.floor(durationSec / 60);
+      const secs = Math.round(durationSec % 60);
+      const durationLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+      return (
+        <div className="ermis-e2ee-voice-attachment">
+          {original.url ? (
+            <CustomAudioPlayer src={original.url} durationLabel={durationLabel} fileName={title} />
           ) : (
             <button
-              className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3"
               type="button"
-              onClick={showingOriginal ? undefined : handleLoad}
-              disabled={showingOriginal || original.loading}
+              className="ermis-custom-audio-player ermis-custom-audio-player--placeholder"
+              onClick={handleLoad}
+              disabled={loading || !grantReady}
             >
-              <img
-                className="ermis-attachment ermis-attachment--image ermis-attachment--loaded"
-                src={loadedUrl}
-                alt={title}
-                loading="lazy"
-                onError={() => setMediaError(true)}
-              />
-              {isVideoAsset && !showingOriginal && (
-                <span className="ermis-e2ee-attachment-placeholder__icon">
-                  <E2eePlayIcon />
+              <span className="ermis-custom-audio-play-btn" aria-hidden>
+                {loading ? <span className="ermis-e2ee-attachment-spinner" /> : <PlayIcon />}
+              </span>
+              <span className="ermis-custom-audio-progress-container">
+                <span className="ermis-custom-audio-progress-bg">
+                  <span
+                    className="ermis-custom-audio-progress-fill"
+                    style={{ width: `${original.progress?.percentage || 0}%` }}
+                  />
                 </span>
-              )}
+              </span>
+              <span className="ermis-custom-audio-duration">{progressLabel || durationLabel}</span>
+              <span className="ermis-custom-audio-download-btn" aria-hidden>
+                <DownloadIcon />
+              </span>
             </button>
           )}
         </div>
-        <div className="ermis-e2ee-attachment-actions">
-          <span className="ermis-e2ee-attachment-actions__label">{title}</span>
-          <button
-            className="ermis-attachment__file-download"
-            onClick={handleDownload}
-            title="Download decrypted file"
-            type="button"
-          >
-            <DownloadIcon />
-          </button>
-        </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (isImageAsset || isVideoAsset) {
+    if ((isImageAsset || isVideoAsset) && loadedUrl && !mediaError) {
+      return (
+        <div className="ermis-e2ee-attachment-media" ref={previewRef}>
+          <button
+            className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--e2ee"
+            style={aspectStyle}
+            type="button"
+            onClick={openViewer}
+            disabled={!grantReady}
+          >
+            <img
+              className="ermis-attachment ermis-attachment--image ermis-attachment--loaded"
+              src={loadedUrl}
+              alt={title}
+              loading="lazy"
+              onLoad={(event) => {
+                const img = event.currentTarget;
+                if (img.naturalWidth && img.naturalHeight) {
+                  setNaturalPreviewSize({ width: img.naturalWidth, height: img.naturalHeight });
+                }
+              }}
+              onError={() => setMediaError(true)}
+            />
+            {(isVideoAsset || original.loading) && (
+              <span className="ermis-e2ee-attachment-placeholder__icon">
+                {original.loading ? <span className="ermis-e2ee-attachment-spinner" /> : <E2eePlayIcon />}
+              </span>
+            )}
+            {original.loading && (
+              <span className="ermis-e2ee-attachment-progress">
+                {formatE2eeProgress(original.progress) || 'Loading'}
+              </span>
+            )}
+          </button>
+          <div className="ermis-e2ee-attachment-actions">
+            <span className="ermis-e2ee-attachment-actions__label">{title}</span>
+            <button
+              className="ermis-attachment__file-download"
+              onClick={handleDownload}
+              title="Download decrypted file"
+              type="button"
+              disabled={!grantReady}
+            >
+              <DownloadIcon />
+            </button>
+          </div>
+          {lightboxOpen && (
+            <MediaLightbox items={lightboxItems} isOpen={lightboxOpen} onClose={() => setLightboxOpen(false)} />
+          )}
+        </div>
+      );
+    }
+
+    if (isImageAsset || isVideoAsset) {
+      return (
+        <div className="ermis-e2ee-attachment-media" ref={previewRef}>
+          <button
+            type="button"
+            className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--e2ee"
+            style={aspectStyle}
+            onClick={handleLoad}
+            disabled={loading || !grantReady}
+          >
+            <span className="ermis-attachment-shimmer" />
+            <span className="ermis-e2ee-attachment-placeholder__center">
+              <span className="ermis-e2ee-attachment-placeholder__icon">
+                {loading ? (
+                  <span className="ermis-e2ee-attachment-spinner" />
+                ) : isVideoAsset ? (
+                  <E2eePlayIcon />
+                ) : (
+                  getFileIcon(mimeType || 'image/*', title)
+                )}
+              </span>
+              <span className="ermis-e2ee-attachment-placeholder__title">{title}</span>
+              <span className="ermis-e2ee-attachment-placeholder__meta">{statusLabel}</span>
+            </span>
+          </button>
+          <div className="ermis-e2ee-attachment-actions">
+            <span className="ermis-e2ee-attachment-actions__label">{sizeLabel || 'Encrypted media'}</span>
+            <button
+              className="ermis-attachment__file-download"
+              onClick={handleDownload}
+              title="Download decrypted file"
+              type="button"
+              disabled={loading || !grantReady}
+            >
+              <DownloadIcon />
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <div className="ermis-e2ee-attachment-media" ref={previewRef}>
+      <div className="ermis-attachment ermis-attachment--file ermis-attachment--e2ee">
+        <span className="ermis-attachment__file-icon">
+          {getFileIcon(mimeType || '', title)}
+          <span className="ermis-attachment__file-ext">{ext}</span>
+        </span>
         <button
           type="button"
-          className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3"
+          className="ermis-attachment__file-info ermis-e2ee-attachment__open"
           onClick={handleLoad}
-          disabled={loading}
+          disabled={loading || !grantReady}
         >
-          <span className="ermis-attachment-shimmer" />
-          <span className="ermis-e2ee-attachment-placeholder__center">
-            <span className="ermis-e2ee-attachment-placeholder__icon">
-              {isVideoAsset ? <E2eePlayIcon /> : getFileIcon(mimeType || 'image/*', title)}
-            </span>
-            <span className="ermis-e2ee-attachment-placeholder__title">{title}</span>
-            <span className="ermis-e2ee-attachment-placeholder__meta">{statusLabel}</span>
+          <span className="ermis-attachment__file-name">{title}</span>
+          <span className="ermis-attachment__file-size">
+            {sizeLabel ? `${sizeLabel} · ${statusLabel}` : statusLabel}
           </span>
         </button>
-        <div className="ermis-e2ee-attachment-actions">
-          <span className="ermis-e2ee-attachment-actions__label">{sizeLabel || 'Encrypted media'}</span>
-          <button
-            className="ermis-attachment__file-download"
-            onClick={handleDownload}
-            title="Download decrypted file"
-            type="button"
-            disabled={loading}
-          >
-            <DownloadIcon />
-          </button>
-        </div>
+        <button
+          className="ermis-attachment__file-download"
+          onClick={handleDownload}
+          title="Download decrypted file"
+          type="button"
+          disabled={loading || !grantReady}
+        >
+          <DownloadIcon />
+        </button>
       </div>
     );
-  }
-
-  return (
-    <div className="ermis-attachment ermis-attachment--file ermis-attachment--e2ee">
-      <span className="ermis-attachment__file-icon">
-        {getFileIcon(mimeType || '', title)}
-        <span className="ermis-attachment__file-ext">{ext}</span>
-      </span>
-      <button
-        type="button"
-        className="ermis-attachment__file-info ermis-e2ee-attachment__open"
-        onClick={handleLoad}
-        disabled={loading}
-      >
-        <span className="ermis-attachment__file-name">{title}</span>
-        <span className="ermis-attachment__file-size">{sizeLabel ? `${sizeLabel} · ${statusLabel}` : statusLabel}</span>
-      </button>
-      <button
-        className="ermis-attachment__file-download"
-        onClick={handleDownload}
-        title="Download decrypted file"
-        type="button"
-        disabled={loading}
-      >
-        <DownloadIcon />
-      </button>
-    </div>
-  );
-});
+  },
+  (prev, next) => prev.attachment === next.attachment && prev.grantReady === next.grantReady,
+);
 (E2eeAttachment as any).displayName = 'E2eeAttachment';
 (ImageAttachment as any).displayName = 'ImageAttachment';
 
@@ -549,25 +685,41 @@ const MicIcon = () => (
 );
 
 const DownloadIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
     <polyline points="7 10 12 15 17 10" />
     <line x1="12" y1="15" x2="12" y2="3" />
   </svg>
 );
 
-const CustomAudioPlayer: React.FC<{ src: string; durationLabel: string; fileName?: string }> = ({ src, durationLabel, fileName }) => {
+const CustomAudioPlayer: React.FC<{ src: string; durationLabel: string; fileName?: string }> = ({
+  src,
+  durationLabel,
+  fileName,
+}) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [dynamicDuration, setDynamicDuration] = useState(durationLabel);
   const audioRef = React.useRef<HTMLAudioElement>(null);
   const { downloadFile } = useDownloadHandler();
 
-  const handleDownload = useCallback(async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    await downloadFile(src, fileName || 'audio.mp3');
-  }, [downloadFile, src, fileName]);
+  const handleDownload = useCallback(
+    async (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await downloadFile(src, fileName || 'audio.mp3');
+    },
+    [downloadFile, src, fileName],
+  );
 
   React.useEffect(() => {
     const audio = audioRef.current;
@@ -642,17 +794,18 @@ const VoiceRecordingAttachment: React.FC<AttachmentProps> = React.memo(
     const src = attachment.asset_url || attachment.url;
     if (!src) return null;
 
-  const durationSec = attachment.duration ?? 0;
-  const mins = Math.floor(durationSec / 60);
-  const secs = Math.round(durationSec % 60);
-  const durationLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
-  const fileName = attachment.file_name || attachment.title || 'audio.mp3';
+    const durationSec = attachment.duration ?? 0;
+    const mins = Math.floor(durationSec / 60);
+    const secs = Math.round(durationSec % 60);
+    const durationLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
+    const fileName = attachment.file_name || attachment.title || 'audio.mp3';
 
-  return <CustomAudioPlayer src={src} durationLabel={durationLabel} fileName={fileName} />;
-}, (prev, next) => {
-  return (prev.attachment.asset_url || prev.attachment.url) ===
-    (next.attachment.asset_url || next.attachment.url);
-});
+    return <CustomAudioPlayer src={src} durationLabel={durationLabel} fileName={fileName} />;
+  },
+  (prev, next) => {
+    return (prev.attachment.asset_url || prev.attachment.url) === (next.attachment.asset_url || next.attachment.url);
+  },
+);
 (VoiceRecordingAttachment as any).displayName = 'VoiceRecordingAttachment';
 
 const LinkPreviewAttachment: React.FC<AttachmentProps> = React.memo(
@@ -723,8 +876,11 @@ export const MessageAttachment: React.FC<AttachmentProps> = ({ attachment }) => 
   return <FileAttachment attachment={attachment} />;
 };
 
-export const AttachmentList: React.FC<{ attachments?: Array<Attachment | E2eeAttachmentManifest> }> = React.memo(
-  ({ attachments }) => {
+export const AttachmentList: React.FC<{
+  attachments?: Array<Attachment | E2eeAttachmentManifest>;
+  e2eeGrantReady?: boolean;
+}> = React.memo(
+  ({ attachments, e2eeGrantReady = true }) => {
     if (!attachments || attachments.length === 0) return null;
 
     // Group by type
@@ -790,7 +946,7 @@ export const AttachmentList: React.FC<{ attachments?: Array<Attachment | E2eeAtt
         )}
         {/* File group */}
         {e2eeAttachments.map((att) => (
-          <E2eeAttachment key={att.attachment_id} attachment={att} />
+          <E2eeAttachment key={att.attachment_id} attachment={att} grantReady={e2eeGrantReady} />
         ))}
         {files.map((att, i) => (
           <FileAttachment key={att.id || `file-${i}`} attachment={att} />
@@ -818,7 +974,8 @@ export const AttachmentList: React.FC<{ attachments?: Array<Attachment | E2eeAtt
   },
   (prev, next) => {
     // Skip re-render if same attachment array reference
-    if (prev.attachments === next.attachments) return true;
+    if (prev.attachments === next.attachments && prev.e2eeGrantReady === next.e2eeGrantReady) return true;
+    if (prev.e2eeGrantReady !== next.e2eeGrantReady) return false;
     if (!prev.attachments || !next.attachments) return false;
     if (prev.attachments.length !== next.attachments.length) return false;
     return prev.attachments.every((a, i) => {
@@ -945,22 +1102,24 @@ function renderTextWithMentions(
 }
 
 /** Regular message: text with @mentions + attachments */
-export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({
-  message,
-  onMentionClick,
-  encryptedMessageLabel = 'Encrypted message',
-  encryptedMessageFailedLabel = 'Encrypted message could not be decrypted',
-  encryptedMessageDecryptingLabel = 'Decrypting encrypted message...',
-}) => {
-  const { activeChannel } = useChatClient();
-  
-  const isEncrypted = message.content_type === 'mls' || Boolean((message as any).mls_ciphertext);
-  const hasRawAttachments = Boolean(message.attachments?.length);
-  const rawText = message.text || '';
-  const isEncryptedSentinelText =
-    hasRawAttachments &&
-    (rawText === 'Encrypted message' || rawText === 'Encrypted message unavailable'
-      || rawText === encryptedMessageLabel);
+export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
+  ({
+    message,
+    onMentionClick,
+    encryptedMessageLabel = 'Encrypted message',
+    encryptedMessageFailedLabel = 'Encrypted message could not be decrypted',
+    encryptedMessageDecryptingLabel = 'Decrypting encrypted message...',
+  }) => {
+    const { activeChannel } = useChatClient();
+
+    const isEncrypted = message.content_type === 'mls' || Boolean((message as any).mls_ciphertext);
+    const hasRawAttachments = Boolean(message.attachments?.length);
+    const rawText = message.text || '';
+    const isEncryptedSentinelText =
+      hasRawAttachments &&
+      (rawText === 'Encrypted message' ||
+        rawText === 'Encrypted message unavailable' ||
+        rawText === encryptedMessageLabel);
 
     const userMap = useMemo<Record<string, string>>(() => {
       return buildUserMap(activeChannel?.state);
@@ -983,8 +1142,11 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({
     }, [message.attachments, message.text]);
 
     const hasAttachments = attachmentsToRender.length > 0;
+    const hasE2eeAttachments = attachmentsToRender.some(isE2eeAttachmentManifest);
+    const messageStatus = (message as any).status;
+    const e2eeGrantReady = !['sending', 'error', 'failed_offline'].includes(messageStatus);
     const encryptedPlaceholder =
-      isEncrypted && !message.text ? (
+      isEncrypted && !message.text && !hasAttachments ? (
         <span className="ermis-message-list__item-text ermis-message-list__item-text--encrypted">
           {(message as any).e2ee_status === 'failed'
             ? encryptedMessageFailedLabel
@@ -996,10 +1158,14 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({
 
     if (hasAttachments) {
       return (
-        <div className="ermis-message-content--with-attachments">
+        <div
+          className={`ermis-message-content--with-attachments${
+            hasE2eeAttachments ? ' ermis-message-content--with-e2ee-attachments' : ''
+          }`}
+        >
           {textContent && <span className="ermis-message-list__item-text">{textContent}</span>}
           {encryptedPlaceholder}
-          <AttachmentList attachments={attachmentsToRender} />
+          <AttachmentList attachments={attachmentsToRender} e2eeGrantReady={e2eeGrantReady} />
         </div>
       );
     }
@@ -1017,7 +1183,9 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(({
       prev.message.updated_at === next.message.updated_at &&
       prev.message.text === next.message.text &&
       prev.message.content_type === next.message.content_type &&
+      (prev.message as any).status === (next.message as any).status &&
       (prev.message as any).e2ee_status === (next.message as any).e2ee_status &&
+      prev.message.attachments === next.message.attachments &&
       prev.isOwnMessage === next.isOwnMessage
     );
   },

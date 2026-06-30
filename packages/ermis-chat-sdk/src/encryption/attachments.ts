@@ -32,6 +32,24 @@ export type UploadedE2eeAttachment = {
   assets: E2eeAttachmentManifestAsset[];
 };
 
+export type E2eeAttachmentTransferPhase = 'granting' | 'downloading' | 'verifying' | 'decrypting';
+
+export type E2eeAttachmentTransferProgress = {
+  phase: E2eeAttachmentTransferPhase;
+  loaded: number;
+  total: number;
+  percentage?: number;
+};
+
+export type E2eeAttachmentPreviewResult = {
+  blob: Blob;
+  originalWidth?: number;
+  originalHeight?: number;
+  previewWidth?: number;
+  previewHeight?: number;
+  duration?: number;
+};
+
 function isHeicLike(input: Blob & { name?: string }): boolean {
   const type = input.type.toLowerCase();
   const name = (input.name || '').toLowerCase();
@@ -88,27 +106,35 @@ function waitForElementEvent(element: HTMLElement, eventName: string, timeoutMs:
   });
 }
 
-async function generateImagePreview(input: Blob): Promise<Blob> {
+async function generateImagePreview(input: Blob): Promise<E2eeAttachmentPreviewResult> {
   const objectUrl = URL.createObjectURL(input);
   try {
     const image = new Image();
     image.decoding = 'async';
     image.src = objectUrl;
     await waitForElementEvent(image, 'load', E2EE_ATTACHMENT_VIDEO_PREVIEW_TIMEOUT_MS);
-    const size = scaledCanvasSize(image.naturalWidth, image.naturalHeight);
+    const originalWidth = image.naturalWidth;
+    const originalHeight = image.naturalHeight;
+    const size = scaledCanvasSize(originalWidth, originalHeight);
     const canvas = document.createElement('canvas');
     canvas.width = size.width;
     canvas.height = size.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('E2EE attachment preview canvas context unavailable');
     ctx.drawImage(image, 0, 0, size.width, size.height);
-    return await canvasToJpegBlob(canvas);
+    return {
+      blob: await canvasToJpegBlob(canvas),
+      originalWidth,
+      originalHeight,
+      previewWidth: size.width,
+      previewHeight: size.height,
+    };
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
 }
 
-async function generateVideoPreview(input: Blob): Promise<Blob> {
+async function generateVideoPreview(input: Blob): Promise<E2eeAttachmentPreviewResult> {
   const objectUrl = URL.createObjectURL(input);
   const video = document.createElement('video');
   try {
@@ -128,14 +154,23 @@ async function generateVideoPreview(input: Blob): Promise<Blob> {
     } else {
       await waitForElementEvent(video, 'loadeddata', E2EE_ATTACHMENT_VIDEO_PREVIEW_TIMEOUT_MS).catch(() => undefined);
     }
-    const size = scaledCanvasSize(video.videoWidth, video.videoHeight);
+    const originalWidth = video.videoWidth;
+    const originalHeight = video.videoHeight;
+    const size = scaledCanvasSize(originalWidth, originalHeight);
     const canvas = document.createElement('canvas');
     canvas.width = size.width;
     canvas.height = size.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('E2EE attachment preview canvas context unavailable');
     ctx.drawImage(video, 0, 0, size.width, size.height);
-    return await canvasToJpegBlob(canvas);
+    return {
+      blob: await canvasToJpegBlob(canvas),
+      originalWidth,
+      originalHeight,
+      previewWidth: size.width,
+      previewHeight: size.height,
+      duration: duration || undefined,
+    };
   } finally {
     video.removeAttribute('src');
     video.load();
@@ -145,7 +180,7 @@ async function generateVideoPreview(input: Blob): Promise<Blob> {
 
 export async function generateE2eeAttachmentPreview(
   input: Blob & { name?: string; type?: string },
-): Promise<Blob | undefined> {
+): Promise<E2eeAttachmentPreviewResult | undefined> {
   if (!isBrowserPreviewAvailable()) return undefined;
   if (isHeicLike(input)) return undefined;
   const type = input.type.toLowerCase();
@@ -266,6 +301,7 @@ export async function verifyEncryptedAssetHash(
   blob: Blob,
   expectedSha256: string,
   cryptoProvider: E2eeAttachmentCryptoProvider = defaultE2eeAttachmentCryptoProvider,
+  onProgress?: (progress: E2eeAttachmentTransferProgress) => void,
 ): Promise<void> {
   const hash = cryptoProvider.createSha256();
   let offset = 0;
@@ -273,6 +309,15 @@ export async function verifyEncryptedAssetHash(
     const end = Math.min(offset + E2EE_ATTACHMENT_FRAME_SIZE, blob.size);
     hash.update(new Uint8Array(await blob.slice(offset, end).arrayBuffer()));
     offset = end;
+    onProgress?.({
+      phase: 'verifying',
+      loaded: offset,
+      total: blob.size,
+      percentage: blob.size === 0 ? 100 : Math.round((offset / blob.size) * 100),
+    });
+  }
+  if (blob.size === 0) {
+    onProgress?.({ phase: 'verifying', loaded: 0, total: 0, percentage: 100 });
   }
   const actual = hash.hex();
   if (actual !== expectedSha256.toLowerCase()) {
@@ -284,13 +329,19 @@ export async function decryptE2eeAsset(
   blob: Blob,
   manifest: E2eeAttachmentManifestAsset,
   cryptoProvider: E2eeAttachmentCryptoProvider = defaultE2eeAttachmentCryptoProvider,
+  onProgress?: (progress: E2eeAttachmentTransferProgress) => void,
 ): Promise<Blob> {
-  await verifyEncryptedAssetHash(blob, manifest.cipher_sha256, cryptoProvider);
+  await verifyEncryptedAssetHash(blob, manifest.cipher_sha256, cryptoProvider, onProgress);
   const rawKey = base64ToBytes(manifest.content_key);
   const noncePrefix = base64ToBytes(manifest.nonce_prefix);
   const parts: BlobPart[] = [];
   let offset = 0;
   let frameIndex = 0;
+  let plainLoaded = 0;
+  const plainTotal =
+    typeof manifest.plaintext_size === 'number' && Number.isFinite(manifest.plaintext_size)
+      ? manifest.plaintext_size
+      : blob.size;
 
   while (offset < blob.size) {
     const header = new Uint8Array(await blob.slice(offset, offset + 8).arrayBuffer());
@@ -304,7 +355,14 @@ export async function decryptE2eeAsset(
     if (plain.length !== plainLength) throw new Error('Invalid E2EE attachment plaintext frame length');
     parts.push(arrayBufferFrom(plain));
     offset += cipherLength;
+    plainLoaded += plain.length;
     frameIndex += 1;
+    onProgress?.({
+      phase: 'decrypting',
+      loaded: plainLoaded,
+      total: plainTotal,
+      percentage: plainTotal === 0 ? 100 : Math.round((plainLoaded / plainTotal) * 100),
+    });
   }
 
   return new Blob(parts);
@@ -365,10 +423,62 @@ export async function putPresignedObject(
   if (!response.ok) throw new Error(`E2EE attachment upload failed: HTTP ${response.status}`);
 }
 
-export async function downloadEncryptedAsset(url: string): Promise<Blob> {
+export async function downloadEncryptedAsset(
+  url: string,
+  onProgress?: (progress: E2eeAttachmentTransferProgress) => void,
+): Promise<Blob> {
+  if (typeof XMLHttpRequest !== 'undefined') {
+    return await new Promise<Blob>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', url);
+      xhr.responseType = 'blob';
+      xhr.onprogress = ({ loaded, total, lengthComputable }) => {
+        onProgress?.({
+          phase: 'downloading',
+          loaded,
+          total: lengthComputable && total > 0 ? total : 0,
+          percentage: lengthComputable && total > 0 ? Math.round((loaded / total) * 100) : undefined,
+        });
+      };
+      xhr.onload = () => {
+        if (xhr.status < 300) {
+          const blob = xhr.response instanceof Blob ? xhr.response : new Blob([xhr.response]);
+          onProgress?.({ phase: 'downloading', loaded: blob.size, total: blob.size, percentage: 100 });
+          resolve(blob);
+        } else {
+          reject(new Error(`E2EE attachment download failed: HTTP ${xhr.status}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error('E2EE attachment download network error'));
+      xhr.send();
+    });
+  }
   const response = await fetch(url);
   if (!response.ok) throw new Error(`E2EE attachment download failed: HTTP ${response.status}`);
-  return await response.blob();
+  const total = Number(response.headers.get('content-length') || 0);
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const blob = await response.blob();
+    onProgress?.({ phase: 'downloading', loaded: blob.size, total: blob.size, percentage: 100 });
+    return blob;
+  }
+  const reader = response.body.getReader();
+  const chunks: BlobPart[] = [];
+  let loaded = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(arrayBufferFrom(value));
+      loaded += value.byteLength;
+      onProgress?.({
+        phase: 'downloading',
+        loaded,
+        total,
+        percentage: total > 0 ? Math.round((loaded / total) * 100) : undefined,
+      });
+    }
+  }
+  return new Blob(chunks, { type: 'application/octet-stream' });
 }
 
 export function ciphertextSha256(
