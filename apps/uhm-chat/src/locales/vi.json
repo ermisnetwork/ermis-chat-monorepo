@@ -74,6 +74,7 @@
     "no_invites": "Không có lời mời nào.",
     "topics_general": "chung",
     "topics_count": "{{count}} chủ đề",
+    "member_count": "{{count}} thành viên",
     "topics_create": "Tạo chủ đề",
     "topics_channel_info": "Thông tin kênh",
     "teams_label": "Nhóm",

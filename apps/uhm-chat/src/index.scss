@@ -97,9 +97,12 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
   .no-scrollbar {
-    -ms-overflow-style: none;  /* IE and Edge */
-    scrollbar-width: none;  /* Firefox */
+    -ms-overflow-style: none;
+    /* IE and Edge */
+    scrollbar-width: none;
+    /* Firefox */
   }
 }
 
@@ -235,5 +238,94 @@
   .ermis-empty {
     position: relative;
     z-index: 2;
+  }
+}
+
+/* ----------------------------------------------------------
+   Collapsed Channel Sidebar Overrides
+   When drilled down into topics, the channel list shrinks to
+   66px. These styles position avatars in the visible 66px
+   strip and hide text content so only clean avatars show.
+   Avatar = 45px, viewport = 66px → padding-left ≈ 10px
+   ---------------------------------------------------------- */
+.channel-sidebar-collapsed {
+
+  /* Channel list items: position avatar in the left 66px strip */
+  .ermis-channel-list__item {
+    padding: 6px 0 6px 10px;
+    gap: 0;
+    border-left: none !important;
+  }
+
+  .ermis-channel-list__item:hover {
+    background-color: transparent;
+  }
+
+  .ermis-channel-list__item--active {
+    border-left: none !important;
+    background-color: transparent;
+  }
+
+  /* Active indicator — accent bar at absolute left 0 */
+  .ermis-channel-list__item--active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 36px;
+    border-radius: 0 3px 3px 0;
+    background-color: var(--ermis-accent, #7949EC);
+  }
+
+  /* Hide all text content, actions, badges */
+  .ermis-channel-list__item-content,
+  .ermis-channel-list__item-actions-wrapper,
+  .ermis-channel-list__pinned-icon {
+    display: none !important;
+  }
+
+  /* Hide section headers (Pinned, Channels, etc.) */
+  .ermis-channel-list__accordion-header {
+    display: none;
+  }
+
+  /* Hide pending invites section */
+  .ermis-channel-list__pending-badge {
+    display: none;
+  }
+
+  /* FlatTopicGroupItem specific — hide topic pills row */
+  .ermis-channel-list__item-topics-row,
+  .ermis-channel-list__topic-pills {
+    display: none;
+  }
+}
+
+/* ----------------------------------------------------------
+   Collapsed Sidebar Header — hides search & + button,
+   keeps only the hamburger dropdown menu in the 66px strip.
+   ---------------------------------------------------------- */
+.collapsed-sidebar-header {
+  overflow: hidden;
+
+  /* The SidebarHeader flex container — shrink to fit only burger */
+  >div {
+    border-bottom: none !important;
+    padding: 16px 0 16px 16px !important;
+    gap: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+  }
+
+  /* Hide the search input container (second child) */
+  >div>div.relative.flex-1 {
+    display: none !important;
+  }
+
+  /* Hide the + button (last child button) */
+  >div>button:last-of-type {
+    display: none !important;
   }
 }

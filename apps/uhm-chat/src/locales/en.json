@@ -74,6 +74,7 @@
     "no_invites": "No invites found.",
     "topics_general": "general",
     "topics_count": "{{count}} topics",
+    "member_count": "{{count}} members",
     "topics_create": "Create topic",
     "topics_channel_info": "Channel info",
     "teams_label": "Teams",

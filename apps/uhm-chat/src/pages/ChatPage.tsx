@@ -79,6 +79,20 @@ export function ChatPage() {
   const [isSearchMode, setIsSearchMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [drillDownChannel, setDrillDownChannel] = useState<ChannelType | null>(null)
+
+  // Auto-clear drill-down when activeChannel switches to a non-topic channel
+  // (e.g. user clicks a DM in the collapsed ChannelList — the ChannelList's internal
+  // handler calls setActiveChannel but doesn't know about drillDownChannel)
+  useEffect(() => {
+    if (!activeChannel || !drillDownChannel) return
+    // If the activeChannel is NOT a child topic of drillDownChannel, clear drill-down
+    const isChildTopic = activeChannel.data?.parent_cid === drillDownChannel.cid
+    const isSameChannel = activeChannel.cid === drillDownChannel.cid
+    if (!isChildTopic && !isSameChannel) {
+      setDrillDownChannel(null)
+      setActivePanel('channels')
+    }
+  }, [activeChannel, drillDownChannel])
   const [showChannelInfo, setShowChannelInfo] = useState(false)
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
@@ -447,20 +461,8 @@ export function ChatPage() {
 
   const handleTopicDrillDown = useCallback((channel: ChannelType) => {
     setDrillDownChannel(channel)
-    setActivePanel('topics')
-    // Always select the parent channel (general topic) when drilling down
     setActiveChannel(channel)
-    // Let useChannelMessages call channel.query() to load full messages.
-    // The individual query won't wipe topics (API doesn't return state.topics).
-    // Mark as read since its messages are now visible (general topic)
-    const ms = channel.state?.membership
-    const chState = channel.state as unknown as Record<string, unknown> | undefined
-    const isBanned = Boolean(ms?.banned)
-    const isPending = isPendingMember(ms?.channel_role as string)
-    if (!isBanned && !isPending && (chState?.unreadCount as number) > 0) {
-      channel.markRead().catch(() => { })
-      if (chState) chState.unreadCount = 0
-    }
+    setActivePanel('topics')
   }, [setActiveChannel])
 
   const handleBackFromTopics = useCallback(() => {
@@ -468,27 +470,6 @@ export function ChatPage() {
     setDrillDownChannel(null)
   }, [])
 
-  /** Switch to a different channel from the TeamChannelBar sidebar */
-  const handleSwitchTeamChannel = useCallback((channel: ChannelType) => {
-    setActiveChannel(channel)
-    // Mark as read
-    const ms = channel.state?.membership
-    const chState = channel.state as unknown as Record<string, unknown> | undefined
-    const isBanned = Boolean(ms?.banned)
-    const isPending = isPendingMember(ms?.channel_role as string)
-    if (!isBanned && !isPending && (chState?.unreadCount as number) > 0) {
-      channel.markRead().catch(() => { })
-      if (chState) chState.unreadCount = 0
-    }
-    // If it's a team channel with topics, stay in topics view
-    if (isGroupChannel(channel) && channel.data?.topics_enabled) {
-      setDrillDownChannel(channel)
-    } else {
-      // Otherwise go back to the channels list
-      setDrillDownChannel(null)
-      setActivePanel('channels')
-    }
-  }, [setActiveChannel])
 
   const handleTruncateChannel = useCallback(async (channel: ChannelType) => {
     try {
@@ -819,105 +800,142 @@ export function ChatPage() {
       {/* Sidebar */}
       <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
 
-        {/* Channels Panel */}
-        <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'channels' ? 'translate-x-0' : '-translate-x-full'}`}>
-          <SidebarHeader
-            onNavigate={setActivePanel}
-            isSearchMode={isSearchMode}
-            searchQuery={searchQuery}
-            onSearchQueryChange={setSearchQuery}
-            onSearchOpen={() => setIsSearchMode(true)}
-            onSearchClose={() => { setIsSearchMode(false); setSearchQuery('') }}
-          />
-
-          {/* ChannelList — always mounted to avoid re-fetching */}
-          <div className="flex-1 overflow-hidden relative">
-            <ChannelList
-              filters={{ type: ['messaging', 'team'], include_hidden_messages: true } as any}
-              showPendingInvites={false}
-              onTopicDrillDown={handleTopicDrillDown}
-              onAddTopic={openCreateTopicModal}
-              onEditTopic={openEditTopicModal}
-              LoadingIndicator={ChannelListSkeleton}
-              EmptyStateIndicator={ChannelListEmpty}
-              ChannelActionsComponent={UhmChannelActions}
-              onTruncateChannel={handleTruncateChannel}
-              actionLabels={actionLabels}
-              deletedMessageLabel={t('chat.deleted_message')}
-              stickerMessageLabel={t('chat.preview_sticker')}
-              photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
-              videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
-              voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
-              fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
-              encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
-              encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
-              systemMessageTranslations={systemMessageTranslations}
-              signalMessageTranslations={signalMessageTranslations}
-            />
-
-            {/* SearchPanel overlay — zoom animation on top of ChannelList */}
-            <div className={`absolute inset-0 z-10 transition-all duration-200 ease-out ${isSearchMode
-              ? 'scale-100 opacity-100'
-              : 'scale-95 opacity-0 pointer-events-none'
-              }`}>
-              {isSearchMode && (
-                <SearchPanel
+        {/* Channels + Topics — width-based push animation */}
+        {/* Channel list shrinks 380→66px (overflow-hidden clips to avatars on left) */}
+        {/* Topics panel fills the remaining 314px, creating a push effect */}
+        <div className="absolute inset-0 flex">
+          {/* Channel list — shrinks width, overflow-hidden clips to show only avatars */}
+          <div
+            className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${drillDownChannel ? 'channel-sidebar-collapsed' : ''}`}
+            style={{ width: drillDownChannel ? 66 : 380 }}
+          >
+            {/* Inner always 380px — parent clips it */}
+            <div className="w-[380px] h-full flex flex-col">
+              {/* SidebarHeader — fades out when collapsed */}
+              <div
+                className={`transition-opacity duration-250 ${
+                  drillDownChannel ? 'opacity-0 pointer-events-none' : 'opacity-100'
+                }`}
+              >
+                <SidebarHeader
+                  onNavigate={setActivePanel}
+                  isSearchMode={isSearchMode}
                   searchQuery={searchQuery}
-                  onSelectChannel={(channel) => { 
-                    setIsSearchMode(false); 
-                    setSearchQuery('');
-                    
-                    if (isTopicChannel(channel) && channel.data?.parent_cid) {
-                      const parentCid = channel.data.parent_cid as string
-                      const parent = client.activeChannels[parentCid]
-                      if (parent) {
-                        setDrillDownChannel(parent)
-                        setActivePanel('topics')
-                      }
-                    } else if (isGroupChannel(channel) && channel.data?.topics_enabled) {
-                      setDrillDownChannel(channel)
-                      setActivePanel('topics')
-                    } else {
-                      setDrillDownChannel(null)
-                      setActivePanel('channels')
-                    }
-                  }}
+                  onSearchQueryChange={setSearchQuery}
+                  onSearchOpen={() => setIsSearchMode(true)}
+                  onSearchClose={() => { setIsSearchMode(false); setSearchQuery('') }}
                 />
-              )}
+              </div>
+
+              {/* ChannelList — always visible; clipped at 66px shows only avatars */}
+              <div className="flex-1 overflow-hidden relative">
+                <ChannelList
+                  filters={{ type: ['messaging', 'team'], include_hidden_messages: true } as any}
+                  showPendingInvites={false}
+                  onTopicDrillDown={handleTopicDrillDown}
+                  onAddTopic={openCreateTopicModal}
+                  onEditTopic={openEditTopicModal}
+                  LoadingIndicator={ChannelListSkeleton}
+                  EmptyStateIndicator={ChannelListEmpty}
+                  ChannelActionsComponent={UhmChannelActions}
+                  onTruncateChannel={handleTruncateChannel}
+                  actionLabels={actionLabels}
+                  deletedMessageLabel={t('chat.deleted_message')}
+                  stickerMessageLabel={t('chat.preview_sticker')}
+                  photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
+                  videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
+                  voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
+                  fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
+                  encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
+                  encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
+                  systemMessageTranslations={systemMessageTranslations}
+                  signalMessageTranslations={signalMessageTranslations}
+                />
+
+                {/* SearchPanel overlay */}
+                <div className={`absolute inset-0 z-10 transition-all duration-200 ease-out ${isSearchMode
+                  ? 'scale-100 opacity-100'
+                  : 'scale-95 opacity-0 pointer-events-none'
+                  }`}>
+                  {isSearchMode && (
+                    <SearchPanel
+                      searchQuery={searchQuery}
+                      onSelectChannel={(channel) => { 
+                        setIsSearchMode(false); 
+                        setSearchQuery('');
+                        
+                        if (isTopicChannel(channel) && channel.data?.parent_cid) {
+                          const parentCid = channel.data.parent_cid as string
+                          const parent = client.activeChannels[parentCid]
+                          if (parent) {
+                            setDrillDownChannel(parent)
+                            setActivePanel('topics')
+                          }
+                        } else if (isGroupChannel(channel) && channel.data?.topics_enabled) {
+                          setDrillDownChannel(channel)
+                          setActivePanel('topics')
+                        } else {
+                          setDrillDownChannel(null)
+                          setActivePanel('channels')
+                        }
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
             </div>
+          </div>
+
+          {/* Topics panel — fills remaining space, pushes in from right */}
+          <div
+            className={`overflow-hidden border-l border-zinc-200/50 dark:border-zinc-800/50 transition-[width] duration-300 ease-in-out ${
+              drillDownChannel ? 'flex-1' : 'w-0 border-l-0'
+            }`}
+          >
+            {drillDownChannel && (
+              <TopicsPanel
+                channel={drillDownChannel}
+                onBack={handleBackFromTopics}
+                onCreateTopic={openCreateTopicModal}
+                onEditTopic={openEditTopicModal}
+                onShowChannelInfo={() => { setHasOpenedInfo(true); setInfoChannel(drillDownChannel); setShowChannelInfo(true) }}
+                deletedMessageLabel={t('chat.deleted_message')}
+                stickerMessageLabel={t('chat.preview_sticker')}
+                photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
+                videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
+                voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
+                fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
+                encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
+                encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
+                systemMessageTranslations={systemMessageTranslations}
+                signalMessageTranslations={signalMessageTranslations}
+              />
+            )}
           </div>
         </div>
 
-        {/* Topics Panel (drill-down) */}
-        <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'topics' ? 'translate-x-0' : 'translate-x-full'}`}>
-          {drillDownChannel && (
-            <TopicsPanel
-              channel={drillDownChannel}
-              onBack={handleBackFromTopics}
-              onCreateTopic={openCreateTopicModal}
-              onEditTopic={openEditTopicModal}
-              onShowChannelInfo={() => { setHasOpenedInfo(true); setInfoChannel(drillDownChannel); setShowChannelInfo(true) }}
-              onSwitchChannel={handleSwitchTeamChannel}
-              deletedMessageLabel={t('chat.deleted_message')}
-              stickerMessageLabel={t('chat.preview_sticker')}
-              photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
-              videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
-              voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
-              fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
-              encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
-              encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
-              systemMessageTranslations={systemMessageTranslations}
-              signalMessageTranslations={signalMessageTranslations}
-            />
-          )}
+        {/* Collapsed menu overlay — renders SidebarHeader but hides search/+ via CSS */}
+        <div
+          className={`absolute top-0 left-0 w-[66px] z-10 transition-opacity duration-250 collapsed-sidebar-header ${
+            drillDownChannel ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          <SidebarHeader
+            onNavigate={setActivePanel}
+            isSearchMode={false}
+            searchQuery=""
+            onSearchQueryChange={() => {}}
+            onSearchOpen={() => {}}
+            onSearchClose={() => {}}
+          />
         </div>
 
-        {/* Contacts Panel */}
+        {/* Contacts Panel — absolute overlay that slides over everything */}
         <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'contacts' ? 'translate-x-0' : 'translate-x-full'}`}>
           <ContactsPanel onBack={() => setActivePanel('channels')} />
         </div>
 
-        {/* Invites Panel */}
+        {/* Invites Panel — absolute overlay that slides over everything */}
         <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'invites' ? 'translate-x-0' : 'translate-x-full'}`}>
           <InvitesPanel onBack={() => setActivePanel('channels')} />
         </div>
