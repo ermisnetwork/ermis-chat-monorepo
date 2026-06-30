@@ -4,7 +4,6 @@ import { ArrowLeft, Hash, Plus, Info, MoreVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   useChatClient,
-  useTopicGroupUpdates,
   TopicList,
   canManageChannel,
 } from '@ermis-network/ermis-chat-react'
@@ -69,7 +68,6 @@ export function TopicsPanel({
   const { t } = useTranslation()
   const { client } = useChatClient()
   const currentUserId = client.userID
-  const { topics } = useTopicGroupUpdates(channel, currentUserId)
 
   const channelName = channel.data?.name || channel.cid
 
