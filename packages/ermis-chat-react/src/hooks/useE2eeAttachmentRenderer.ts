@@ -21,6 +21,10 @@ export type E2eeAttachmentRenderState = {
   progress?: E2eeAttachmentTransferProgress;
   load: () => Promise<string | undefined>;
   download: (filename?: string) => Promise<void>;
+  streamUrl?: string;
+  streamLoading: boolean;
+  loadStream: () => Promise<string | undefined>;
+  disposeStream: () => Promise<void>;
   revoke: () => void;
 };
 
@@ -72,7 +76,17 @@ export function useE2eeAttachmentRenderer(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [progress, setProgress] = useState<E2eeAttachmentTransferProgress | undefined>();
+  const [streamUrl, setStreamUrl] = useState<string | undefined>();
+  const [streamLoading, setStreamLoading] = useState(false);
+  const streamDisposeRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const cachedPreviewRef = useRef(false);
+
+  const disposeStream = useCallback(async () => {
+    const dispose = streamDisposeRef.current;
+    streamDisposeRef.current = undefined;
+    setStreamUrl(undefined);
+    if (dispose) await dispose();
+  }, []);
 
   const revoke = useCallback(() => {
     setUrl((current) => {
@@ -82,7 +96,8 @@ export function useE2eeAttachmentRenderer(
     setBlob(undefined);
     setProgress(undefined);
     cachedPreviewRef.current = false;
-  }, [kind]);
+    void disposeStream();
+  }, [disposeStream, kind]);
 
   const load = useCallback(async () => {
     if (!channel || !manifest) return undefined;
@@ -133,6 +148,28 @@ export function useE2eeAttachmentRenderer(
     }
   }, [channel, kind, manifest, url]);
 
+  const loadStream = useCallback(async () => {
+    if (!channel || !manifest || kind !== 'original') return undefined;
+    if (streamUrl) return streamUrl;
+    const manager = (channel as any).getClient?.().encryptionManager;
+    if (!manager?.initialized || typeof manager.createE2eeAttachmentStreamUrl !== 'function') return undefined;
+    setStreamLoading(true);
+    setError(undefined);
+    try {
+      const handle = await manager.createE2eeAttachmentStreamUrl(channel.type, channel.id, manifest, 'original');
+      if (!handle?.url) return undefined;
+      streamDisposeRef.current = handle.dispose;
+      setStreamUrl(handle.url);
+      return handle.url;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      return undefined;
+    } finally {
+      setStreamLoading(false);
+    }
+  }, [channel, kind, manifest, streamUrl]);
+
   const download = useCallback(
     async (filename?: string) => {
       const objectUrl = await load();
@@ -150,5 +187,18 @@ export function useE2eeAttachmentRenderer(
 
   useEffect(() => revoke, [revoke]);
 
-  return { url, blob, loading, error, progress, load, download, revoke };
+  return {
+    url,
+    blob,
+    streamUrl,
+    streamLoading,
+    loading,
+    error,
+    progress,
+    load,
+    loadStream,
+    download,
+    disposeStream,
+    revoke,
+  };
 }

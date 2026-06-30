@@ -276,8 +276,14 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
     const ensureOriginal = useCallback(() => {
       if (!grantReady) return;
       setMediaError(false);
-      if (!original.url && !original.loading) void original.load();
-    }, [grantReady, original]);
+      if (isVideoAsset && !original.streamUrl && !original.streamLoading) {
+        void original.loadStream().then((streamUrl) => {
+          if (!streamUrl && !original.url && !original.loading) void original.load();
+        });
+        return;
+      }
+      if (!original.url && !original.loading && !original.streamUrl) void original.load();
+    }, [grantReady, isVideoAsset, original]);
 
     const openViewer = useCallback(
       (event?: React.MouseEvent) => {
@@ -312,14 +318,19 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
       () => [
         {
           type: isVideoAsset ? 'video' : 'image',
-          src: original.url,
+          src: original.streamUrl || original.url,
           posterSrc: preview.url,
           alt: title,
-          loading: original.loading || (lightboxOpen && !original.url && !original.error),
+          loading: original.loading || (lightboxOpen && !original.streamUrl && !original.url && !original.error),
           progressLabel: formatE2eeProgress(original.progress),
           download: async () => {
             await original.download(title);
           },
+          onPlaybackError: async () => {
+            await original.disposeStream();
+            if (!original.url && !original.loading) await original.load();
+          },
+          onDispose: original.disposeStream,
         },
       ],
       [isVideoAsset, lightboxOpen, original, preview.url, title],

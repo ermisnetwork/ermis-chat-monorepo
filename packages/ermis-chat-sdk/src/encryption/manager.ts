@@ -76,6 +76,11 @@ import {
   type E2eeAttachmentTransferProgress,
 } from './attachments';
 import { defaultE2eeAttachmentCryptoProvider, type E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
+import {
+  createE2eeAttachmentStreamUrl,
+  type E2eeMediaStreamHandle,
+  type E2eeMediaStreamWorkerOptions,
+} from './e2ee_media_stream';
 import type { ErmisChat } from '../client';
 import type { ExtendableGenerics, DefaultGenerics, E2eeRecoveryPolicy } from '../types';
 import { sdkLog } from '../logger';
@@ -6958,6 +6963,34 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
 
     return { attachments, e2ee_attachment_ids: ids };
+  }
+
+  async createE2eeAttachmentStreamUrl(
+    channelType: string,
+    channelId: string,
+    manifest: E2eeAttachmentManifest,
+    kind: 'original' | 'preview' = 'original',
+    options: E2eeMediaStreamWorkerOptions = {},
+  ): Promise<E2eeMediaStreamHandle | null> {
+    if (!this.e2eeClient) throw new Error('[Encryption] E2EE client is not initialized');
+    return await createE2eeAttachmentStreamUrl({
+      ...options,
+      channelType,
+      channelId,
+      manifest,
+      kind,
+      renewGrant: async () => {
+        const asset =
+          manifest.assets.find((item) => item.kind === kind) || (kind === 'original' ? manifest.assets[0] : undefined);
+        if (!asset) throw new Error('[Encryption] E2EE attachment manifest has no streamable asset');
+        return await this.e2eeClient!.downloadAttachmentGrant(
+          channelType,
+          channelId,
+          manifest.attachment_id,
+          asset.asset_id,
+        );
+      },
+    });
   }
 
   async downloadE2eeAttachmentAsset(

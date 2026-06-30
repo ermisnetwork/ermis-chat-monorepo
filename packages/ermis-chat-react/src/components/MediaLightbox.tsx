@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom';
 import { preloadImage } from '../utils';
 import { useDownloadHandler } from '../hooks/useDownloadHandler';
-import type { MediaLightboxProps } from '../types';
+import type { MediaLightboxItem, MediaLightboxProps } from '../types';
 
 /** Max retry attempts for video loading (CDN may not be ready for large uploads) */
 const VIDEO_MAX_RETRIES = 3;
@@ -24,6 +24,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
     const panStart = useRef({ x: 0, y: 0 });
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const currentDisposeRef = useRef<MediaLightboxItem['onDispose']>();
 
     // Video retry state — handles CDN not-ready for large recently-uploaded files
     const [videoRetryCount, setVideoRetryCount] = useState(0);
@@ -55,12 +56,20 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
       });
     }, [isOpen, currentIndex, items]);
 
-    // Pause video when navigating away or closing
+    useEffect(() => {
+      currentDisposeRef.current = items[currentIndex]?.onDispose;
+    });
+
+    // Pause video and dispose virtual E2EE stream sessions when navigating away or closing.
+    // Do not depend on items: callers often rebuild the items array after progress/state changes.
     useEffect(() => {
       return () => {
         if (videoRef.current) {
           videoRef.current.pause();
         }
+        const dispose = currentDisposeRef.current;
+        currentDisposeRef.current = undefined;
+        void dispose?.();
       };
     }, [currentIndex]);
 
@@ -197,6 +206,15 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
     // Video error handler — retries loading with exponential backoff
     // Handles CDN not-ready scenario for large recently-uploaded files
     const handleVideoError = useCallback(() => {
+      if (currentItem?.onPlaybackError) {
+        if (videoRetryTimerRef.current) clearTimeout(videoRetryTimerRef.current);
+        setVideoLoading(true);
+        void Promise.resolve(currentItem.onPlaybackError()).finally(() => {
+          setVideoLoading(false);
+          setVideoRetryCount(0);
+        });
+        return;
+      }
       setVideoRetryCount((prev) => {
         if (prev >= VIDEO_MAX_RETRIES) return prev;
         const nextAttempt = prev + 1;
@@ -214,7 +232,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
         }, delay);
         return nextAttempt;
       });
-    }, []);
+    }, [currentItem]);
 
     const content = useMemo(() => {
       if (!currentItem) return null;
@@ -233,6 +251,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
                 autoPlay
                 preload="metadata"
                 onClick={(e) => e.stopPropagation()}
+                onCanPlay={() => setVideoLoading(false)}
+                onPlaying={() => setVideoLoading(false)}
                 onError={handleVideoError}
               />
             ) : currentItem.posterSrc ? (

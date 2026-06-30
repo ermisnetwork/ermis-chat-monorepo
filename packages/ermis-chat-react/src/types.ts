@@ -628,6 +628,8 @@ export type MediaLightboxItem = {
   loading?: boolean;
   progressLabel?: string;
   download?: () => Promise<void> | void;
+  onPlaybackError?: () => Promise<void> | void;
+  onDispose?: () => Promise<void> | void;
 };
 
 export type MediaLightboxProps = {

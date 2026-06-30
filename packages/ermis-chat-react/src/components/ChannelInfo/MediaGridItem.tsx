@@ -67,7 +67,11 @@ const E2eeMediaGridItem: React.FC<{
     if (!manifest) return;
     if (isImage || isVideo) {
       setLightboxOpen(true);
-      if (!original.url && !original.loading) void original.load();
+      if (isVideo && !original.streamUrl && !original.streamLoading) {
+        void original.loadStream().then((streamUrl) => {
+          if (!streamUrl && !original.url && !original.loading) void original.load();
+        });
+      } else if (!original.url && !original.loading && !original.streamUrl) void original.load();
       return;
     }
     await original.download(item.file_name);
@@ -77,14 +81,19 @@ const E2eeMediaGridItem: React.FC<{
     () => [
       {
         type: isVideo ? 'video' : 'image',
-        src: original.url,
+        src: original.streamUrl || original.url,
         posterSrc: preview.url,
         alt: item.file_name,
-        loading: original.loading || (lightboxOpen && !original.url && !original.error),
+        loading: original.loading || (lightboxOpen && !original.streamUrl && !original.url && !original.error),
         progressLabel,
         download: async () => {
           await original.download(item.file_name);
         },
+        onPlaybackError: async () => {
+          await original.disposeStream();
+          if (!original.url && !original.loading) await original.load();
+        },
+        onDispose: original.disposeStream,
       },
     ],
     [isVideo, item.file_name, lightboxOpen, original, preview.url, progressLabel],

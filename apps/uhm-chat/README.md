@@ -3,6 +3,7 @@
 ## UHM Chat E2EE Runtime Notes
 
 - `public/openmls_wasm_bg.wasm` must be published with the app. `App.tsx` loads this binary through `loadOpenMlsWasm()` after `connectUser`; the OpenMLS JS glue comes from the SDK bundle so SDK logger settings cover OpenMLS glue logs. The legacy public OpenMLS JS glue copies are logger-safe for direct/older asset loads.
+- `public/e2ee-media-stream-worker.js` is the optional E2EE video streaming worker. It is feature-flagged off by default; enable only after R2 single/concurrent range and CORS gates pass. The worker intercepts only `/__ermis/e2ee-media/*` virtual URLs and keeps decrypted frames in memory only.
 - `public/wasm_worker.worker.mjs` must be copied from the SDK `dist` after building or installing a published SDK. The worker forwards WASM logs through the SDK logger bridge, so stale public copies can bypass `logger` and write to the browser console directly.
 - E2EE controls stay disabled when `client.encryptionManager` is not initialized; standard chat continues to work.
 - uhm-chat waits for `connectUser()` and encryption initialization before mounting the chat shell, preventing first-login channel queries with an unset auth token.

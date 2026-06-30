@@ -5,6 +5,7 @@ export * from './manager';
 export * from './openmls';
 export * from './aad';
 export * from './attachments';
+export * from './e2ee_media_stream';
 export * from './attachment_crypto_provider';
 export * from './sha256';
 
