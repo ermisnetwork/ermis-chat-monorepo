@@ -956,6 +956,17 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    * @returns Successful acknowledgement from the server.
    */
   async markRead() {
+    if (this.state.unreadCount > 0) {
+      this.state.unreadCount = 0;
+      this.getClient().dispatchEvent({
+        type: 'message.read',
+        cid: this.cid,
+        channel_id: this.id,
+        channel_type: this.type,
+        user: this.getClient().user,
+        created_at: new Date().toISOString(),
+      } as any);
+    }
     return await this.getClient().post(this._channelURL() + '/read');
   }
 
