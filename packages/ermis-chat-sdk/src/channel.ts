@@ -238,6 +238,225 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
   }
 
+  private _buildPendingE2eeLocalAttachments(
+    files: Blob[],
+    displayOverrides?: Map<number, Record<string, unknown>>,
+  ): any[] {
+    return files.map((file, index) => {
+      const namedFile = file as Blob & { name?: string; type?: string };
+      const name = namedFile.name || `attachment-${index + 1}`;
+      const mimeType = namedFile.type || 'application/octet-stream';
+      const override = displayOverrides?.get(index) || {};
+      const objectUrl =
+        typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : '';
+      const base = {
+        id: randomId(),
+        title: name,
+        file_name: name,
+        file_size: file.size,
+        mime_type: mimeType,
+        upload_status: 'uploading',
+        upload_progress: 0,
+        local_object_url: objectUrl,
+        ...override,
+      };
+
+      if ((override as any).attachment_type === 'voiceRecording' || mimeType.startsWith('audio/')) {
+        return {
+          ...base,
+          type: 'voiceRecording',
+          attachment_type: 'voiceRecording',
+          asset_url: objectUrl,
+          url: objectUrl,
+        };
+      }
+      if (mimeType.startsWith('image/')) {
+        return {
+          ...base,
+          type: 'image',
+          image_url: objectUrl,
+          thumb_url: objectUrl,
+          url: objectUrl,
+        };
+      }
+      if (mimeType.startsWith('video/')) {
+        return {
+          ...base,
+          type: 'video',
+          asset_url: objectUrl,
+          url: objectUrl,
+          thumb_url: objectUrl,
+        };
+      }
+      return {
+        ...base,
+        type: 'file',
+        url: objectUrl,
+        asset_url: objectUrl,
+      };
+    });
+  }
+
+  private _revokePendingE2eeLocalAttachments(attachments: any[]) {
+    if (typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+    attachments.forEach((attachment) => {
+      const objectUrl = attachment?.local_object_url;
+      if (typeof objectUrl === 'string' && objectUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    });
+  }
+
+  private _findLocalMessageById(messageId: string) {
+    return this.state.findMessage(messageId) || this.state.messages.find((message) => message.id === messageId);
+  }
+
+  private _removeLocalMessageById(messageId: string) {
+    let removed = false;
+    while (this.state.removeMessage({ id: messageId })) {
+      removed = true;
+    }
+    return removed;
+  }
+
+  private _dispatchLocalMessageStateEvent(
+    type: 'message.new' | 'message.updated' | 'message.deleted',
+    message?: MessageResponse<ErmisChatGenerics> | FormatMessageResponse<ErmisChatGenerics>,
+  ) {
+    if (!message) return;
+    const user = (message as any).user || this.getClient().user;
+    const event = {
+      type,
+      cid: this.cid,
+      channel_type: this.type,
+      channel_id: this.id,
+      channel: this.data,
+      created_at: new Date().toISOString(),
+      message,
+      user,
+    } as unknown as Event<ErmisChatGenerics>;
+
+    this._callChannelListeners(event);
+    this.getClient().dispatchEvent(event);
+  }
+
+  async enqueueE2eeAttachmentMessage(
+    message: Message<ErmisChatGenerics>,
+    files: Blob[],
+    options: { displayOverrides?: Map<number, Record<string, unknown>> } = {},
+  ) {
+    if (!this._isEffectiveE2ee()) {
+      return await this.sendMessage(message);
+    }
+    const encryptionMgr = this.getClient().encryptionManager;
+    if (!encryptionMgr?.initialized) {
+      throw new Error('E2EE attachment queue requires an initialized encryption manager');
+    }
+    if (!message.id) {
+      message = { ...message, id: randomId() };
+    }
+    const messageId = message.id!;
+    const quotedMessage =
+      (message as any).quoted_message ||
+      (message.quoted_message_id ? this.state.findMessage(message.quoted_message_id) : undefined);
+    const localAttachments = this._buildPendingE2eeLocalAttachments(files, options.displayOverrides);
+    const now = new Date().toISOString();
+    const optimisticMessage = {
+      ...message,
+      id: messageId,
+      attachments: localAttachments,
+      quoted_message: quotedMessage,
+      status: 'sending',
+      created_at: now,
+      updated_at: now,
+      user: this.getClient().user,
+      user_id: this.getClient().userID,
+      type: message.type || 'regular',
+    } as unknown as MessageResponse<ErmisChatGenerics>;
+
+    this.state.addMessageSorted(optimisticMessage);
+    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+
+    void encryptionMgr.enqueueE2eeAttachmentMessage({
+      channelType: this.type,
+      channelId: this.id!,
+      cid: this.cid,
+      text: message.text || '',
+      messageId,
+      files,
+      options: {
+        parent_id: message.parent_id,
+        quoted_message_id: message.quoted_message_id,
+        mentioned_users: message.mentioned_users,
+        mentioned_all: message.mentioned_all,
+        forward_cid: message.forward_cid,
+        forward_message_id: message.forward_message_id,
+        forward_parent_cid: (message as any).forward_parent_cid,
+      },
+      displayOverrides: options.displayOverrides,
+      localAttachments,
+      onProgress: (progress: any) => {
+        const rawFileIndex = Number.isInteger(progress?.fileIndex) ? progress.fileIndex : undefined;
+        const fallbackToAllAttachments = rawFileIndex === undefined && localAttachments.length > 1;
+        const fileIndex = rawFileIndex ?? 0;
+        const percentage = Math.max(0, Math.min(100, Math.round(progress.percentage)));
+        this.state.updateMessageById(messageId, (msg) => ({
+          ...msg,
+          status: 'sending',
+          attachments: (msg.attachments || []).map((attachment: any, index: number) =>
+            fallbackToAllAttachments || index === fileIndex
+              ? { ...attachment, upload_status: progress.phase, upload_progress: percentage }
+              : attachment,
+          ),
+        }));
+        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+      },
+      onSuccess: (response: any) => {
+        this._revokePendingE2eeLocalAttachments(localAttachments);
+        if (response?.message) {
+          const responseUserId =
+            response.message.user?.id || (response.message as any).user_id || this.getClient().userID || '';
+          const confirmedMessage = {
+            ...response.message,
+            status: 'received',
+            user: pickUserWithDisplayName(
+              responseUserId,
+              response.message.user,
+              this.getClient().state.users[responseUserId],
+              this.getClient().user,
+            ),
+          } as MessageResponse<ErmisChatGenerics>;
+          this._removeLocalMessageById(messageId);
+          this.state.addMessageSorted(confirmedMessage, true, true, 'current');
+          this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+        }
+      },
+      onError: () => {
+        this.state.updateMessageById(messageId, (msg) => ({
+          ...msg,
+          status: 'error',
+          attachments: (msg.attachments || []).map((attachment: any) => ({
+            ...attachment,
+            upload_status: 'failed',
+          })),
+        }));
+        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+      },
+    });
+
+    return { message: optimisticMessage };
+  }
+
+  async cancelPendingE2eeSend(messageId: string) {
+    const stateMsg = this.state.messages.find((message) => message.id === messageId);
+    this._revokePendingE2eeLocalAttachments(((stateMsg as any)?.attachments || []) as any[]);
+    await this.getClient().encryptionManager?.cancelPendingE2eeSend(messageId);
+    if (stateMsg) {
+      this._removeLocalMessageById(messageId);
+      this._dispatchLocalMessageStateEvent('message.deleted', stateMsg as any);
+    }
+  }
+
   async retryMessage(messageId: string) {
     const stateMsg = this.state.messages.find((m) => m.id === messageId);
     if (!stateMsg) throw new Error(`Message ${messageId} not found in state`);

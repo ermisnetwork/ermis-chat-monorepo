@@ -87,6 +87,7 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(
             </svg>
           </div>
         )}
+        <LocalUploadOverlay attachment={attachment} />
       </div>
     );
   },
@@ -136,6 +137,39 @@ function formatE2eeProgress(progress?: {
       : 'Loading';
   if (typeof progress.percentage === 'number') return `${phaseLabel} ${progress.percentage}%`;
   return phaseLabel;
+}
+
+function getLocalUploadProgress(attachment: Attachment): number | undefined {
+  const value = (attachment as any).upload_progress;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.min(100, Math.round(value)))
+    : undefined;
+}
+
+function attachmentRenderKey(attachment: Attachment | E2eeAttachmentManifest): string {
+  const anyAttachment = attachment as any;
+  const id = isE2eeAttachmentManifest(attachment)
+    ? attachment.attachment_id
+    : anyAttachment.id || anyAttachment.asset_url || anyAttachment.url || anyAttachment.file_name || '';
+  return [
+    id,
+    anyAttachment.type || '',
+    anyAttachment.upload_status || '',
+    typeof anyAttachment.upload_progress === 'number' ? Math.round(anyAttachment.upload_progress) : '',
+    anyAttachment.local_object_url || '',
+  ].join('|');
+}
+
+function LocalUploadOverlay({ attachment }: { attachment: Attachment }) {
+  const progress = getLocalUploadProgress(attachment);
+  const status = (attachment as any).upload_status;
+  if (progress === undefined && !status) return null;
+  return (
+    <span className="ermis-attachment-upload-overlay">
+      <span className="ermis-e2ee-attachment-spinner" />
+      <span>{progress !== undefined ? `${progress}%` : 'Sending'}</span>
+    </span>
+  );
 }
 
 function e2eeAspectStyle(width?: number, height?: number): React.CSSProperties {
@@ -562,6 +596,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
           </div>
+          <LocalUploadOverlay attachment={attachment} />
         </div>
       );
     }
@@ -596,6 +631,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
             if (!posterSrc) setLoaded(true);
           }}
         />
+        <LocalUploadOverlay attachment={attachment} />
       </div>
     );
   },
@@ -638,6 +674,7 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(
           {size && (
             <span className="ermis-attachment__file-size">
               {typeof size === 'number' ? `${(size / 1024).toFixed(1)} KB` : size}
+              {getLocalUploadProgress(attachment) !== undefined ? ` · ${getLocalUploadProgress(attachment)}%` : ''}
             </span>
           )}
         </span>
@@ -810,11 +847,20 @@ const VoiceRecordingAttachment: React.FC<AttachmentProps> = React.memo(
     const secs = Math.round(durationSec % 60);
     const durationLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
     const fileName = attachment.file_name || attachment.title || 'audio.mp3';
+    const uploadProgress = getLocalUploadProgress(attachment);
 
-    return <CustomAudioPlayer src={src} durationLabel={durationLabel} fileName={fileName} />;
+    return (
+      <div className="ermis-voice-upload-wrap">
+        <CustomAudioPlayer src={src} durationLabel={durationLabel} fileName={fileName} />
+        {uploadProgress !== undefined && <span className="ermis-voice-upload-progress">{uploadProgress}%</span>}
+      </div>
+    );
   },
   (prev, next) => {
-    return (prev.attachment.asset_url || prev.attachment.url) === (next.attachment.asset_url || next.attachment.url);
+    return (
+      (prev.attachment.asset_url || prev.attachment.url) === (next.attachment.asset_url || next.attachment.url) &&
+      getLocalUploadProgress(prev.attachment) === getLocalUploadProgress(next.attachment)
+    );
   },
 );
 (VoiceRecordingAttachment as any).displayName = 'VoiceRecordingAttachment';
@@ -991,9 +1037,7 @@ export const AttachmentList: React.FC<{
     if (prev.attachments.length !== next.attachments.length) return false;
     return prev.attachments.every((a, i) => {
       const b = next.attachments![i];
-      const aId = isE2eeAttachmentManifest(a) ? a.attachment_id : a.id;
-      const bId = isE2eeAttachmentManifest(b) ? b.attachment_id : b.id;
-      return aId === bId;
+      return attachmentRenderKey(a) === attachmentRenderKey(b);
     });
   },
 );

@@ -290,9 +290,9 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   /** POST with X-Device-ID header */
-  private async _post<T>(url: string, data?: unknown): Promise<T> {
+  private async _post<T>(url: string, data?: unknown, headers?: Record<string, string>): Promise<T> {
     return await (this.client as any).doAxiosRequest('post', url, data, {
-      headers: this.deviceHeaders,
+      headers: { ...this.deviceHeaders, ...(headers || {}) },
     });
   }
 
@@ -550,8 +550,13 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     channelType: string,
     channelId: string,
     data: InitE2eeAttachmentRequest,
+    options: { multipart?: boolean } = {},
   ): Promise<InitE2eeAttachmentResponse> {
-    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/init`, data);
+    return await this._post(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/init`,
+      data,
+      options.multipart ? { 'X-Ermis-E2EE-Attachment-Upload': 'multipart-v1' } : undefined,
+    );
   }
 
   /** Query confirmed E2EE attachment projections for Channel Info media/files tabs. */

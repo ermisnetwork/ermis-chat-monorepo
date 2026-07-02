@@ -1,4 +1,9 @@
-import type { E2eeAttachmentAssetKind, E2eeAttachmentManifest, E2eeAttachmentManifestAsset } from './types';
+import type {
+  E2eeAttachmentAssetKind,
+  E2eeAttachmentManifest,
+  E2eeAttachmentManifestAsset,
+  InitE2eeAttachmentMultipartResponse,
+} from './types';
 import { defaultE2eeAttachmentCryptoProvider, type E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
 
 export const E2EE_ATTACHMENT_FRAME_SIZE = 256 * 1024;
@@ -27,9 +32,27 @@ export type EncryptedAsset = {
   display?: Record<string, unknown>;
 };
 
+export type EncryptedAssetMetadata = Omit<EncryptedAsset, 'encryptedBlob'>;
+
 export type UploadedE2eeAttachment = {
   attachment_id: string;
   assets: E2eeAttachmentManifestAsset[];
+};
+
+export type MultipartEncryptedAssetPart = {
+  part_number: number;
+  etag: string;
+};
+
+export type MultipartEncryptedAssetUploadResult = {
+  encrypted: EncryptedAssetMetadata;
+  parts: MultipartEncryptedAssetPart[];
+};
+
+export type EncryptMultipartAssetOptions = Omit<EncryptAssetOptions, 'onProgress'> & {
+  multipart: InitE2eeAttachmentMultipartResponse;
+  onProgress?: (progress: { phase: 'uploading'; loaded: number; total: number; percentage: number }) => void;
+  signal?: AbortSignal;
 };
 
 export type E2eeAttachmentTransferPhase = 'granting' | 'downloading' | 'verifying' | 'decrypting';
@@ -218,6 +241,48 @@ function arrayBufferFrom(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
+function concatUint8Arrays(chunks: Uint8Array[], totalLength: number): Uint8Array {
+  const out = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
+class NonRetryableMultipartUploadError extends Error {
+  public readonly nonRetryable = true;
+}
+
+function isNonRetryableMultipartUploadError(err: unknown): boolean {
+  return Boolean((err as { nonRetryable?: boolean } | null)?.nonRetryable);
+}
+
+export function estimateE2eeEncryptedAssetSize(
+  plaintextSize: number,
+  frameSize: number = E2EE_ATTACHMENT_FRAME_SIZE,
+): number {
+  if (!Number.isFinite(plaintextSize) || plaintextSize < 0) {
+    throw new Error('Invalid E2EE attachment plaintext size');
+  }
+  if (!Number.isFinite(frameSize) || frameSize <= 0) {
+    throw new Error('Invalid E2EE attachment frame size');
+  }
+  const frameCount = Math.max(1, Math.ceil(plaintextSize / frameSize));
+  return plaintextSize + frameCount * (8 + 16);
+}
+
 export function bytesToBase64(bytes: Uint8Array): string {
   const bufferCtor = (
     globalThis as unknown as { Buffer?: { from(data: Uint8Array): { toString(enc: string): string } } }
@@ -297,6 +362,169 @@ export async function encryptE2eeAsset(input: Blob, options: EncryptAssetOptions
   };
 }
 
+async function uploadMultipartPartWithRetry(
+  partUrl: string,
+  partNumber: number,
+  partBytes: Uint8Array,
+  multipart: InitE2eeAttachmentMultipartResponse,
+  uploadedConfirmedBytes: number,
+  totalBytes: number,
+  onProgress?: (progress: { phase: 'uploading'; loaded: number; total: number; percentage: number }) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  const maxRetries = Math.max(0, multipart.max_part_retries || 0);
+  const retryMaxElapsedMs = Math.max(1, multipart.retry_max_elapsed_secs || 900) * 1000;
+  const startedAt = Date.now();
+  let retryCount = 0;
+  let partHighWater = 0;
+
+  while (true) {
+    try {
+      const result = await putPresignedObjectWithResult(
+        partUrl,
+        new Blob([arrayBufferFrom(partBytes)], { type: 'application/octet-stream' }),
+        (progress) => {
+          partHighWater = Math.max(partHighWater, progress.loaded);
+          const loaded = Math.min(totalBytes, uploadedConfirmedBytes + partHighWater);
+          onProgress?.({
+            phase: 'uploading',
+            loaded,
+            total: totalBytes,
+            percentage: totalBytes === 0 ? 100 : Math.round((loaded / totalBytes) * 100),
+          });
+        },
+        { readEtag: true, signal },
+      );
+      if (!result.etag) {
+        throw new NonRetryableMultipartUploadError(
+          `E2EE attachment multipart part ${partNumber} upload did not expose ETag. Configure R2 CORS ExposeHeaders to include ETag before enabling multipart.`,
+        );
+      }
+      return result.etag;
+    } catch (err) {
+      if (isNonRetryableMultipartUploadError(err)) throw err;
+      if (signal?.aborted) throw err;
+      const elapsed = Date.now() - startedAt;
+      if (retryCount >= maxRetries || elapsed >= retryMaxElapsedMs) throw err;
+      retryCount += 1;
+      const backoff = Math.min(30_000, 500 * 2 ** Math.min(retryCount, 6));
+      await sleep(backoff + Math.floor(Math.random() * 250));
+    }
+  }
+}
+
+export async function encryptAndUploadE2eeAssetMultipart(
+  input: Blob,
+  options: EncryptMultipartAssetOptions,
+): Promise<MultipartEncryptedAssetUploadResult> {
+  const cryptoProvider = options.cryptoProvider || defaultE2eeAttachmentCryptoProvider;
+  const frameSize = options.frameSize || E2EE_ATTACHMENT_FRAME_SIZE;
+  const multipart = options.multipart;
+  const partSize = multipart.part_size;
+  if (!Number.isFinite(partSize) || partSize <= 0) {
+    throw new Error('Invalid E2EE attachment multipart part size');
+  }
+
+  const totalCipherSize = estimateE2eeEncryptedAssetSize(input.size, frameSize);
+  const expectedPartCount = Math.max(1, Math.ceil(totalCipherSize / partSize));
+  if (multipart.part_count !== expectedPartCount) {
+    throw new Error('E2EE attachment multipart part count mismatch');
+  }
+
+  const partUrls = new Map<number, string>();
+  for (const part of multipart.parts || []) partUrls.set(part.part_number, part.put_url);
+
+  const rawKey = await cryptoProvider.generateAesGcmKey();
+  const noncePrefix = cryptoProvider.randomBytes(8);
+  const cipherHash = cryptoProvider.createSha256();
+  const plainHash = cryptoProvider.createSha256();
+  const uploadedParts: MultipartEncryptedAssetPart[] = [];
+  let uploadedConfirmedBytes = 0;
+  let partChunks: Uint8Array[] = [];
+  let partLength = 0;
+
+  const flushPart = async (final: boolean) => {
+    if (partLength === 0) return;
+    const partNumber = uploadedParts.length + 1;
+    const putUrl = partUrls.get(partNumber);
+    if (!putUrl) throw new Error(`E2EE attachment multipart missing upload URL for part ${partNumber}`);
+    if (!final && partLength !== partSize) {
+      throw new Error('E2EE attachment multipart attempted to flush a short non-final part');
+    }
+    const partBytes = concatUint8Arrays(partChunks, partLength);
+    const etag = await uploadMultipartPartWithRetry(
+      putUrl,
+      partNumber,
+      partBytes,
+      multipart,
+      uploadedConfirmedBytes,
+      totalCipherSize,
+      options.onProgress,
+      options.signal,
+    );
+    uploadedConfirmedBytes += partBytes.length;
+    uploadedParts.push({ part_number: partNumber, etag });
+    options.onProgress?.({
+      phase: 'uploading',
+      loaded: Math.min(uploadedConfirmedBytes, totalCipherSize),
+      total: totalCipherSize,
+      percentage: totalCipherSize === 0 ? 100 : Math.round((uploadedConfirmedBytes / totalCipherSize) * 100),
+    });
+    partChunks = [];
+    partLength = 0;
+  };
+
+  const appendEncryptedBytes = async (bytes: Uint8Array) => {
+    let offset = 0;
+    while (offset < bytes.length) {
+      const capacity = partSize - partLength;
+      const take = Math.min(capacity, bytes.length - offset);
+      partChunks.push(bytes.slice(offset, offset + take));
+      partLength += take;
+      offset += take;
+      if (partLength === partSize) await flushPart(false);
+    }
+  };
+
+  let offset = 0;
+  let frameIndex = 0;
+  while (offset < input.size || (input.size === 0 && frameIndex === 0)) {
+    const end = input.size === 0 ? 0 : Math.min(offset + frameSize, input.size);
+    const plain = new Uint8Array(await input.slice(offset, end).arrayBuffer());
+    plainHash.update(plain);
+    const cipher = await cryptoProvider.aesGcmEncrypt(rawKey, nonceForFrame(noncePrefix, frameIndex), plain);
+    const header = new Uint8Array(8);
+    writeU32(header, 0, plain.length);
+    writeU32(header, 4, cipher.length);
+    cipherHash.update(header).update(cipher);
+    await appendEncryptedBytes(header);
+    await appendEncryptedBytes(cipher);
+    offset = end;
+    frameIndex += 1;
+    if (input.size === 0) break;
+  }
+  await flushPart(true);
+
+  if (uploadedParts.length !== multipart.part_count) {
+    throw new Error('E2EE attachment multipart uploaded part count mismatch');
+  }
+
+  return {
+    encrypted: {
+      kind: options.kind,
+      cipher_size: totalCipherSize,
+      cipher_sha256: cipherHash.hex(),
+      frame_size: frameSize,
+      content_key: bytesToBase64(rawKey),
+      nonce_prefix: bytesToBase64(noncePrefix),
+      plaintext_size: input.size,
+      plaintext_sha256: plainHash.hex(),
+      display: options.display,
+    },
+    parts: uploadedParts,
+  };
+}
+
 export async function verifyEncryptedAssetHash(
   blob: Blob,
   expectedSha256: string,
@@ -368,7 +596,7 @@ export async function decryptE2eeAsset(
   return new Blob(parts);
 }
 
-export function buildManifestAsset(assetId: string, encrypted: EncryptedAsset): E2eeAttachmentManifestAsset {
+export function buildManifestAsset(assetId: string, encrypted: EncryptedAssetMetadata): E2eeAttachmentManifestAsset {
   return {
     asset_id: assetId,
     kind: encrypted.kind,
@@ -391,14 +619,28 @@ export function buildAttachmentManifest(uploaded: UploadedE2eeAttachment): E2eeA
   };
 }
 
-export async function putPresignedObject(
+export type PutPresignedObjectResult = {
+  etag?: string;
+};
+
+export async function putPresignedObjectWithResult(
   url: string,
   body: Blob,
   onProgress?: (progress: { phase: 'uploading'; loaded: number; total: number; percentage: number }) => void,
-): Promise<void> {
+  options: { readEtag?: boolean; signal?: AbortSignal } = {},
+): Promise<PutPresignedObjectResult> {
   if (typeof XMLHttpRequest !== 'undefined') {
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<PutPresignedObjectResult>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      const abort = () => {
+        xhr.abort();
+        reject(createAbortError('E2EE attachment upload aborted'));
+      };
+      if (options.signal?.aborted) {
+        abort();
+        return;
+      }
+      options.signal?.addEventListener('abort', abort, { once: true });
       xhr.open('PUT', url);
       xhr.setRequestHeader('Content-Type', 'application/octet-stream');
       xhr.upload.onprogress = ({ loaded, total }) => {
@@ -407,20 +649,41 @@ export async function putPresignedObject(
         }
       };
       xhr.onload = () => {
-        if (xhr.status < 300) resolve();
-        else reject(new Error(`E2EE attachment upload failed: HTTP ${xhr.status}`));
+        options.signal?.removeEventListener('abort', abort);
+        if (xhr.status < 300) {
+          resolve({ etag: options.readEtag ? xhr.getResponseHeader('ETag') || undefined : undefined });
+        } else {
+          reject(new Error(`E2EE attachment upload failed: HTTP ${xhr.status}`));
+        }
       };
-      xhr.onerror = () => reject(new Error('E2EE attachment upload network error'));
+      xhr.onerror = () => {
+        options.signal?.removeEventListener('abort', abort);
+        reject(new Error('E2EE attachment upload network error'));
+      };
+      xhr.onabort = () => {
+        options.signal?.removeEventListener('abort', abort);
+        reject(createAbortError('E2EE attachment upload aborted'));
+      };
       xhr.send(body);
     });
-    return;
   }
   const response = await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/octet-stream' },
     body,
+    signal: options.signal,
   });
   if (!response.ok) throw new Error(`E2EE attachment upload failed: HTTP ${response.status}`);
+  return { etag: options.readEtag ? response.headers.get('ETag') || undefined : undefined };
+}
+
+export async function putPresignedObject(
+  url: string,
+  body: Blob,
+  onProgress?: (progress: { phase: 'uploading'; loaded: number; total: number; percentage: number }) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  await putPresignedObjectWithResult(url, body, onProgress, { signal });
 }
 
 export async function downloadEncryptedAsset(

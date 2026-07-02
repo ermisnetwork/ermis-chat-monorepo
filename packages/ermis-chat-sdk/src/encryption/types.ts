@@ -508,10 +508,28 @@ export interface InitE2eeAttachmentRequest {
   }>;
 }
 
+export type E2eeAttachmentUploadMode = 'single_put' | 'multipart';
+
+export interface InitE2eeAttachmentMultipartPartResponse {
+  part_number: number;
+  put_url: string;
+}
+
+export interface InitE2eeAttachmentMultipartResponse {
+  multipart_upload_id: string;
+  part_size: number;
+  part_count: number;
+  max_part_retries: number;
+  retry_max_elapsed_secs: number;
+  parts: InitE2eeAttachmentMultipartPartResponse[];
+}
+
 export interface InitE2eeAttachmentAssetResponse {
   asset_id: string;
   kind: E2eeAttachmentAssetKind;
-  put_url: string;
+  upload_mode?: E2eeAttachmentUploadMode;
+  put_url?: string;
+  multipart?: InitE2eeAttachmentMultipartResponse;
   staging_object_key?: string;
   final_object_key?: string;
   cipher_size_estimate: number;
@@ -526,6 +544,15 @@ export interface InitE2eeAttachmentResponse extends APIResponse {
 
 export interface CompleteE2eeAttachmentRequest {
   completion_lease_id: string;
+  assets?: Array<{
+    asset_id: string;
+    multipart?: {
+      parts: Array<{
+        part_number: number;
+        etag: string;
+      }>;
+    };
+  }>;
 }
 
 export interface CompleteE2eeAttachmentResponse extends APIResponse {
@@ -612,11 +639,19 @@ export interface PendingE2eeSendRecord {
   message_id: string;
   cid: string;
   e2ee_group_id: string;
+  channel_type?: string;
+  channel_id?: string;
+  text?: string;
+  files?: File[];
+  display_overrides?: Array<Record<string, unknown> | undefined>;
+  local_attachments?: unknown[];
+  local_progress?: number;
   mls_ciphertext?: Uint8Array;
   mls_ciphertext_sha256?: string;
   mls_epoch?: number;
   e2ee_attachment_ids?: string[];
   aad_metadata?: Record<string, unknown>;
+  send_envelope?: Record<string, unknown>;
   forward_cid?: string;
   forward_message_id?: string;
   forward_parent_cid?: string;
@@ -1041,6 +1076,12 @@ export interface EncryptionManagerOptions {
    * durable pending-send attachment state.
    */
   attachmentCryptoProvider?: E2eeAttachmentCryptoProvider;
+  /**
+   * Enables the client capability header for E2EE attachment multipart upload.
+   * Defaults to false; production should keep this disabled until R2 multipart
+   * smoke/lifecycle gates pass.
+   */
+  enableE2eeAttachmentMultipart?: boolean;
 }
 
 /**

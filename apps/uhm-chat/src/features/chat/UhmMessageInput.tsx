@@ -121,7 +121,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         if (!encryptionMgr?.initialized) {
           throw new Error('E2EE voice messages require an initialized encryption manager');
         }
-        const prepared = await encryptionMgr.uploadE2eeAttachments(activeChannel.type, activeChannel.id, [file], {
+        await (activeChannel as any).enqueueE2eeAttachmentMessage({ text: '' }, [file], {
           displayOverrides: new Map([
             [
               0,
@@ -133,11 +133,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
             ],
           ]),
         });
-        await activeChannel.sendMessage({
-          text: '',
-          attachments: prepared.attachments,
-          e2ee_attachment_ids: prepared.e2ee_attachment_ids,
-        } as any);
+        syncMessages();
       } else {
         const uploadRes = await activeChannel.sendFile(file, file.name, file.type);
         await activeChannel.sendMessage({

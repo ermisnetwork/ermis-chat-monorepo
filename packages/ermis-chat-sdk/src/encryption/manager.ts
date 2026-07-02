@@ -41,10 +41,13 @@ import type {
   PendingArchiveUpload,
   PendingDeferredArchive,
   PendingE2eeSendRecord,
+  PendingE2eeSendStatus,
   PendingE2eeSnapshot,
   QueryEpochArchivesResponse,
   QueryE2eeAttachmentProjection,
   QueryE2eeAttachmentsRequest,
+  CompleteE2eeAttachmentRequest,
+  InitE2eeAttachmentAssetResponse,
   RecoveryStatus,
   RecoveryVaultResponse,
   RemovedSyncCursor,
@@ -69,7 +72,9 @@ import {
   ciphertextSha256,
   decryptE2eeAsset,
   downloadEncryptedAsset,
+  encryptAndUploadE2eeAssetMultipart,
   encryptE2eeAsset,
+  estimateE2eeEncryptedAssetSize,
   generateE2eeAttachmentPreview,
   newUuid,
   putPresignedObject,
@@ -95,6 +100,19 @@ import { getUserInfo, pickUserWithDisplayName } from '../utils';
 function isEpochStaleError(err: any): boolean {
   const msg = err?.message || err?.response?.data?.message || String(err);
   return msg.includes('epoch_stale');
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isE2eeAttachmentInvalidError(err: any): boolean {
+  const data = err?.response?.data || err?.data || err;
+  const reason = typeof data?.reason === 'string' ? data.reason : '';
+  const message =
+    typeof data?.message === 'string' ? data.message : typeof err?.message === 'string' ? err.message : '';
+  return reason === 'e2ee_attachment_invalid' || message.includes('e2ee_attachment_invalid');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -285,6 +303,37 @@ type ArchiveMessageEnvelope = Record<string, unknown> & {
   mls_epoch?: number;
 };
 
+type QueuedE2eeAttachmentProgress = {
+  fileIndex: number;
+  phase: 'generating_preview' | 'encrypting' | 'uploading' | 'completing' | 'sending';
+  loaded: number;
+  total: number;
+  percentage: number;
+};
+
+type QueuedE2eeAttachmentSendParams = {
+  channelType: string;
+  channelId: string;
+  cid: string;
+  text: string;
+  messageId: string;
+  files: Blob[];
+  options?: {
+    parent_id?: string;
+    quoted_message_id?: string;
+    mentioned_users?: string[];
+    mentioned_all?: boolean;
+    forward_cid?: string;
+    forward_message_id?: string;
+    forward_parent_cid?: string;
+  };
+  displayOverrides?: Map<number, Record<string, unknown>>;
+  localAttachments?: unknown[];
+  onProgress?: (progress: QueuedE2eeAttachmentProgress) => void;
+  onSuccess?: (response: any) => void;
+  onError?: (error: unknown) => void;
+};
+
 // WASM module — loaded dynamically
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let wasmModule: any = null;
@@ -365,6 +414,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _waterfallSummaryLogKeys = new Map<string, number>();
   private _deferredEncryptionEventLogKeys = new Map<string, number>();
   private _attachmentCryptoProvider: E2eeAttachmentCryptoProvider = defaultE2eeAttachmentCryptoProvider;
+  private _e2eeAttachmentMultipartEnabled = false;
+  private _e2eeSendLockChains: Map<string, Promise<void>> = new Map();
+  private _pendingE2eeSendJobs: Set<string> = new Set();
+  private _pendingE2eeSendAbortControllers: Map<string, AbortController> = new Map();
+  private _canceledPendingE2eeSends: Set<string> = new Set();
   private _restoreQueue: RestoreQueueEntry[] = [];
   private _restoreQueueRunning = false;
   private _restoreInflight = new Map<string, Promise<RestoredMessage[]>>();
@@ -439,6 +493,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (options?.attachmentCryptoProvider) {
       this._attachmentCryptoProvider = options.attachmentCryptoProvider;
     }
+    this._e2eeAttachmentMultipartEnabled = options?.enableE2eeAttachmentMultipart === true;
 
     // Reuse deviceId if already eagerly initialized in connectUser(),
     // otherwise fall back to storage (e.g., non-browser or custom flow).
@@ -486,6 +541,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     this.initialized = true;
     void this._resumeEpochArchiveCheckpoints();
+    void this.resumePendingE2eeSends();
     (this.client as any)?.dispatchEvent?.({
       type: 'e2ee.initialized',
       user_id: this.userId,
@@ -6816,6 +6872,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         percentage: number;
       }) => void;
       displayOverrides?: Map<number, Record<string, unknown>>;
+      signal?: AbortSignal;
     } = {},
   ): Promise<{ attachments: E2eeAttachmentManifest[]; e2ee_attachment_ids: string[] }> {
     if (!this.e2eeClient) throw new Error('[Encryption] E2EE client is not initialized');
@@ -6825,9 +6882,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     const attachments: E2eeAttachmentManifest[] = [];
     const ids: string[] = [];
+    const multipartEnabled = this._e2eeAttachmentMultipartEnabled;
 
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index] as Blob & { name?: string; type?: string };
+      const emitProgress = (progress: {
+        phase: 'generating_preview' | 'encrypting' | 'uploading' | 'completing';
+        loaded: number;
+        total: number;
+        percentage: number;
+      }) => options.onProgress?.({ fileIndex: index, ...progress });
+
       options.onProgress?.({
         fileIndex: index,
         phase: 'generating_preview',
@@ -6838,28 +6903,23 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const previewResult = await generateE2eeAttachmentPreview(file);
       const previewBlob = previewResult?.blob;
       const displayOverrides = options.displayOverrides?.get(index) || {};
-      options.onProgress?.({
-        fileIndex: index,
+      emitProgress({
         phase: 'generating_preview',
         loaded: file.size,
         total: file.size,
         percentage: 100,
       });
 
-      const originalEncrypted = await encryptE2eeAsset(file, {
-        kind: 'original',
-        cryptoProvider: this._attachmentCryptoProvider,
-        display: {
-          name: file.name,
-          mime_type: file.type,
-          size: file.size,
-          width: previewResult?.originalWidth,
-          height: previewResult?.originalHeight,
-          duration: previewResult?.duration,
-          ...displayOverrides,
-        },
-        onProgress: (progress) => options.onProgress?.({ fileIndex: index, ...progress }),
-      });
+      const originalDisplay = {
+        name: file.name,
+        mime_type: file.type,
+        size: file.size,
+        width: previewResult?.originalWidth,
+        height: previewResult?.originalHeight,
+        duration: previewResult?.duration,
+        ...displayOverrides,
+      };
+      const originalCipherSizeEstimate = estimateE2eeEncryptedAssetSize(file.size);
 
       let previewEncrypted: Awaited<ReturnType<typeof encryptE2eeAsset>> | undefined;
       if (previewBlob) {
@@ -6875,36 +6935,96 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               width: previewResult?.previewWidth,
               height: previewResult?.previewHeight,
             },
-            onProgress: (progress) => options.onProgress?.({ fileIndex: index, ...progress }),
+            onProgress: emitProgress,
           });
         } catch {
           previewEncrypted = undefined;
         }
       }
 
-      const completeOriginalOnly = async () => {
-        const init = await e2eeClient.initAttachment(channelType, channelId, {
-          idempotency_key: newUuid(this._attachmentCryptoProvider),
-          assets: [{ kind: 'original', cipher_size_estimate: originalEncrypted.cipher_size }],
+      type UploadedOriginal = {
+        manifestAsset: ReturnType<typeof buildManifestAsset>;
+        completeAsset?: NonNullable<CompleteE2eeAttachmentRequest['assets']>[number];
+      };
+
+      const uploadOriginalAsset = async (initAsset: InitE2eeAttachmentAssetResponse): Promise<UploadedOriginal> => {
+        const uploadMode = initAsset.upload_mode || 'single_put';
+        if (uploadMode === 'multipart') {
+          if (!initAsset.multipart) {
+            throw new Error('[Encryption] E2EE attachment multipart init did not include multipart data');
+          }
+          const uploaded = await encryptAndUploadE2eeAssetMultipart(file, {
+            kind: 'original',
+            cryptoProvider: this._attachmentCryptoProvider,
+            display: originalDisplay,
+            multipart: initAsset.multipart,
+            onProgress: emitProgress,
+            signal: options.signal,
+          });
+          return {
+            manifestAsset: buildManifestAsset(initAsset.asset_id, uploaded.encrypted),
+            completeAsset: {
+              asset_id: initAsset.asset_id,
+              multipart: { parts: uploaded.parts },
+            },
+          };
+        }
+
+        if (!initAsset.put_url) {
+          throw new Error('[Encryption] E2EE attachment init did not return original PUT URL');
+        }
+        const originalEncrypted = await encryptE2eeAsset(file, {
+          kind: 'original',
+          cryptoProvider: this._attachmentCryptoProvider,
+          display: originalDisplay,
+          onProgress: emitProgress,
         });
+        await putPresignedObject(initAsset.put_url, originalEncrypted.encryptedBlob, emitProgress, options.signal);
+        return { manifestAsset: buildManifestAsset(initAsset.asset_id, originalEncrypted) };
+      };
+
+      const completeAttachmentWithRetry = async (
+        attachmentId: string,
+        request: CompleteE2eeAttachmentRequest,
+      ): Promise<void> => {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            await e2eeClient.completeAttachment(channelType, channelId, attachmentId, request);
+            return;
+          } catch (err) {
+            if (isE2eeAttachmentInvalidError(err) || attempt === 1) throw err;
+            await delay(500);
+          }
+        }
+      };
+
+      const completeOriginalOnly = async () => {
+        const init = await e2eeClient.initAttachment(
+          channelType,
+          channelId,
+          {
+            idempotency_key: newUuid(this._attachmentCryptoProvider),
+            assets: [{ kind: 'original', cipher_size_estimate: originalCipherSizeEstimate }],
+          },
+          { multipart: multipartEnabled },
+        );
         const initAsset = init.assets.find((asset) => asset.kind === 'original');
         if (!initAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
-        await putPresignedObject(initAsset.put_url, originalEncrypted.encryptedBlob, (progress) =>
-          options.onProgress?.({ fileIndex: index, ...progress }),
-        );
-        options.onProgress?.({
-          fileIndex: index,
+        const uploadedOriginal = await uploadOriginalAsset(initAsset);
+        emitProgress({
           phase: 'completing',
-          loaded: originalEncrypted.cipher_size,
-          total: originalEncrypted.cipher_size,
+          loaded: uploadedOriginal.manifestAsset.cipher_size,
+          total: uploadedOriginal.manifestAsset.cipher_size,
           percentage: 100,
         });
-        await e2eeClient.completeAttachment(channelType, channelId, init.attachment_id, {
+        const completeRequest: CompleteE2eeAttachmentRequest = {
           completion_lease_id: newUuid(this._attachmentCryptoProvider),
-        });
+          ...(uploadedOriginal.completeAsset ? { assets: [uploadedOriginal.completeAsset] } : {}),
+        };
+        await completeAttachmentWithRetry(init.attachment_id, completeRequest);
         return buildAttachmentManifest({
           attachment_id: init.attachment_id,
-          assets: [buildManifestAsset(initAsset.asset_id, originalEncrypted)],
+          assets: [uploadedOriginal.manifestAsset],
         });
       };
 
@@ -6915,48 +7035,56 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         continue;
       }
 
-      const init = await e2eeClient.initAttachment(channelType, channelId, {
-        idempotency_key: newUuid(this._attachmentCryptoProvider),
-        assets: [
-          { kind: 'original', cipher_size_estimate: originalEncrypted.cipher_size },
-          { kind: 'preview', cipher_size_estimate: previewEncrypted.cipher_size },
-        ],
-      });
+      const init = await e2eeClient.initAttachment(
+        channelType,
+        channelId,
+        {
+          idempotency_key: newUuid(this._attachmentCryptoProvider),
+          assets: [
+            { kind: 'original', cipher_size_estimate: originalCipherSizeEstimate },
+            { kind: 'preview', cipher_size_estimate: previewEncrypted.cipher_size },
+          ],
+        },
+        { multipart: multipartEnabled },
+      );
       const originalInitAsset = init.assets.find((asset) => asset.kind === 'original');
       const previewInitAsset = init.assets.find((asset) => asset.kind === 'preview');
       if (!originalInitAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
       if (!previewInitAsset) throw new Error('[Encryption] E2EE attachment init did not return preview asset');
+      if (!previewInitAsset.put_url)
+        throw new Error('[Encryption] E2EE attachment init did not return preview PUT URL');
 
-      await putPresignedObject(originalInitAsset.put_url, originalEncrypted.encryptedBlob, (progress) =>
-        options.onProgress?.({ fileIndex: index, ...progress }),
-      );
+      const uploadedOriginal = await uploadOriginalAsset(originalInitAsset);
       try {
-        await putPresignedObject(previewInitAsset.put_url, previewEncrypted.encryptedBlob, (progress) =>
-          options.onProgress?.({ fileIndex: index, ...progress }),
+        await putPresignedObject(
+          previewInitAsset.put_url,
+          previewEncrypted.encryptedBlob,
+          emitProgress,
+          options.signal,
         );
       } catch {
+        void e2eeClient.deleteAttachment(channelType, channelId, init.attachment_id).catch(() => undefined);
         const manifest = await completeOriginalOnly();
         attachments.push(manifest);
         ids.push(manifest.attachment_id);
         continue;
       }
 
-      options.onProgress?.({
-        fileIndex: index,
+      const completeTotal = uploadedOriginal.manifestAsset.cipher_size + previewEncrypted.cipher_size;
+      emitProgress({
         phase: 'completing',
-        loaded: originalEncrypted.cipher_size + previewEncrypted.cipher_size,
-        total: originalEncrypted.cipher_size + previewEncrypted.cipher_size,
+        loaded: completeTotal,
+        total: completeTotal,
         percentage: 100,
       });
-      await e2eeClient.completeAttachment(channelType, channelId, init.attachment_id, {
+      const completeRequest: CompleteE2eeAttachmentRequest = {
         completion_lease_id: newUuid(this._attachmentCryptoProvider),
-      });
+        ...(uploadedOriginal.completeAsset ? { assets: [uploadedOriginal.completeAsset] } : {}),
+      };
+      await completeAttachmentWithRetry(init.attachment_id, completeRequest);
       const manifest = buildAttachmentManifest({
         attachment_id: init.attachment_id,
-        assets: [
-          buildManifestAsset(originalInitAsset.asset_id, originalEncrypted),
-          buildManifestAsset(previewInitAsset.asset_id, previewEncrypted),
-        ],
+        assets: [uploadedOriginal.manifestAsset, buildManifestAsset(previewInitAsset.asset_id, previewEncrypted)],
       });
       attachments.push(manifest);
       ids.push(init.attachment_id);
@@ -7117,6 +7245,264 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     };
   }
 
+  private async _withE2eeSendLock<T>(e2eeGroupId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this._e2eeSendLockChains.get(e2eeGroupId) || Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chained = previous.catch(() => undefined).then(() => next);
+    this._e2eeSendLockChains.set(e2eeGroupId, chained);
+
+    await previous.catch(() => undefined);
+    try {
+      return await task();
+    } finally {
+      release();
+      if (this._e2eeSendLockChains.get(e2eeGroupId) === chained) {
+        this._e2eeSendLockChains.delete(e2eeGroupId);
+      }
+    }
+  }
+
+  private _displayOverridesArrayToMap(overrides?: Array<Record<string, unknown> | undefined>) {
+    if (!overrides?.length) return undefined;
+    const map = new Map<number, Record<string, unknown>>();
+    overrides.forEach((value, index) => {
+      if (value) map.set(index, value);
+    });
+    return map;
+  }
+
+  async enqueueE2eeAttachmentMessage(params: QueuedE2eeAttachmentSendParams): Promise<PendingE2eeSendRecord> {
+    if (!params.files.length) throw new Error('[Encryption] enqueueE2eeAttachmentMessage requires at least one file');
+    const e2eeGroupId = this._resolveChannelE2eeGroupId(params.cid, this._getActiveChannel(params.cid));
+    const displayOverrides = params.displayOverrides
+      ? params.files.map((_, index) => params.displayOverrides?.get(index))
+      : undefined;
+    const now = Date.now();
+    const record: PendingE2eeSendRecord = {
+      message_id: params.messageId,
+      cid: params.cid,
+      e2ee_group_id: e2eeGroupId,
+      channel_type: params.channelType,
+      channel_id: params.channelId,
+      text: params.text,
+      files: params.files as File[],
+      display_overrides: displayOverrides,
+      local_attachments: params.localAttachments,
+      aad_metadata: params.options,
+      retry_count: 0,
+      status: 'uploading',
+      created_at: now,
+      updated_at: now,
+    };
+
+    await this.storage.savePendingE2eeSend(record);
+    void this._processQueuedE2eeAttachmentMessage(record, params);
+    return record;
+  }
+
+  async cancelPendingE2eeSend(messageId: string): Promise<void> {
+    this._canceledPendingE2eeSends.add(messageId);
+    this._pendingE2eeSendAbortControllers.get(messageId)?.abort();
+    const existing = await this.storage.loadPendingE2eeSend(messageId).catch(() => null);
+    if (existing) {
+      await this.storage.savePendingE2eeSend({
+        ...existing,
+        status: 'canceled',
+        updated_at: Date.now(),
+      });
+      await this.storage.deletePendingE2eeSend(messageId);
+    }
+  }
+
+  async resumePendingE2eeSends(): Promise<void> {
+    if (!this.storage?.listPendingE2eeSends) return;
+    let records: PendingE2eeSendRecord[] = [];
+    try {
+      records = await this.storage.listPendingE2eeSends([
+        'generating_preview',
+        'uploading',
+        'uploaded',
+        'encrypting',
+        'sending',
+        'failed_retryable',
+      ]);
+    } catch (err) {
+      sdkLog('warn', '[Encryption] Failed to list pending E2EE sends for resume', err);
+      return;
+    }
+
+    records
+      .filter(
+        (record) =>
+          ((record.files?.length && record.channel_type && record.channel_id) || record.mls_ciphertext) &&
+          record.text !== undefined,
+      )
+      .forEach((record) => {
+        void this._processQueuedE2eeAttachmentMessage(record);
+      });
+  }
+
+  private async _sendPersistedPendingE2eeRecord(record: PendingE2eeSendRecord): Promise<any> {
+    if (!record.channel_type || !record.channel_id || !record.mls_ciphertext || record.mls_epoch === undefined) {
+      throw new Error('Pending E2EE send is missing persisted send material');
+    }
+    const envelopeOptions = {
+      ...(record.send_envelope || {}),
+      ...(record.e2ee_attachment_ids?.length ? { e2ee_attachment_ids: record.e2ee_attachment_ids } : {}),
+      ...(record.forward_cid ? { forward_cid: record.forward_cid } : {}),
+      ...(record.forward_message_id ? { forward_message_id: record.forward_message_id } : {}),
+      ...(record.forward_parent_cid ? { forward_parent_cid: record.forward_parent_cid } : {}),
+    };
+
+    return await this.e2eeClient!.sendMessage(record.channel_type, record.channel_id, {
+      message: {
+        id: record.message_id,
+        mls_ciphertext: record.mls_ciphertext,
+        mls_epoch: record.mls_epoch,
+        e2ee_group_id: record.e2ee_group_id,
+        ...envelopeOptions,
+      },
+    });
+  }
+
+  private async _processQueuedE2eeAttachmentMessage(
+    initialRecord: PendingE2eeSendRecord,
+    liveParams?: QueuedE2eeAttachmentSendParams,
+  ): Promise<void> {
+    if (this._pendingE2eeSendJobs.has(initialRecord.message_id)) return;
+    this._pendingE2eeSendJobs.add(initialRecord.message_id);
+    let record = initialRecord;
+    let lastProgressPersistedAt = 0;
+    let lastProgressEmittedAt = 0;
+    let lastProgressPercent = typeof record.local_progress === 'number' ? record.local_progress : -1;
+    const abortController = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+    if (abortController) this._pendingE2eeSendAbortControllers.set(initialRecord.message_id, abortController);
+
+    const isCanceled = () => this._canceledPendingE2eeSends.has(initialRecord.message_id);
+    const throwIfCanceled = () => {
+      if (isCanceled() || abortController?.signal.aborted) {
+        const error = new Error('Pending E2EE send canceled');
+        error.name = 'AbortError';
+        throw error;
+      }
+    };
+
+    const savePatch = async (patch: Partial<PendingE2eeSendRecord>) => {
+      if (isCanceled()) return;
+      record = { ...record, ...patch, updated_at: Date.now() };
+      await this.storage.savePendingE2eeSend(record);
+    };
+
+    try {
+      throwIfCanceled();
+      const files = record.files || liveParams?.files;
+      const channelType = record.channel_type || liveParams?.channelType;
+      const channelId = record.channel_id || liveParams?.channelId;
+      if (record.status === 'sending' && record.mls_ciphertext) {
+        const response = await this._withE2eeSendLock(record.e2ee_group_id, () =>
+          this._sendPersistedPendingE2eeRecord(record),
+        );
+        await this.storage.deletePendingE2eeSend(record.message_id);
+        liveParams?.onSuccess?.(response);
+        return;
+      }
+      if (!files?.length || !channelType || !channelId) {
+        await savePatch({
+          status: 'failed_terminal',
+          last_error: 'Missing durable files or channel routing for pending E2EE send',
+        });
+        return;
+      }
+
+      const prepared = await this.uploadE2eeAttachments(channelType, channelId, files, {
+        displayOverrides: liveParams?.displayOverrides || this._displayOverridesArrayToMap(record.display_overrides),
+        signal: abortController?.signal,
+        onProgress: (progress) => {
+          if (isCanceled()) return;
+          const nextStatus: PendingE2eeSendStatus =
+            progress.phase === 'generating_preview'
+              ? 'generating_preview'
+              : progress.phase === 'encrypting'
+              ? 'encrypting'
+              : 'uploading';
+          const nextProgress = Math.max(0, Math.min(100, Math.round(progress.percentage)));
+          const now = Date.now();
+          const shouldEmit =
+            now - lastProgressEmittedAt >= 250 || nextProgress !== lastProgressPercent || nextProgress === 100;
+          const shouldPersist =
+            now - lastProgressPersistedAt >= 500 || nextProgress !== lastProgressPercent || nextProgress === 100;
+          if (shouldPersist) {
+            lastProgressPersistedAt = now;
+            lastProgressPercent = nextProgress;
+            void savePatch({ status: nextStatus, local_progress: nextProgress });
+          }
+          if (shouldEmit) {
+            lastProgressEmittedAt = now;
+            liveParams?.onProgress?.({ ...progress, percentage: nextProgress });
+          }
+        },
+      });
+      throwIfCanceled();
+
+      await savePatch({
+        status: 'uploaded',
+        manifest: prepared.attachments,
+        e2ee_attachment_ids: prepared.e2ee_attachment_ids,
+        local_progress: 100,
+      });
+
+      const sendOptions = {
+        ...(record.aad_metadata || {}),
+        ...(liveParams?.options || {}),
+        attachments: prepared.attachments,
+        e2ee_attachment_ids: prepared.e2ee_attachment_ids,
+      } as QueuedE2eeAttachmentSendParams['options'] & {
+        attachments: E2eeAttachmentManifest[];
+        e2ee_attachment_ids: string[];
+      };
+
+      liveParams?.onProgress?.({
+        fileIndex: Math.max(0, files.length - 1),
+        phase: 'sending',
+        loaded: 1,
+        total: 1,
+        percentage: 100,
+      });
+
+      await savePatch({ status: 'sending' });
+      throwIfCanceled();
+      const response = await this.sendMessage(
+        channelType,
+        channelId,
+        record.cid,
+        record.text || '',
+        record.message_id,
+        sendOptions,
+      );
+      await this.storage.deletePendingE2eeSend(record.message_id);
+      liveParams?.onSuccess?.(response);
+    } catch (err) {
+      if (isCanceled() || abortController?.signal.aborted) {
+        await this.storage.deletePendingE2eeSend(record.message_id).catch(() => undefined);
+        return;
+      }
+      const isTerminal = isE2eeAttachmentInvalidError(err);
+      await savePatch({
+        status: isTerminal ? 'failed_terminal' : 'failed_retryable',
+        retry_count: (record.retry_count || 0) + 1,
+        last_error: getApiErrorMessage(err),
+      });
+      liveParams?.onError?.(err);
+    } finally {
+      this._pendingE2eeSendJobs.delete(initialRecord.message_id);
+      this._pendingE2eeSendAbortControllers.delete(initialRecord.message_id);
+      this._canceledPendingE2eeSends.delete(initialRecord.message_id);
+    }
+  }
+
   /**
    * Send an encrypted E2EE message.
    *
@@ -7151,6 +7537,39 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       poll_choice_counts?: Record<string, number>;
     } = {},
   ): Promise<any> {
+    const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
+    return await this._withE2eeSendLock(e2eeGroupId, () =>
+      this._sendMessageUnlocked(channelType, channelId, cid, text, messageId, options, e2eeGroupId),
+    );
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async _sendMessageUnlocked(
+    channelType: string,
+    channelId: string,
+    cid: string,
+    text: string,
+    messageId: string,
+    options: {
+      parent_id?: string;
+      quoted_message_id?: string;
+      mentioned_users?: string[];
+      mentioned_all?: boolean;
+      forward_cid?: string;
+      forward_message_id?: string;
+      forward_parent_cid?: string;
+      e2ee_attachment_ids?: string[];
+      /** Attachment metadata — encrypted inside E2EE payload */
+      attachments?: unknown[];
+      /** Sticker URL — encrypted inside E2EE payload */
+      sticker_url?: string;
+      /** Poll type — encrypted inside E2EE payload */
+      poll_type?: string;
+      /** Poll choices — encrypted inside E2EE payload */
+      poll_choice_counts?: Record<string, number>;
+    },
+    e2eeGroupId: string,
+  ): Promise<any> {
     // Build structured payload — everything inside is encrypted
     const payload: E2eePayload = { text };
     if (options.attachments && options.attachments.length > 0) {
@@ -7169,7 +7588,6 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // Strip encrypted fields — only envelope metadata goes to server
     const { attachments: _a, sticker_url: _s, poll_type: _pt, poll_choice_counts: _pc, ...envelopeOptions } = options;
 
-    const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
     if (!this.getGroup(e2eeGroupId)) {
       const groupParts = channelPartsFromCid(e2eeGroupId);
       const ready = groupParts
@@ -7207,11 +7625,15 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       message_id: messageId,
       cid,
       e2ee_group_id: e2eeGroupId,
+      channel_type: channelType,
+      channel_id: channelId,
+      text,
       mls_ciphertext: ciphertext,
       mls_ciphertext_sha256: ciphertextSha256(ciphertext, this._attachmentCryptoProvider),
       mls_epoch: Number(group.epoch()),
       e2ee_attachment_ids: e2eeAttachmentIds,
       aad_metadata: aad ? aadParams : undefined,
+      send_envelope: envelopeOptions as Record<string, unknown>,
       forward_cid: options.forward_cid,
       forward_message_id: options.forward_message_id,
       forward_parent_cid: options.forward_parent_cid,

@@ -90,44 +90,28 @@ export function useMessageSend({
         const encryptionMgr = (activeChannel as any).getClient?.().encryptionManager;
         if (!encryptionMgr?.initialized) throw new Error('E2EE attachments require an initialized encryption manager');
         const filesToUpload = uploadedFiles.map((f) => f.normalizedFile || f.file!).filter(Boolean);
-        setFiles((prev) =>
-          prev.map((f) =>
-            uploadedFiles.some((candidate) => candidate.id === f.id)
-              ? { ...f, status: 'uploading' as const, e2eePhase: 'generating_preview' as const, progress: 0 }
-              : f,
-          ),
-        );
-        const prepared = await encryptionMgr.uploadE2eeAttachments(
-          activeChannel.type,
-          activeChannel.id,
-          filesToUpload,
-          {
-            onProgress: (progress: {
-              fileIndex: number;
-              phase: 'generating_preview' | 'encrypting' | 'uploading' | 'completing';
-              percentage: number;
-            }) => {
-              const fileId = uploadedFiles[progress.fileIndex]?.id;
-              if (!fileId) return;
-              setFiles((prev) =>
-                prev.map((f) =>
-                  f.id === fileId
-                    ? { ...f, status: 'uploading' as const, e2eePhase: progress.phase, progress: progress.percentage }
-                    : f,
-                ),
-              );
-            },
-          },
-        );
-        attachments = prepared.attachments;
-        e2eeAttachmentIds = prepared.e2ee_attachment_ids;
-        setFiles((prev) =>
-          prev.map((f) =>
-            uploadedFiles.some((candidate) => candidate.id === f.id)
-              ? { ...f, status: 'done' as const, e2eePhase: 'sending' as const, progress: 100 }
-              : f,
-          ),
-        );
+        const message: Record<string, any> = { text };
+        if (isTeamChannel) {
+          message.mentioned_all = payload.mentioned_all;
+          message.mentioned_users = payload.mentioned_users;
+        }
+        if (quotedMessage?.id) {
+          message.quoted_message_id = quotedMessage.id;
+        }
+        await (activeChannel as any).enqueueE2eeAttachmentMessage(message, filesToUpload);
+        syncMessages();
+
+        files.forEach((f) => {
+          if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
+        });
+        const errorFiles = files.filter((f) => f.status === 'error');
+        setFiles(errorFiles);
+        setHasContent(errorFiles.length > 0);
+        reset();
+        clearQuotedMessage?.();
+        onSend?.(payload.text);
+        activeChannel?.stopTyping();
+        return;
       } else {
         attachments = uploadedFiles.map((f) => {
           if (f.originalAttachment) {

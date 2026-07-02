@@ -16,6 +16,7 @@ import { toast, Toaster } from 'sonner'
 
 // Initialize client with env variables
 const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || '';
+const E2EE_ATTACHMENT_MULTIPART_ENABLED = import.meta.env.VITE_E2EE_ATTACHMENT_MULTIPART === 'true';
 
 const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_DEFAULTS.BASE_URL, {
   recoverStateOnReconnect: true,
@@ -36,7 +37,10 @@ async function initializeE2ee(userId: string) {
   if (!e2eeInitPromise) {
     e2eeInitPromise = (async () => {
       const wasmModule = await loadOpenMlsWasm('/openmls_wasm_bg.wasm');
-      await encryptionManager.initialize(chatClient, userId, { wasmModule });
+      await encryptionManager.initialize(chatClient, userId, {
+        wasmModule,
+        enableE2eeAttachmentMultipart: E2EE_ATTACHMENT_MULTIPART_ENABLED,
+      });
     })().catch((err) => {
       e2eeInitPromise = null;
       throw err;
