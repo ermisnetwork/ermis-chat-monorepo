@@ -3,7 +3,7 @@
 ## UHM Chat E2EE Runtime Notes
 
 - `public/openmls_wasm_bg.wasm` must be published with the app. `App.tsx` loads this binary through `loadOpenMlsWasm()` after `connectUser`; the OpenMLS JS glue comes from the SDK bundle so SDK logger settings cover OpenMLS glue logs. The legacy public OpenMLS JS glue copies are logger-safe for direct/older asset loads.
-- `public/e2ee-media-stream-worker.js` is the optional E2EE video streaming worker. It is feature-flagged off by default; enable only after R2 single/concurrent range and CORS gates pass. The worker intercepts only `/__ermis/e2ee-media/*` virtual URLs and keeps decrypted frames in memory only.
+- `public/e2ee-media-stream-worker.js` is the E2EE video streaming worker. UHM enables native Service Worker range playback by default at bootstrap with `VITE_E2EE_MEDIA_STREAMING` defaulting to on; set `VITE_E2EE_MEDIA_STREAMING=false` to force the whole-blob fallback. Playback diagnostics default to on for current UHM validation and can be disabled with `VITE_E2EE_MEDIA_PLAYBACK_DEBUG=false`. The bootstrap only unregisters stale `e2ee-media-stream-worker.js` registrations, not the app PWA `sw.js` or unrelated Service Workers. The worker intercepts only `/__ermis/e2ee-media/*` virtual URLs and keeps decrypted frames in memory only.
 - `public/wasm_worker.worker.mjs` must be copied from the SDK `dist` after building or installing a published SDK. The worker forwards WASM logs through the SDK logger bridge, so stale public copies can bypass `logger` and write to the browser console directly.
 - E2EE controls stay disabled when `client.encryptionManager` is not initialized; standard chat continues to work.
 - uhm-chat waits for `connectUser()` and encryption initialization before mounting the chat shell, preventing first-login channel queries with an unset auth token.
@@ -24,6 +24,14 @@
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-07-02 - production E2EE media streaming defaults
+
+- Goal: stop requiring console commands to enable E2EE video range playback and debug logging during UHM validation.
+- Code changed: UHM bootstrap now enables `ermis_e2ee_media_streaming` and playback debug defaults, sets the SDK global streaming/debug flags, and performs targeted cleanup only for stale `e2ee-media-stream-worker.js` registrations instead of unregistering all Service Workers.
+- Docs changed: this README records the UHM defaults and env opt-outs. Bellboy E2EE docs record that the SDK remains fallback-capable while UHM defaults streaming on.
+- Design decision: do not run broad `navigator.serviceWorker.getRegistrations().map(unregister)` automatically because that can remove the PWA worker and unrelated workers; stale cleanup is scoped to the E2EE media worker script.
+- Verification: `npm run build:sdk`, `yarn workspace @ermis-network/ermis-chat-sdk test:media`, `npm run build:react`, `npm run build:uhm`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
 
 ### 2026-06-19 - production E2EE sender display names
 

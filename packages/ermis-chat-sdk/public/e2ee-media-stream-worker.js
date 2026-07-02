@@ -4,10 +4,16 @@ const SMOKE_PATH = '/__ermis/e2ee-media-smoke';
 const FRAME_HEADER_BYTES = 8;
 const GCM_TAG_BYTES = 16;
 const IDLE_TTL_MS = 30 * 60 * 1000;
-const SESSION_CACHE_LIMIT = 16 * 1024 * 1024;
-const GLOBAL_CACHE_LIMIT = 64 * 1024 * 1024;
+const BASE_SESSION_CACHE_LIMIT = 16 * 1024 * 1024;
+const FULL_REPLAY_CACHE_LIMIT = 128 * 1024 * 1024;
+const GLOBAL_CACHE_LIMIT = 256 * 1024 * 1024;
 const MAX_R2_RETRIES = 2;
 const RETRY_BASE_MS = 250;
+const PREFETCH_FRAMES = 8;
+const PREFETCH_THRESHOLD_FRAMES = 2;
+const SEQUENTIAL_PREFETCH_HITS = 2;
+const SEQUENTIAL_FRAME_GAP = 2;
+const DEFAULT_GRANT_RENEWAL_SAFETY_MARGIN_MS = 30 * 1000;
 
 const sessions = new Map();
 let globalCacheBytes = 0;
@@ -113,13 +119,21 @@ function evictFrame(session, key) {
 	globalCacheBytes -= frame.byteLength;
 }
 
+function sessionCacheLimit(session) {
+	const plaintextSize = Number(session.plaintextSize || 0);
+	if (Number.isFinite(plaintextSize) && plaintextSize > 0 && plaintextSize <= FULL_REPLAY_CACHE_LIMIT) {
+		return Math.max(BASE_SESSION_CACHE_LIMIT, plaintextSize);
+	}
+	return BASE_SESSION_CACHE_LIMIT;
+}
+
 function cacheFrame(session, frameIndex, plain) {
 	const key = cacheKey(session.sessionId, frameIndex);
 	if (session.frameCache.has(key)) evictFrame(session, key);
 	session.frameCache.set(key, plain);
 	session.cacheBytes += plain.byteLength;
 	globalCacheBytes += plain.byteLength;
-	while (session.cacheBytes > SESSION_CACHE_LIMIT && session.frameCache.size > 0) {
+	while (session.cacheBytes > sessionCacheLimit(session) && session.frameCache.size > 0) {
 		const oldest = session.frameCache.keys().next().value;
 		evictFrame(session, oldest);
 	}
@@ -173,8 +187,39 @@ function parseRange(header, size) {
 	return { start, endExclusive: Math.min(size, inclusiveEnd + 1) };
 }
 
-function sleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+function abortError() {
+	try {
+		return new DOMException('E2EE media stream request aborted', 'AbortError');
+	} catch {
+		const error = new Error('E2EE media stream request aborted');
+		error.name = 'AbortError';
+		return error;
+	}
+}
+
+function assertNotAborted(signal) {
+	if (signal?.aborted) throw abortError();
+}
+
+function isAbortError(error) {
+	return error?.name === 'AbortError';
+}
+
+function sleep(ms, signal) {
+	assertNotAborted(signal);
+	return new Promise((resolve, reject) => {
+		const cleanup = () => signal?.removeEventListener?.('abort', onAbort);
+		const onAbort = () => {
+			clearTimeout(timeout);
+			cleanup();
+			reject(abortError());
+		};
+		const timeout = setTimeout(() => {
+			cleanup();
+			resolve();
+		}, ms);
+		signal?.addEventListener?.('abort', onAbort, { once: true });
+	});
 }
 
 async function renewGrant(session, clientId) {
@@ -198,19 +243,48 @@ async function renewGrant(session, clientId) {
 	return await session.renewalPromise;
 }
 
+function grantRenewalSafetyMargin(session) {
+	const value = Number(session.safetyMarginMs);
+	return Number.isFinite(value) && value >= 0 ? value : DEFAULT_GRANT_RENEWAL_SAFETY_MARGIN_MS;
+}
+
+async function ensureFreshGrant(session, clientId, signal) {
+	assertNotAborted(signal);
+	if (Date.now() + grantRenewalSafetyMargin(session) < Number(session.expiresAtMs || 0)) return;
+	await renewGrant(session, clientId);
+	assertNotAborted(signal);
+}
+
 async function fetchEncryptedRange(session, start, endExclusive, clientId, signal) {
-	if (Date.now() >= session.expiresAtMs) await renewGrant(session, clientId);
+	await ensureFreshGrant(session, clientId, signal);
 	const headers = { Range: `bytes=${start}-${endExclusive - 1}` };
-	for (let attempt = 0; attempt <= MAX_R2_RETRIES; attempt += 1) {
+	let transientAttempts = 0;
+	let renewedAfterAuthFailure = false;
+	while (true) {
+		assertNotAborted(signal);
 		const response = await fetch(session.grantUrl, { headers, cache: 'no-store', signal });
-		if (response.status === 206) return new Uint8Array(await response.arrayBuffer());
+		assertNotAborted(signal);
+		if (response.status === 206) {
+			const encrypted = new Uint8Array(await response.arrayBuffer());
+			assertNotAborted(signal);
+			return encrypted;
+		}
 		if (response.status === 200) throw new Error('E2EE media stream unsupported: R2 ignored Range request');
 		if (response.status === 401 || response.status === 403) {
+			if (renewedAfterAuthFailure) {
+				throw new Error(
+					`E2EE media encrypted range fetch failed after grant renewal: HTTP ${
+						response.status
+					}; requested=${start}-${endExclusive - 1}`,
+				);
+			}
+			renewedAfterAuthFailure = true;
 			await renewGrant(session, clientId);
 			continue;
 		}
-		if ((response.status === 429 || response.status >= 500) && attempt < MAX_R2_RETRIES) {
-			await sleep(RETRY_BASE_MS * Math.pow(2, attempt));
+		if ((response.status === 429 || response.status >= 500) && transientAttempts < MAX_R2_RETRIES) {
+			await sleep(RETRY_BASE_MS * Math.pow(2, transientAttempts), signal);
+			transientAttempts += 1;
 			continue;
 		}
 		throw new Error(
@@ -219,7 +293,6 @@ async function fetchEncryptedRange(session, start, endExclusive, clientId, signa
 			}; content-range=${response.headers.get('Content-Range') || ''}`,
 		);
 	}
-	throw new Error('E2EE media encrypted range fetch failed');
 }
 
 async function decryptFrame(session, frameIndex, encrypted, offset) {
@@ -255,12 +328,16 @@ async function loadFrames(session, firstFrame, lastFrame, clientId, signal) {
 	let groupStart = missing[0];
 	let previous = missing[0];
 	const flush = async (startFrame, endFrame) => {
+		assertNotAborted(signal);
 		const encryptedStart = frameStartEncrypted(session, startFrame);
 		const encryptedEnd = frameStartEncrypted(session, endFrame) + frameEncryptedLength(session, endFrame);
 		const encrypted = await fetchEncryptedRange(session, encryptedStart, encryptedEnd, clientId, signal);
+		assertNotAborted(signal);
 		let offset = 0;
 		for (let frame = startFrame; frame <= endFrame; frame += 1) {
+			assertNotAborted(signal);
 			const plain = await decryptFrame(session, frame, encrypted, offset);
+			assertNotAborted(signal);
 			cacheFrame(session, frame, plain);
 			offset += frameEncryptedLength(session, frame);
 		}
@@ -278,9 +355,49 @@ async function loadFrames(session, firstFrame, lastFrame, clientId, signal) {
 	await flush(groupStart, previous);
 }
 
+function shouldPrefetchRange(session, start, endExclusive, firstFrame, lastFrame) {
+	const requestedFrameSpan = lastFrame - firstFrame + 1;
+	const previous = session.lastRangeAccess;
+	let sequentialHits = 0;
+	if (previous) {
+		const movingForward = start >= previous.start && firstFrame >= previous.firstFrame;
+		const nearby =
+			firstFrame <= previous.lastFrame + SEQUENTIAL_FRAME_GAP ||
+			start <= previous.endExclusive + session.frameSize * SEQUENTIAL_FRAME_GAP;
+		const sequential = movingForward && nearby;
+		sequentialHits = sequential ? previous.sequentialHits + 1 : 0;
+		if (!sequential) session.prefetchedUntilFrame = -1;
+	}
+	session.lastRangeAccess = {
+		start,
+		endExclusive,
+		firstFrame,
+		lastFrame,
+		sequentialHits,
+	};
+	return requestedFrameSpan > PREFETCH_THRESHOLD_FRAMES || sequentialHits >= SEQUENTIAL_PREFETCH_HITS;
+}
+
+function plannedBatchLastFrame(session, currentFrame, maxFrame, shouldPrefetch) {
+	if (!shouldPrefetch) return currentFrame;
+	const prefetchedUntilFrame = Number(session.prefetchedUntilFrame);
+	if (Number.isFinite(prefetchedUntilFrame) && currentFrame <= prefetchedUntilFrame) return currentFrame;
+	return Math.min(maxFrame, currentFrame + PREFETCH_FRAMES - 1);
+}
+
+function markPrefetchedUntil(session, frameIndex) {
+	const prefetchedUntilFrame = Number(session.prefetchedUntilFrame);
+	session.prefetchedUntilFrame = Math.max(
+		Number.isFinite(prefetchedUntilFrame) ? prefetchedUntilFrame : -1,
+		frameIndex,
+	);
+}
+
 function buildRangeStream(session, start, endExclusive, clientId, requestSignal) {
 	let frame = Math.floor(start / session.frameSize);
-	const lastFrame = Math.floor((endExclusive - 1) / session.frameSize);
+	const responseLastFrame = Math.floor((endExclusive - 1) / session.frameSize);
+	const maxFrame = frameCount(session) - 1;
+	const shouldPrefetch = shouldPrefetchRange(session, start, endExclusive, frame, responseLastFrame);
 	const abort = new AbortController();
 	let cleanedUp = false;
 	const cleanup = () => {
@@ -294,13 +411,15 @@ function buildRangeStream(session, start, endExclusive, clientId, requestSignal)
 
 	return new ReadableStream({
 		async pull(controller) {
-			if (abort.signal.aborted || frame > lastFrame) {
+			if (abort.signal.aborted || frame > responseLastFrame) {
 				cleanup();
 				controller.close();
 				return;
 			}
 			try {
-				await loadFrames(session, frame, frame, clientId, abort.signal);
+				const batchLastFrame = plannedBatchLastFrame(session, frame, maxFrame, shouldPrefetch);
+				await loadFrames(session, frame, batchLastFrame, clientId, abort.signal);
+				if (shouldPrefetch && batchLastFrame > frame) markPrefetchedUntil(session, batchLastFrame);
 				if (abort.signal.aborted) {
 					cleanup();
 					controller.close();
@@ -313,13 +432,13 @@ function buildRangeStream(session, start, endExclusive, clientId, requestSignal)
 				const sliceEnd = Math.min(plain.length, endExclusive - plainStart);
 				if (sliceEnd > sliceStart) controller.enqueue(plain.slice(sliceStart, sliceEnd));
 				frame += 1;
-				if (frame > lastFrame) {
+				if (frame > responseLastFrame) {
 					cleanup();
 					controller.close();
 				}
 			} catch (err) {
 				cleanup();
-				if (abort.signal.aborted || err?.name === 'AbortError') {
+				if (abort.signal.aborted || isAbortError(err)) {
 					controller.close();
 					return;
 				}
@@ -364,7 +483,9 @@ function handleNoRangeRequest(event, session) {
 				return;
 			}
 			try {
-				await loadFrames(session, frame, frame, event.clientId, abort.signal);
+				const batchLastFrame = plannedBatchLastFrame(session, frame, frameCount(session) - 1, true);
+				await loadFrames(session, frame, batchLastFrame, event.clientId, abort.signal);
+				if (batchLastFrame > frame) markPrefetchedUntil(session, batchLastFrame);
 				if (abort.signal.aborted) {
 					controller.close();
 					return;
@@ -374,7 +495,7 @@ function handleNoRangeRequest(event, session) {
 				controller.enqueue(plain);
 				frame += 1;
 			} catch (err) {
-				if (abort.signal.aborted || err?.name === 'AbortError') {
+				if (abort.signal.aborted || isAbortError(err)) {
 					controller.close();
 					return;
 				}
@@ -435,7 +556,9 @@ self.addEventListener('message', (event) => {
 			lastAccess: Date.now(),
 			cryptoKeyPromise: null,
 			renewalPromise: null,
+			prefetchedUntilFrame: -1,
 		};
+		session.safetyMarginMs = grantRenewalSafetyMargin(session);
 		if (!session.sessionId || !session.grantUrl || !session.contentKey || session.noncePrefix.length !== 8) {
 			ack(event.source, data.requestId, false, undefined, 'Invalid E2EE media stream session');
 			return;

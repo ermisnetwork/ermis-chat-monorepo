@@ -1,5 +1,7 @@
 import type { DownloadE2eeAttachmentGrantResponse, E2eeAttachmentManifest, E2eeAttachmentManifestAsset } from './types';
 
+export type E2eeMediaPlaybackStrategy = 'whole_blob' | 'native_range' | 'mse_fmp4';
+
 export type E2eeMediaStreamWorkerOptions = {
   workerUrl?: string;
   scope?: string;
@@ -37,7 +39,7 @@ type PageSession = {
   safetyMarginMs: number;
 };
 
-const DEFAULT_WORKER_URL = '/e2ee-media-stream-worker.js?v=20260630-2';
+const DEFAULT_WORKER_URL = '/e2ee-media-stream-worker.js?v=20260702-3';
 const DEFAULT_WORKER_SCOPE = '/';
 const DEFAULT_GRANT_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_SAFETY_MARGIN_MS = 30 * 1000;
@@ -66,11 +68,24 @@ function streamingFlagEnabled(explicit?: boolean): boolean {
   }
 }
 
+function mseFlagEnabled(explicit?: boolean): boolean {
+  if (explicit !== undefined) return explicit;
+  const globalValue = (globalThis as any).__ERMIS_E2EE_MEDIA_MSE_ENABLED__;
+  if (globalValue === true || globalValue === '1') return true;
+  try {
+    return globalThis.localStorage?.getItem('ermis_e2ee_media_mse') === '1';
+  } catch {
+    return false;
+  }
+}
+
 function mediaStreamDebugEnabled(): boolean {
+  const globalValue = (globalThis as any).__ERMIS_E2EE_MEDIA_PLAYBACK_DEBUG__;
+  if (globalValue === true || globalValue === '1') return true;
   try {
     return (
       globalThis.localStorage?.getItem('ermis_e2ee_media_streaming_debug') === '1' ||
-      globalThis.localStorage?.getItem('ermis_e2ee_media_streaming') === '1'
+      globalThis.localStorage?.getItem('ermis_e2ee_media_playback_debug') === '1'
     );
   } catch {
     return false;
@@ -81,6 +96,39 @@ function logMediaStreamFallback(reason: string, details?: unknown): void {
   if (!mediaStreamDebugEnabled()) return;
   if (details === undefined) console.info(`[E2EE media streaming] fallback: ${reason}`);
   else console.info(`[E2EE media streaming] fallback: ${reason}`, details);
+}
+
+export function isE2eeMediaMsePlaybackEnabled(
+  options: {
+    streamingEnabled?: boolean;
+    mseEnabled?: boolean;
+  } = {},
+): boolean {
+  return streamingFlagEnabled(options.streamingEnabled) && mseFlagEnabled(options.mseEnabled);
+}
+
+function isLikelyIosWebKit(userAgent: string): boolean {
+  if (/iPad|iPhone|iPod/i.test(userAgent)) return true;
+  const hasTouch = typeof globalThis !== 'undefined' && 'ontouchend' in globalThis;
+  return /Macintosh/i.test(userAgent) && hasTouch;
+}
+
+export function isE2eeMediaMsePlaybackAllowed(
+  options: {
+    streamingEnabled?: boolean;
+    mseEnabled?: boolean;
+    userAgent?: string;
+    mediaSource?: { isTypeSupported?: (mimeType: string) => boolean };
+    codecMimeType?: string;
+  } = {},
+): boolean {
+  if (!isE2eeMediaMsePlaybackEnabled(options)) return false;
+  const userAgent = options.userAgent || (typeof navigator !== 'undefined' ? navigator.userAgent : '');
+  if (isLikelyIosWebKit(userAgent)) return false;
+  const mediaSource = options.mediaSource || (globalThis as any).MediaSource;
+  if (!mediaSource || typeof mediaSource.isTypeSupported !== 'function') return false;
+  if (options.codecMimeType) return mediaSource.isTypeSupported(options.codecMimeType);
+  return true;
 }
 
 function waitForController(timeoutMs = 3000): Promise<boolean> {
@@ -147,7 +195,7 @@ async function handleGrantRenewal(sessionId: string, requestId: string): Promise
       requestId,
       sessionId,
       grantUrl: grant.download_url,
-      expiresAtMs: Date.now() + session.grantTtlMs - session.safetyMarginMs,
+      expiresAtMs: Date.now() + session.grantTtlMs,
     });
   } catch (err) {
     controller.postMessage({
@@ -289,7 +337,8 @@ export async function createE2eeAttachmentStreamUrl(
       session: {
         sessionId,
         grantUrl: grant.download_url,
-        expiresAtMs: Date.now() + grantTtlMs - safetyMarginMs,
+        expiresAtMs: Date.now() + grantTtlMs,
+        safetyMarginMs,
         mimeType,
         plaintextSize,
         cipherSize: asset.cipher_size,

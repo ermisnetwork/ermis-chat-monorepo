@@ -30,6 +30,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
     const [videoRetryCount, setVideoRetryCount] = useState(0);
     const [videoLoading, setVideoLoading] = useState(false);
     const videoRetryTimerRef = useRef<ReturnType<typeof setTimeout>>();
+    const pendingVideoSeekTimeRef = useRef<number | undefined>();
 
     // Reset state when opening or when items change
     useEffect(() => {
@@ -39,6 +40,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
         setPan({ x: 0, y: 0 });
         setVideoRetryCount(0);
         setVideoLoading(false);
+        pendingVideoSeekTimeRef.current = undefined;
       }
       return () => {
         if (videoRetryTimerRef.current) clearTimeout(videoRetryTimerRef.current);
@@ -92,6 +94,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
       setPan({ x: 0, y: 0 });
       setVideoRetryCount(0);
       setVideoLoading(false);
+      pendingVideoSeekTimeRef.current = undefined;
     }, []);
 
     const goPrev = useCallback(() => {
@@ -203,16 +206,36 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
       await downloadFile(currentItem.src, currentItem.alt || 'media');
     }, [currentItem, downloadFile]);
 
+    const restorePendingVideoSeekTime = useCallback(() => {
+      setVideoLoading(false);
+      const seekTime = pendingVideoSeekTimeRef.current;
+      const video = videoRef.current;
+      if (seekTime === undefined || !video || !Number.isFinite(seekTime) || seekTime <= 0) return;
+      try {
+        if (!Number.isFinite(video.duration) || seekTime < video.duration) {
+          video.currentTime = seekTime;
+        }
+        pendingVideoSeekTimeRef.current = undefined;
+      } catch {
+        pendingVideoSeekTimeRef.current = undefined;
+      }
+    }, []);
+
     // Video error handler — retries loading with exponential backoff
     // Handles CDN not-ready scenario for large recently-uploaded files
     const handleVideoError = useCallback(() => {
       if (currentItem?.onPlaybackError) {
         if (videoRetryTimerRef.current) clearTimeout(videoRetryTimerRef.current);
+        const currentTime = videoRef.current?.currentTime;
+        pendingVideoSeekTimeRef.current =
+          currentTime !== undefined && Number.isFinite(currentTime) && currentTime > 0 ? currentTime : undefined;
         setVideoLoading(true);
-        void Promise.resolve(currentItem.onPlaybackError()).finally(() => {
-          setVideoLoading(false);
-          setVideoRetryCount(0);
-        });
+        void Promise.resolve(currentItem.onPlaybackError({ currentTime: pendingVideoSeekTimeRef.current })).finally(
+          () => {
+            setVideoLoading(false);
+            setVideoRetryCount(0);
+          },
+        );
         return;
       }
       setVideoRetryCount((prev) => {
@@ -251,7 +274,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
                 autoPlay
                 preload="metadata"
                 onClick={(e) => e.stopPropagation()}
-                onCanPlay={() => setVideoLoading(false)}
+                onLoadedMetadata={restorePendingVideoSeekTime}
+                onCanPlay={restorePendingVideoSeekTime}
                 onPlaying={() => setVideoLoading(false)}
                 onError={handleVideoError}
               />
@@ -326,6 +350,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
       videoLoading,
       handleDoubleClick,
       handleVideoError,
+      restorePendingVideoSeekTime,
       handleMouseDown,
       handleMouseMove,
       handleMouseUp,
