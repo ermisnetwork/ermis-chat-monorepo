@@ -4,6 +4,7 @@ import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
 import { isDirectChannel } from '../channelTypeUtils';
 import { getLastMessagePreview } from '../utils';
 import { SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk';
+import { useChatClient } from './useChatClient';
 
 /** Preview data for the most recent message across the topic group */
 export type LatestMessagePreview = {
@@ -48,6 +49,7 @@ export function useTopicGroupUpdates(
   updateCount: number;
   latestMessagePreview: LatestMessagePreview | null;
 } {
+  const { client: chatClient, activeChannel } = useChatClient();
   const [updateCount, setUpdateCount] = useState(0);
   const bump = useCallback(() => setUpdateCount((c) => c + 1), []);
 
@@ -106,17 +108,19 @@ export function useTopicGroupUpdates(
 
   // Helper: check if user is excluded from unread counting
   const isExcludedUser = (ch: Channel): boolean => {
-    const ms = ch.state?.membership as Record<string, unknown> | undefined;
+    const client = ch.getClient();
+    const activeCh = client.activeChannels[ch.cid] || ch;
+    const ms = activeCh.state?.membership as Record<string, unknown> | undefined;
     if (!ms) return false;
     const isBannedSelf = Boolean(ms.banned);
     
     // Topic support: check parent channel's ban status
-    const parentCid = ch.data?.parent_cid as string | undefined;
-    const parentChannel = parentCid ? ch.getClient().activeChannels[parentCid] : undefined;
+    const parentCid = activeCh.data?.parent_cid as string | undefined;
+    const parentChannel = parentCid ? client.activeChannels[parentCid] : undefined;
     const isBannedParent = Boolean(parentChannel?.state?.membership?.banned);
     
     const isBanned = isBannedSelf || isBannedParent;
-    const isBlocked = isDirectChannel(ch) && Boolean(ms.blocked);
+    const isBlocked = isDirectChannel(activeCh) && Boolean(ms.blocked);
     const isPending = isPendingMember(ms.channel_role as string);
     const isSkipped = isSkippedMember(ms.channel_role as string);
     return isBanned || isBlocked || isPending || isSkipped;
@@ -125,8 +129,10 @@ export function useTopicGroupUpdates(
   // Helper: get unread count for a channel (reads from SDK state directly)
   const getUnreadCount = (ch: Channel): number => {
     if (!currentUserId || isExcludedUser(ch)) return 0;
-    // Primary: use the SDK's tracked unreadCount
-    const state = ch.state as unknown as Record<string, unknown> | undefined;
+    // Primary: use the SDK's tracked unreadCount from activeChannels to avoid stale state
+    const client = ch.getClient();
+    const activeCh = client.activeChannels[ch.cid] || ch;
+    const state = activeCh.state as unknown as Record<string, unknown> | undefined;
     const count = (state?.unreadCount as number) ?? 0;
     return count;
   };
@@ -134,7 +140,9 @@ export function useTopicGroupUpdates(
   // Sort topics: pinned first → last activity descending
   const topics = useMemo(() => {
     const allTopics = channel.state?.topics || [];
-    return [...allTopics].sort((a: Channel, b: Channel) => {
+    const client = channel.getClient();
+    const upToDateTopics = allTopics.map(t => client.activeChannels[t.cid] || t);
+    return upToDateTopics.sort((a: Channel, b: Channel) => {
       const aPinned = a.data?.is_pinned === true;
       const bPinned = b.data?.is_pinned === true;
       if (aPinned && !bPinned) return -1;
@@ -146,16 +154,29 @@ export function useTopicGroupUpdates(
 
   // Aggregated unread count across parent + all topics
   const aggregatedUnreadCount = useMemo(() => {
-    let total = getUnreadCount(channel);
+    const client = channel.getClient();
+    const activeParent = client.activeChannels[channel.cid] || channel;
+    
+    // Ignore the currently active channel's unread count to match UI behavior
+    // where active channels don't show unread badges.
+    const activeChannelCid = Object.values(client.activeChannels || {}).find(c => c.state && c.cid === activeChannel?.cid)?.cid || activeChannel?.cid;
+    
+    let total = 0;
+    if (activeParent.cid !== activeChannelCid) {
+      total += getUnreadCount(activeParent);
+    }
 
     const allTopics = channel.state?.topics || [];
     allTopics.forEach((topic: Channel) => {
-      total += getUnreadCount(topic);
+      const activeTopic = client.activeChannels[topic.cid] || topic;
+      if (activeTopic.cid !== activeChannelCid) {
+        total += getUnreadCount(activeTopic);
+      }
     });
 
     return total;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel, channel.state?.topics, currentUserId, updateCount]);
+  }, [channel, channel.state?.topics, currentUserId, updateCount, activeChannel?.cid]);
 
   const hasUnread = aggregatedUnreadCount > 0;
 

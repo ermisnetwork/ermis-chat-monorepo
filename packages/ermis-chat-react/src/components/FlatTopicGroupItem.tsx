@@ -174,6 +174,11 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
     <div className={itemClass} onClick={handleClick}>
       <div className="ermis-channel-list__item-avatar-wrapper">
         <AvatarComponent image={image} name={name} size={45} disableLightbox className="ermis-avatar-wrapper--group" />
+        {showUnread && aggregatedUnreadCount > 0 && (
+          <span className="ermis-channel-list__avatar-unread-badge">
+            {aggregatedUnreadCount > 99 ? '99+' : aggregatedUnreadCount}
+          </span>
+        )}
       </div>
       <div className="ermis-channel-list__item-content">
         {/* Row 1: name + pinned + timestamp */}

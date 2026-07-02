@@ -121,15 +121,24 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
   }, [channel, generalTopicLabel]);
 
   const markChannelRead = useCallback((ch: Channel) => {
-    const ms = ch.state?.membership as Record<string, unknown> | undefined;
-    const chState = ch.state as unknown as Record<string, unknown> | undefined;
+    const client = ch.getClient();
+    const activeCh = client.activeChannels[ch.cid] || ch;
+    const ms = activeCh.state?.membership as Record<string, unknown> | undefined;
+    const chState = activeCh.state as unknown as Record<string, unknown> | undefined;
     const isBannedInChannel = Boolean(ms?.banned);
     const isPending = isPendingMember(ms?.channel_role as string);
     const isSkipped = isSkippedMember(ms?.channel_role as string);
 
-    if (!isBannedInChannel && !isPending && !isSkipped && (chState?.unreadCount as number) > 0) {
-      ch.markRead().catch(() => { });
-      if (chState) chState.unreadCount = 0;
+    if (!isBannedInChannel && !isPending && !isSkipped) {
+      if ((chState?.unreadCount as number) > 0) {
+        activeCh.markRead().catch(() => { });
+        if (chState) chState.unreadCount = 0;
+      }
+      
+      // Always clear the stale channel just in case to fix UI ghost badges
+      if (ch.state && (ch.state as any).unreadCount > 0) {
+        (ch.state as any).unreadCount = 0;
+      }
     }
   }, []);
 

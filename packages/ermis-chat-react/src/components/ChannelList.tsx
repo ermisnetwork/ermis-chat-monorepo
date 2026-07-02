@@ -143,6 +143,11 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
         {isOnline !== undefined && (
           <span className={`ermis-channel-list__online-dot ermis-channel-list__online-dot--${isOnline ? 'online' : 'offline'}`} />
         )}
+        {showUnread && unreadCount > 0 && (
+          <span className="ermis-channel-list__avatar-unread-badge">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
       </div>
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-top-row">
@@ -604,18 +609,32 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       onChannelSelect?.(channel);
 
       // Mark as read when user selects a channel (skip if banned, blocked, or pending)
-      const ms = channel.state?.membership as Record<string, unknown> | undefined;
-      const chState = channel.state as unknown as Record<string, unknown> | undefined;
+      const activeCh = client.activeChannels[channel.cid] || channel;
+      const ms = activeCh.state?.membership as Record<string, unknown> | undefined;
+      const chState = activeCh.state as unknown as Record<string, unknown> | undefined;
       const isBannedInChannel = Boolean(ms?.banned);
-      const isBlockedInChannel = isDirectChannel(channel) && Boolean(ms?.blocked);
+      const isBlockedInChannel = isDirectChannel(activeCh) && Boolean(ms?.blocked);
       const isPending = isPendingMember(ms?.channel_role as string);
       const isSkipped = isSkippedMember(ms?.channel_role as string);
 
-      if (!isBannedInChannel && !isBlockedInChannel && !isPending && !isSkipped && (chState?.unreadCount as number) > 0) {
-        channel.markRead().catch(() => { });
-        // Optimistically reset unread to update UI immediately
-        if (chState) chState.unreadCount = 0;
-        setChannels((prev) => [...prev]);
+      if (!isBannedInChannel && !isBlockedInChannel && !isPending && !isSkipped) {
+        let shouldUpdate = false;
+        if ((chState?.unreadCount as number) > 0) {
+          activeCh.markRead().catch(() => { });
+          // Optimistically reset unread to update UI immediately
+          if (chState) chState.unreadCount = 0;
+          shouldUpdate = true;
+        }
+        
+        // Also optimistic update on the stale channel just in case
+        if (channel.state && (channel.state as any).unreadCount > 0) {
+          (channel.state as any).unreadCount = 0;
+          shouldUpdate = true;
+        }
+
+        if (shouldUpdate) {
+          setChannels((prev) => [...prev]);
+        }
       }
     },
     [setActiveChannel, onChannelSelect, setChannels],
@@ -705,7 +724,10 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 key={channel.cid}
                 channel={channel}
                 isActive={isActive}
-                onDrillDown={onTopicDrillDown}
+                onDrillDown={(c) => {
+                  handleSelect(c);
+                  if (onTopicDrillDown) onTopicDrillDown(c);
+                }}
                 AvatarComponent={AvatarComponent}
                 maxVisibleTopics={maxVisibleTopics}
                 moreTopicsLabel={moreTopicsLabel}
