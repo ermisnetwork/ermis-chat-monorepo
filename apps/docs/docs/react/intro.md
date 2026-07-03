@@ -9,7 +9,7 @@ The `@ermis-network/ermis-chat-react` package provides ready-to-use, highly cust
 ## Installation
 
 ```bash
-yarn add @ermis-network/ermis-chat-react @ermis-network/ermis-chat-sdk 
+yarn add @ermis-network/ermis-chat-react @ermis-network/ermis-chat-sdk
 ```
 
 ## Setup Code

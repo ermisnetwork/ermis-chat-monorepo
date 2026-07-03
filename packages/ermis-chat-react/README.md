@@ -2,6 +2,18 @@
 
 The official React UI components for Ermis Chat.
 
+## Public Package Name
+
+<details>
+<summary>Change log</summary>
+
+- `2026-07-03`: Kept the public npm package under the official `@ermis-network/ermis-chat-react` scoped name.
+  - Reason: keep the React package aligned with the existing Ermis public package name before wider adoption.
+  - Integrator action: install/import `@ermis-network/ermis-chat-react`; install `@ermis-network/ermis-chat-sdk` as the matching core SDK dependency.
+  - Compatibility/default: React exports and CSS subpath stay the same under the scoped package name. Any temporary package names should be deprecated on npm.
+
+</details>
+
 ## E2EE UI Support
 
 - `CreateChannelModal` supports E2EE direct/group creation when `client.encryptionManager` is initialized.
@@ -19,6 +31,15 @@ The official React UI components for Ermis Chat.
 - Custom Channel Info action components receive the current `channel`, allowing selected-timeline repair UI without relying on global active-channel state.
 
 ## Progress Log
+
+### 2026-07-03 - production npm package rename
+
+- Goal: publish the current React package under the canonical `@ermis-network/ermis-chat-react` package and keep the `@ermis-network` scope.
+- Code changed: React package metadata now depends on `@ermis-network/ermis-chat-sdk`, and package imports across React source, examples, docs, and UHM use `@ermis-network/ermis-chat-react`.
+- Docs/artifacts changed: React README, SDK README, UHM README, docs app content, examples, and release docs were updated. SQL and Postman are unchanged because no backend API/schema/request contract changed.
+- Design decision: keep the React package as a normal dependency on the canonical scoped SDK package name to prevent future publish drift.
+- Performance: no React runtime complexity, memory, storage, network, payload, or scaling behavior changes.
+- Verification: `yarn install --ignore-scripts`, `npm run build:sdk`, `npm run build:react`, `npm run build:uhm`, `yarn workspace @ermis-network/ermis-chat-sdk test:repair`, `yarn workspace @ermis-network/ermis-chat-sdk test:attachments`, `yarn workspace @ermis-network/ermis-chat-sdk test:media`, Node root/subpath require smoke test, `npm_config_cache=/private/tmp/npm-cache-codex npm pack --dry-run --json` for SDK/React, and `git diff --check` passed.
 
 ### 2026-07-03 - E2EE File Upload Progress
 

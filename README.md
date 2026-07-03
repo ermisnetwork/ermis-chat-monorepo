@@ -2,7 +2,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-JAVASCRIPT-orange.svg)
 ![Languages](https://img.shields.io/badge/language-TYPESCRIPT-orange.svg)
-[![npm](https://img.shields.io/npm/v/ermis-chat-js-sdk.svg?style=popout&colorB=red)](https://www.npmjs.com/package/ermis-chat-js-sdk)
+[![npm](https://img.shields.io/npm/v/@ermis-network/ermis-chat-sdk.svg?style=popout&colorB=red)](https://www.npmjs.com/package/@ermis-network/ermis-chat-sdk)
 
 ## Table of contents
 
@@ -54,7 +54,7 @@ You can install the Chat SDK with either `npm` or `yarn`.
 **npm**
 
 ```bash
-$ npm install ermis-chat-js-sdk
+$ npm install @ermis-network/ermis-chat-sdk
 ```
 
 > Note: To use npm to install the Chat SDK, Node.js must be first installed on your system.
@@ -62,7 +62,7 @@ $ npm install ermis-chat-js-sdk
 **yarn**
 
 ```bash
-$ yarn add ermis-chat-js-sdk
+$ yarn add @ermis-network/ermis-chat-sdk
 ```
 
 > Note: If you want to initialize the chat client using the client's authentication method without using sign via wallet, skip steps 3 and 4 and proceed from [here](#2-initial-token-method)
@@ -74,7 +74,7 @@ Login with email to get a token for connecting to the chat SDK. You need to init
 **Initialize ErmisAuthProvider:**
 
 ```javascript
-import { ErmisAuthProvider } from 'ermis-chat-js-sdk';
+import { ErmisAuthProvider } from '@ermis-network/ermis-chat-sdk';
 const options = {
   baseURL: BASE_URL,
 }; // optional
@@ -112,7 +112,7 @@ const response = await authProvider.verifyOtp(otp);
 On the client-side, initialize the Chat client with your **API key** and **ProjectID**.
 
 ```javascript
-import { ErmisChat } from 'ermis-chat-js-sdk';
+import { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
 const options = {
   timeout: 6000,
@@ -213,7 +213,7 @@ You need to install WalletConnect to sign in and login to the Chat SDK. For more
 **4.2: Get challenge**
 
 ```javascript
-import { ErmisAuthProvider } from 'ermis-chat-js-sdk';
+import { ErmisAuthProvider } from '@ermis-network/ermis-chat-sdk';
 // Get wallet address (using WalletConnect or other wallet provider)
 const address = '0x123...abc';
 // Get challenge from server
@@ -1726,7 +1726,7 @@ The call feature enables real-time audio and video communication between users i
 Users can start a call in a direct channel (type `messaging`). This feature is not available for group channels (type `team`).
 
 ```javascript
-import { ErmisDirectCall } from 'ermis-chat-js-sdk';
+import { ErmisDirectCall } from '@ermis-network/ermis-chat-sdk';
 
 // Generate a random sessionID when user logs in and store it
 // This should be done once during authentication and saved

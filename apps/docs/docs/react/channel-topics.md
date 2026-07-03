@@ -4,7 +4,7 @@ sidebar_position: 10
 
 # Channel Topics UI
 
-The `ermis-chat-react` UI Kit provides built-in components and behaviors to handle Channel Topics out-of-the-box. Topics are displayed within your channel lists as enriched items with topic pill previews and aggregated message data, and can be browsed in detail through a drill-down `TopicList` panel.
+The `@ermis-network/ermis-chat-react` UI Kit provides built-in components and behaviors to handle Channel Topics out-of-the-box. Topics are displayed within your channel lists as enriched items with topic pill previews and aggregated message data, and can be browsed in detail through a drill-down `TopicList` panel.
 
 ## Topic Display in ChannelList
 

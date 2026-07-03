@@ -1,9 +1,16 @@
 # Hướng dẫn Phát hành (Releasing Guide)
 
-Dự án Ermis Chat sử dụng Github Actions để tự động publish (NPM) mỗi khi bạn đẩy code lên nhánh `main`. 
+Dự án Ermis Chat sử dụng Github Actions để tự động publish (NPM) mỗi khi bạn đẩy code lên nhánh `main`.
 
 > [!WARNING]
 > Vì dự án không còn sử dụng Changesets, bạn **BẮT BUỘC** phải tự đổi số phiên bản (`version`) bằng tay trong file `package.json` của thư viện mà bạn sửa. Nếu quên, NPM sẽ văng lỗi vì trùng lặp version cũ!
+
+## Package NPM chính thức
+
+- Core SDK: `@ermis-network/ermis-chat-sdk`
+- React SDK: `@ermis-network/ermis-chat-react`
+
+Giữ nguyên scope `@ermis-network/*` khi publish. Nếu đã lỡ publish các tên unscoped hoặc tên trung gian, hãy deprecate bản đó trên NPM và hướng người dùng sang hai package chính thức ở trên.
 
 ---
 
@@ -40,11 +47,30 @@ git commit -m "feat: cập nhật siêu xịn"
 git push
 ```
 
-### 4. Tự động hóa Github Actions 🚀
+### 4. Publish thủ công cả 2 packages cùng lúc
+
+Nếu cần publish từ máy local thay vì đợi Github Actions, dùng script:
+
+```bash
+yarn publish:packages --dry-run
+yarn publish:packages --yes
+```
+
+Script này build SDK/React, chạy `npm pack --dry-run`, kiểm tra `@ermis-network/ermis-chat-react` đang phụ thuộc đúng version `@ermis-network/ermis-chat-sdk`, kiểm tra version chưa tồn tại trên NPM, rồi chạy `npm publish` cho cả hai package song song. Có thể truyền OTP hoặc tag:
+
+```bash
+yarn publish:packages --tag beta --otp 123456 --yes
+```
+
+### 5. Tự động hóa Github Actions
 Sau khi code được đẩy thẳng lên `main` (hoặc sau khi được chốt Merge Pull Request vào `main`):
 Con bot Github Actions tên là `"Publish SDKs to NPM"` sẽ lập tức chạy:
 1. Yarn Install & Build.
-2. Di chuyển vào SDK -> Chạy lệnh `npm publish`.
-3. Di chuyển vào React -> Chạy lệnh `npm publish`.
+2. Di chuyển vào SDK -> publish `@ermis-network/ermis-chat-sdk`.
+3. Di chuyển vào React -> publish `@ermis-network/ermis-chat-react`.
 
 Vậy là xong! Phiên bản mới đã xuất hiện trên NPM. Mọi thứ rất dễ theo dõi!
+
+## Change log
+
+- `2026-07-03`: Added `scripts/publish-packages.sh` and `yarn publish:packages` for local parallel publishing of `@ermis-network/ermis-chat-sdk` and `@ermis-network/ermis-chat-react`.
