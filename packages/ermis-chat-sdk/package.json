@@ -78,6 +78,7 @@
     "dev": "tsup --watch",
     "types": "tsc --noEmit",
     "test:media": "node --test test/e2ee_media_streaming.test.cjs",
+    "test:attachments": "node --test test/e2ee_attachments.test.cjs",
     "test:repair": "node --test test/recovery_repair.test.cjs"
   }
 }

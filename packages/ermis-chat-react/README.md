@@ -20,6 +20,14 @@ The official React UI components for Ermis Chat.
 
 ## Progress Log
 
+### 2026-07-03 - E2EE File Upload Progress
+
+- Goal: make generic E2EE file upload bubbles update progress like image/video attachments.
+- Code changed: `MessageRenderers` memo comparisons for image, video, and file attachments now include `upload_status`, rounded `upload_progress`, type, and local object URL via `attachmentRenderKey`; generic file attachments no longer compare only the object URL.
+- Docs/artifacts changed: this README records the React behavior fix. Bellboy E2EE docs record the matching multipart complete optimization and client-side progress guidance. SQL and Postman are unchanged because no public API/schema changed.
+- Design decision: keep progress delivery event-driven in the SDK/channel state and make render memoization observe that state instead of adding polling or special file-only state.
+- Verification: `./node_modules/.bin/prettier --write packages/ermis-chat-react/src/components/MessageRenderers.tsx packages/ermis-chat-react/README.md`, `npm run build:react`, `npm run build:uhm`, and monorepo `git diff --check` passed.
+
 ### 2026-06-19 - E2EE Sender Display Name Hydration
 
 - Goal: keep freshly sent encrypted messages from showing the current user's raw id in message rows or channel previews.

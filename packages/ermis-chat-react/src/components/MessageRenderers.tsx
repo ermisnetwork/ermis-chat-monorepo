@@ -92,9 +92,9 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(
     );
   },
   (prev, next) => {
-    const prevSrc = prev.attachment.image_url || prev.attachment.thumb_url || prev.attachment.url;
-    const nextSrc = next.attachment.image_url || next.attachment.thumb_url || next.attachment.url;
-    return prevSrc === nextSrc && prev.onClick === next.onClick;
+    return (
+      attachmentRenderKey(prev.attachment) === attachmentRenderKey(next.attachment) && prev.onClick === next.onClick
+    );
   },
 );
 
@@ -637,8 +637,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
   },
   (prev, next) => {
     return (
-      (prev.attachment.asset_url || prev.attachment.url) === (next.attachment.asset_url || next.attachment.url) &&
-      prev.onClick === next.onClick
+      attachmentRenderKey(prev.attachment) === attachmentRenderKey(next.attachment) && prev.onClick === next.onClick
     );
   },
 );
@@ -698,7 +697,7 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(
     );
   },
   (prev, next) => {
-    return (prev.attachment.url || prev.attachment.asset_url) === (next.attachment.url || next.attachment.asset_url);
+    return attachmentRenderKey(prev.attachment) === attachmentRenderKey(next.attachment);
   },
 );
 (FileAttachment as any).displayName = 'FileAttachment';

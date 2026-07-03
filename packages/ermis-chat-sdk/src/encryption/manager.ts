@@ -78,6 +78,7 @@ import {
   generateE2eeAttachmentPreview,
   newUuid,
   putPresignedObject,
+  resolveE2eeAttachmentMultipartUploadConcurrency,
   type E2eeAttachmentTransferProgress,
 } from './attachments';
 import { defaultE2eeAttachmentCryptoProvider, type E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
@@ -415,6 +416,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _deferredEncryptionEventLogKeys = new Map<string, number>();
   private _attachmentCryptoProvider: E2eeAttachmentCryptoProvider = defaultE2eeAttachmentCryptoProvider;
   private _e2eeAttachmentMultipartEnabled = false;
+  private _e2eeAttachmentMultipartUploadConcurrency = resolveE2eeAttachmentMultipartUploadConcurrency();
   private _e2eeSendLockChains: Map<string, Promise<void>> = new Map();
   private _pendingE2eeSendJobs: Set<string> = new Set();
   private _pendingE2eeSendAbortControllers: Map<string, AbortController> = new Map();
@@ -494,6 +496,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       this._attachmentCryptoProvider = options.attachmentCryptoProvider;
     }
     this._e2eeAttachmentMultipartEnabled = options?.enableE2eeAttachmentMultipart === true;
+    this._e2eeAttachmentMultipartUploadConcurrency = resolveE2eeAttachmentMultipartUploadConcurrency(
+      options?.e2eeAttachmentMultipartUploadConcurrency,
+    );
 
     // Reuse deviceId if already eagerly initialized in connectUser(),
     // otherwise fall back to storage (e.g., non-browser or custom flow).
@@ -6958,6 +6963,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             cryptoProvider: this._attachmentCryptoProvider,
             display: originalDisplay,
             multipart: initAsset.multipart,
+            uploadConcurrency: this._e2eeAttachmentMultipartUploadConcurrency,
             onProgress: emitProgress,
             signal: options.signal,
           });

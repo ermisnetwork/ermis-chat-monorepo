@@ -4,6 +4,7 @@
 
 - `public/openmls_wasm_bg.wasm` must be published with the app. `App.tsx` loads this binary through `loadOpenMlsWasm()` after `connectUser`; the OpenMLS JS glue comes from the SDK bundle so SDK logger settings cover OpenMLS glue logs. The legacy public OpenMLS JS glue copies are logger-safe for direct/older asset loads.
 - `public/e2ee-media-stream-worker.js` is the E2EE video streaming worker. UHM enables native Service Worker range playback by default at bootstrap with `VITE_E2EE_MEDIA_STREAMING` defaulting to on; set `VITE_E2EE_MEDIA_STREAMING=false` to force the whole-blob fallback. Playback diagnostics default to on for current UHM validation and can be disabled with `VITE_E2EE_MEDIA_PLAYBACK_DEBUG=false`. The bootstrap only unregisters stale `e2ee-media-stream-worker.js` registrations, not the app PWA `sw.js` or unrelated Service Workers. The worker intercepts only `/__ermis/e2ee-media/*` virtual URLs and keeps decrypted frames in memory only.
+- Large E2EE attachment upload can use multipart when `VITE_E2EE_ATTACHMENT_MULTIPART=true`. Multipart PUT concurrency defaults to `3` and can be tuned with `VITE_E2EE_ATTACHMENT_MULTIPART_CONCURRENCY`; the SDK clamps it to `1..4`, where `1` restores the old sequential PUT behavior. Optional upload diagnostics are enabled with `VITE_E2EE_ATTACHMENT_UPLOAD_DEBUG=true` or `localStorage.ermis_e2ee_attachment_upload_debug = "1"`.
 - `public/wasm_worker.worker.mjs` must be copied from the SDK `dist` after building or installing a published SDK. The worker forwards WASM logs through the SDK logger bridge, so stale public copies can bypass `logger` and write to the browser console directly.
 - E2EE controls stay disabled when `client.encryptionManager` is not initialized; standard chat continues to work.
 - uhm-chat waits for `connectUser()` and encryption initialization before mounting the chat shell, preventing first-login channel queries with an unset auth token.
@@ -24,6 +25,15 @@
 - E2EE edits use latest-snapshot same-id updates. The old secondary edit-record model is no longer part of the active client contract.
 
 ## Progress Log
+
+### 2026-07-02 - production E2EE multipart upload concurrency
+
+- Goal: improve 100 MB-class E2EE attachment upload time without changing Bellboy backend contracts or attachment crypto format.
+- Code changed: SDK multipart upload now encrypts/hash-seals parts in order but uploads sealed R2 multipart parts with bounded concurrency. UHM wires `VITE_E2EE_ATTACHMENT_MULTIPART_CONCURRENCY` and optional `VITE_E2EE_ATTACHMENT_UPLOAD_DEBUG`.
+- Docs changed: this README records the UHM env controls. Bellboy E2EE docs record concurrency, TTL, progress, and R2 smoke gates.
+- Design decision: default concurrency is `3`, clamped to `1..4`; `1` is the rollback path. Presigned part URL expiry remains backend-provided, currently one hour, and R1 fails clearly instead of adding a URL re-issue endpoint.
+- Performance: encryption/hash stays `O(file_size)` and R2 request count remains `ceil(cipher_size / part_size)`, but network waves drop from `P` serial waves to roughly `ceil(P / concurrency)`. Client memory is bounded to about `(concurrency + 1) * part_size` plus browser request overhead.
+- Verification: `npm run build:sdk`, `node --test test/e2ee_attachments.test.cjs`, `npm run build:react`, `npm run build:uhm`, and `yarn workspace @ermis-network/ermis-chat-sdk test:repair` passed.
 
 ### 2026-07-02 - production E2EE media streaming defaults
 

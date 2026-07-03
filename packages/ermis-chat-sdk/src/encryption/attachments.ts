@@ -10,6 +10,9 @@ export const E2EE_ATTACHMENT_FRAME_SIZE = 256 * 1024;
 export const E2EE_ATTACHMENT_PREVIEW_MAX_SIDE = 480;
 export const E2EE_ATTACHMENT_PREVIEW_JPEG_QUALITY = 0.72;
 export const E2EE_ATTACHMENT_VIDEO_PREVIEW_TIMEOUT_MS = 5000;
+export const E2EE_ATTACHMENT_MULTIPART_UPLOAD_DEFAULT_CONCURRENCY = 3;
+export const E2EE_ATTACHMENT_MULTIPART_UPLOAD_MAX_CONCURRENCY = 4;
+export const E2EE_ATTACHMENT_MULTIPART_UPLOAD_URL_EXPIRY_SAFETY_MARGIN_MS = 120_000;
 
 export type EncryptAssetOptions = {
   kind: E2eeAttachmentAssetKind;
@@ -51,6 +54,7 @@ export type MultipartEncryptedAssetUploadResult = {
 
 export type EncryptMultipartAssetOptions = Omit<EncryptAssetOptions, 'onProgress'> & {
   multipart: InitE2eeAttachmentMultipartResponse;
+  uploadConcurrency?: number;
   onProgress?: (progress: { phase: 'uploading'; loaded: number; total: number; percentage: number }) => void;
   signal?: AbortSignal;
 };
@@ -263,11 +267,126 @@ function createAbortError(message: string): Error {
 
 class NonRetryableMultipartUploadError extends Error {
   public readonly nonRetryable = true;
+
+  public readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = 'NonRetryableMultipartUploadError';
+    this.code = code;
+  }
 }
 
 function isNonRetryableMultipartUploadError(err: unknown): boolean {
   return Boolean((err as { nonRetryable?: boolean } | null)?.nonRetryable);
 }
+
+class PresignedObjectUploadHttpError extends Error {
+  public readonly status: number;
+
+  constructor(status: number) {
+    super(`E2EE attachment upload failed: HTTP ${status}`);
+    this.name = 'PresignedObjectUploadHttpError';
+    this.status = status;
+  }
+}
+
+function uploadHttpStatus(err: unknown): number | undefined {
+  return (err as { status?: number } | null)?.status;
+}
+
+export function resolveE2eeAttachmentMultipartUploadConcurrency(value?: number): number {
+  if (value === undefined) return E2EE_ATTACHMENT_MULTIPART_UPLOAD_DEFAULT_CONCURRENCY;
+  if (!Number.isFinite(value) || value <= 0) return E2EE_ATTACHMENT_MULTIPART_UPLOAD_DEFAULT_CONCURRENCY;
+  return Math.min(E2EE_ATTACHMENT_MULTIPART_UPLOAD_MAX_CONCURRENCY, Math.max(1, Math.floor(value)));
+}
+
+function parseAwsSigV4Date(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value);
+  if (!match) return undefined;
+  const [, year, month, day, hour, minute, second] = match;
+  const timestamp = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  );
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+export function e2eeAttachmentMultipartUploadUrlExpiresAtMs(partUrl: string): number | undefined {
+  try {
+    const url = new URL(partUrl);
+    const signedAt = parseAwsSigV4Date(url.searchParams.get('X-Amz-Date'));
+    const expiresSecs = Number(url.searchParams.get('X-Amz-Expires'));
+    if (signedAt === undefined || !Number.isFinite(expiresSecs) || expiresSecs <= 0) return undefined;
+    return signedAt + expiresSecs * 1000;
+  } catch {
+    return undefined;
+  }
+}
+
+function isE2eeAttachmentMultipartUploadUrlExpired(
+  partUrl: string,
+  nowMs: number = Date.now(),
+  safetyMarginMs: number = E2EE_ATTACHMENT_MULTIPART_UPLOAD_URL_EXPIRY_SAFETY_MARGIN_MS,
+): boolean {
+  const expiresAt = e2eeAttachmentMultipartUploadUrlExpiresAtMs(partUrl);
+  return expiresAt !== undefined && nowMs + safetyMarginMs >= expiresAt;
+}
+
+function e2eeAttachmentUploadDebugEnabled(): boolean {
+  const runtime = globalThis as typeof globalThis & {
+    __ERMIS_E2EE_ATTACHMENT_UPLOAD_DEBUG__?: boolean;
+    localStorage?: Storage;
+  };
+  if (runtime.__ERMIS_E2EE_ATTACHMENT_UPLOAD_DEBUG__ === true) return true;
+  try {
+    return runtime.localStorage?.getItem('ermis_e2ee_attachment_upload_debug') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function debugE2eeAttachmentUpload(event: string, details: Record<string, unknown>): void {
+  if (!e2eeAttachmentUploadDebugEnabled()) return;
+  try {
+    console.debug('[Ermis E2EE attachment upload]', event, details);
+  } catch {}
+}
+
+function multipartUploadUrlExpiredError(partNumber: number): NonRetryableMultipartUploadError {
+  return new NonRetryableMultipartUploadError(
+    `E2EE attachment multipart part ${partNumber} upload URL expired or is too close to expiry (multipart_upload_url_expired). Retry the attachment upload to obtain fresh presigned part URLs.`,
+    'multipart_upload_url_expired',
+  );
+}
+
+function createLinkedAbortController(signal?: AbortSignal): AbortController {
+  const controller = new AbortController();
+  if (!signal) return controller;
+  const abort = () => controller.abort();
+  if (signal.aborted) abort();
+  else signal.addEventListener('abort', abort, { once: true });
+  return controller;
+}
+
+function throwIfMultipartUploadStopped(signal: AbortSignal, failure?: unknown): void {
+  if (failure) throw failure;
+  if (signal.aborted) throw createAbortError('E2EE attachment multipart upload aborted');
+}
+
+type MultipartPartUploadProgress = (progress: {
+  partNumber: number;
+  loaded: number;
+  total: number;
+  attempt: number;
+}) => void;
+
+type MultipartInFlightResult = { ok: true } | { ok: false; error: unknown };
 
 export function estimateE2eeEncryptedAssetSize(
   plaintextSize: number,
@@ -367,30 +486,36 @@ async function uploadMultipartPartWithRetry(
   partNumber: number,
   partBytes: Uint8Array,
   multipart: InitE2eeAttachmentMultipartResponse,
-  uploadedConfirmedBytes: number,
-  totalBytes: number,
-  onProgress?: (progress: { phase: 'uploading'; loaded: number; total: number; percentage: number }) => void,
+  onPartProgress?: MultipartPartUploadProgress,
   signal?: AbortSignal,
 ): Promise<string> {
   const maxRetries = Math.max(0, multipart.max_part_retries || 0);
   const retryMaxElapsedMs = Math.max(1, multipart.retry_max_elapsed_secs || 900) * 1000;
   const startedAt = Date.now();
   let retryCount = 0;
-  let partHighWater = 0;
+
+  if (isE2eeAttachmentMultipartUploadUrlExpired(partUrl)) {
+    throw multipartUploadUrlExpiredError(partNumber);
+  }
 
   while (true) {
+    throwIfMultipartUploadStopped(signal || new AbortController().signal);
+    const attempt = retryCount + 1;
+    const attemptStartedAt = Date.now();
+    let partHighWater = 0;
+    onPartProgress?.({ partNumber, loaded: 0, total: partBytes.length, attempt });
+    debugE2eeAttachmentUpload('part_start', { part_number: partNumber, size_bytes: partBytes.length, attempt });
     try {
       const result = await putPresignedObjectWithResult(
         partUrl,
         new Blob([arrayBufferFrom(partBytes)], { type: 'application/octet-stream' }),
         (progress) => {
           partHighWater = Math.max(partHighWater, progress.loaded);
-          const loaded = Math.min(totalBytes, uploadedConfirmedBytes + partHighWater);
-          onProgress?.({
-            phase: 'uploading',
-            loaded,
-            total: totalBytes,
-            percentage: totalBytes === 0 ? 100 : Math.round((loaded / totalBytes) * 100),
+          onPartProgress?.({
+            partNumber,
+            loaded: Math.min(partHighWater, partBytes.length),
+            total: partBytes.length,
+            attempt,
           });
         },
         { readEtag: true, signal },
@@ -398,15 +523,52 @@ async function uploadMultipartPartWithRetry(
       if (!result.etag) {
         throw new NonRetryableMultipartUploadError(
           `E2EE attachment multipart part ${partNumber} upload did not expose ETag. Configure R2 CORS ExposeHeaders to include ETag before enabling multipart.`,
+          'multipart_missing_etag',
         );
       }
+      const durationMs = Math.max(1, Date.now() - attemptStartedAt);
+      debugE2eeAttachmentUpload('part_complete', {
+        part_number: partNumber,
+        size_bytes: partBytes.length,
+        attempt,
+        duration_ms: durationMs,
+        mbps: Number(((partBytes.length * 8) / durationMs / 1000).toFixed(2)),
+        retry_count: retryCount,
+      });
       return result.etag;
     } catch (err) {
+      const status = uploadHttpStatus(err);
+      if ((status === 401 || status === 403) && isE2eeAttachmentMultipartUploadUrlExpired(partUrl, Date.now(), 0)) {
+        const expiredErr = multipartUploadUrlExpiredError(partNumber);
+        debugE2eeAttachmentUpload('part_failed', {
+          part_number: partNumber,
+          attempt,
+          status,
+          retry_count: retryCount,
+          reason: expiredErr.code,
+        });
+        throw expiredErr;
+      }
       if (isNonRetryableMultipartUploadError(err)) throw err;
       if (signal?.aborted) throw err;
       const elapsed = Date.now() - startedAt;
-      if (retryCount >= maxRetries || elapsed >= retryMaxElapsedMs) throw err;
+      if (retryCount >= maxRetries || elapsed >= retryMaxElapsedMs) {
+        debugE2eeAttachmentUpload('part_failed', {
+          part_number: partNumber,
+          attempt,
+          status,
+          retry_count: retryCount,
+          reason: err instanceof Error ? err.message : 'unknown',
+        });
+        throw err;
+      }
       retryCount += 1;
+      debugE2eeAttachmentUpload('part_retry', {
+        part_number: partNumber,
+        next_attempt: retryCount + 1,
+        status,
+        retry_count: retryCount,
+      });
       const backoff = Math.min(30_000, 500 * 2 ** Math.min(retryCount, 6));
       await sleep(backoff + Math.floor(Math.random() * 250));
     }
@@ -420,6 +582,7 @@ export async function encryptAndUploadE2eeAssetMultipart(
   const cryptoProvider = options.cryptoProvider || defaultE2eeAttachmentCryptoProvider;
   const frameSize = options.frameSize || E2EE_ATTACHMENT_FRAME_SIZE;
   const multipart = options.multipart;
+  const uploadConcurrency = resolveE2eeAttachmentMultipartUploadConcurrency(options.uploadConcurrency);
   const partSize = multipart.part_size;
   if (!Number.isFinite(partSize) || partSize <= 0) {
     throw new Error('Invalid E2EE attachment multipart part size');
@@ -438,45 +601,105 @@ export async function encryptAndUploadE2eeAssetMultipart(
   const noncePrefix = cryptoProvider.randomBytes(8);
   const cipherHash = cryptoProvider.createSha256();
   const plainHash = cryptoProvider.createSha256();
+  const queueController = createLinkedAbortController(options.signal);
   const uploadedParts: MultipartEncryptedAssetPart[] = [];
-  let uploadedConfirmedBytes = 0;
+  const inFlightUploads = new Map<number, Promise<MultipartInFlightResult>>();
+  const inFlightProgress = new Map<number, number>();
+  let firstUploadFailure: unknown;
+  let completedBytes = 0;
+  let lastEmittedUploadLoaded = 0;
+  let nextPartNumberToSeal = 1;
   let partChunks: Uint8Array[] = [];
   let partLength = 0;
 
+  const emitUploadProgress = () => {
+    let inFlightLoaded = 0;
+    for (const loaded of inFlightProgress.values()) inFlightLoaded += loaded;
+    const loaded = Math.min(
+      totalCipherSize,
+      Math.max(lastEmittedUploadLoaded, completedBytes, completedBytes + inFlightLoaded),
+    );
+    lastEmittedUploadLoaded = loaded;
+    options.onProgress?.({
+      phase: 'uploading',
+      loaded,
+      total: totalCipherSize,
+      percentage: totalCipherSize === 0 ? 100 : Math.round((loaded / totalCipherSize) * 100),
+    });
+  };
+
+  const failAndDrain = async (err: unknown): Promise<never> => {
+    firstUploadFailure = firstUploadFailure || err;
+    if (!queueController.signal.aborted) queueController.abort();
+    await Promise.all([...inFlightUploads.values()]);
+    throw firstUploadFailure;
+  };
+
+  const waitForOneInFlight = async (): Promise<void> => {
+    if (inFlightUploads.size === 0) return;
+    const result = await Promise.race(inFlightUploads.values());
+    if (!result.ok) await failAndDrain(result.error);
+  };
+
+  const waitForUploadCapacity = async (): Promise<void> => {
+    while (inFlightUploads.size >= uploadConcurrency) await waitForOneInFlight();
+    throwIfMultipartUploadStopped(queueController.signal, firstUploadFailure);
+  };
+
+  const enqueuePartUpload = async (partNumber: number, putUrl: string, partBytes: Uint8Array): Promise<void> => {
+    await waitForUploadCapacity();
+    inFlightProgress.set(partNumber, 0);
+    const task = (async (): Promise<MultipartInFlightResult> => {
+      try {
+        const etag = await uploadMultipartPartWithRetry(
+          putUrl,
+          partNumber,
+          partBytes,
+          multipart,
+          (progress) => {
+            inFlightProgress.set(partNumber, Math.min(partBytes.length, progress.loaded));
+            emitUploadProgress();
+          },
+          queueController.signal,
+        );
+        uploadedParts.push({ part_number: partNumber, etag });
+        completedBytes += partBytes.length;
+        inFlightProgress.delete(partNumber);
+        emitUploadProgress();
+        return { ok: true };
+      } catch (error) {
+        inFlightProgress.delete(partNumber);
+        if (!queueController.signal.aborted) queueController.abort();
+        firstUploadFailure = firstUploadFailure || error;
+        emitUploadProgress();
+        return { ok: false, error };
+      } finally {
+        inFlightUploads.delete(partNumber);
+      }
+    })();
+    inFlightUploads.set(partNumber, task);
+  };
+
   const flushPart = async (final: boolean) => {
     if (partLength === 0) return;
-    const partNumber = uploadedParts.length + 1;
+    throwIfMultipartUploadStopped(queueController.signal, firstUploadFailure);
+    const partNumber = nextPartNumberToSeal;
     const putUrl = partUrls.get(partNumber);
     if (!putUrl) throw new Error(`E2EE attachment multipart missing upload URL for part ${partNumber}`);
     if (!final && partLength !== partSize) {
       throw new Error('E2EE attachment multipart attempted to flush a short non-final part');
     }
     const partBytes = concatUint8Arrays(partChunks, partLength);
-    const etag = await uploadMultipartPartWithRetry(
-      putUrl,
-      partNumber,
-      partBytes,
-      multipart,
-      uploadedConfirmedBytes,
-      totalCipherSize,
-      options.onProgress,
-      options.signal,
-    );
-    uploadedConfirmedBytes += partBytes.length;
-    uploadedParts.push({ part_number: partNumber, etag });
-    options.onProgress?.({
-      phase: 'uploading',
-      loaded: Math.min(uploadedConfirmedBytes, totalCipherSize),
-      total: totalCipherSize,
-      percentage: totalCipherSize === 0 ? 100 : Math.round((uploadedConfirmedBytes / totalCipherSize) * 100),
-    });
+    nextPartNumberToSeal += 1;
     partChunks = [];
     partLength = 0;
+    await enqueuePartUpload(partNumber, putUrl, partBytes);
   };
 
   const appendEncryptedBytes = async (bytes: Uint8Array) => {
     let offset = 0;
     while (offset < bytes.length) {
+      throwIfMultipartUploadStopped(queueController.signal, firstUploadFailure);
       const capacity = partSize - partLength;
       const take = Math.min(capacity, bytes.length - offset);
       partChunks.push(bytes.slice(offset, offset + take));
@@ -489,6 +712,7 @@ export async function encryptAndUploadE2eeAssetMultipart(
   let offset = 0;
   let frameIndex = 0;
   while (offset < input.size || (input.size === 0 && frameIndex === 0)) {
+    throwIfMultipartUploadStopped(queueController.signal, firstUploadFailure);
     const end = input.size === 0 ? 0 : Math.min(offset + frameSize, input.size);
     const plain = new Uint8Array(await input.slice(offset, end).arrayBuffer());
     plainHash.update(plain);
@@ -501,9 +725,13 @@ export async function encryptAndUploadE2eeAssetMultipart(
     await appendEncryptedBytes(cipher);
     offset = end;
     frameIndex += 1;
+    throwIfMultipartUploadStopped(queueController.signal, firstUploadFailure);
     if (input.size === 0) break;
   }
   await flushPart(true);
+  while (inFlightUploads.size > 0) await waitForOneInFlight();
+  if (firstUploadFailure) await failAndDrain(firstUploadFailure);
+  uploadedParts.sort((a, b) => a.part_number - b.part_number);
 
   if (uploadedParts.length !== multipart.part_count) {
     throw new Error('E2EE attachment multipart uploaded part count mismatch');
@@ -653,7 +881,7 @@ export async function putPresignedObjectWithResult(
         if (xhr.status < 300) {
           resolve({ etag: options.readEtag ? xhr.getResponseHeader('ETag') || undefined : undefined });
         } else {
-          reject(new Error(`E2EE attachment upload failed: HTTP ${xhr.status}`));
+          reject(new PresignedObjectUploadHttpError(xhr.status));
         }
       };
       xhr.onerror = () => {
@@ -673,7 +901,7 @@ export async function putPresignedObjectWithResult(
     body,
     signal: options.signal,
   });
-  if (!response.ok) throw new Error(`E2EE attachment upload failed: HTTP ${response.status}`);
+  if (!response.ok) throw new PresignedObjectUploadHttpError(response.status);
   return { etag: options.readEtag ? response.headers.get('ETag') || undefined : undefined };
 }
 

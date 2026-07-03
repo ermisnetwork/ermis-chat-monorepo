@@ -530,8 +530,7 @@ export interface InitE2eeAttachmentAssetResponse {
   upload_mode?: E2eeAttachmentUploadMode;
   put_url?: string;
   multipart?: InitE2eeAttachmentMultipartResponse;
-  staging_object_key?: string;
-  final_object_key?: string;
+  object_key: string;
   cipher_size_estimate: number;
 }
 
@@ -1082,6 +1081,12 @@ export interface EncryptionManagerOptions {
    * smoke/lifecycle gates pass.
    */
   enableE2eeAttachmentMultipart?: boolean;
+  /**
+   * Max concurrent R2/S3 UploadPart PUTs for one E2EE multipart original.
+   * Defaults to 3 and clamps to 1..4. Set to 1 to preserve the old
+   * sequential upload behavior.
+   */
+  e2eeAttachmentMultipartUploadConcurrency?: number;
 }
 
 /**
