@@ -9,6 +9,7 @@ REACT_NAME="@ermis-network/ermis-chat-react"
 
 TAG="${NPM_TAG:-latest}"
 OTP="${NPM_OTP:-}"
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmjs.org}"
 DRY_RUN=0
 SKIP_BUILD=0
 SKIP_PACK=0
@@ -25,6 +26,7 @@ Publishes both Ermis packages in parallel:
 Options:
   --tag <tag>      npm dist-tag to publish with. Default: latest
   --otp <code>     npm 2FA one-time password. Also accepts NPM_OTP
+  --registry <url> npm registry. Default: https://registry.npmjs.org
   --dry-run        Run npm publish --dry-run for both packages
   --skip-build     Skip yarn build
   --skip-pack      Skip npm pack --dry-run checks
@@ -34,6 +36,7 @@ Options:
 Examples:
   scripts/publish-packages.sh --dry-run
   scripts/publish-packages.sh --yes
+  scripts/publish-packages.sh --registry https://registry.npmjs.org --yes
   scripts/publish-packages.sh --tag beta --otp 123456 --yes
 USAGE
 }
@@ -69,7 +72,7 @@ version_exists() {
   local err_file
   err_file="$(mktemp)"
 
-  if npm view "$package_name@$version" version >/dev/null 2>"$err_file"; then
+  if npm view "$package_name@$version" version --registry "$NPM_REGISTRY" >/dev/null 2>"$err_file"; then
     rm -f "$err_file"
     return 0
   fi
@@ -101,7 +104,7 @@ publish_one() {
 
   (
     cd "$package_dir"
-    npm publish "${publish_args[@]}"
+    npm publish --registry "$NPM_REGISTRY" "${publish_args[@]}"
   ) >"$log_file" 2>&1
 }
 
@@ -115,6 +118,11 @@ while [[ $# -gt 0 ]]; do
     --otp)
       [[ $# -ge 2 ]] || fail "--otp requires a value"
       OTP="$2"
+      shift 2
+      ;;
+    --registry)
+      [[ $# -ge 2 ]] || fail "--registry requires a value"
+      NPM_REGISTRY="$2"
       shift 2
       ;;
     --dry-run)
@@ -163,10 +171,11 @@ log "Packages"
 printf '%s@%s\n' "$SDK_NAME" "$SDK_VERSION"
 printf '%s@%s\n' "$REACT_NAME" "$REACT_VERSION"
 printf 'dist-tag: %s\n' "$TAG"
+printf 'registry: %s\n' "$NPM_REGISTRY"
 
 if [[ "$DRY_RUN" != "1" ]]; then
   log "Checking npm authentication"
-  npm whoami >/dev/null || fail "npm authentication failed; run npm login or set NODE_AUTH_TOKEN"
+  npm whoami --registry "$NPM_REGISTRY" >/dev/null || fail "npm authentication failed; run npm login --registry=$NPM_REGISTRY or set NODE_AUTH_TOKEN"
 
   log "Checking npm versions"
   if version_exists "$SDK_NAME" "$SDK_VERSION"; then
