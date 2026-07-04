@@ -42,6 +42,35 @@ function getAttachmentPreview(
   return attachmentLabel;
 }
 
+/**
+ * Extract a thumbnail URL from the first image/video attachment, or from
+ * a sticker message.  Returns `undefined` when no preview is available.
+ */
+function getThumbnailUrl(quotedMessage: QuotedMessagePreviewProps['quotedMessage']): string | undefined {
+  // Sticker thumbnail
+  if (isStickerMessage(quotedMessage) && quotedMessage.sticker_url) {
+    return quotedMessage.sticker_url;
+  }
+
+  const attachments = quotedMessage.attachments;
+  if (!attachments || attachments.length === 0) return undefined;
+
+  const first = attachments[0];
+  if (!first) return undefined;
+
+  // Image attachment
+  if (isImageAttachment(first) || first.mime_type?.startsWith('image/')) {
+    return first.thumb_url || first.image_url || first.asset_url || first.url;
+  }
+
+  // Video attachment — prefer thumb_url for poster frame
+  if (isVideoAttachment(first) || first.mime_type?.startsWith('video/')) {
+    return first.thumb_url || first.image_url;
+  }
+
+  return undefined;
+}
+
 function hasUnavailableContent(quotedMessage: QuotedMessagePreviewProps['quotedMessage']): boolean {
   const hasText = Boolean(quotedMessage.text?.trim());
   if (hasText) return false;
@@ -78,6 +107,8 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
     () => replaceMentionsForPreview(rawText, quotedMessage, userMap),
     [rawText, quotedMessage, userMap],
   );
+
+  const thumbnailUrl = useMemo(() => getThumbnailUrl(quotedMessage), [quotedMessage]);
 
   const preview = useMemo(() => {
     if (formattedText) {
@@ -137,10 +168,22 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
         if (e.key === 'Enter') handleClick();
       }}
     >
-      <span className="ermis-quoted-message__author">{authorName}</span>
-      <span className="ermis-quoted-message__text">{preview.text}</span>
+      <div className="ermis-quoted-message__body">
+        <span className="ermis-quoted-message__author">{authorName}</span>
+        <span className="ermis-quoted-message__text">{preview.text}</span>
+      </div>
+      {thumbnailUrl && (
+        <img
+          className="ermis-quoted-message__thumb"
+          src={thumbnailUrl}
+          alt=""
+          loading="lazy"
+          draggable={false}
+        />
+      )}
     </div>
   );
 });
 
 QuotedMessagePreview.displayName = 'QuotedMessagePreview';
+

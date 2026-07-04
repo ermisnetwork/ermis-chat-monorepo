@@ -4,7 +4,8 @@ import { formatMessage } from '@ermis-network/ermis-chat-sdk';
 import type { VListHandle } from 'virtua';
 import { dedupMessages } from './useLoadMessages';
 import { useChatClient } from './useChatClient';
-import { getDateKey } from '../utils';
+import { getDateKey, getMessageUserId } from '../utils';
+import { isStickerMessage } from '../messageTypeUtils';
 
 export type UseScrollToMessageOptions = {
   vlistRef: React.RefObject<VListHandle | null>;
@@ -24,18 +25,104 @@ export type UseScrollToMessageReturn = {
   jumpToLatest: () => void;
 };
 
+/** Time gap threshold in ms — must match VirtualMessageList's TIME_GAP_THRESHOLD_MS */
+const TIME_GAP_THRESHOLD_MS = 5 * 60 * 1000;
+
+function getTimestamp(date: Date | string | undefined): number {
+  if (!date) return 0;
+  return date instanceof Date ? date.getTime() : new Date(date).getTime();
+}
+
+/**
+ * Calculate the VList element index for a given messageId.
+ *
+ * This mirrors VirtualMessageList's element-building logic exactly:
+ * - Date separators are separate VList items.
+ * - System messages are standalone VList items.
+ * - Consecutive regular/signal messages from the same user (within 5min)
+ *   are grouped into ONE VList item.
+ * - Time separators between same-user groups with a time gap are separate
+ *   VList items.
+ */
 function getRenderedMessageIndex(messages: FormatMessageResponse[], messageId: string): number {
   let renderedIndex = 0;
+  let i = 0;
 
-  for (let i = 0; i < messages.length; i += 1) {
+  while (i < messages.length) {
     const message = messages[i];
     const prevMessage = i > 0 ? messages[i - 1] : null;
     const showDateSeparator =
       !prevMessage || getDateKey(message.created_at) !== getDateKey(prevMessage.created_at);
+    const messageType = (
+      isStickerMessage(message) ? 'sticker' : (message.type || 'regular')
+    ) as string;
 
+    // Date separator = 1 VList item
     if (showDateSeparator) renderedIndex += 1;
-    if (message.id === messageId) return renderedIndex;
+
+    // System messages are standalone VList items
+    if (messageType === 'system') {
+      if (message.id === messageId) return renderedIndex;
+      renderedIndex += 1;
+      i++;
+      continue;
+    }
+
+    // Collect consecutive regular/signal messages from same user into a group
+    // (mirrors VirtualMessageList grouping logic)
+    const groupStartIndex = i;
+    let j = i + 1;
+    while (j < messages.length) {
+      const nextMessage = messages[j];
+      const prevInGroup = messages[j - 1];
+      const nextShowDateSeparator =
+        getDateKey(nextMessage.created_at) !== getDateKey(prevInGroup.created_at);
+      const nextType = (
+        isStickerMessage(nextMessage) ? 'sticker' : (nextMessage.type || 'regular')
+      ) as string;
+      const timeGap = Math.abs(
+        getTimestamp(nextMessage.created_at) - getTimestamp(prevInGroup.created_at)
+      );
+
+      if (
+        nextShowDateSeparator ||
+        nextType === 'system' ||
+        getMessageUserId(nextMessage) !== getMessageUserId(message) ||
+        timeGap > TIME_GAP_THRESHOLD_MS
+      ) {
+        break;
+      }
+      j++;
+    }
+
+    // Check if we need a time separator BEFORE this group
+    if (i > 0) {
+      const prevEntry = messages[i - 1];
+      const prevEntryType = (
+        isStickerMessage(prevEntry) ? 'sticker' : (prevEntry.type || 'regular')
+      ) as string;
+      const timeGap = Math.abs(
+        getTimestamp(message.created_at) - getTimestamp(prevEntry.created_at)
+      );
+      if (
+        !showDateSeparator &&
+        prevEntryType !== 'system' &&
+        getMessageUserId(prevEntry) === getMessageUserId(message) &&
+        timeGap > TIME_GAP_THRESHOLD_MS
+      ) {
+        // Time separator = 1 VList item
+        renderedIndex += 1;
+      }
+    }
+
+    // Check if target message is in this group
+    for (let k = groupStartIndex; k < j; k++) {
+      if (messages[k].id === messageId) return renderedIndex;
+    }
+
+    // Entire group = 1 VList item
     renderedIndex += 1;
+    i = j;
   }
 
   return -1;

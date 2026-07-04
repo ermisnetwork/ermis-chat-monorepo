@@ -48,28 +48,38 @@
   background-color: var(--ermis-bg-hover);
 }
 
-/* Accordion transition for the list */
+/* Smooth expand/collapse via CSS grid-rows animation.
+   grid-template-rows: 0fr → 1fr smoothly animates the actual
+   content height without the timing mismatch of max-height. */
+.ermis-pinned-messages__list-outer {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 49;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  background-color: var(--ermis-bg-secondary);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.ermis-pinned-messages--expanded .ermis-pinned-messages__list-outer {
+  grid-template-rows: 1fr;
+}
+
 .ermis-pinned-messages__list {
   padding: 0 var(--ermis-spacing-md);
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 0;
-  overflow-y: auto;
-  transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
+  overflow: hidden;
+  max-height: 300px;
   scrollbar-width: thin;
-  /* Overlay on top of VList instead of pushing it down */
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background-color: var(--ermis-bg-secondary);
-  z-index: 49;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .ermis-pinned-messages--expanded .ermis-pinned-messages__list {
-  max-height: 300px;
+  overflow-y: auto;
   padding-bottom: var(--ermis-spacing-xs);
 }
 

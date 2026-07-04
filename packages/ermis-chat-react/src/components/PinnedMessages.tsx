@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { Avatar } from './Avatar';
 import {
@@ -123,20 +123,39 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
 }) => {
-  const { activeChannel, client, messages } = useChatClient();
+  const { activeChannel, client } = useChatClient();
   const [expanded, setExpanded] = useState(false);
   const currentUserId = client.userID;
+
+  // Track pinned messages via a revision counter so we re-read from channel
+  // state only when pin events fire, rather than on every new message.
+  const [pinRevision, setPinRevision] = useState(0);
 
   // Reset expanded state when switching channels
   useEffect(() => {
     setExpanded(false);
+    setPinRevision((r) => r + 1);
+  }, [activeChannel]);
+
+  // Listen for pin/unpin events to bump the revision
+  useEffect(() => {
+    if (!activeChannel) return;
+    const bumpRevision = () => setPinRevision((r) => r + 1);
+    activeChannel.on('message.pinned', bumpRevision);
+    activeChannel.on('message.unpinned', bumpRevision);
+    return () => {
+      activeChannel.off('message.pinned', bumpRevision);
+      activeChannel.off('message.unpinned', bumpRevision);
+    };
   }, [activeChannel]);
 
   const pinnedMessages = useMemo<FormatMessageResponse[]>(() => {
+    // pinRevision is used as a dependency trigger only
+    void pinRevision;
     if (!activeChannel) return [];
     const pinned = (activeChannel.state as any)?.pinnedMessages;
     return Array.isArray(pinned) ? pinned : [];
-  }, [activeChannel, messages]);
+  }, [activeChannel, pinRevision]);
 
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => !prev);
@@ -151,13 +170,14 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
     }
   }, [activeChannel]);
 
-  if (pinnedMessages.length === 0) return null;
-
-  const displayedMessages = expanded
-    ? pinnedMessages
-    : pinnedMessages.slice(0, maxCollapsed);
+  const displayedMessages = useMemo(
+    () => (expanded ? pinnedMessages : pinnedMessages.slice(0, maxCollapsed)),
+    [expanded, pinnedMessages, maxCollapsed],
+  );
 
   const hasMore = pinnedMessages.length > maxCollapsed;
+
+  if (pinnedMessages.length === 0) return null;
 
   return (
     <div className={`ermis-pinned-messages${expanded ? ' ermis-pinned-messages--expanded' : ''}${className ? ` ${className}` : ''}`}>
@@ -182,25 +202,28 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
         )}
       </div>
 
-      {/* Pinned message list */}
-      <div className="ermis-pinned-messages__list">
-        {displayedMessages.map((msg) => (
-          <PinnedMessageItemComponent
-            key={msg.id}
-            message={msg}
-            isOwnMessage={msg.user_id === currentUserId || msg.user?.id === currentUserId}
-            onClickMessage={onClickMessage}
-            onUnpin={handleUnpin}
-            AvatarComponent={AvatarComponent}
-            unpinLabel={unpinLabel}
-            stickerLabel={stickerLabel}
-            attachmentLabel={attachmentLabel}
-            unavailableMessageLabel={unavailableMessageLabel}
-          />
-        ))}
+      {/* Pinned message list — CSS grid-rows animation wrapper */}
+      <div className="ermis-pinned-messages__list-outer">
+        <div className="ermis-pinned-messages__list">
+          {displayedMessages.map((msg) => (
+            <PinnedMessageItemComponent
+              key={msg.id}
+              message={msg}
+              isOwnMessage={msg.user_id === currentUserId || msg.user?.id === currentUserId}
+              onClickMessage={onClickMessage}
+              onUnpin={handleUnpin}
+              AvatarComponent={AvatarComponent}
+              unpinLabel={unpinLabel}
+              stickerLabel={stickerLabel}
+              attachmentLabel={attachmentLabel}
+              unavailableMessageLabel={unavailableMessageLabel}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
 });
 
 PinnedMessages.displayName = 'PinnedMessages';
+

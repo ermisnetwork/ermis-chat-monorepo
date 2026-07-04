@@ -411,6 +411,14 @@
   color: var(--ermis-text-primary);
 }
 
+.ermis-message-input__reply-preview-thumb {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--ermis-radius-xs, 4px);
+  object-fit: cover;
+}
+
 /* ----------------------------------------------------------
    Banned State
    ---------------------------------------------------------- */

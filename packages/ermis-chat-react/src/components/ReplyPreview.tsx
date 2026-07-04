@@ -1,7 +1,11 @@
 import React, { useMemo } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
 import { replaceMentionsForPreview, buildUserMap } from '../utils';
-import { isStickerMessage } from '../messageTypeUtils';
+import {
+  isStickerMessage,
+  isImageAttachment,
+  isVideoAttachment,
+} from '../messageTypeUtils';
 import type { ReplyPreviewProps } from '../types';
 
 const MAX_PREVIEW_LENGTH = 120;
@@ -37,6 +41,30 @@ function getAttachmentSummary(attachments: any[]): string {
 
   return labels.join(', ');
 }
+
+/** Extract a thumbnail URL from the first image/video attachment or sticker */
+function getThumbnailUrl(message: any): string | undefined {
+  if (isStickerMessage(message) && message.sticker_url) {
+    return message.sticker_url;
+  }
+
+  const attachments = message.attachments;
+  if (!attachments || attachments.length === 0) return undefined;
+
+  const first = attachments[0];
+  if (!first) return undefined;
+
+  if (isImageAttachment(first) || first.mime_type?.startsWith('image/')) {
+    return first.thumb_url || first.image_url || first.asset_url || first.url;
+  }
+
+  if (isVideoAttachment(first) || first.mime_type?.startsWith('video/')) {
+    return first.thumb_url || first.image_url;
+  }
+
+  return undefined;
+}
+
 export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   message,
   onDismiss,
@@ -56,6 +84,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   const hasAttachments = message.attachments && message.attachments.length > 0;
   const isSticker = isStickerMessage(message);
   const attachmentSummary = hasAttachments ? getAttachmentSummary(message.attachments!) : '';
+  const thumbnailUrl = useMemo(() => getThumbnailUrl(message), [message]);
 
   // Build preview content
   let previewContent: React.ReactNode = null;
@@ -82,6 +111,15 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
         <span className="ermis-message-input__reply-preview-user">{userName}</span>
         {previewContent}
       </div>
+      {thumbnailUrl && (
+        <img
+          className="ermis-message-input__reply-preview-thumb"
+          src={thumbnailUrl}
+          alt=""
+          loading="lazy"
+          draggable={false}
+        />
+      )}
       <button
         className="ermis-message-input__reply-preview-dismiss"
         onClick={onDismiss}
@@ -97,3 +135,4 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
 });
 
 ReplyPreview.displayName = 'ReplyPreview';
+

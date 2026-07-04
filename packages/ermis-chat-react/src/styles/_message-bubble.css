@@ -1,8 +1,9 @@
 /* --- Quoted message preview --- */
 .ermis-quoted-message {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: var(--ermis-spacing-sm);
   padding: var(--ermis-spacing-xs) var(--ermis-spacing-sm);
   border-left: 3px solid var(--ermis-accent);
   background-color: var(--ermis-quote-other-bg);
@@ -10,6 +11,7 @@
   cursor: pointer;
   max-width: 100%;
   transition: background-color 0.15s;
+  overflow: hidden;
 }
 
 .ermis-quoted-message:hover {
@@ -23,6 +25,15 @@
 
 .ermis-quoted-message--unavailable:hover {
   background-color: var(--ermis-bg-hover);
+}
+
+.ermis-quoted-message__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
 }
 
 .ermis-quoted-message__author {
@@ -46,6 +57,15 @@
 .ermis-quoted-message--unavailable .ermis-quoted-message__text {
   font-style: italic;
 }
+
+.ermis-quoted-message__thumb {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--ermis-radius-xs, 4px);
+  object-fit: cover;
+}
+
 
 /* Light theme: same approach works since we darken the accent bg */
 
