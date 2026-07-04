@@ -86,9 +86,13 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   const attachmentSummary = hasAttachments ? getAttachmentSummary(message.attachments!) : '';
   const thumbnailUrl = useMemo(() => getThumbnailUrl(message), [message]);
 
-  // Build preview content
+  // Build preview content — skip attachment summary when thumbnail is visible
+  const showAttachmentText = hasAttachments && !thumbnailUrl;
   let previewContent: React.ReactNode = null;
-  if (isSticker) {
+  if (isSticker && thumbnailUrl) {
+    // Sticker with thumbnail — no text needed
+    previewContent = null;
+  } else if (isSticker) {
     previewContent = (
       <span className="ermis-message-input__reply-preview-text">
         😀 Sticker
@@ -98,8 +102,8 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
     previewContent = (
       <span className="ermis-message-input__reply-preview-text">
         {hasText && truncateText(formattedText, MAX_PREVIEW_LENGTH)}
-        {hasText && hasAttachments && ' · '}
-        {hasAttachments && attachmentSummary}
+        {hasText && showAttachmentText && ' · '}
+        {showAttachmentText && attachmentSummary}
       </span>
     );
   }
