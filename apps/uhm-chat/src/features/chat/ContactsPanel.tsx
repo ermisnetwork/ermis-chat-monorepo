@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Search, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useContactChannels, Avatar, useChatClient } from '@ermis-network/ermis-chat-react'
+import { useContactChannels, Avatar, useChatClient, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
 
 interface ContactsPanelProps {
@@ -24,7 +24,7 @@ export function ContactsPanel({ onBack }: ContactsPanelProps) {
       if (!client?.userID) return channel.data?.name || channel.cid
       const members = Object.values(channel.state?.members || {})
       const other = members.find((m) => m.user?.id !== client.userID)
-      return other?.user?.name || other?.user?.id || channel.data?.name || channel.cid
+      return getUserDisplayName(other?.user, other?.user?.id || other?.user_id) || channel.data?.name || channel.cid
     },
     [client?.userID],
   )

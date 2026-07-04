@@ -11,34 +11,34 @@ The Ermis Chat SDK provides a structured error system with typed error codes, re
 
 Every failed REST or WebSocket request returns a numeric error code. The SDK maps these codes to human-readable names and classifies whether a retry is safe.
 
-| Code | Name | Retryable |
-|------|------|-----------|
-| `-1` | `InternalSystemError` | ✅ Yes |
-| `2` | `AccessKeyError` | ❌ No |
-| `3` | `AuthenticationFailedError` | ✅ Yes |
-| `4` | `InputError` | ❌ No |
-| `6` | `DuplicateUsernameError` | ❌ No |
-| `9` | `RateLimitError` | ✅ Yes |
-| `16` | `DoesNotExistError` | ❌ No |
-| `17` | `NotAllowedError` | ❌ No |
-| `18` | `EventNotSupportedError` | ❌ No |
-| `19` | `ChannelFeatureNotSupportedError` | ❌ No |
-| `20` | `MessageTooLongError` | ❌ No |
-| `21` | `MultipleNestingLevelError` | ❌ No |
-| `22` | `PayloadTooBigError` | ❌ No |
-| `23` | `RequestTimeoutError` | ✅ Yes |
-| `24` | `MaxHeaderSizeExceededError` | ❌ No |
-| `40` | `AuthErrorTokenExpired` | ❌ No |
-| `41` | `AuthErrorTokenNotValidYet` | ❌ No |
-| `42` | `AuthErrorTokenUsedBeforeIssuedAt` | ❌ No |
-| `43` | `AuthErrorTokenSignatureInvalid` | ❌ No |
-| `44` | `CustomCommandEndpointMissingError` | ❌ No |
-| `45` | `CustomCommandEndpointCallError` | ✅ Yes |
-| `60` | `CoolDownError` | ✅ Yes |
-| `69` | `ErrWrongRegion` | ❌ No |
-| `70` | `ErrQueryChannelPermissions` | ❌ No |
-| `71` | `ErrTooManyConnections` | ✅ Yes |
-| `99` | `AppSuspendedError` | ❌ No |
+| Code | Name                                | Retryable |
+| ---- | ----------------------------------- | --------- |
+| `-1` | `InternalSystemError`               | ✅ Yes    |
+| `2`  | `AccessKeyError`                    | ❌ No     |
+| `3`  | `AuthenticationFailedError`         | ✅ Yes    |
+| `4`  | `InputError`                        | ❌ No     |
+| `6`  | `DuplicateUsernameError`            | ❌ No     |
+| `9`  | `RateLimitError`                    | ✅ Yes    |
+| `16` | `DoesNotExistError`                 | ❌ No     |
+| `17` | `NotAllowedError`                   | ❌ No     |
+| `18` | `EventNotSupportedError`            | ❌ No     |
+| `19` | `ChannelFeatureNotSupportedError`   | ❌ No     |
+| `20` | `MessageTooLongError`               | ❌ No     |
+| `21` | `MultipleNestingLevelError`         | ❌ No     |
+| `22` | `PayloadTooBigError`                | ❌ No     |
+| `23` | `RequestTimeoutError`               | ✅ Yes    |
+| `24` | `MaxHeaderSizeExceededError`        | ❌ No     |
+| `40` | `AuthErrorTokenExpired`             | ❌ No     |
+| `41` | `AuthErrorTokenNotValidYet`         | ❌ No     |
+| `42` | `AuthErrorTokenUsedBeforeIssuedAt`  | ❌ No     |
+| `43` | `AuthErrorTokenSignatureInvalid`    | ❌ No     |
+| `44` | `CustomCommandEndpointMissingError` | ❌ No     |
+| `45` | `CustomCommandEndpointCallError`    | ✅ Yes    |
+| `60` | `CoolDownError`                     | ✅ Yes    |
+| `69` | `ErrWrongRegion`                    | ❌ No     |
+| `70` | `ErrQueryChannelPermissions`        | ❌ No     |
+| `71` | `ErrTooManyConnections`             | ✅ Yes    |
+| `99` | `AppSuspendedError`                 | ❌ No     |
 
 ---
 
@@ -97,6 +97,21 @@ client.on('connection.changed', (event) => {
 Returns `true` if the error originated from a WebSocket transport failure (as opposed to an API-level rejection). The SDK automatically reconnects on WS failures, so you typically only need this for logging or UI indicators.
 
 ---
+
+## v1 Unsupported Feature Errors
+
+Some legacy SDK methods now throw normal JavaScript `Error` objects before making a network request because `ermis_end_user` v1 does not expose the old server capability:
+
+| Method or input                  | v1 behavior                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `queryUsers()`                   | Throws; use `searchUsers(query, limit)`, `queryUser(id)`, or `getBatchUsers(ids)`. |
+| `syncUserCache()`                | Throws; `connectUser()` no longer schedules full user-list preload.                |
+| `connectToSSE()`                 | Throws; profile SSE is not supported.                                              |
+| `connectUser(user, token, true)` | Throws; exchange external auth on a trusted backend through `/v1/auth/external`.   |
+| Wallet challenge/signature auth  | Throws; wallet auth is not exposed by v1.                                          |
+| `updateProfile({ about_me })`    | Throws; v1 supports profile display/avatar fields, not `about_me`.                 |
+
+Treat these as permanent integration errors and update the caller rather than retrying.
 
 ## Best Practices
 

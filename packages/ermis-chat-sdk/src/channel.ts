@@ -906,11 +906,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async acceptInvite(action: string) {
-    // const url = this.getClient().baseURL + `/invites/${this.type}/${this.id}/accept`;
-    const channel_id = this.id;
-
-    const url = this.getClient().userBaseURL + `/token_gate/join_channel/${this.type}`;
-    return this.getClient().post<APIResponse>(url, {}, { channel_id, action });
+    const inviteAction = action === 'join' ? 'join' : 'accept';
+    const url = this.getClient().baseURL + `/invites/${this.type}/${this.id}/${inviteAction}`;
+    return this.getClient().post<APIResponse>(url);
   }
 
   async rejectInvite() {
@@ -1348,17 +1346,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   };
 
   async createTopic(data: CreateTopicData) {
-    const project_id = this._client.projectId;
     const uuid = randomId();
-    const topicID = `${project_id}:${uuid}`;
-    const topicCid = `topic:${topicID}`;
+    const project_id = this._client._projectIdForInternalUse();
+    const topicID = project_id ? `${project_id}:${uuid}` : undefined;
+    const topicCid = topicID ? `topic:${topicID}` : undefined;
 
-    const queryURL = `${this.getClient().baseURL}/channels/topic/${topicID}`;
-    const payload: any = {
-      project_id,
+    const queryURL = topicID
+      ? `${this.getClient().baseURL}/channels/topic/${topicID}`
+      : `${this.getClient().baseURL}/channels/topic`;
+    const payload: any = this.getClient()._withProjectId({
       parent_cid: this.cid,
       data: { ...data },
-    };
+    });
 
     const parentEncryptionEnabled = this._isEffectiveE2ee();
     const explicitEncryptionEnabled = data?.mls_enabled === true;
@@ -1374,6 +1373,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       }
       if (ownTopicGroup && encryptionManager?.initialized) {
         try {
+          if (!topicCid) {
+            throw new Error(
+              'createTopic with a dedicated E2EE group requires projectId; connect the self-hosted client first or pass projectId in the client config.',
+            );
+          }
           const memberIds = Object.keys(this.state?.members || {});
           const bundle = await encryptionManager.createE2eeTopic(topicCid, memberIds);
           payload.data.commit = bundle.commit;
@@ -1404,17 +1408,21 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     this._seedE2eeStateFromLocalCache(options, messageSetToAddToIfDoesNotExist);
 
-    let project_id = this._client.projectId;
-    const update_options = this._isE2eeQuery() ? { project_id } : { ...options, project_id };
+    const update_options = this._isE2eeQuery()
+      ? this.getClient()._withProjectId({})
+      : this.getClient()._withProjectId({ ...options });
 
     let queryURL = `${this.getClient().baseURL}/channels/${this.type}`;
     if (this.id) {
       queryURL += `/${this.id}`;
     } else {
       if (this.type === 'team' || this.type === 'meeting') {
-        const uuid = randomId();
-        this.id = `${project_id}:${uuid}`;
-        queryURL += `/${this.id}`;
+        const project_id = this._client._projectIdForInternalUse();
+        if (project_id) {
+          const uuid = randomId();
+          this.id = `${project_id}:${uuid}`;
+          queryURL += `/${this.id}`;
+        }
       }
     }
 
@@ -1511,13 +1519,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     // Make sure we wait for the connect promise if there is a pending one
     await this.getClient().wsPromise;
 
-    const project_id = this._client.projectId;
-
     const queryURL = `${this.getClient().baseURL}/channels/${this.type}`;
 
-    const payload: any = {
-      project_id,
-    };
+    const payload: any = this.getClient()._withProjectId({});
 
     const dataPayload = this._queryDataPayload();
     if (dataPayload) {
@@ -1566,15 +1570,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async queryMessagesLessThanId(message_id: string, limit: number = 25) {
     await this.getClient().wsPromise;
 
-    let project_id = this._client.projectId;
     let queryURL = `${this.getClient().baseURL}/channels/${this.type}/${this.id}`;
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', {
-      // data: this._data,
-      state: true,
-      project_id,
-      messages: { limit, id_lt: message_id },
-    });
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this.getClient()._withProjectId({
+        // data: this._data,
+        state: true,
+        messages: { limit, id_lt: message_id },
+      }),
+    );
 
     // Ensure user info for message authors is loaded
     const messageMemberStubs = (state.messages || [])
@@ -1603,15 +1608,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async queryMessagesGreaterThanId(message_id: string, limit: number = 25) {
     await this.getClient().wsPromise;
 
-    let project_id = this._client.projectId;
     let queryURL = `${this.getClient().baseURL}/channels/${this.type}/${this.id}`;
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', {
-      // data: this._data,
-      state: true,
-      project_id,
-      messages: { limit, id_gt: message_id },
-    });
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this.getClient()._withProjectId({
+        // data: this._data,
+        state: true,
+        messages: { limit, id_gt: message_id },
+      }),
+    );
 
     // Ensure user info for message authors is loaded
     const messageMemberStubsGt = (state.messages || [])
@@ -1640,15 +1646,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async queryMessagesAroundId(message_id: string, limit: number = 25) {
     await this.getClient().wsPromise;
 
-    let project_id = this._client.projectId;
     let queryURL = `${this.getClient().baseURL}/channels/${this.type}/${this.id}`;
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL + '/query', {
-      // data: this._data,
-      state: true,
-      project_id,
-      messages: { limit, id_around: message_id },
-    });
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL + '/query',
+      this.getClient()._withProjectId({
+        // data: this._data,
+        state: true,
+        messages: { limit, id_around: message_id },
+      }),
+    );
 
     // Ensure user info for message authors is loaded
     const messageMemberStubsAround = (state.messages || [])
@@ -1805,40 +1812,46 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async enableTopics() {
-    return await this.getClient().post(this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics/enable`, {
-      project_id: this.getClient().projectId,
-      messages: { limit: 25 },
-    });
+    return await this.getClient().post(
+      this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics/enable`,
+      this.getClient()._withProjectId({
+        messages: { limit: 25 },
+      }),
+    );
   }
 
   async disableTopics() {
-    return await this.getClient().post(this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics/disable`, {
-      project_id: this.getClient().projectId,
-    });
+    return await this.getClient().post(
+      this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics/disable`,
+      this.getClient()._withProjectId({}),
+    );
   }
 
   async closeTopic(topicCID: string) {
-    return await this.getClient().post(this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics/close`, {
-      project_id: this.getClient().projectId,
-      topic_cid: topicCID,
-    });
+    return await this.getClient().post(
+      this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics/close`,
+      this.getClient()._withProjectId({
+        topic_cid: topicCID,
+      }),
+    );
   }
 
   async reopenTopic(topicCID: string) {
-    return await this.getClient().post(this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics/reopen`, {
-      project_id: this.getClient().projectId,
-      topic_cid: topicCID,
-    });
+    return await this.getClient().post(
+      this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics/reopen`,
+      this.getClient()._withProjectId({
+        topic_cid: topicCID,
+      }),
+    );
   }
 
   async editTopic(topicCID: string, data: EditTopicData) {
     const response: any = await this.getClient().post(
       this.getClient().baseURL + `/channels/${this.type}/${this.id}/topics`,
-      {
-        project_id: this.getClient().projectId,
+      this.getClient()._withProjectId({
         topic_cid: topicCID,
         data,
-      },
+      }),
     );
 
     if (response) {
@@ -1921,7 +1934,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         if (event.user?.id) {
           const user = getUserInfo(event.user.id || '', users);
           event.user = user;
-          channelState.typing[event.user.id] = event;
+          channelState.typing[user.id] = event;
         }
         break;
       case 'typing.stop':
@@ -1933,7 +1946,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         if (event.user?.id && event.created_at) {
           const user = getUserInfo(event.user.id || '', users);
           event.user = user;
-          channelState.read[event.user.id] = {
+          channelState.read[user.id] = {
             last_read: new Date(event.created_at),
             last_read_message_id: event.last_read_message_id,
             user,

@@ -1,6 +1,7 @@
 export const STORAGE_KEYS = {
   USER_ID: 'user_id',
   TOKEN: 'token',
+  REFRESH_TOKEN: 'refresh_token',
   CALL_SESSION_ID: 'call_session_id',
   LOCALE: 'locale',
   THEME: 'theme',
@@ -12,9 +13,11 @@ export const NOTIFICATION_CONFIG = {
 } as const;
 
 export const API_DEFAULTS = {
-  API_KEY: import.meta.env.VITE_API_KEY || 'uhm-chat-dev-key',
+  SELF_HOSTED: import.meta.env.VITE_ERMIS_SELF_HOSTED !== 'false',
+  API_KEY: import.meta.env.VITE_API_KEY || '',
+  PROJECT_ID: import.meta.env.VITE_CHAT_PROJECT_ID || '',
   BASE_URL: import.meta.env.VITE_API_URL || 'https://api-trieve.ermis.network',
-  USS_BASE_URL: import.meta.env.VITE_USS_API_URL || 'https://api-trieve.ermis.network/uss/v1',
+  USS_BASE_URL: import.meta.env.VITE_USS_API_URL || 'https://api-trieve.ermis.network/v1',
 } as const;
 
 export const OTP_CONFIG = {

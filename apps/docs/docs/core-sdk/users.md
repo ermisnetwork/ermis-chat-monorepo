@@ -4,132 +4,87 @@ sidebar_position: 4
 
 # User Management
 
-Once a user is connected to `ErmisChat`, broad query methods for discovering other actors in the system, viewing contacts, and updating own profiles are available directly within the global client session.
+The SDK uses `ermis_end_user` v1 for user profile reads, search, and current-user profile updates. v1 intentionally does not expose unrestricted full-user listing.
 
-## Querying and Searching
+## Targeted User Retrieval
 
-Retrieve users registered inside your Ermis Project using these methods.
-
-### Paginated User Search
 ```typescript
-// Query full paginated user list (by page size & page number)
-const usersData = await chatClient.queryUsers(25, 1); // pageSize = 25, page = 1
-
-// Search users by name
-const searchResult = await chatClient.searchUsers(1, 25, 'Jane Doe'); 
-```
-
-### Targeted User Retrieval
-```typescript
-// Target a specific single user ID
-const userDetail = await chatClient.queryUser('user-xyz');
-
-// Retrieve batched users by an explicit list of IDs
+const user = await chatClient.queryUser('user-xyz');
 const users = await chatClient.getBatchUsers(['user-1', 'user-2']);
 ```
 
-### Persistent User Profile Cache
+- `queryUser(id)` calls `GET /users/:id`.
+- `getBatchUsers(ids)` calls `POST /users/batch` with `{ user_ids }`, de-dupes IDs, and chunks at 100 IDs per request.
+- Both methods use Bearer auth and do not send `project_id`.
+- Responses normalize `display_name -> name` and `avatar_url -> avatar` while preserving raw `display_name`, `avatar_url`, `status`, and `services`.
 
-In browser runtimes, the SDK stores profiles returned by `queryUser`, `queryUsers`, `getBatchUsers`, SSE profile updates, and current-user profile edits in IndexedDB. On the next `connectUser`, cached profiles hydrate `client.state.users` before channel or E2EE restore rendering, then the SDK refreshes the first large users page in the background so new users and changed avatars/names replace stale cache entries.
+## Search
 
 ```typescript
-// Optional manual refresh. connectUser already schedules this in the background.
-await chatClient.syncUserCache(10000, 1);
+const response = await chatClient.searchUsers('Jane Doe', 25);
 ```
 
-Message, member, watcher, and read-state rendering should treat `client.state.users[userId]` as the preferred profile source, then fall back to the user object carried by a message/member payload, and only then fall back to the raw user id.
+`searchUsers(query, limit)` calls `GET /users/search?q=<query>&limit=<limit>`. `limit` is capped at 100.
 
-## Contacts
+The legacy overload remains callable:
 
-Ermis maintains contact relationship structures. You can query contacts to fetch users interacting frequently or explicitly marked by blocklist rules:
 ```typescript
-// Fetch user's contact list
-const { contact_users, block_users } = await chatClient.queryContacts();
-
-console.log("Allowed Users", contact_users);
-console.log("Blocked Users", block_users);
+await chatClient.searchUsers(1, 25, 'Jane Doe');
 ```
+
+For v1 this maps to `q=Jane Doe&limit=25` and ignores `page`.
+
+## Unsupported Listing APIs
+
+```typescript
+await chatClient.queryUsers(); // throws
+await chatClient.syncUserCache(); // throws
+```
+
+`queryUsers()` and `syncUserCache()` are unsupported because v1 has no full-user-list endpoint. The SDK also does not run background 10k-user cache sync after `connectUser()`.
+
+## Browser User Cache
+
+In browser runtimes, the SDK keeps a local IndexedDB user cache. On `connectUser()`, the SDK hydrates from local cache only, then asynchronously refreshes the connected user's full profile with `queryUser(me)`.
+
+The cache is updated by:
+
+- `queryUser`
+- `getBatchUsers`
+- `searchUsers`
+- message/member enrichment
+- `updateProfile`
+- `uploadAvatar`
+
+When `projectId` is unavailable in self-host mode, the SDK scopes the cache by the normalized user/chat base URL plus the current user ID.
 
 ## Updating Profiles
 
-The client exposes two distinct methods to update the authenticated user's profile, separating media uploads from lightweight text changes to maximize UI responsiveness.
-
-### 1. Updating Metadata (Text Only)
-Use `updateProfile` for near-instant updates to the user's name or bio. This method does not support uploading image files.
+Use `updateProfile` for lightweight metadata and `uploadAvatar` for image upload.
 
 ```typescript
-// Updates text fields asynchronously and hydrates the local user state
 await chatClient.updateProfile({
-  name: 'New User Name', 
-  about_me: 'My updated about me...' 
+  name: 'New User Name',
+  avatar: 'https://cdn.example.com/avatar.png',
 });
-```
 
-### 2. Updating the Avatar (Image Upload)
-Use `uploadFile` to send a media file to the server. The backend processes the file, updates the user's avatar URL in the database, and the SDK automatically syncs this new avatar URL down to the client state.
-
-```typescript
-// Usually derived from an <input type="file" /> in the browser
-const newAvatarFile = new File([...], 'avatar.png');
-
-// Uploads the file and updates the profile avatar automatically
 const response = await chatClient.uploadAvatar(newAvatarFile);
-
-console.log('Successfully uploaded and updated Avatar URL to:', response.avatar);
+console.log(response.avatar);
 ```
 
-### 🎯 Orchestrating a Complete Profile Form
-When building a 'Settings' form that updates both the Avatar and text metadata simultaneously, it's a best practice to orchestrate these two methods sequentially. This prevents UI blocking from heavy image uploads while keeping text changes fast.
+`updateProfile()` maps `name -> display_name` and `avatar -> avatar_url`. `about_me` is not supported by v1 and throws an explicit error.
 
-> **Why not merge them?** 
-> Keeping them separate ensures you can provide distinct loading states for image uploads vs text saves, and elegantly handle cases where an image upload fails but text properties are successfully persisted.
+`uploadAvatar()` posts multipart data to `/users/me/avatar` and returns the normalized full user profile.
 
-```javascript
-const saveProfileChanges = async (newName, newAboutMe, newAvatarFile) => {
-  setIsSaving(true);
-  
-  try {
-    // Stage 1: Upload the avatar if the user selected a new image
-    if (newAvatarFile) {
-      // You can show a specific progress indicator here
-      await chatClient.uploadAvatar(newAvatarFile); 
-    }
+## Real-time Profile Sync
 
-    // Stage 2: Always update the text metadata
-    await chatClient.updateProfile({ name: newName, about_me: newAboutMe });
-    
-    alert('Profile updated successfully!');
-  } catch (error) {
-    console.error('Failed to update profile:', error);
-  } finally {
-    setIsSaving(false);
-  }
-};
-```
+Profile SSE is unsupported in v1. `connectToSSE()` throws an explicit unsupported error. Refresh user state through targeted reads/search, batch lookup, profile update calls, and message/member payload enrichment.
 
-## Real-time Profile Sync (SSE)
+## User Picker Guidance
 
-After `connectUser` succeeds, the SDK automatically opens a **Server-Sent Events (SSE)** connection to receive real-time profile updates. When any user in the project changes their name, avatar, or about-me, the SDK:
+User discovery UI should be search-driven:
 
-1. Updates the user in `client.state.users`.
-2. Propagates changes to every active channel's member list, watchers, and message references.
-3. For **direct messaging** channels, automatically updates the channel name and image to reflect the other user's new profile.
-
-### `connectToSSE`
-
-Called internally by `connectUser`. You can also call it manually with an optional callback to react to profile update events:
-
-```typescript
-await chatClient.connectToSSE((data) => {
-  // data.type === 'AccountUserChainProjects'
-  console.log('User profile updated:', data.name, data.avatar);
-});
-```
-
-### `disconnectFromSSE`
-
-Closes the SSE connection. Useful when tearing down the client manually.
-
-```typescript
-await chatClient.disconnectFromSSE();
-```
+- Seed the initial list from `client.state.users` and already loaded channel members.
+- Do not call `queryUsers()` on mount.
+- Only perform remote search when the search input is non-empty.
+- Call `client.searchUsers(search.trim(), limit)` for remote search.

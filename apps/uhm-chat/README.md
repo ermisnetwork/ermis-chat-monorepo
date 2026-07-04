@@ -16,6 +16,10 @@
 - E2EE Channel Info exposes one conversation repair card. The app replays encrypted state for the selected conversation, restores any available history, asks for PIN only when needed, and keeps retry modes plus message-level diagnostics out of the primary UI.
 - If replay cannot recover this device, Channel Info reveals the advanced reset action that reloads encrypted state on this device while keeping already shown messages.
 - If this device has no PIN or has incomplete history restore, uhm-chat shows a soft PIN popup after login/app entry; a locked vault alone does not interrupt login.
+- UHM defaults to SDK self-host mode (`VITE_ERMIS_SELF_HOSTED` unset or any value except `false`), so API key and project ID env vars are optional. Set `VITE_ERMIS_SELF_HOSTED=false` for cloud mode, where `VITE_API_KEY` and `VITE_CHAT_PROJECT_ID` are required.
+- UHM uses `ermis_end_user` v1 for auth and profile APIs. `VITE_USS_API_URL` may be the root host, `/v1`, or legacy `/uss/v1`; the SDK normalizes it to `/v1`.
+- UHM persists v1 `refresh_token` after OTP/Google login. The SDK refreshes expired access tokens automatically and writes rotated tokens back to localStorage through `onTokenRefresh`.
+- UserPicker is search-driven for v1. It seeds from `client.state.users` and active friend channels on mount, does not call `queryUsers()`, and only performs remote user search when the search box is non-empty.
 - After the channel list loads, the SDK prepares all loaded E2EE channels in the background with sequential external join and reports progress through a compact secure-restore banner.
 - Active E2EE channels show running/pending restore progress from local `restore_progress` records without creating fake messages.
 - Permanent restore gaps are summarized in Chat history PIN settings instead of rendering warning banners or gap badges inside each channel.

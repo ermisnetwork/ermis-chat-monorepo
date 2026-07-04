@@ -327,18 +327,25 @@ export const enrichWithUserInfo = (items: any[], users: any[]) => {
 
   if (users.length === 0) {
     return items.map((item) => {
-      item.user = { id: item.user?.id, name: item.user?.id, avatar: '' };
+      const userId = item.user?.id || item.user_id;
+      item.user = { ...item.user, id: userId, name: getUserDisplayName(item.user, userId), avatar: item.user?.avatar || '' };
       return item;
     });
   }
 
   return items.map((item) => {
-    const userId = item.user?.id;
+    const userId = item.user?.id || item.user_id;
     const lastestReactionMsg = item?.latest_reactions;
     const quotedMsg = item?.quoted_message;
     const user = users.find((u) => u.id === userId);
     if (user) {
-      item.user = { id: user.id, name: user.name || user.id, avatar: user.avatar || '' };
+      item.user = {
+        ...item.user,
+        ...user,
+        id: user.id,
+        name: getUserDisplayName(user, user.id),
+        avatar: user.avatar || item.user?.avatar || '',
+      };
     }
 
     if (lastestReactionMsg) {
@@ -347,8 +354,10 @@ export const enrichWithUserInfo = (items: any[], users: any[]) => {
         return {
           ...reaction,
           user: {
+            ...reaction.user,
+            ...reactionUser,
             id: reactionUser?.id || reaction.user_id,
-            name: reactionUser?.name || reaction.user_id,
+            name: getUserDisplayName(reactionUser, reaction.user_id),
             avatar: reactionUser?.avatar || '',
           },
         };
@@ -358,14 +367,29 @@ export const enrichWithUserInfo = (items: any[], users: any[]) => {
     if (quotedMsg) {
       const quotedUser = users.find((u) => u.id === quotedMsg.user?.id);
       item.quoted_message.user = {
+        ...quotedMsg.user,
+        ...quotedUser,
         id: quotedUser?.id || quotedMsg.user?.id,
-        name: quotedUser?.name || quotedMsg.user?.id,
+        name: getUserDisplayName(quotedUser, quotedMsg.user?.id),
         avatar: quotedUser?.avatar || '',
       };
     }
 
     return item;
   });
+};
+
+export const getUserDisplayName = (user: any, fallbackId?: string) => {
+  const id = fallbackId || user?.id || '';
+  const displayName = typeof user?.display_name === 'string' ? user.display_name.trim() : '';
+  if (displayName && displayName !== id) return displayName;
+  const name = typeof user?.name === 'string' ? user.name.trim() : '';
+  if (name && name !== id) return name;
+  const email = typeof user?.email === 'string' ? user.email.trim() : '';
+  if (email) return email;
+  const phone = typeof user?.phone === 'string' ? user.phone.trim() : '';
+  if (phone) return phone;
+  return id;
 };
 
 export const getUserInfo = (id: string, users: any[]) => {
@@ -383,12 +407,14 @@ export const getUserInfo = (id: string, users: any[]) => {
       const name = typeof u?.name === 'string' ? u.name.trim() : '';
       return Boolean(name && name !== id);
     }) ||
+    matchingUsers.find((u) => u?.email || u?.phone) ||
     matchingUsers.find((u) => u?.avatar || u?.image) ||
     matchingUsers[0];
   return {
+    ...user,
     id,
-    name: user?.name || id,
-    avatar: user?.avatar || '',
+    name: getUserDisplayName(user, id),
+    avatar: user?.avatar || user?.avatar_url || user?.image || '',
   };
 };
 
@@ -401,17 +427,30 @@ export const pickUserWithDisplayName = (id?: string, ...candidates: any[]) => {
   });
 
   const hasUsefulName = (candidate: any) => {
+    const displayName = typeof candidate?.display_name === 'string' ? candidate.display_name.trim() : '';
+    if (displayName && displayName !== (candidate?.id || userId)) return true;
     const name = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
     const candidateId = candidate?.id || userId;
     return Boolean(name && name !== candidateId);
   };
+  const normalizeCandidate = (candidate: any) => {
+    if (!candidate) return undefined;
+    const candidateId = candidate.id || userId;
+    return {
+      ...candidate,
+      id: candidateId,
+      name: getUserDisplayName(candidate, candidateId),
+      avatar: candidate.avatar || candidate.avatar_url || candidate.image || '',
+    };
+  };
 
-  return (
+  const user =
     users.find(hasUsefulName) ||
+    users.find((candidate) => candidate.email || candidate.phone) ||
     users.find((candidate) => candidate.avatar || candidate.image) ||
-    users[0] ||
-    (userId ? getUserInfo(userId, []) : undefined)
-  );
+    users[0];
+
+  return normalizeCandidate(user) || (userId ? getUserInfo(userId, []) : undefined);
 };
 
 export const getDirectChannelName = (members: any[], currentUserId: string) => {

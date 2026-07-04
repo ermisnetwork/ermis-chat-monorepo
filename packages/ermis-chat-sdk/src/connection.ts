@@ -96,6 +96,25 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     this.client.logger(level, 'connection:' + msg, { tags: ['connection'], ...extra });
   }
 
+  private _isTokenExpiredMessage(message?: string) {
+    const normalized = String(message || '').toLowerCase();
+    return (
+      (normalized.includes('token') || normalized.includes('jwt')) &&
+      (normalized.includes('expired') || normalized.includes('expire'))
+    );
+  }
+
+  private _isTokenExpiredError(error: { code?: string | number; message?: string } | undefined) {
+    return (
+      Number(error?.code) === chatCodes.TOKEN_EXPIRED ||
+      this._isTokenExpiredMessage(error?.message)
+    );
+  }
+
+  private _isTokenExpiredCloseEvent(event: WebSocket.CloseEvent) {
+    return Number(event.code) === chatCodes.TOKEN_EXPIRED || this._isTokenExpiredMessage(event.reason);
+  }
+
   setClient(client: ErmisChat<ErmisChatGenerics>) {
     this.client = client;
   }
@@ -116,8 +135,15 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
       this.isHealthy = false;
       this.consecutiveFailures += 1;
 
-      if (error.code === chatCodes.TOKEN_EXPIRED) {
+      if (this._isTokenExpiredError(error)) {
         this._log('connect() - WS failure due to expired token');
+        const refreshedToken = await this.client.refreshAccessToken();
+        if (refreshedToken) {
+          const healthCheck = await this._connect();
+          this.consecutiveFailures = 0;
+
+          this._log(`connect() - Re-established ws connection after token refresh: ${healthCheck}`);
+        }
       } else if (!error.isWSFailure) {
         // API rejected the connection and we should not retry
         throw new Error(
@@ -185,9 +211,11 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     const qs = encodeURIComponent(this.client._buildWSPayload(this.requestID));
     const token = this.client.tokenManager.getToken();
 
-    let rawURL = `${this.client.wsBaseURL}/connect?json=${qs}&api_key=${
-      this.client.apiKey
-    }&authorization=${token}&stream-auth-type=${this.client.getAuthType()}&X-Stream-Client=${this.client.getUserAgent()}&${E2EE_BYTES_WS_QUERY_PARAM}=${E2EE_BYTES_WIRE_FORMAT}`;
+    let rawURL = `${this.client.wsBaseURL}/connect?json=${qs}`;
+    if (this.client.apiKey) {
+      rawURL += `&api_key=${this.client.apiKey}`;
+    }
+    rawURL += `&authorization=${token}&stream-auth-type=${this.client.getAuthType()}&X-Stream-Client=${this.client.getUserAgent()}&${E2EE_BYTES_WS_QUERY_PARAM}=${E2EE_BYTES_WIRE_FORMAT}`;
     if (this.client.deviceId) {
       rawURL += `&device_id=${encodeURIComponent(this.client.deviceId)}`;
     }
@@ -352,6 +380,9 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     this._destroyCurrentWSConnection();
 
     try {
+      if (options.refreshToken) {
+        await this.client.refreshAccessToken();
+      }
       if (this.client.encryptionManager?.initialized) {
         this.client.encryptionManager.markSyncStart();
       }
@@ -366,7 +397,11 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
       this.consecutiveFailures += 1;
 
       // reconnect on WS failures, don't reconnect if there is a code bug
-      if (error.isWSFailure) {
+      if (this._isTokenExpiredError(error) && !options.refreshToken) {
+        this._log('_reconnect() - WS failure due to expired token, going to refresh and reconnect');
+
+        this._reconnect({ refreshToken: true });
+      } else if (error.isWSFailure) {
         this._log('_reconnect() - WS failure, so going to try to reconnect');
 
         this._reconnect();
@@ -457,10 +492,11 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
 
     this.rejectPromise?.(this._errorFromWSEvent(event));
 
+    const refreshToken = this._isTokenExpiredCloseEvent(event);
     this._log(`onclose() - WS connection closed abnormally (code ${event.code}). Calling reconnect ...`, { event });
 
     // reconnect on abnormal failure
-    this._reconnect();
+    this._reconnect({ refreshToken });
   };
 
   onerror = (wsID: number, event: WebSocket.ErrorEvent) => {

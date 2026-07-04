@@ -15,7 +15,19 @@ import { LocaleToggle } from '../components/LocaleToggle'
 import { SEO } from '../components/SEO'
 
 interface LoginPageProps {
-  onLoginSuccess: (userId: string, token: string) => void
+  onLoginSuccess: (userId: string, token: string, refreshToken?: string) => void
+}
+
+function createAuthProvider() {
+  return API_DEFAULTS.SELF_HOSTED
+    ? new ErmisAuthProvider({
+        baseURL: API_DEFAULTS.BASE_URL,
+        userBaseURL: API_DEFAULTS.USS_BASE_URL,
+        selfHosted: true,
+      })
+    : new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL, {
+        userBaseURL: API_DEFAULTS.USS_BASE_URL,
+      })
 }
 
 export function LoginPage({ onLoginSuccess }: LoginPageProps) {
@@ -61,7 +73,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     setLoading(true)
 
     try {
-      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL)
+      const provider = createAuthProvider()
       authProviderRef.current = provider
 
       let res
@@ -101,6 +113,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       const res = await provider.verifyOtp(otpCode) as any
       if (res && res.success !== false) {
         const token = res.token || res.data?.token || res.access_token
+        const refreshToken = res.refresh_token || res.data?.refresh_token
         if (!token) throw new Error(t('errors.missing_token'))
 
         const payload = parseJwt(token)
@@ -110,8 +123,13 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
         localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId)
         localStorage.setItem(STORAGE_KEYS.TOKEN, token)
+        if (refreshToken) {
+          localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
+        } else {
+          localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
+        }
         localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
-        onLoginSuccess(finalUserId, token)
+        onLoginSuccess(finalUserId, token, refreshToken)
       } else {
         setError(res.message || t('errors.wrong_otp'))
       }
@@ -126,11 +144,12 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     setError('')
     setLoading(true)
     try {
-      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL)
+      const provider = createAuthProvider()
 
       const res = await provider.loginWithGoogle(credentialResponse.credential) as any
       if (res && res.success !== false) {
         const token = res.token || res.data?.token || res.access_token
+        const refreshToken = res.refresh_token || res.data?.refresh_token
         if (!token) throw new Error(t('errors.missing_token'))
 
         const payload = parseJwt(token)
@@ -138,8 +157,13 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
         localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId)
         localStorage.setItem(STORAGE_KEYS.TOKEN, token)
+        if (refreshToken) {
+          localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
+        } else {
+          localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
+        }
         localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
-        onLoginSuccess(finalUserId, token)
+        onLoginSuccess(finalUserId, token, refreshToken)
       } else {
         setError(res.message || t('errors.google_failed'))
       }
@@ -395,4 +419,3 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     </div>
   )
 }
-

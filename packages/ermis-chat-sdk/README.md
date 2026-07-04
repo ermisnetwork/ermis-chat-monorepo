@@ -19,6 +19,83 @@ The official core SDK for Ermis Chat.
 - Deep imports from `@ermis-network/ermis-chat-sdk/src/*` are intentionally unsupported. The package publishes `dist/` and runtime assets from `public/`, not TypeScript source files.
 - Apps using OpenMLS must publish `openmls_wasm_bg.wasm` with their web assets. The SDK package includes this binary under `public/openmls_wasm_bg.wasm`; `loadOpenMlsWasm('/openmls_wasm_bg.wasm')` loads the bundled JS glue and that public binary.
 
+## Client Configuration
+
+<details>
+<summary>Change log</summary>
+
+- `2026-07-03`: Added `selfHosted` SDK config for Bellboy self-host deployments.
+  - Reason: self-hosted Bellboy resolves tenant scope from the JWT/license instead of requiring frontend API key and project ID inputs.
+  - Integrator action: use `ErmisChat.getInstance({ baseURL, selfHosted: true })` and `new ErmisAuthProvider({ baseURL, selfHosted: true })` for self-host; keep `apiKey` and `projectId` for cloud mode.
+  - Compatibility/default: legacy positional constructors still work; when `selfHosted` is not true, `apiKey` and `projectId` remain required.
+
+</details>
+
+Cloud mode:
+
+```ts
+const client = ErmisChat.getInstance({
+  apiKey: API_KEY,
+  projectId: PROJECT_ID,
+  baseURL: BASE_URL,
+  selfHosted: false,
+});
+```
+
+Self-host mode:
+
+```ts
+const client = ErmisChat.getInstance({
+  baseURL: BASE_URL,
+  selfHosted: true,
+});
+```
+
+Self-host mode omits `api_key` from the WebSocket URL and does not require SDK callers to send `project_id` on normal project-scoped requests. After `connectUser()`, Bellboy returns the license project ID in `health.check`; the SDK stores it for local caches and E2EE deterministic channel helpers. Pass `projectId` in the self-host config only when the app must create project-scoped IDs before the first WebSocket health check.
+
+## `ermis_end_user` v1 Auth And Users
+
+<details>
+<summary>Change log</summary>
+
+- `2026-07-04`: Switched SDK auth/profile calls from legacy `/uss/v1` to `ermis_end_user` `/v1`.
+  - Reason: v1 exposes targeted user lookup, batch lookup, search, profile update, avatar upload, and auth routes without unrestricted user enumeration.
+  - Integrator action: set `userBaseURL`/auth `baseURL` to the root host or `/v1`; legacy `/uss/v1` input is normalized to `/v1`.
+  - Compatibility/default: `queryUsers`, `syncUserCache`, profile SSE, wallet auth, client-side `external_auth`, and `about_me` updates now throw explicit unsupported errors.
+- `2026-07-04`: Added SDK-managed access-token refresh using v1 `refresh_token`.
+  - Reason: `/auth/otp/verify` and other v1 auth responses can return short-lived access tokens plus refresh tokens.
+  - Integrator action: persist `refresh_token`, pass it through `refreshToken`/`connectUser(..., refreshToken)`, and persist rotated tokens in `onTokenRefresh`.
+  - Compatibility/default: without a refresh token, expired access-token requests keep returning the original auth error.
+
+</details>
+
+- AuthProvider routes are `POST /auth/otp/request`, `POST /auth/otp/verify`, `POST /auth/google`, and client `refreshNewToken()` calls `POST /auth/refresh`.
+- Auth responses expose compatibility aliases: `success: true`, `token = access_token`, and top-level `user_id` when v1 returns it or when it can be read from the JWT payload.
+- `ErmisChat` automatically calls `POST /auth/refresh` when authenticated HTTP requests return 401/token-expired responses, then retries the original request once. WebSocket reconnect also refreshes first when the server reports an expired token.
+- Use `refreshToken: () => localStorage.getItem('refresh_token')` and `onTokenRefresh` to keep app storage in sync with rotated access/refresh tokens.
+- User APIs call `/users/:id`, `/users/batch`, `/users/search`, `/users/me`, and `/users/me/avatar` with Bearer auth and without `project_id` query/body decoration.
+- `searchUsers(query, limit)` is the preferred overload. The legacy `searchUsers(page, page_size, name)` overload maps to `q=name&limit=page_size` and ignores `page`.
+- The SDK no longer preloads all users after `connectUser()`. Browser cache hydration remains local-only, and cache entries are refreshed by `queryUser`, `getBatchUsers`, `searchUsers`, message/member enrichment, `updateProfile`, and `uploadAvatar`.
+- For external auth, exchange the external identity through a trusted backend calling `/v1/auth/external`, then pass the returned `access_token` to `connectUser(user, access_token)`.
+
+<details>
+<summary>Implementation progress</summary>
+
+- `2026-07-03` (production): Added flexible SDK self-host/cloud initialization.
+  - Code changed: SDK config parsing/types, AuthProvider API-key decoration, WebSocket URL construction, project-scoped client/channel payload helpers, and UHM app initialization/login wiring.
+  - Docs changed: SDK README client configuration, root README setup examples, and UHM runtime notes.
+  - Decision: cloud mode remains strict and backward compatible; self-host mode allows omitted `apiKey`/`projectId`, learns `project_id` from `health.check`, and avoids empty-scope user cache writes before that event.
+  - Performance: O(1) config/payload checks, no new HTTP/WS round trips, and slightly smaller self-host request payloads because `api_key`/`project_id` are omitted where Bellboy derives scope from claims.
+  - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `npm run build:sdk`, and `yarn workspace uhm-chat build` passed.
+- `2026-07-04` (production): Added SDK/UHM refresh-token flow for expired access tokens.
+  - Code changed: `TokenManager` stores refresh token/provider, `ErmisChat` refreshes and retries expired HTTP requests once, WebSocket reconnect refreshes before rebuilding the URL, and UHM stores/clears `refresh_token`.
+  - Docs changed: SDK README and core SDK auth/client docs document `refreshToken`, `onTokenRefresh`, and automatic retry behavior.
+  - Decision: refresh calls are single-flight per client; callback persistence failures are logged but do not fail the refreshed request.
+  - Performance: normal requests stay O(1) with no extra round trip; expired-token recovery adds one `POST /auth/refresh` plus one retry, and concurrent expired requests share the in-flight refresh promise.
+  - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `npm run build:sdk`, and `yarn workspace uhm-chat build` passed.
+
+</details>
+
 ## E2EE Channel Helpers
 
 <details>

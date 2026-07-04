@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Hash, MessageSquare, Globe, Users, Search } from 'lucide-react'
-import { useChatClient, Avatar } from '@ermis-network/ermis-chat-react'
+import { useChatClient, Avatar, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import { useGlobalSearch } from '@/hooks/useGlobalSearch'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
 import type { TopicResult } from '@/hooks/useGlobalSearch'
@@ -199,7 +199,7 @@ function UserResultItem({
   onClick: () => void
   isCreating: boolean
 }) {
-  const name = user.name || user.id
+  const name = getUserDisplayName(user, user.id)
   const subtitle = user.email || user.phone || ''
 
   return (

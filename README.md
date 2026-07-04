@@ -41,9 +41,11 @@ The ErmisChat client is designed to allow extension of the base types through us
 
 ## Step-by-Step Guide:
 
-### Step 1: Generate API key and ProjectID
+### Step 1: Choose deployment mode
 
-Before installing ErmisChat SDK, you need to generate an **API key** and **ProjectID** on the [Ermis Dashboard](https://ermis.network). This **API key** and **ProjectID** will be required when initializing the Chat SDK.
+For cloud mode, generate an **API key** and **ProjectID** on the [Ermis Dashboard](https://ermis.network). These values are required when `selfHosted` is not true.
+
+For self-hosted Bellboy deployments, the frontend can initialize the SDK with `selfHosted: true`; API key and project ID inputs are not required because tenant scope is resolved from the user JWT and server license.
 
 > **Note**: Ermis Dashboard will be available soon. Please contact our support team to create a client account and receive your API key. Contact support: [tony@ermis.network](mailto:tony@ermis.network)
 
@@ -76,10 +78,12 @@ Login with email to get a token for connecting to the chat SDK. You need to init
 ```javascript
 import { ErmisAuthProvider } from '@ermis-network/ermis-chat-sdk';
 const options = {
-  baseURL: BASE_URL,
+  timeout: 6000,
 }; // optional
 
-const authProvider = new ErmisAuthProvider(API_KEY, options);
+const authProvider = new ErmisAuthProvider(API_KEY, BASE_URL, options);
+// Self-host:
+// const authProvider = new ErmisAuthProvider({ baseURL: BASE_URL, selfHosted: true });
 ```
 
 **Send OTP to email:**
@@ -119,7 +123,9 @@ const options = {
   baseURL: BASE_URL,
 }; // optional
 
-const chatClient = ErmisChat.getInstance(API_KEY, PROJECT_ID, options);
+const chatClient = ErmisChat.getInstance(API_KEY, PROJECT_ID, BASE_URL, options);
+// Self-host:
+// const chatClient = ErmisChat.getInstance({ baseURL: BASE_URL, selfHosted: true });
 ```
 
 After obtaining the token and user_id from the OTP verification step, connect the user to the chat:

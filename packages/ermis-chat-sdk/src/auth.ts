@@ -1,9 +1,66 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
-import { APIErrorResponse, ErmisChatOptions, ErrorFromResponse, Logger } from './types';
+import { APIErrorResponse, ErmisAuthProviderConfig, ErmisChatOptions, ErrorFromResponse, Logger } from './types';
 import { chatCodes, randomId, retryInterval, sleep } from './utils';
 import https from 'https';
 import { isErrorResponse } from './errors';
 import { getLogger, setSdkLogger } from './logger';
+import {
+  END_USER_V1_UNSUPPORTED_WALLET,
+  adaptEndUserV1AuthResponse,
+  normalizeEndUserV1BaseURL,
+  unsupportedEndUserV1Feature,
+  type EndUserV1AuthResponse,
+  type EndUserV1CompatAuthResponse,
+} from './end_user_v1';
+
+type ResolvedAuthProviderConfig = {
+  apiKey: string;
+  baseURL: string;
+  options: ErmisChatOptions;
+  selfHosted: boolean;
+};
+
+function resolveAuthProviderConfig(
+  apiKeyOrConfig: string | ErmisAuthProviderConfig,
+  baseURL?: string,
+  options?: ErmisChatOptions,
+): ResolvedAuthProviderConfig {
+  if (typeof apiKeyOrConfig === 'object' && apiKeyOrConfig !== null) {
+    const { apiKey = '', baseURL: configBaseURL, ...inputOptions } = apiKeyOrConfig;
+    const selfHosted = inputOptions.selfHosted === true;
+
+    if (!configBaseURL) {
+      throw new Error('ErmisAuthProvider config requires baseURL');
+    }
+    if (!selfHosted && !apiKey) {
+      throw new Error('ErmisAuthProvider cloud mode requires apiKey');
+    }
+
+    return {
+      apiKey,
+      baseURL: configBaseURL,
+      options: inputOptions,
+      selfHosted,
+    };
+  }
+
+  const inputOptions = options || {};
+  const selfHosted = inputOptions.selfHosted === true;
+
+  if (!baseURL) {
+    throw new Error('ErmisAuthProvider constructor requires baseURL');
+  }
+  if (!selfHosted && !apiKeyOrConfig) {
+    throw new Error('ErmisAuthProvider cloud mode requires apiKey');
+  }
+
+  return {
+    apiKey: apiKeyOrConfig || '',
+    baseURL,
+    options: inputOptions,
+    selfHosted,
+  };
+}
 
 export class ErmisAuthProvider {
   apiKey: string;
@@ -15,6 +72,7 @@ export class ErmisAuthProvider {
   node: boolean;
   logger: Logger;
   consecutiveFailures: number;
+  selfHosted: boolean;
   userAgent?: string;
   /** Last identifier (phone or email) used for OTP */
   lastIdentifier?: string;
@@ -26,14 +84,18 @@ export class ErmisAuthProvider {
   /** Wallet address used for wallet authentication */
   address?: string;
 
-  constructor(apiKey: string, baseURL: string, options?: ErmisChatOptions) {
-    const inputOptions = options || {};
-    this.apiKey = apiKey;
+  constructor(config: ErmisAuthProviderConfig);
+  constructor(apiKey: string, baseURL: string, options?: ErmisChatOptions);
+  constructor(apiKeyOrConfig: string | ErmisAuthProviderConfig, baseURL?: string, options?: ErmisChatOptions) {
+    const resolvedConfig = resolveAuthProviderConfig(apiKeyOrConfig, baseURL, options);
+    const inputOptions = resolvedConfig.options;
+    this.apiKey = resolvedConfig.apiKey;
+    this.selfHosted = resolvedConfig.selfHosted;
     this.logger = getLogger(inputOptions.logger);
     setSdkLogger(inputOptions.logger);
-    this.logger('info', 'auth:constructor - userBaseURL configured', { userBaseURL: options?.userBaseURL });
+    this.logger('info', 'auth:constructor - userBaseURL configured', { userBaseURL: inputOptions.userBaseURL });
 
-    this.baseURL = options?.userBaseURL || baseURL + '/uss/v1';
+    this.baseURL = normalizeEndUserV1BaseURL(inputOptions.userBaseURL || resolvedConfig.baseURL);
 
     this.browser = typeof inputOptions.browser !== 'undefined' ? inputOptions.browser : typeof window !== 'undefined';
     this.node = !this.browser;
@@ -249,17 +311,16 @@ export class ErmisAuthProvider {
    * @param language Language code (e.g. 'En', 'Vi')
    * @param method Method type (e.g. 'Sms', 'Voice')
    */
-  async sendOtpToPhone(identifier: string, method: 'Sms' | 'Voice'): Promise<{ success: boolean; message?: string }> {
+  async sendOtpToPhone(identifier: string, method: 'Sms' | 'Voice'): Promise<EndUserV1CompatAuthResponse> {
     this.lastIdentifier = identifier;
     this.lastMethod = method;
     const data = {
-      apikey: this.apiKey,
       identifier,
-      language: 'Vi',
-      method,
-      otp_type: 'Login',
+      language: 'en',
+      method: method === 'Voice' ? 'voice' : 'sms',
     };
-    return this.post<{ success: boolean; message?: string }>(this.baseURL + '/auth/get_otp_new', data);
+    const response = await this.post<EndUserV1AuthResponse>(this.baseURL + '/auth/otp/request', data);
+    return adaptEndUserV1AuthResponse(response);
   }
 
   /**
@@ -268,32 +329,30 @@ export class ErmisAuthProvider {
    * @param language Language code (e.g. 'En', 'Vi')
    * @param method Method type (e.g. 'Email')
    */
-  async sendOtpToEmail(identifier: string): Promise<{ success: boolean; message?: string }> {
+  async sendOtpToEmail(identifier: string): Promise<EndUserV1CompatAuthResponse> {
     this.lastIdentifier = identifier;
     this.lastMethod = 'Email';
     const data = {
-      apikey: this.apiKey,
       identifier,
-      language: 'Vi',
-      method: 'Email',
-      otp_type: 'Login',
+      language: 'en',
+      method: 'email',
     };
-    return this.post<{ success: boolean; message?: string }>(this.baseURL + '/auth/get_otp_new', data);
+    const response = await this.post<EndUserV1AuthResponse>(this.baseURL + '/auth/otp/request', data);
+    return adaptEndUserV1AuthResponse(response);
   }
 
   /**
    * Verify OTP for phone or email.
    * @param otp OTP code
    */
-  async verifyOtp(otp: string): Promise<{ success: boolean; message?: string }> {
+  async verifyOtp(otp: string): Promise<EndUserV1CompatAuthResponse> {
     const data = {
       identifier: this.lastIdentifier,
-      method: this.lastMethod,
-      apikey: this.apiKey,
       otp,
     };
 
-    return this.post<{ success: boolean; message?: string }>(this.baseURL + '/auth/otp_login', data);
+    const response = await this.post<EndUserV1AuthResponse>(this.baseURL + '/auth/otp/verify', data);
+    return adaptEndUserV1AuthResponse(response);
   }
 
   /**
@@ -301,12 +360,12 @@ export class ErmisAuthProvider {
    * @param token Google OAuth token
    * @param apikey API key
    */
-  async loginWithGoogle(token: string): Promise<{ success: boolean; message?: string }> {
+  async loginWithGoogle(token: string): Promise<EndUserV1CompatAuthResponse> {
     const data = {
       token,
-      apikey: this.apiKey,
     };
-    return this.post<{ success: boolean; message?: string }>(this.baseURL + '/auth/google_login', data);
+    const response = await this.post<EndUserV1AuthResponse>(this.baseURL + '/auth/google', data);
+    return adaptEndUserV1AuthResponse(response);
   }
 
   /**
@@ -316,22 +375,7 @@ export class ErmisAuthProvider {
    */
   async getWalletChallenge(address: string): Promise<any> {
     this.address = address;
-    const response = await this.post<{ challenge: string }>(this.baseURL + '/auth/get_challenge', {
-      address,
-      apikey: this.apiKey,
-    });
-    const challenge = JSON.parse(response.challenge);
-    return challenge;
-  }
-
-  private createNonce(length: number): string {
-    let result = '';
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    const charactersLength = characters.length;
-    for (let i = 0; i < length; i++) {
-      result += characters.charAt(Math.floor(Math.random() * charactersLength));
-    }
-    return result;
+    throw unsupportedEndUserV1Feature(END_USER_V1_UNSUPPORTED_WALLET);
   }
 
   /**
@@ -341,16 +385,7 @@ export class ErmisAuthProvider {
    * @param nonce Nonce used in the challenge
    * @returns Verification result and token if successful
    */
-  async verifyWalletSignature(signature: string): Promise<{ success: boolean; token?: string; message?: string }> {
-    const data = {
-      address: this.address,
-      signature,
-      nonce: this.createNonce(20),
-      apikey: this.apiKey,
-    };
-    return this.post<{ success: boolean; token?: string; message?: string }>(
-      this.baseURL + '/auth/verify_signature',
-      data,
-    );
+  async verifyWalletSignature(_signature: string): Promise<{ success: boolean; token?: string; message?: string }> {
+    throw unsupportedEndUserV1Feature(END_USER_V1_UNSUPPORTED_WALLET);
   }
 }

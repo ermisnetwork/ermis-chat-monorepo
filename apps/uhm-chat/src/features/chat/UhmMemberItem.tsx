@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Dropdown } from '@ermis-network/ermis-chat-react';
+import { Dropdown, getUserDisplayName } from '@ermis-network/ermis-chat-react';
 import type { ChannelInfoMemberItemProps } from '@ermis-network/ermis-chat-react';
 import { CHANNEL_ROLES } from '@ermis-network/ermis-chat-react';
 import { MoreVertical, Shield, UserCheck, ShieldAlert, ShieldPlus, ShieldMinus, UserX, Trash2 } from 'lucide-react';
@@ -30,6 +30,7 @@ export const UhmMemberItem: React.FC<UhmMemberItemProps> = React.memo(({
   const isOwner = role === CHANNEL_ROLES.OWNER;
   const isModer = role === CHANNEL_ROLES.MODERATOR;
   const isPending = role === CHANNEL_ROLES.PENDING;
+  const displayName = getUserDisplayName(member.user, member.user?.id || member.user_id);
 
   const roleLabel = (roleLabels && roleLabels[role]) ||
     (isOwner ? t('roles.owner') :
@@ -46,14 +47,14 @@ export const UhmMemberItem: React.FC<UhmMemberItemProps> = React.memo(({
     >
       <AvatarComponent
         image={member.user?.avatar}
-        name={member.user?.name || member.user?.id}
+        name={displayName}
         size={36}
       />
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-            {member.user?.name || member.user?.id}
+            {displayName}
           </span>
           {isOwner && (
             <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />

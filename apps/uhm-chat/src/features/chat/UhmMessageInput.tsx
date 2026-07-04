@@ -7,6 +7,7 @@ import {
   ReplyPreview,
   buildUserMap,
   getMentionHtml,
+  getUserDisplayName,
   replaceMentionsForPreview,
   useBannedState,
   useBlockedState,
@@ -223,7 +224,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       for (const [id, memberVal] of Object.entries(stateMembers)) {
         list.push({
           id,
-          name: memberVal?.user?.name || memberVal?.user_id || id,
+          name: getUserDisplayName(memberVal?.user, memberVal?.user_id || id),
           avatar: memberVal?.user?.avatar,
         });
       }

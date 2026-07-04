@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, X, Loader2, ArrowLeft } from 'lucide-react';
-import { useMessageSearch, HighlightedText, replaceMentionsForPreview, formatRelativeDate } from '@ermis-network/ermis-chat-react';
+import { useMessageSearch, HighlightedText, replaceMentionsForPreview, formatRelativeDate, getUserDisplayName } from '@ermis-network/ermis-chat-react';
 import type { MessageSearchPanelProps } from '@ermis-network/ermis-chat-react';
 import { useChatClient } from '@ermis-network/ermis-chat-react';
 
@@ -13,7 +13,7 @@ export const UhmMessageSearchPanel: React.FC<MessageSearchPanelProps> = ({
   debounceMs = 500,
 }) => {
   const { t } = useTranslation();
-  const { setJumpToMessageId } = useChatClient();
+  const { setJumpToMessageId, client } = useChatClient();
   const {
     query,
     setQuery: _setQuery,
@@ -103,6 +103,8 @@ export const UhmMessageSearchPanel: React.FC<MessageSearchPanelProps> = ({
 
         {/* Results */}
         {!loading && results.map((msg) => {
+          const userId = msg.user_id || msg.user?.id || '';
+          const displayName = getUserDisplayName(msg.user, userId, userId ? client?.state?.users?.[userId] : undefined);
           let parsedText = '';
           if (msg.text) {
             parsedText = replaceMentionsForPreview(msg.text, msg as any, userMaps.original);
@@ -126,14 +128,14 @@ export const UhmMessageSearchPanel: React.FC<MessageSearchPanelProps> = ({
               {AvatarComponent && (
                 <AvatarComponent
                   image={msg.user?.avatar || msg.user?.image || msg.user?.avatar_url}
-                  name={msg.user?.name || msg.user_id}
+                  name={displayName}
                   size={36}
                 />
               )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-                    {msg.user?.name || msg.user_id || 'Unknown'}
+                    {displayName || 'Unknown'}
                   </span>
                   <span className="text-[11px] text-zinc-500 whitespace-nowrap">
                     {msg.created_at ? formatRelativeDate(msg.created_at) : ''}

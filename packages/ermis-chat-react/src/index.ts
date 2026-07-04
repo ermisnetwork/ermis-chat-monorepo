@@ -91,6 +91,7 @@ export {
   getDateKey,
   formatDateLabel,
   getMessageUserId,
+  getUserDisplayName,
   replaceMentionsForPreview,
   getLastMessagePreview,
   buildUserMap,
