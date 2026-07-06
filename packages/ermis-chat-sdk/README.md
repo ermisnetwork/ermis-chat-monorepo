@@ -58,9 +58,13 @@ Self-host mode omits `api_key` from the WebSocket URL and does not require SDK c
 <details>
 <summary>Change log</summary>
 
-- `2026-07-04`: Switched SDK auth/profile calls from legacy `/uss/v1` to `ermis_end_user` `/v1`.
+- `2026-07-06`: Restored the USS `/uss/v1` prefix for SDK auth/profile calls.
+  - Reason: the `ermis_end_user` backend contract keeps USS routes under `/uss/v1`.
+  - Integrator action: set `userBaseURL`/auth `baseURL` to the root host, `/v1`, or `/uss/v1`; the SDK normalizes these inputs to `/uss/v1`.
+  - Compatibility/default: bare `/v1` end-user inputs are mapped to `/uss/v1`; Bellboy chat/E2EE routes are unchanged.
+- `2026-07-04`: Switched SDK auth/profile calls to targeted `ermis_end_user` v1 APIs.
   - Reason: v1 exposes targeted user lookup, batch lookup, search, profile update, avatar upload, and auth routes without unrestricted user enumeration.
-  - Integrator action: set `userBaseURL`/auth `baseURL` to the root host or `/v1`; legacy `/uss/v1` input is normalized to `/v1`.
+  - Integrator action: use the targeted auth/users/profile methods instead of unrestricted listing or profile SSE.
   - Compatibility/default: `queryUsers`, `syncUserCache`, profile SSE, wallet auth, client-side `external_auth`, and `about_me` updates now throw explicit unsupported errors.
 - `2026-07-04`: Added SDK-managed access-token refresh using v1 `refresh_token`.
   - Reason: `/auth/otp/verify` and other v1 auth responses can return short-lived access tokens plus refresh tokens.
@@ -76,7 +80,7 @@ Self-host mode omits `api_key` from the WebSocket URL and does not require SDK c
 - User APIs call `/users/:id`, `/users/batch`, `/users/search`, `/users/me`, and `/users/me/avatar` with Bearer auth and without `project_id` query/body decoration.
 - `searchUsers(query, limit)` is the preferred overload. The legacy `searchUsers(page, page_size, name)` overload maps to `q=name&limit=page_size` and ignores `page`.
 - The SDK no longer preloads all users after `connectUser()`. Browser cache hydration remains local-only, and cache entries are refreshed by `queryUser`, `getBatchUsers`, `searchUsers`, message/member enrichment, `updateProfile`, and `uploadAvatar`.
-- For external auth, exchange the external identity through a trusted backend calling `/v1/auth/external`, then pass the returned `access_token` to `connectUser(user, access_token)`.
+- For external auth, exchange the external identity through a trusted backend calling `/uss/v1/auth/external`, then pass the returned `access_token` to `connectUser(user, access_token)`.
 
 <details>
 <summary>Implementation progress</summary>

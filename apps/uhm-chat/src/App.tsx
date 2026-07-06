@@ -51,7 +51,7 @@ const chatClientOptions: ErmisChatOptions = {
     filter: { type: ['messaging', 'team'] },
     options: { message_limit: 1 },
   },
-  userBaseURL: API_DEFAULTS.USS_BASE_URL,
+  ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
   refreshToken: getStoredRefreshToken,
   onTokenRefresh: ({ token, refresh_token }) => {
     if (typeof window === 'undefined') return;

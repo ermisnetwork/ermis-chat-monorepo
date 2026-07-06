@@ -37,7 +37,7 @@ export const END_USER_V1_UNSUPPORTED_SSE =
   'ermis_end_user v1 does not support user profile SSE. Profile updates are refreshed through queryUser, searchUsers, getBatchUsers, updateProfile, and uploadAvatar.';
 
 export const END_USER_V1_UNSUPPORTED_EXTERNAL_AUTH =
-  'ermis_end_user v1 does not support client-side external_auth token exchange. Call /v1/auth/external from a trusted backend, then pass the returned access_token to connectUser().';
+  'ermis_end_user v1 does not support client-side external_auth token exchange. Call /uss/v1/auth/external from a trusted backend, then pass the returned access_token to connectUser().';
 
 export const END_USER_V1_UNSUPPORTED_WALLET = 'ermis_end_user v1 does not support wallet authentication.';
 
@@ -49,15 +49,15 @@ export function normalizeEndUserV1BaseURL(input: string): string {
     throw new Error('End-user API base URL is required');
   }
   if (/\/uss\/v1$/i.test(trimmed)) {
-    return trimmed.replace(/\/uss\/v1$/i, '/v1');
+    return trimmed;
   }
   if (/\/v1$/i.test(trimmed)) {
-    return trimmed;
+    return trimmed.replace(/\/v1$/i, '/uss/v1');
   }
   if (/\/v\d+$/i.test(trimmed)) {
     return trimmed;
   }
-  return `${trimmed}/v1`;
+  return `${trimmed}/uss/v1`;
 }
 
 function decodeJwtPayload(token?: string): Record<string, unknown> | undefined {

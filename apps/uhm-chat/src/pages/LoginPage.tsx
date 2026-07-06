@@ -22,11 +22,11 @@ function createAuthProvider() {
   return API_DEFAULTS.SELF_HOSTED
     ? new ErmisAuthProvider({
         baseURL: API_DEFAULTS.BASE_URL,
-        userBaseURL: API_DEFAULTS.USS_BASE_URL,
+        ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
         selfHosted: true,
       })
     : new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL, {
-        userBaseURL: API_DEFAULTS.USS_BASE_URL,
+        ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
       })
 }
 

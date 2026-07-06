@@ -13,7 +13,7 @@ import { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
 const chatClient = ErmisChat.getInstance({
   baseURL: 'https://chat.example.com',
-  userBaseURL: 'https://users.example.com/v1',
+  userBaseURL: 'https://users.example.com/uss/v1',
   selfHosted: true,
   refreshToken: () => localStorage.getItem('refresh_token'),
   onTokenRefresh: ({ token, refresh_token }) => {
@@ -26,7 +26,7 @@ const chatClient = ErmisChat.getInstance({
 });
 ```
 
-`userBaseURL` may be a root host, `/v1`, or legacy `/uss/v1`; the SDK normalizes it to `/v1` for `ermis_end_user` calls.
+`userBaseURL` may be a root host, `/v1`, or `/uss/v1`; the SDK normalizes it to `/uss/v1` for `ermis_end_user` calls.
 
 ### `ErmisChatOptions` Reference
 
@@ -67,7 +67,7 @@ Authenticated HTTP requests automatically refresh once on 401/token-expired resp
 
 ### External Authentication
 
-`connectUser(user, externalToken, true)` is unsupported in v1. A trusted backend should call `/v1/auth/external`, then the browser calls:
+`connectUser(user, externalToken, true)` is unsupported in v1. A trusted backend should call `/uss/v1/auth/external`, then the browser calls:
 
 ```typescript
 await chatClient.connectUser({ id: user_id }, access_token);

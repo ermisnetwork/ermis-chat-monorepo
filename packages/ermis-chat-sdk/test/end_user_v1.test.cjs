@@ -43,10 +43,10 @@ async function makeClient(token = 'user-token') {
 }
 
 test('normalizes end-user v1 base URLs without rewriting future versions', () => {
-  assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network/'), 'https://api.ermis.network/v1');
-  assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network/v1/'), 'https://api.ermis.network/v1');
-  assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network/uss/v1/'), 'https://api.ermis.network/v1');
-  assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network:8080/v1'), 'https://api.ermis.network:8080/v1');
+  assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network/'), 'https://api.ermis.network/uss/v1');
+  assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network/v1/'), 'https://api.ermis.network/uss/v1');
+  assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network/uss/v1/'), 'https://api.ermis.network/uss/v1');
+  assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network:8080/v1'), 'https://api.ermis.network:8080/uss/v1');
   assert.equal(normalizeEndUserV1BaseURL('https://api.ermis.network/v2'), 'https://api.ermis.network/v2');
 });
 
@@ -70,10 +70,10 @@ test('auth provider sends v1 auth bodies without apikey and adds compatibility a
   assert.deepEqual(
     calls.map((call) => call.url),
     [
-      'https://api.example.test/v1/auth/otp/request',
-      'https://api.example.test/v1/auth/otp/request',
-      'https://api.example.test/v1/auth/otp/verify',
-      'https://api.example.test/v1/auth/google',
+      'https://api.example.test/uss/v1/auth/otp/request',
+      'https://api.example.test/uss/v1/auth/otp/request',
+      'https://api.example.test/uss/v1/auth/otp/verify',
+      'https://api.example.test/uss/v1/auth/google',
     ],
   );
   assert.deepEqual(calls[0].data, { identifier: '+84900000000', language: 'en', method: 'sms' });
@@ -104,7 +104,7 @@ test('refreshNewToken uses /auth/refresh without Bearer auth', async () => {
 
   const response = await client.refreshNewToken('refresh-token');
 
-  assert.equal(call.url, 'https://users.example.test/v1/auth/refresh');
+  assert.equal(call.url, 'https://users.example.test/uss/v1/auth/refresh');
   assert.deepEqual(call.data, { refresh_token: 'refresh-token' });
   assert.equal(call.config.headers.Authorization, undefined);
   assert.equal(response.success, true);
@@ -156,7 +156,7 @@ test('authenticated requests refresh expired access token and retry once', async
   assert.deepEqual(response, { ok: true });
   assert.equal(getCalls.length, 2);
   assert.equal(refreshCalls.length, 1);
-  assert.equal(refreshCalls[0].url, 'https://users.example.test/v1/auth/refresh');
+  assert.equal(refreshCalls[0].url, 'https://users.example.test/uss/v1/auth/refresh');
   assert.deepEqual(refreshCalls[0].data, { refresh_token: 'refresh-token' });
   assert.equal(refreshCalls[0].config.headers.Authorization, undefined);
   assert.equal(getCalls[0].config.headers.Authorization, 'Bearer old-token');
@@ -181,7 +181,7 @@ test('queryUser uses Bearer auth, no project_id, and normalizes v1 user fields',
 
   const user = await client.queryUser('user-1');
 
-  assert.equal(call.url, 'https://users.example.test/v1/users/user-1');
+  assert.equal(call.url, 'https://users.example.test/uss/v1/users/user-1');
   assert.equal(call.config.headers.Authorization, 'Bearer user-token');
   assert.equal(call.config.params.project_id, undefined);
   assert.equal(user.name, 'Alice');
@@ -209,7 +209,7 @@ test('getBatchUsers de-dupes IDs, chunks by 100, and omits project_id', async ()
     [100, 100, 5],
   );
   assert.equal(
-    calls.every((call) => call.url === 'https://users.example.test/v1/users/batch'),
+    calls.every((call) => call.url === 'https://users.example.test/uss/v1/users/batch'),
     true,
   );
   assert.equal(
@@ -254,7 +254,7 @@ test('updateProfile maps v1 profile fields and rejects about_me', async () => {
 
   const user = await client.updateProfile({ name: 'Renamed', avatar: 'https://cdn.example.test/me.png' });
 
-  assert.equal(call.url, 'https://users.example.test/v1/users/me');
+  assert.equal(call.url, 'https://users.example.test/uss/v1/users/me');
   assert.deepEqual(call.data, { display_name: 'Renamed', avatar_url: 'https://cdn.example.test/me.png' });
   assert.equal(call.config.headers.Authorization, 'Bearer user-token');
   assert.equal(user.name, 'Renamed');
@@ -272,7 +272,7 @@ test('uploadAvatar posts multipart form to /users/me/avatar and normalizes full 
   const file = new Blob(['avatar-bytes'], { type: 'image/png' });
   const user = await client.uploadAvatar(file);
 
-  assert.equal(call.url, 'https://users.example.test/v1/users/me/avatar');
+  assert.equal(call.url, 'https://users.example.test/uss/v1/users/me/avatar');
   assert.equal(call.config.headers.Authorization, 'Bearer user-token');
   assert.equal(typeof call.data.get, 'function');
   assert.equal(user.name, 'Avatar User');

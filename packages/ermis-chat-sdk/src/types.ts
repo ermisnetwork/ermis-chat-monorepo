@@ -258,7 +258,7 @@ export type ErmisChatOptions = AxiosRequestConfig & {
   allowServerSideConnect?: boolean;
   axiosRequestConfig?: AxiosRequestConfig;
   /**
-   * Base URL for ermis_end_user API. Root host, /v1, and legacy /uss/v1 inputs normalize to /v1.
+   * Base URL for ermis_end_user API. Root host, /v1, and /uss/v1 inputs normalize to /uss/v1.
    */
   userBaseURL?: string;
   browser?: boolean;

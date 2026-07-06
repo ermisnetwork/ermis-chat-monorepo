@@ -107,7 +107,7 @@ Some legacy SDK methods now throw normal JavaScript `Error` objects before makin
 | `queryUsers()`                   | Throws; use `searchUsers(query, limit)`, `queryUser(id)`, or `getBatchUsers(ids)`. |
 | `syncUserCache()`                | Throws; `connectUser()` no longer schedules full user-list preload.                |
 | `connectToSSE()`                 | Throws; profile SSE is not supported.                                              |
-| `connectUser(user, token, true)` | Throws; exchange external auth on a trusted backend through `/v1/auth/external`.   |
+| `connectUser(user, token, true)` | Throws; exchange external auth on a trusted backend through `/uss/v1/auth/external`. |
 | Wallet challenge/signature auth  | Throws; wallet auth is not exposed by v1.                                          |
 | `updateProfile({ about_me })`    | Throws; v1 supports profile display/avatar fields, not `about_me`.                 |
 

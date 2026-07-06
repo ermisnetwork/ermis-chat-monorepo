@@ -43,7 +43,7 @@ await chatClient.connectUser(user, 'ERMIS_USER_TOKEN');
 
 #### Option B: External Authentication
 
-Use this when your application has its own backend and user system. In `ermis_end_user` v1, the browser SDK does not exchange external tokens directly. Your trusted backend calls `/v1/auth/external`, then returns the Ermis `access_token` and `user_id` to the browser.
+Use this when your application has its own backend and user system. In `ermis_end_user` v1, the browser SDK does not exchange external tokens directly. Your trusted backend calls `/uss/v1/auth/external`, then returns the Ermis `access_token` and `user_id` to the browser.
 
 ```typescript
 const { user_id, access_token } = await yourBackend.exchangeExternalToken(appToken);

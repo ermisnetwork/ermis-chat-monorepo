@@ -17,7 +17,7 @@ export const API_DEFAULTS = {
   API_KEY: import.meta.env.VITE_API_KEY || '',
   PROJECT_ID: import.meta.env.VITE_CHAT_PROJECT_ID || '',
   BASE_URL: import.meta.env.VITE_API_URL || 'https://api-trieve.ermis.network',
-  USS_BASE_URL: import.meta.env.VITE_USS_API_URL || 'https://api-trieve.ermis.network/v1',
+  USS_BASE_URL: import.meta.env.VITE_USS_API_URL || undefined,
 } as const;
 
 export const OTP_CONFIG = {

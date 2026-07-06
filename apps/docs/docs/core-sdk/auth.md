@@ -4,13 +4,13 @@ sidebar_position: 2
 
 # Authentication
 
-`ErmisAuthProvider` talks to `ermis_end_user` v1. The constructor accepts a root host, `/v1`, or legacy `/uss/v1` URL and normalizes it to `/v1`.
+`ErmisAuthProvider` talks to `ermis_end_user` v1. The constructor accepts a root host, `/v1`, or `/uss/v1` URL and normalizes it to `/uss/v1`.
 
 ```typescript
 import { ErmisAuthProvider } from '@ermis-network/ermis-chat-sdk';
 
 const authProvider = new ErmisAuthProvider({
-  baseURL: 'https://api.example.com/v1',
+  baseURL: 'https://api.example.com/uss/v1',
   selfHosted: true,
 });
 ```
@@ -53,7 +53,7 @@ The provider calls `POST /auth/google` with `{ token }`.
 
 ## External Authentication
 
-Client-side `connectUser(user, token, true)` is not supported in `ermis_end_user` v1. Exchange external identity from a trusted backend by calling `/v1/auth/external`, then pass the returned `access_token` to the client:
+Client-side `connectUser(user, token, true)` is not supported in `ermis_end_user` v1. Exchange external identity from a trusted backend by calling `/uss/v1/auth/external`, then pass the returned `access_token` to the client:
 
 ```typescript
 const { user_id, access_token } = await yourBackend.exchangeExternalToken(appToken);
