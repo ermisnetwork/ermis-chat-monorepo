@@ -47,7 +47,7 @@ git commit -m "feat: cập nhật siêu xịn"
 git push
 ```
 
-### 4. Publish thủ công cả 2 packages cùng lúc
+### 4. Publish thủ công cả 2 packages
 
 Nếu cần publish từ máy local thay vì đợi Github Actions, dùng script:
 
@@ -56,11 +56,28 @@ yarn publish:packages --dry-run
 yarn publish:packages --yes
 ```
 
-Script này build SDK/React, chạy `npm pack --dry-run`, kiểm tra `@ermis-network/ermis-chat-react` đang phụ thuộc đúng version `@ermis-network/ermis-chat-sdk`, kiểm tra version chưa tồn tại trên NPM, rồi chạy `npm publish` cho cả hai package song song. Có thể truyền OTP hoặc tag:
+Script này build SDK/React, chạy `npm pack --dry-run`, kiểm tra `@ermis-network/ermis-chat-react` đang phụ thuộc đúng version `@ermis-network/ermis-chat-sdk`, rồi publish tuần tự: SDK trước, đợi NPM registry nhìn thấy SDK cùng version, sau đó publish React. Script có thể resume: nếu SDK version đã tồn tại nhưng React chưa tồn tại, nó sẽ bỏ qua SDK và publish React. Có thể truyền tag:
 
 ```bash
-yarn publish:packages --tag beta --otp 123456 --yes
+yarn publish:packages --tag beta --yes
 ```
+
+Nếu tài khoản NPM bật web-based 2FA, vẫn dùng lệnh trên và không cần truyền OTP. Ở mỗi bước `npm publish`, terminal sẽ yêu cầu bấm Enter để mở browser; xác thực xong ở browser thì tiến trình quay lại terminal và tiếp tục package kế tiếp.
+
+Nếu tài khoản NPM dùng mã OTP 6 số thay vì browser verification, có thể truyền OTP riêng cho từng package:
+
+```bash
+yarn publish:packages --otp-sdk 111111 --otp-react 222222 --yes
+```
+
+Hoặc publish từng package riêng nếu muốn tự kiểm soát từng bước:
+
+```bash
+yarn publish:sdk --yes
+yarn publish:react --yes
+```
+
+Luồng này publish SDK trước. Lệnh publish React sẽ kiểm tra SDK cùng version đã tồn tại trên NPM, để dependency `@ermis-network/ermis-chat-sdk` không trỏ tới version chưa publish.
 
 ### 5. Tự động hóa Github Actions
 Sau khi code được đẩy thẳng lên `main` (hoặc sau khi được chốt Merge Pull Request vào `main`):
@@ -74,3 +91,5 @@ Vậy là xong! Phiên bản mới đã xuất hiện trên NPM. Mọi thứ r�
 ## Change log
 
 - `2026-07-03`: Added `scripts/publish-packages.sh` and `yarn publish:packages` for local parallel publishing of `@ermis-network/ermis-chat-sdk` and `@ermis-network/ermis-chat-react`.
+- `2026-07-06`: Added `scripts/publish-one-package.sh`, `yarn publish:sdk`, and `yarn publish:react` for sequential 2FA-friendly local publishing.
+- `2026-07-06`: Changed `scripts/publish-packages.sh` to publish SDK then React sequentially, wait for SDK registry propagation, and resume when SDK already exists but React is still missing.
