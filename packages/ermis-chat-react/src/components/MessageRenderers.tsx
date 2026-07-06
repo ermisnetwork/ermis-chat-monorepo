@@ -534,7 +534,7 @@ export const AttachmentList: React.FC<{ attachments?: Attachment[] }> = React.me
  * Detect URLs and emails in plain text, wrapping them in <a> tags.
  * Returns an array of React nodes (strings and link elements).
  */
-const URL_REGEX = /(https?:\/\/[^\s<>]+|www\.[^\s<>]+|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g;
+const URL_REGEX = /(https?:\/\/[^\s<>]+?|www\.[^\s<>]+?|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?=[.,!?:;"']*(?:\s|<|>|$))/g;
 
 function linkifyText(text: string, keyPrefix: string): React.ReactNode[] {
   const parts = text.split(URL_REGEX);
