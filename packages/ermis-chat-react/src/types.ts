@@ -1355,6 +1355,7 @@ export type ChannelInfoActionsProps = {
   onLeaveChannel?: () => void;
   onDeleteChannel?: () => void;
   onTruncateChannel?: () => void;
+  onTruncateChannelForMe?: () => void;
   onBlockUser?: () => void;
   onUnblockUser?: () => void;
   onPin?: () => void;
@@ -1369,6 +1370,7 @@ export type ChannelInfoActionsProps = {
   settingsLabel?: string;
   deleteLabel?: string;
   truncateLabel?: string;
+  truncateForMeLabel?: string;
   leaveLabel?: string;
   blockLabel?: string;
   unblockLabel?: string;
@@ -1611,6 +1613,7 @@ export type ChannelInfoProps = {
   actionsSettingsLabel?: string;
   actionsDeleteLabel?: string;
   actionsTruncateLabel?: string;
+  actionsTruncateForMeLabel?: string;
   actionsLeaveLabel?: string;
   actionsPinLabel?: string;
   actionsUnpinLabel?: string;
@@ -1622,6 +1625,7 @@ export type ChannelInfoProps = {
   onLeaveChannel?: () => void;
   onDeleteChannel?: () => void;
   onTruncateChannel?: (channel: Channel) => void;
+  onTruncateChannelForMe?: (channel: Channel) => void;
   onPinChannel?: () => void;
   onUnpinChannel?: () => void;
   onAddMemberClick?: () => void;

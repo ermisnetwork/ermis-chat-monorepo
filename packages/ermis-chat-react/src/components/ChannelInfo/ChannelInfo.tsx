@@ -240,6 +240,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     actionsSettingsLabel,
     actionsDeleteLabel,
     actionsTruncateLabel,
+    actionsTruncateForMeLabel,
     actionsLeaveLabel,
     actionsCreateTopicLabel,
     MemberItemComponent,
@@ -252,6 +253,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     onLeaveChannel: onLeaveChannelProp,
     onDeleteChannel: onDeleteChannelProp,
     onTruncateChannel: onTruncateChannelProp,
+    onTruncateChannelForMe: onTruncateChannelForMeProp,
     onDeleteTopic: onDeleteTopicProp,
     onCreateTopic: onCreateTopicProp,
     onAddMemberClick,
@@ -618,6 +620,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 onLeaveChannel={handleLeaveChannel}
                 onDeleteChannel={handleDeleteChannel}
                 onTruncateChannel={onTruncateChannelProp ? () => onTruncateChannelProp(channel) : undefined}
+                onTruncateChannelForMe={onTruncateChannelForMeProp ? () => onTruncateChannelForMeProp(channel) : undefined}
                 onBlockUser={handleBlockUser}
                 onUnblockUser={handleUnblockUser}
                 onPin={handlePinChannel}
@@ -644,6 +647,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 settingsLabel={actionsSettingsLabel}
                 deleteLabel={actionsDeleteLabel}
                 truncateLabel={actionsTruncateLabel}
+                truncateForMeLabel={actionsTruncateForMeLabel}
                 leaveLabel={actionsLeaveLabel}
                 blockLabel={actionsBlockLabel}
                 unblockLabel={actionsUnblockLabel}

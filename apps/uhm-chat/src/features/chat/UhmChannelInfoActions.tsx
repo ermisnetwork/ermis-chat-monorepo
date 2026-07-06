@@ -18,6 +18,7 @@ import {
   RotateCw,
   Loader2,
   ShieldAlert,
+  Eraser,
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -81,6 +82,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     onLeaveChannel,
     onDeleteChannel,
     onTruncateChannel,
+    onTruncateChannelForMe,
     onBlockUser,
     onUnblockUser,
     onPin,
@@ -100,6 +102,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     settingsLabel,
     deleteLabel,
     truncateLabel,
+    truncateForMeLabel,
     leaveLabel,
     blockLabel,
     unblockLabel,
@@ -308,17 +311,19 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
             </>
           )}
 
-          {/* Block/Unblock & Truncate Actions (1-1 messaging only) */}
+          {/* Clear history for everyone (DM + Group, not topic) */}
+          {!isTopic && onTruncateChannel && (
+            <ActionItem
+              onClick={() => handleActionWithConfirm('truncate', onTruncateChannel)}
+              icon={Trash2}
+              label={truncateLabel || t('actions.truncate_channel')}
+              danger
+            />
+          )}
+
+          {/* Block/Unblock Actions (1-1 messaging only) */}
           {!isTeamChannel && !isTopic && (
             <>
-              {onTruncateChannel && (
-                <ActionItem
-                  onClick={() => handleActionWithConfirm('truncate', onTruncateChannel)}
-                  icon={Trash2}
-                  label={truncateLabel || t('actions.truncate_channel')}
-                  danger
-                />
-              )}
               {isBlocked ? (
                 <ActionItem
                   onClick={() => handleActionWithConfirm('unblock', onUnblockUser)}
@@ -334,6 +339,16 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
                 />
               )}
             </>
+          )}
+
+          {/* Clear my history (all channel types except topics) */}
+          {!isTopic && onTruncateChannelForMe && (
+            <ActionItem
+              onClick={() => handleActionWithConfirm('truncate_for_me', onTruncateChannelForMe)}
+              icon={Eraser}
+              label={truncateForMeLabel || t('actions.truncate_channel_for_me')}
+              danger
+            />
           )}
 
           {/* Create Topic Action (Team Channels only) */}

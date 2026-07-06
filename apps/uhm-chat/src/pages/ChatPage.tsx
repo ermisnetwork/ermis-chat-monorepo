@@ -477,7 +477,17 @@ export function ChatPage() {
       toast.success(t('chat.history_cleared', 'History cleared'));
     } catch (err) {
       console.error('Failed to truncate channel', err)
-      toast.error('Failed to clear history');
+      toast.error(t('chat.history_clear_failed', 'Failed to clear history'));
+    }
+  }, [t])
+
+  const handleTruncateChannelForMe = useCallback(async (channel: ChannelType) => {
+    try {
+      await channel.truncate({ for_me: true })
+      toast.success(t('chat.history_cleared', 'History cleared'));
+    } catch (err) {
+      console.error('Failed to clear history for me', err)
+      toast.error(t('chat.history_clear_failed', 'Failed to clear history'));
     }
   }, [t])
 
@@ -931,12 +941,12 @@ export function ChatPage() {
         </div>
 
         {/* Contacts Panel — absolute overlay that slides over everything */}
-        <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'contacts' ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className={`absolute inset-0 z-20 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'contacts' ? 'translate-x-0' : 'translate-x-full'}`}>
           <ContactsPanel onBack={() => setActivePanel('channels')} />
         </div>
 
         {/* Invites Panel — absolute overlay that slides over everything */}
-        <div className={`absolute inset-0 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'invites' ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className={`absolute inset-0 z-20 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'invites' ? 'translate-x-0' : 'translate-x-full'}`}>
           <InvitesPanel onBack={() => setActivePanel('channels')} />
         </div>
       </div>
@@ -1074,12 +1084,14 @@ export function ChatPage() {
               actionsUnblockLabel={t('actions.unblock_user')}
               actionsDeleteLabel={t('actions.delete_channel')}
               actionsTruncateLabel={t('actions.truncate_channel')}
+              actionsTruncateForMeLabel={t('actions.truncate_channel_for_me')}
               actionsLeaveLabel={t('actions.leave_channel')}
               actionsCloseTopicLabel={t('actions.close_topic')}
               actionsReopenTopicLabel={t('actions.reopen_topic')}
               actionsDeleteTopicLabel={t('actions.delete_topic')}
               actionsCreateTopicLabel={t('actions.create_topic')}
               onTruncateChannel={handleTruncateChannel}
+              onTruncateChannelForMe={handleTruncateChannelForMe}
               onCreateTopic={openCreateTopicModal}
               roleLabels={roleLabels}
             />

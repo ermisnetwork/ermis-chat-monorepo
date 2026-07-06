@@ -605,8 +605,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async truncate(options?: { for_me?: boolean }) {
-    const qs = options?.for_me ? '?for_me=true' : '';
-    const response = await this.getClient().delete(this._channelURL() + '/chat' + qs);
+    // for_me: always DELETE /truncate?for_me=true
+    // DM (messaging): DELETE /chat
+    // Group (team): DELETE /truncate
+    let path: string;
+    if (options?.for_me) {
+      path = '/truncate?for_me=true';
+    } else if (this.type === 'messaging') {
+      path = '/chat';
+    } else {
+      path = '/truncate';
+    }
+    const response = await this.getClient().delete(this._channelURL() + path);
 
     // Dispatch local event so UI clears immediately
     const truncateDate = (response as any)?.channel?.truncated_at || new Date().toISOString();
@@ -2222,6 +2232,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           }
 
           channelState.members[event.member.user_id] = event.member;
+          // When a member accepts an invite, ensure their role is updated from "pending" to "member"
+          if (channelState.members[event.member.user_id]?.channel_role === 'pending') {
+            channelState.members[event.member.user_id].channel_role = 'member';
+          }
           channel.data = {
             ...channel.data,
             member_count: Number(channel.data?.member_count) + 1,

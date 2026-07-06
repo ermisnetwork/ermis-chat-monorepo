@@ -16,6 +16,8 @@ export const useChannelMembers = (channel: Channel | null | undefined) => {
     const sub6 = channel.on('member.banned', updateMembers);
     const sub7 = channel.on('member.unbanned', updateMembers);
     const sub8 = channel.on('notification.invite_rejected', updateMembers);
+    const sub9 = channel.on('notification.invite_accepted', updateMembers);
+    const sub10 = channel.on('member.joined', updateMembers);
 
     return () => {
       sub1.unsubscribe();
@@ -26,6 +28,8 @@ export const useChannelMembers = (channel: Channel | null | undefined) => {
       sub6.unsubscribe();
       sub7.unsubscribe();
       sub8.unsubscribe();
+      sub9.unsubscribe();
+      sub10.unsubscribe();
     };
   }, [channel]);
 
