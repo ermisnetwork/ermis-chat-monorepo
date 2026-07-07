@@ -19,6 +19,67 @@ The official core SDK for Ermis Chat.
 - Deep imports from `@ermis-network/ermis-chat-sdk/src/*` are intentionally unsupported. The package publishes `dist/` and runtime assets from `public/`, not TypeScript source files.
 - Apps using OpenMLS must publish `openmls_wasm_bg.wasm` with their web assets. The SDK package includes this binary under `public/openmls_wasm_bg.wasm`; `loadOpenMlsWasm('/openmls_wasm_bg.wasm')` loads the bundled JS glue and that public binary.
 
+## Release Channels And NPM Tags
+
+### Mechanism
+
+Ermis keeps multiple SDK lines available when backend API contracts are different. The source branch, Git tag, npm version, and npm dist-tag each have a different job:
+
+- Git branches hold ongoing source work for each SDK line.
+- Git tags mark immutable source snapshots for released versions.
+- NPM versions are immutable package artifacts; the same `name@version` cannot be published twice.
+- NPM dist-tags are movable aliases that let consumers install the right SDK line without memorizing exact versions.
+
+### Current Channels
+
+Current public channels:
+
+| Channel        | Source branch       | Purpose                                                                                       |
+| -------------- | ------------------- | --------------------------------------------------------------------------------------------- |
+| `latest`       | `feat/self-host`    | Default SDK line, currently the self-host/Bellboy SDK.                                        |
+| `self-host`    | `feat/self-host`    | Explicit channel for the new self-host SDK line.                                              |
+| `user-service` | `uhm-chat-dev-e2ee` | Legacy line for apps that still depend on the old `ermis_end_user` user-service API contract. |
+
+### Install By Channel
+
+Install the self-host line:
+
+```bash
+npm install @ermis-network/ermis-chat-sdk@self-host
+npm install @ermis-network/ermis-chat-react@self-host
+```
+
+Install the user-service line:
+
+```bash
+npm install @ermis-network/ermis-chat-sdk@user-service
+npm install @ermis-network/ermis-chat-react@user-service
+```
+
+Always install SDK and React from the same channel/version. Do not mix `@ermis-network/ermis-chat-sdk@self-host` with `@ermis-network/ermis-chat-react@user-service`, or the React package can call SDK APIs from a different backend contract.
+
+### Publish By Channel
+
+Publish the self-host line:
+
+```bash
+git switch feat/self-host
+yarn bump
+yarn publish:packages --tag self-host --yes
+npm dist-tag add @ermis-network/ermis-chat-sdk@<version> latest
+npm dist-tag add @ermis-network/ermis-chat-react@<version> latest
+```
+
+Publish the user-service line:
+
+```bash
+git switch uhm-chat-dev-e2ee
+yarn bump
+yarn publish:packages --tag user-service --yes
+```
+
+Do not point `latest` at the `user-service` line unless you intentionally want the legacy backend contract to become the default install target. If SDK publish succeeds but React publish fails, rerun `yarn publish:packages --tag <channel> --yes`; the publish script resumes by skipping package versions that already exist and continuing with the missing package.
+
 ## Client Configuration
 
 <details>
