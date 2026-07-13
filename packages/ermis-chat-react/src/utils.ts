@@ -247,7 +247,6 @@ export function isUserManagedAttachment(attachment: Attachment): boolean {
 
 /**
  * Lightweight in-memory image preloader.
- * Removes URLs from cache on error so failed loads can be retried.
  */
 const preloadedUrls = new Set<string>();
 const MAX_CACHE_SIZE = 500;
@@ -261,16 +260,7 @@ export function preloadImage(url: string): void {
   }
 
   const img = new Image();
-  img.onload = () => {
-    // Confirmed loaded — keep in cache
-    preloadedUrls.add(url);
-  };
-  img.onerror = () => {
-    // Remove from cache so the URL can be retried on next render
-    preloadedUrls.delete(url);
-  };
   img.src = url;
-  // Optimistically add; onerror will remove if it fails
   preloadedUrls.add(url);
 }
 
@@ -392,6 +382,12 @@ export function getLastMessagePreview(
 
   // Regular / other
   let displayText: React.ReactNode = rawText;
+  if (!displayText && isEncrypted) {
+    displayText =
+      (lastMsg as any).e2ee_status === 'failed'
+        ? (options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable')
+        : (options?.encryptedMessageLabel || 'Encrypted message');
+  }
   if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
     const att = lastMsg.attachments[0];
     const type = att.type || '';
@@ -418,23 +414,13 @@ export function getLastMessagePreview(
       }
     }
   }
-  if (!displayText && isEncrypted) {
-    displayText =
-      (lastMsg as any).e2ee_status === 'failed'
-        ? options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable'
-        : options?.encryptedMessageLabel || 'Encrypted message';
-  }
 
   // Format mentions if necessary
   const lastMsgRecord = lastMsg as any;
   const mentionedUsers = lastMsgRecord.mentioned_users as string[] | undefined;
   const mentionedAll = lastMsgRecord.mentioned_all as boolean | undefined;
 
-  if (
-    typeof displayText === 'string' &&
-    displayText &&
-    (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))
-  ) {
+  if (typeof displayText === 'string' && displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
     displayText = replaceMentionsForPreview(displayText, lastMsg as any, userMap);
   }
 

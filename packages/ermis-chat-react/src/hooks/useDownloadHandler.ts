@@ -27,27 +27,21 @@ export const useDownloadHandler = () => {
         window.URL.revokeObjectURL(urlBlob);
       }, 1000);
     } catch (err) {
-      // Fallback: trigger a direct download via <a> tag without opening a new tab.
-      // This keeps the user on the same page even when fetch-based download fails.
-      console.warn('Blob download failed, falling back to direct anchor download:', err);
-      try {
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = filename || 'file';
-        // Force download attribute — prevents navigation for same-origin URLs
-        a.target = '_self';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          if (document.body.contains(a)) {
-            document.body.removeChild(a);
-          }
-        }, 500);
-      } catch {
-        // Last resort: nothing we can do, just log
-        console.error('All download methods failed for:', url);
-      }
+      console.warn('Download via blob failed, falling back to direct link:', err);
+      // Fallback: use an <a> tag with download attribute instead of window.open
+      // This triggers a file download rather than navigating to a new tab
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename || 'file';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) {
+          document.body.removeChild(a);
+        }
+      }, 1000);
     }
   }, [client]);
 
