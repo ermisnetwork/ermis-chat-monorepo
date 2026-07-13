@@ -39,6 +39,13 @@ export type APIResponse = {
   duration?: string;
 };
 
+export type TokenRefreshAPIResponse = APIResponse & {
+  token: string;
+  refresh_token: string;
+  user_id?: string;
+  project_id?: string;
+};
+
 export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['channelType'] & {
     cid: string;
@@ -293,8 +300,12 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   online?: boolean;
   parent_id?: string;
   parent_cid?: string;
+  reason?: string;
   reaction?: ReactionResponse<ErmisChatGenerics>;
   received_at?: string | Date;
+  refresh_token?: string;
+  status?: number;
+  token?: string;
   unread_messages?: number;
   user?: UserResponse<ErmisChatGenerics>;
   user_id?: string;

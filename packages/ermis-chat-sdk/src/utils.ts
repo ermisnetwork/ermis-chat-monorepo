@@ -31,6 +31,7 @@ export function isFunction<T>(value: Function | T): value is Function {
 
 export const chatCodes = {
   TOKEN_EXPIRED: 40,
+  WS_TOKEN_EXPIRED: 4001,
   WS_CLOSED_SUCCESS: 1000,
 };
 

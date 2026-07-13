@@ -20,6 +20,7 @@ import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
   addFileToFormData,
   axiosParamsSerializer,
+  chatCodes,
   enrichWithUserInfo,
   ensureMembersUserInfoLoaded,
   getDirectChannelImage,
@@ -45,6 +46,7 @@ import {
   Logger,
   QueryChannelsAPIResponse,
   SendFileAPIResponse,
+  TokenRefreshAPIResponse,
   ErmisChatOptions,
   UserResponse,
   ContactResponse,
@@ -56,6 +58,15 @@ import {
 function isString(x: unknown): x is string {
   return typeof x === 'string' || x instanceof String;
 }
+
+type ConnectUserAuthOptions = {
+  refreshToken?: string | null;
+};
+
+type RefreshableAxiosOptions = AxiosRequestConfig & {
+  config?: AxiosRequestConfig & { maxBodyLength?: number };
+  _retriedWithRefresh?: boolean;
+};
 
 /**
  * The ErmisChat Client represents the connection securely established between your application
@@ -201,7 +212,64 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   }
 
   async refreshNewToken(refresh_token: string) {
-    return await this.post<APIResponse>(this.userBaseURL + '/refresh_token', { refresh_token });
+    return await this.post<TokenRefreshAPIResponse>(this.userBaseURL + '/refresh_token', { refresh_token });
+  }
+
+  private _isRefreshTokenRequest(url: string) {
+    return url.replace(/\/+$/, '').endsWith('/refresh_token');
+  }
+
+  private _shouldRefreshAuth(error: any, url: string, options: RefreshableAxiosOptions) {
+    if (options._retriedWithRefresh || this._isRefreshTokenRequest(url)) return false;
+    const status = error?.response?.status;
+    const code = error?.response?.data?.code;
+    return status === 401 || status === 403 || String(code) === String(chatCodes.TOKEN_EXPIRED);
+  }
+
+  private _dispatchRefreshFailed(error: unknown, reason = 'refresh_failed') {
+    const status = (error as any)?.response?.status || (error as any)?.status;
+    this.dispatchEvent({
+      type: 'auth.refresh_failed',
+      reason,
+      status,
+    } as Event<ErmisChatGenerics>);
+  }
+
+  async refreshAccessToken(): Promise<TokenRefreshAPIResponse> {
+    const existingPromise = this.tokenManager.refreshPromise as Promise<TokenRefreshAPIResponse> | null;
+    if (existingPromise) return existingPromise;
+
+    const refreshToken = this.tokenManager.getRefreshToken();
+    if (!refreshToken) {
+      const error = new Error('No refresh token available');
+      this._dispatchRefreshFailed(error, 'missing_refresh_token');
+      throw error;
+    }
+
+    const refreshPromise = this.refreshNewToken(refreshToken)
+      .then((response) => {
+        if (!response?.token || !response?.refresh_token) {
+          throw new Error('Refresh token response is missing token fields');
+        }
+        this.tokenManager.setTokens(response.token, response.refresh_token);
+        this.dispatchEvent({
+          type: 'auth.token_refreshed',
+          token: response.token,
+          refresh_token: response.refresh_token,
+          user_id: response.user_id,
+        } as Event<ErmisChatGenerics>);
+        return response;
+      })
+      .catch((error) => {
+        this._dispatchRefreshFailed(error);
+        throw error;
+      })
+      .finally(() => {
+        this.tokenManager.refreshPromise = null;
+      });
+
+    this.tokenManager.refreshPromise = refreshPromise;
+    return refreshPromise;
   }
 
   getAuthType() {
@@ -258,6 +326,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     user: UserResponse<ErmisChatGenerics>,
     userTokenOrProvider: string | null,
     external_auth?: boolean, // pass true if you are using external auth
+    authOptions: ConnectUserAuthOptions = {},
   ) => {
     this.logger('info', 'client:connectUser() - started', {
       tags: ['connection', 'client'],
@@ -326,7 +395,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.userID = connectionUser.id;
     await this._hydrateUserCacheFromStorage();
 
-    const setTokenPromise = this._setToken(connectionUser, connectionToken);
+    const setTokenPromise = this._setToken(connectionUser, connectionToken, authOptions);
     this._setUser(connectionUser);
     this._upsertUser(
       {
@@ -373,8 +442,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   setUser = this.connectUser;
 
-  _setToken = (user: UserResponse<ErmisChatGenerics>, userTokenOrProvider: string | null) =>
-    this.tokenManager.setTokenOrProvider(userTokenOrProvider, user);
+  _setToken = (
+    user: UserResponse<ErmisChatGenerics>,
+    userTokenOrProvider: string | null,
+    authOptions: ConnectUserAuthOptions = {},
+  ) => this.tokenManager.setTokenOrProvider(userTokenOrProvider, user, authOptions);
 
   _setUser(user: UserResponse<ErmisChatGenerics>) {
     this.user = { ...user };
@@ -633,13 +705,17 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       config?: AxiosRequestConfig & { maxBodyLength?: number };
     },
   ) {
+    const loggedData =
+      data && typeof data === 'object' && 'refresh_token' in data
+        ? { ...(data as Record<string, unknown>), refresh_token: '[REDACTED]' }
+        : data;
     this.logger(
       'info',
-      `client: ${type} - Request - ${url}- ${JSON.stringify(data)} - ${JSON.stringify(config.params)}`,
+      `client: ${type} - Request - ${url}- ${JSON.stringify(loggedData)} - ${JSON.stringify(config.params)}`,
       {
         tags: ['api', 'api_request', 'client'],
         url,
-        payload: data,
+        payload: loggedData,
         config,
       },
     );
@@ -669,9 +745,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     type: string,
     url: string,
     data?: unknown,
-    options: AxiosRequestConfig & {
-      config?: AxiosRequestConfig & { maxBodyLength?: number };
-    } = {},
+    options: RefreshableAxiosOptions = {},
   ): Promise<T> => {
     await this.tokenManager.tokenReady();
 
@@ -714,6 +788,19 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       this._logApiError(type, url, e, options);
       this.consecutiveFailures += 1;
       if (e.response) {
+        if (this._shouldRefreshAuth(e, url, options)) {
+          await this.refreshAccessToken();
+          const retryOptions: RefreshableAxiosOptions = {
+            ...options,
+            _retriedWithRefresh: true,
+            headers: {
+              ...(options.headers || {}),
+            },
+          };
+          delete (retryOptions.headers as Record<string, unknown>).Authorization;
+          delete (retryOptions.headers as Record<string, unknown>).authorization;
+          return await this.doAxiosRequest<T>(type, url, data, retryOptions);
+        }
         return this.handleResponse(e.response);
       } else {
         throw e as AxiosError<APIErrorResponse>;

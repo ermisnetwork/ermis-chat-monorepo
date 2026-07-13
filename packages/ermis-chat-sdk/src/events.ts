@@ -38,6 +38,8 @@ export const EVENT_MAP = {
   'user.watching.stop': true,
   'connection.changed': true,
   'connection.recovered': true,
+  'auth.token_refreshed': true,
+  'auth.refresh_failed': true,
   'capabilities.changed': true,
   'channel.topic.disabled': true,
   'channel.topic.enabled': true,
