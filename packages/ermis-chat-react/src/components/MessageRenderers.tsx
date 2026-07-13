@@ -22,22 +22,39 @@ import {
    Attachment renderers
    ---------------------------------------------------------- */
 const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment, onClick }) => {
-  const src = attachment.image_url || attachment.thumb_url || attachment.url;
+  const originalSrc = attachment.image_url || attachment.thumb_url || attachment.url;
   const thumbSrc = attachment.thumb_url;
-  if (!src) return null;
+  if (!originalSrc) return null;
 
-  const alreadyCached = isImagePreloaded(src);
+  const alreadyCached = isImagePreloaded(originalSrc);
   const [loaded, setLoaded] = useState(alreadyCached);
+  const [currentSrc, setCurrentSrc] = useState(originalSrc);
+  const retriedRef = React.useRef(false);
   const imgRef = React.useRef<HTMLImageElement>(null);
 
   // Trigger background preload (no-op if already cached)
-  useMemo(() => { preloadImage(src); }, [src]);
+  useMemo(() => { preloadImage(originalSrc); }, [originalSrc]);
+
+  // Reset retry state when source changes
+  React.useEffect(() => {
+    retriedRef.current = false;
+    setCurrentSrc(originalSrc);
+  }, [originalSrc]);
 
   React.useEffect(() => {
-    if (!loaded && imgRef.current?.complete) {
+    if (!loaded && imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
       setLoaded(true);
     }
-  }, [loaded, src]);
+  }, [loaded, currentSrc]);
+
+  const handleError = useCallback(() => {
+    if (!retriedRef.current) {
+      // Retry once with cache-busting parameter
+      retriedRef.current = true;
+      const sep = originalSrc.includes('?') ? '&' : '?';
+      setCurrentSrc(`${originalSrc}${sep}_cb=${Date.now()}`);
+    }
+  }, [originalSrc]);
 
   const clickable = Boolean(onClick);
 
@@ -50,7 +67,7 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment, onC
     >
       {/* Blur placeholder: use thumb if available, otherwise shimmer */}
       {!loaded && (
-        thumbSrc && thumbSrc !== src ? (
+        thumbSrc && thumbSrc !== originalSrc ? (
           <img
             className="ermis-attachment-blur-preview"
             src={thumbSrc}
@@ -64,10 +81,11 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(({ attachment, onC
       <img
         ref={imgRef}
         className={`ermis-attachment ermis-attachment--image${loaded ? ' ermis-attachment--loaded' : ''}`}
-        src={src}
+        src={currentSrc}
         alt={attachment.file_name || attachment.title || 'image'}
         loading="lazy"
         onLoad={() => setLoaded(true)}
+        onError={handleError}
       />
       {clickable && (
         <div className="ermis-attachment__overlay">

@@ -247,6 +247,7 @@ export function isUserManagedAttachment(attachment: Attachment): boolean {
 
 /**
  * Lightweight in-memory image preloader.
+ * Removes URLs from cache on error so failed loads can be retried.
  */
 const preloadedUrls = new Set<string>();
 const MAX_CACHE_SIZE = 500;
@@ -260,7 +261,16 @@ export function preloadImage(url: string): void {
   }
 
   const img = new Image();
+  img.onload = () => {
+    // Confirmed loaded — keep in cache
+    preloadedUrls.add(url);
+  };
+  img.onerror = () => {
+    // Remove from cache so the URL can be retried on next render
+    preloadedUrls.delete(url);
+  };
   img.src = url;
+  // Optimistically add; onerror will remove if it fails
   preloadedUrls.add(url);
 }
 

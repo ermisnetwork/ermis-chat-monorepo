@@ -770,11 +770,38 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * @returns A Blob of the file content.
    */
   async downloadMedia(url: string): Promise<Blob> {
-    const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) {
-      throw new Error(`Failed to download media: ${response.statusText}`);
+    const MAX_RETRIES = 2;
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // On retry, append a cache-busting query parameter to bypass stale CDN cache
+        let fetchUrl = url;
+        if (attempt > 0) {
+          const sep = url.includes('?') ? '&' : '?';
+          fetchUrl = `${url}${sep}_cb=${Date.now()}`;
+        }
+
+        const response = await fetch(fetchUrl, {
+          cache: attempt === 0 ? 'no-store' : 'reload',
+        });
+
+        if (response.ok) {
+          return await response.blob();
+        }
+
+        lastError = new Error(`Failed to download media: ${response.status} ${response.statusText}`);
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+      }
+
+      // Wait before retrying (300ms, then 800ms)
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, attempt === 0 ? 300 : 800));
+      }
     }
-    return await response.blob();
+
+    throw lastError || new Error('Failed to download media after retries');
   }
 
   errorFromResponse(response: AxiosResponse<APIErrorResponse>): ErrorFromResponse<APIErrorResponse> {
