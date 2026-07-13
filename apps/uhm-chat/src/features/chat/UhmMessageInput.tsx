@@ -37,7 +37,17 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   DragAndDropOverlayComponent = UhmDragAndDropOverlay,
 }) => {
   const { t } = useTranslation();
-  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage, setDraft, getDraft } = useChatClient();
+  const {
+    client,
+    activeChannel,
+    syncMessages,
+    quotedMessage,
+    setQuotedMessage,
+    editingMessage,
+    setEditingMessage,
+    setDraft,
+    getDraft,
+  } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
@@ -101,18 +111,45 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     setIsUploadingVoice(true);
     try {
       const file = new File([recordedBlob], `Voice_Message.wav`, { type: 'audio/wav' });
-      const uploadRes = await activeChannel.sendFile(file, file.name, file.type);
-      await activeChannel.sendMessage({
-        text: '',
-        attachments: [{
-          type: 'voiceRecording',
-          asset_url: uploadRes.file,
-          title: file.name,
-          file_size: file.size,
-          mime_type: file.type,
-          duration: recordingTime,
-        }],
-      });
+      const isE2eeChannel =
+        typeof (activeChannel as any)._isEffectiveE2ee === 'function'
+          ? (activeChannel as any)._isEffectiveE2ee()
+          : activeChannel.data?.mls_enabled === true;
+
+      if (isE2eeChannel) {
+        const encryptionMgr = (activeChannel as any).getClient?.().encryptionManager;
+        if (!encryptionMgr?.initialized) {
+          throw new Error('E2EE voice messages require an initialized encryption manager');
+        }
+        await (activeChannel as any).enqueueE2eeAttachmentMessage({ text: '' }, [file], {
+          displayOverrides: new Map([
+            [
+              0,
+              {
+                attachment_type: 'voiceRecording',
+                duration: recordingTime,
+                waveform_data: [],
+              },
+            ],
+          ]),
+        });
+        syncMessages();
+      } else {
+        const uploadRes = await activeChannel.sendFile(file, file.name, file.type);
+        await activeChannel.sendMessage({
+          text: '',
+          attachments: [
+            {
+              type: 'voiceRecording',
+              asset_url: uploadRes.file,
+              title: file.name,
+              file_size: file.size,
+              mime_type: file.type,
+              duration: recordingTime,
+            },
+          ],
+        });
+      }
       cancelRecording();
     } catch (err) {
       console.error('Failed to send voice message:', err);
@@ -147,7 +184,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         setIsRecording(true);
         setRecordingTime(0);
         timerRef.current = window.setInterval(() => {
-          setRecordingTime(prev => prev + 1);
+          setRecordingTime((prev) => prev + 1);
         }, 1000);
       } catch (err) {
         console.error('Failed to start recording:', err);
@@ -167,24 +204,21 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   }, [t, errorType]);
 
   // File Upload Hook
-  const {
-    files, setFiles, fileInputRef,
-    handleFilesSelected, handleRemoveFile, handleAttachClick, cleanupFiles,
-  } = useFileUpload({ activeChannel, editableRef, setHasContent });
+  const { files, setFiles, fileInputRef, handleFilesSelected, handleRemoveFile, handleAttachClick, cleanupFiles } =
+    useFileUpload({ activeChannel, editableRef, setHasContent });
 
   const filesRef = useRef(files);
   filesRef.current = files;
 
-  const { isDragging } = useDragAndDrop(
-    handleFilesSelected,
-    !canSendMessage || !!editingMessage || !!quotedMessage
-  );
+  const { isDragging } = useDragAndDrop(handleFilesSelected, !canSendMessage || !!editingMessage || !!quotedMessage);
 
   // Mentions
   const members = useMemo(() => {
     if (!activeChannel) return [];
     const list = [];
-    const stateMembers = activeChannel?.state?.members as Record<string, { user?: { name?: string, avatar?: string }, user_id?: string }> | undefined;
+    const stateMembers = activeChannel?.state?.members as
+      | Record<string, { user?: { name?: string; avatar?: string }; user_id?: string }>
+      | undefined;
     if (stateMembers && typeof stateMembers === 'object') {
       for (const [id, memberVal] of Object.entries(stateMembers)) {
         list.push({
@@ -198,10 +232,14 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   }, [activeChannel, activeChannel?.state?.members]);
 
   const {
-    showSuggestions, filteredMembers, highlightIndex,
+    showSuggestions,
+    filteredMembers,
+    highlightIndex,
     handleInput: mentionHandleInput,
     handleKeyDown: mentionHandleKeyDown,
-    selectMention, buildPayload, reset: resetMentions,
+    selectMention,
+    buildPayload,
+    reset: resetMentions,
   } = useMentions({
     members,
     currentUserId: client.userID,
@@ -273,69 +311,90 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     activeChannel?.keystroke();
   }, [mentionHandleInput, files.length, activeChannel, t, errorType]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.nativeEvent.isComposing) return;
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.nativeEvent.isComposing) return;
 
-    if (e.key === 'Escape') {
-      if (editingMessage) {
-        setEditingMessage(null);
-        cleanupFiles();
-        setFiles([]);
-        setHasContent(false);
-        resetMentions();
-        if (editableRef.current) editableRef.current.innerHTML = '';
-        return;
+      if (e.key === 'Escape') {
+        if (editingMessage) {
+          setEditingMessage(null);
+          cleanupFiles();
+          setFiles([]);
+          setHasContent(false);
+          resetMentions();
+          if (editableRef.current) editableRef.current.innerHTML = '';
+          return;
+        }
+        if (quotedMessage) {
+          setQuotedMessage(null);
+          return;
+        }
       }
-      if (quotedMessage) {
-        setQuotedMessage(null);
-        return;
-      }
-    }
-    const consumed = mentionHandleKeyDown(e);
-    if (consumed) return;
+      const consumed = mentionHandleKeyDown(e);
+      if (consumed) return;
 
-    if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (!keywordError) {
+          handleSend();
+        }
+      }
+    },
+    [
+      mentionHandleKeyDown,
+      handleSend,
+      editingMessage,
+      quotedMessage,
+      setEditingMessage,
+      setQuotedMessage,
+      resetMentions,
+      cleanupFiles,
+      setFiles,
+      setHasContent,
+      keywordError,
+    ],
+  );
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
       e.preventDefault();
-      if (!keywordError) {
-        handleSend();
+      if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+        if (canSendMessage && !editingMessage) {
+          handleFilesSelected(e.clipboardData.files);
+        }
+        return;
       }
-    }
-  }, [mentionHandleKeyDown, handleSend, editingMessage, quotedMessage, setEditingMessage, setQuotedMessage, resetMentions, cleanupFiles, setFiles, setHasContent, keywordError]);
+      const plainText = e.clipboardData.getData('text/plain');
+      if (plainText) {
+        document.execCommand('insertText', false, plainText);
+      }
+    },
+    [canSendMessage, editingMessage, handleFilesSelected],
+  );
 
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    e.preventDefault();
-    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
-      if (canSendMessage && !editingMessage) {
-        handleFilesSelected(e.clipboardData.files);
+  const handleEmojiSelect = useCallback(
+    (emojiNative: string) => {
+      const el = editableRef.current;
+      if (el) {
+        el.focus();
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          const textNode = document.createTextNode(emojiNative);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.setEndAfter(textNode);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else {
+          el.innerHTML += emojiNative;
+        }
+        handleInput();
       }
-      return;
-    }
-    const plainText = e.clipboardData.getData('text/plain');
-    if (plainText) {
-      document.execCommand('insertText', false, plainText);
-    }
-  }, [canSendMessage, editingMessage, handleFilesSelected]);
-
-  const handleEmojiSelect = useCallback((emojiNative: string) => {
-    const el = editableRef.current;
-    if (el) {
-      el.focus();
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        const textNode = document.createTextNode(emojiNative);
-        range.insertNode(textNode);
-        range.setStartAfter(textNode);
-        range.setEndAfter(textNode);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      } else {
-        el.innerHTML += emojiNative;
-      }
-      handleInput();
-    }
-  }, [handleInput]);
+    },
+    [handleInput],
+  );
 
   const { openEmojiPicker, openStickerPicker, closePickers, pickerAction } = useUIStore();
 
@@ -404,12 +463,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         .replace(/>/g, '&gt;')
         .replace(/\n/g, '<br>');
 
-      editableRef.current.innerHTML = replaceMentionsForPreview(
-        htmlText,
-        editingMessage,
-        userMap,
-        getMentionHtml
-      );
+      editableRef.current.innerHTML = replaceMentionsForPreview(htmlText, editingMessage, userMap, getMentionHtml);
 
       const sel = window.getSelection();
       const range = document.createRange();
@@ -455,18 +509,17 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       <PreviewOverlay
         title={t('chat.previewTitle', 'You are viewing a public channel.')}
         buttonLabel={t('chat.joinChannel', 'Join Channel')}
-        onJoin={() => activeChannel.acceptInvite('join').catch(e => console.error(e))}
+        onJoin={() => activeChannel.acceptInvite('join').catch((e) => console.error(e))}
       />
     );
   }
 
-  const isStillUploading = files.some(f => f.status === 'uploading');
+  const isStillUploading = files.some((f) => f.status === 'uploading');
   const disabledInput = !canSendMessage || sending || isStillUploading || isUploadingVoice;
 
   return (
     <div className="relative z-50 shrink-0">
       <div className="relative flex flex-col background-transparent transition-shadow">
-
         {quotedMessage && !editingMessage && (
           <div className="border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-black/20 p-2">
             <ReplyPreview
@@ -507,7 +560,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
         <div className="px-4 pb-3 pt-1.5">
           <div className="relative flex items-end w-full pl-2 pr-1.5 py-1.5 bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 rounded-3xl min-h-[44px]">
-            {(isRecording || recordedBlob || isUploadingVoice) ? (
+            {isRecording || recordedBlob || isUploadingVoice ? (
               <div className="flex flex-1 items-center justify-between w-full h-[32px] mb-[1px]">
                 <style>{`
                   @keyframes audio-wave {
@@ -542,7 +595,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                             className="w-[3px] bg-red-400 dark:bg-red-500 rounded-full animate-wave"
                             style={{
                               animationDelay: `${Math.random() * 0.5}s`,
-                              animationDuration: `${0.8 + Math.random() * 0.4}s`
+                              animationDuration: `${0.8 + Math.random() * 0.4}s`,
                             }}
                           />
                         ))}
@@ -624,10 +677,11 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                   <button
                     type="button"
                     disabled={disabledInput || !!editingMessage}
-                    className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${pickerAction.type === 'emoji'
-                      ? 'text-primary bg-primary/10'
-                      : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700'
-                      }`}
+                    className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      pickerAction.type === 'emoji'
+                        ? 'text-primary bg-primary/10'
+                        : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700'
+                    }`}
                     onClick={(e) => {
                       if (pickerAction.type === 'emoji') {
                         closePickers();
@@ -644,10 +698,11 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                   <button
                     type="button"
                     disabled={disabledInput || !!editingMessage || !!quotedMessage}
-                    className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${pickerAction.type === 'sticker'
-                      ? 'text-primary bg-primary/10'
-                      : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700'
-                      }`}
+                    className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      pickerAction.type === 'sticker'
+                        ? 'text-primary bg-primary/10'
+                        : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700'
+                    }`}
                     onClick={(e) => {
                       if (pickerAction.type === 'sticker') {
                         closePickers();

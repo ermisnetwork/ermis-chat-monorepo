@@ -29,6 +29,7 @@ import type {
   EncryptionStorageAdapter,
   EncryptionSyncCheckpoint,
   PendingArchiveUpload,
+  PendingE2eeSendRecord,
   PendingDeferredArchive,
   PendingE2eeSnapshot,
   RemovedSyncCursor,
@@ -43,10 +44,11 @@ import type {
 const DB_NAME_PREFIX = 'ermis_mls';
 /** Global DB (no userId) — only used for migrating legacy device_id */
 const DB_NAME_LEGACY = 'ermis_mls';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 const STORE_IDENTITY = 'identity';
 const STORE_MESSAGES = 'messages';
+const STORE_PENDING_SENDS = 'pending_sends';
 const STORE_META = 'meta';
 const STORE_GROUPS = 'groups';
 const STORE_ARCHIVE_UPLOADS = 'archive_uploads';
@@ -177,6 +179,15 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           msgStore.createIndex('cid_created', ['cid', 'created_at'], { unique: false });
         }
 
+        if (!db.objectStoreNames.contains(STORE_PENDING_SENDS)) {
+          const pendingStore = db.createObjectStore(STORE_PENDING_SENDS, {
+            keyPath: 'message_id',
+          });
+          pendingStore.createIndex('status', 'status', { unique: false });
+          pendingStore.createIndex('cid', 'cid', { unique: false });
+          pendingStore.createIndex('updated_at', 'updated_at', { unique: false });
+        }
+
         // Meta store: key-value for device_id, snapshot, sync timestamps
         if (!db.objectStoreNames.contains(STORE_META)) {
           db.createObjectStore(STORE_META);
@@ -266,6 +277,12 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           const msgStore = db.createObjectStore(STORE_MESSAGES, { keyPath: 'id' });
           msgStore.createIndex('cid', 'cid', { unique: false });
           msgStore.createIndex('cid_created', ['cid', 'created_at'], { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_PENDING_SENDS)) {
+          const pendingStore = db.createObjectStore(STORE_PENDING_SENDS, { keyPath: 'message_id' });
+          pendingStore.createIndex('status', 'status', { unique: false });
+          pendingStore.createIndex('cid', 'cid', { unique: false });
+          pendingStore.createIndex('updated_at', 'updated_at', { unique: false });
         }
         if (!db.objectStoreNames.contains(STORE_GROUPS)) {
           db.createObjectStore(STORE_GROUPS);
@@ -476,6 +493,62 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         }
         resolve();
       };
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // ---- Pending E2EE Sends ----
+
+  async savePendingE2eeSend(record: PendingE2eeSendRecord): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_PENDING_SENDS, 'readwrite');
+      tx.objectStore(STORE_PENDING_SENDS).put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadPendingE2eeSend(messageId: string): Promise<PendingE2eeSendRecord | null> {
+    const db = await this.openDB();
+    return new Promise<PendingE2eeSendRecord | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_PENDING_SENDS, 'readonly');
+      const request = tx.objectStore(STORE_PENDING_SENDS).get(messageId);
+      request.onsuccess = () => resolve((request.result as PendingE2eeSendRecord) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async listPendingE2eeSends(statuses?: string[]): Promise<PendingE2eeSendRecord[]> {
+    const db = await this.openDB();
+    return new Promise<PendingE2eeSendRecord[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_PENDING_SENDS, 'readonly');
+      const store = tx.objectStore(STORE_PENDING_SENDS);
+      const results: PendingE2eeSendRecord[] = [];
+      const allowed = statuses && statuses.length > 0 ? new Set(statuses) : null;
+      const request = store.openCursor();
+      request.onsuccess = (event: Event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+        if (cursor) {
+          const value = cursor.value as PendingE2eeSendRecord;
+          if (!allowed || allowed.has(value.status)) results.push(value);
+          cursor.continue();
+        }
+      };
+      tx.oncomplete = () => {
+        results.sort((a, b) => a.updated_at - b.updated_at);
+        resolve(results);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async deletePendingE2eeSend(messageId: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_PENDING_SENDS, 'readwrite');
+      tx.objectStore(STORE_PENDING_SENDS).delete(messageId);
+      tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }

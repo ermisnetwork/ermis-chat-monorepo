@@ -17,6 +17,11 @@ export type UseFileUploadOptions = {
 export function useFileUpload({ activeChannel, editableRef, setHasContent }: UseFileUploadOptions) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<FilePreviewItem[]>([]);
+  const isE2eeChannel =
+    !!activeChannel &&
+    (typeof (activeChannel as any)._isEffectiveE2ee === 'function'
+      ? (activeChannel as any)._isEffectiveE2ee()
+      : activeChannel.data?.mls_enabled === true);
 
   /**
    * Upload a single file immediately:
@@ -90,18 +95,21 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
         id: nextFileId(),
         file,
         previewUrl: isPreviewable ? URL.createObjectURL(file) : undefined,
-        status: 'uploading' as const,
+        status: isE2eeChannel ? ('pending' as const) : ('uploading' as const),
+        e2eePhase: isE2eeChannel ? ('encrypting' as const) : undefined,
       };
     });
 
     setFiles((prev) => [...prev, ...newItems]);
     setHasContent(true);
 
-    newItems.forEach((item) => uploadSingleFile(item));
+    if (!isE2eeChannel) {
+      newItems.forEach((item) => uploadSingleFile(item));
+    }
 
     // Auto-focus the input so user can press Enter to send immediately
     editableRef.current?.focus();
-  }, [uploadSingleFile, setHasContent, editableRef]);
+  }, [uploadSingleFile, setHasContent, editableRef, isE2eeChannel]);
 
   const handleRemoveFile = useCallback((id: string) => {
     setFiles((prev) => {

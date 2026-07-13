@@ -58,7 +58,12 @@ export function useMessageSend({
 
     const payload = buildPayload();
     const text = payload.text.trim();
-    const uploadedFiles = files.filter((f) => f.status === 'done');
+    const isE2eeChannelForFiles =
+      !!activeChannel &&
+      (typeof (activeChannel as any)._isEffectiveE2ee === 'function'
+        ? (activeChannel as any)._isEffectiveE2ee()
+        : activeChannel.data?.mls_enabled === true);
+    const uploadedFiles = files.filter((f) => f.status === 'done' || (isE2eeChannelForFiles && f.status === 'pending'));
 
     if (!text && uploadedFiles.length === 0) return;
 
@@ -73,15 +78,49 @@ export function useMessageSend({
 
     try {
       setSending(true);
+      const isE2eeChannel =
+        typeof (activeChannel as any)._isEffectiveE2ee === 'function'
+          ? (activeChannel as any)._isEffectiveE2ee()
+          : activeChannel.data?.mls_enabled === true;
 
       // Build attachment payloads from already-uploaded files (only applied on new messages)
-      const attachments = uploadedFiles.map((f) => {
-        if (f.originalAttachment) {
-          return f.originalAttachment;
+      let attachments: unknown[] = [];
+      let e2eeAttachmentIds: string[] | undefined;
+      if (isE2eeChannel && !editingMessage && uploadedFiles.length > 0) {
+        const encryptionMgr = (activeChannel as any).getClient?.().encryptionManager;
+        if (!encryptionMgr?.initialized) throw new Error('E2EE attachments require an initialized encryption manager');
+        const filesToUpload = uploadedFiles.map((f) => f.normalizedFile || f.file!).filter(Boolean);
+        const message: Record<string, any> = { text };
+        if (isTeamChannel) {
+          message.mentioned_all = payload.mentioned_all;
+          message.mentioned_users = payload.mentioned_users;
         }
-        const fileObj = f.normalizedFile || f.file!;
-        return buildAttachmentPayload(fileObj, f.uploadedUrl!, f.thumbUrl);
-      });
+        if (quotedMessage?.id) {
+          message.quoted_message_id = quotedMessage.id;
+        }
+        await (activeChannel as any).enqueueE2eeAttachmentMessage(message, filesToUpload);
+        syncMessages();
+
+        files.forEach((f) => {
+          if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
+        });
+        const errorFiles = files.filter((f) => f.status === 'error');
+        setFiles(errorFiles);
+        setHasContent(errorFiles.length > 0);
+        reset();
+        clearQuotedMessage?.();
+        onSend?.(payload.text);
+        activeChannel?.stopTyping();
+        return;
+      } else {
+        attachments = uploadedFiles.map((f) => {
+          if (f.originalAttachment) {
+            return f.originalAttachment;
+          }
+          const fileObj = f.normalizedFile || f.file!;
+          return buildAttachmentPayload(fileObj, f.uploadedUrl!, f.thumbUrl);
+        });
+      }
 
       // Build message
       const message: Record<string, any> = { text };
@@ -89,6 +128,9 @@ export function useMessageSend({
       // The API does not accept attachment arrays during standard text editing
       if (!editingMessage && attachments.length > 0) {
         message.attachments = attachments;
+      }
+      if (!editingMessage && e2eeAttachmentIds && e2eeAttachmentIds.length > 0) {
+        message.e2ee_attachment_ids = e2eeAttachmentIds;
       }
 
       if (isTeamChannel) {

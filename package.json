@@ -25,7 +25,8 @@
     "eslint-fix": "eslint --fix '**/*.{js,ts,tsx}' --max-warnings 0 --ignore-path .eslintignore",
     "lint": "yarn prettier && yarn eslint",
     "lint-fix": "yarn prettier-fix && yarn eslint-fix",
-    "bump": "node scripts/bump-version.js"
+    "bump": "node scripts/bump-version.js",
+    "publish:packages": "bash scripts/publish-packages.sh"
   },
   "devDependencies": {
     "eslint": "7.21.0",

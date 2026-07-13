@@ -112,9 +112,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return this._isEffectiveE2ee();
   }
 
-  private _isE2eeChannelData(
-    data?: ChannelData<ErmisChatGenerics> | ChannelResponse<ErmisChatGenerics>,
-  ): boolean {
+  private _isE2eeChannelData(data?: ChannelData<ErmisChatGenerics> | ChannelResponse<ErmisChatGenerics>): boolean {
     const channelData = (data || this.data || this._data) as any;
     if (channelData?.mls_enabled === true) return true;
     const parentCid = typeof channelData?.parent_cid === 'string' ? channelData.parent_cid : undefined;
@@ -185,6 +183,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           mentioned_users: message.mentioned_users,
           mentioned_all: message.mentioned_all,
           forward_cid: message.forward_cid,
+          forward_message_id: message.forward_message_id,
+          forward_parent_cid: (message as any).forward_parent_cid,
+          e2ee_attachment_ids: (message as any).e2ee_attachment_ids,
           attachments: message.attachments,
           sticker_url: message.sticker_url,
           poll_type: message.poll_type,
@@ -234,6 +235,225 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       const statusToSet = isOfflineError ? 'failed_offline' : 'error';
       this.state.updateMessageStatus(messageId, statusToSet);
       throw error;
+    }
+  }
+
+  private _buildPendingE2eeLocalAttachments(
+    files: Blob[],
+    displayOverrides?: Map<number, Record<string, unknown>>,
+  ): any[] {
+    return files.map((file, index) => {
+      const namedFile = file as Blob & { name?: string; type?: string };
+      const name = namedFile.name || `attachment-${index + 1}`;
+      const mimeType = namedFile.type || 'application/octet-stream';
+      const override = displayOverrides?.get(index) || {};
+      const objectUrl =
+        typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : '';
+      const base = {
+        id: randomId(),
+        title: name,
+        file_name: name,
+        file_size: file.size,
+        mime_type: mimeType,
+        upload_status: 'uploading',
+        upload_progress: 0,
+        local_object_url: objectUrl,
+        ...override,
+      };
+
+      if ((override as any).attachment_type === 'voiceRecording' || mimeType.startsWith('audio/')) {
+        return {
+          ...base,
+          type: 'voiceRecording',
+          attachment_type: 'voiceRecording',
+          asset_url: objectUrl,
+          url: objectUrl,
+        };
+      }
+      if (mimeType.startsWith('image/')) {
+        return {
+          ...base,
+          type: 'image',
+          image_url: objectUrl,
+          thumb_url: objectUrl,
+          url: objectUrl,
+        };
+      }
+      if (mimeType.startsWith('video/')) {
+        return {
+          ...base,
+          type: 'video',
+          asset_url: objectUrl,
+          url: objectUrl,
+          thumb_url: objectUrl,
+        };
+      }
+      return {
+        ...base,
+        type: 'file',
+        url: objectUrl,
+        asset_url: objectUrl,
+      };
+    });
+  }
+
+  private _revokePendingE2eeLocalAttachments(attachments: any[]) {
+    if (typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+    attachments.forEach((attachment) => {
+      const objectUrl = attachment?.local_object_url;
+      if (typeof objectUrl === 'string' && objectUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    });
+  }
+
+  private _findLocalMessageById(messageId: string) {
+    return this.state.findMessage(messageId) || this.state.messages.find((message) => message.id === messageId);
+  }
+
+  private _removeLocalMessageById(messageId: string) {
+    let removed = false;
+    while (this.state.removeMessage({ id: messageId })) {
+      removed = true;
+    }
+    return removed;
+  }
+
+  private _dispatchLocalMessageStateEvent(
+    type: 'message.new' | 'message.updated' | 'message.deleted',
+    message?: MessageResponse<ErmisChatGenerics> | FormatMessageResponse<ErmisChatGenerics>,
+  ) {
+    if (!message) return;
+    const user = (message as any).user || this.getClient().user;
+    const event = {
+      type,
+      cid: this.cid,
+      channel_type: this.type,
+      channel_id: this.id,
+      channel: this.data,
+      created_at: new Date().toISOString(),
+      message,
+      user,
+    } as unknown as Event<ErmisChatGenerics>;
+
+    this._callChannelListeners(event);
+    this.getClient().dispatchEvent(event);
+  }
+
+  async enqueueE2eeAttachmentMessage(
+    message: Message<ErmisChatGenerics>,
+    files: Blob[],
+    options: { displayOverrides?: Map<number, Record<string, unknown>> } = {},
+  ) {
+    if (!this._isEffectiveE2ee()) {
+      return await this.sendMessage(message);
+    }
+    const encryptionMgr = this.getClient().encryptionManager;
+    if (!encryptionMgr?.initialized) {
+      throw new Error('E2EE attachment queue requires an initialized encryption manager');
+    }
+    if (!message.id) {
+      message = { ...message, id: randomId() };
+    }
+    const messageId = message.id!;
+    const quotedMessage =
+      (message as any).quoted_message ||
+      (message.quoted_message_id ? this.state.findMessage(message.quoted_message_id) : undefined);
+    const localAttachments = this._buildPendingE2eeLocalAttachments(files, options.displayOverrides);
+    const now = new Date().toISOString();
+    const optimisticMessage = {
+      ...message,
+      id: messageId,
+      attachments: localAttachments,
+      quoted_message: quotedMessage,
+      status: 'sending',
+      created_at: now,
+      updated_at: now,
+      user: this.getClient().user,
+      user_id: this.getClient().userID,
+      type: message.type || 'regular',
+    } as unknown as MessageResponse<ErmisChatGenerics>;
+
+    this.state.addMessageSorted(optimisticMessage);
+    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+
+    void encryptionMgr.enqueueE2eeAttachmentMessage({
+      channelType: this.type,
+      channelId: this.id!,
+      cid: this.cid,
+      text: message.text || '',
+      messageId,
+      files,
+      options: {
+        parent_id: message.parent_id,
+        quoted_message_id: message.quoted_message_id,
+        mentioned_users: message.mentioned_users,
+        mentioned_all: message.mentioned_all,
+        forward_cid: message.forward_cid,
+        forward_message_id: message.forward_message_id,
+        forward_parent_cid: (message as any).forward_parent_cid,
+      },
+      displayOverrides: options.displayOverrides,
+      localAttachments,
+      onProgress: (progress: any) => {
+        const rawFileIndex = Number.isInteger(progress?.fileIndex) ? progress.fileIndex : undefined;
+        const fallbackToAllAttachments = rawFileIndex === undefined && localAttachments.length > 1;
+        const fileIndex = rawFileIndex ?? 0;
+        const percentage = Math.max(0, Math.min(100, Math.round(progress.percentage)));
+        this.state.updateMessageById(messageId, (msg) => ({
+          ...msg,
+          status: 'sending',
+          attachments: (msg.attachments || []).map((attachment: any, index: number) =>
+            fallbackToAllAttachments || index === fileIndex
+              ? { ...attachment, upload_status: progress.phase, upload_progress: percentage }
+              : attachment,
+          ),
+        }));
+        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+      },
+      onSuccess: (response: any) => {
+        this._revokePendingE2eeLocalAttachments(localAttachments);
+        if (response?.message) {
+          const responseUserId =
+            response.message.user?.id || (response.message as any).user_id || this.getClient().userID || '';
+          const confirmedMessage = {
+            ...response.message,
+            status: 'received',
+            user: pickUserWithDisplayName(
+              responseUserId,
+              response.message.user,
+              this.getClient().state.users[responseUserId],
+              this.getClient().user,
+            ),
+          } as MessageResponse<ErmisChatGenerics>;
+          this._removeLocalMessageById(messageId);
+          this.state.addMessageSorted(confirmedMessage, true, true, 'current');
+          this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+        }
+      },
+      onError: () => {
+        this.state.updateMessageById(messageId, (msg) => ({
+          ...msg,
+          status: 'error',
+          attachments: (msg.attachments || []).map((attachment: any) => ({
+            ...attachment,
+            upload_status: 'failed',
+          })),
+        }));
+        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+      },
+    });
+
+    return { message: optimisticMessage };
+  }
+
+  async cancelPendingE2eeSend(messageId: string) {
+    const stateMsg = this.state.messages.find((message) => message.id === messageId);
+    this._revokePendingE2eeLocalAttachments(((stateMsg as any)?.attachments || []) as any[]);
+    await this.getClient().encryptionManager?.cancelPendingE2eeSend(messageId);
+    if (stateMsg) {
+      this._removeLocalMessageById(messageId);
+      this._dispatchLocalMessageStateEvent('message.deleted', stateMsg as any);
     }
   }
 
@@ -293,6 +513,38 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async forwardMessage(message: ForwardMessage<ErmisChatGenerics>, channel: { type: string; channelID: string }) {
     if (!message.id) {
       message = { ...message, id: randomId() };
+    }
+
+    const targetChannel = this.getClient().activeChannels[message.cid] as Channel<ErmisChatGenerics> | undefined;
+    const targetIsE2ee =
+      !!targetChannel &&
+      (typeof (targetChannel as any)._isEffectiveE2ee === 'function'
+        ? (targetChannel as any)._isEffectiveE2ee()
+        : targetChannel.data?.mls_enabled === true);
+
+    if (targetIsE2ee) {
+      const encryptionMgr = this.getClient().encryptionManager;
+      if (!encryptionMgr?.initialized) {
+        throw new Error('E2EE forward target is encrypted but encryption manager is not initialized');
+      }
+      if ((message.attachments?.length || 0) > 0 && !(message.e2ee_attachment_ids?.length || 0)) {
+        throw new Error('E2EE forward with attachments requires freshly uploaded E2EE attachment IDs');
+      }
+      return await encryptionMgr.sendMessage(
+        channel.type,
+        channel.channelID,
+        message.cid,
+        message.text || '',
+        message.id,
+        {
+          forward_cid: message.forward_cid,
+          forward_message_id: message.forward_message_id,
+          forward_parent_cid: message.forward_parent_cid,
+          e2ee_attachment_ids: message.e2ee_attachment_ids,
+          attachments: message.attachments,
+          sticker_url: message.sticker_url,
+        },
+      );
     }
 
     return await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(
@@ -720,6 +972,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async queryAttachmentMessages() {
+    if (this._isEffectiveE2ee()) {
+      const manager = (this.getClient() as any).encryptionManager;
+      if (!manager?.initialized) {
+        return { attachments: [] };
+      }
+      return await manager.queryE2eeAttachmentMessages(this.type, this.id, { limit: 50 });
+    }
+
     const response = await this.getClient().post<AttachmentResponse<ErmisChatGenerics>>(
       this.getClient().baseURL + `/channels/${this.type}/${this.id}/attachment`,
       {
@@ -1122,7 +1382,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           payload.data.group_info = bundle.group_info;
           payload.data.epoch = bundle.epoch;
         } catch (err) {
-          this.getClient().logger('error', '[Encryption] createTopic: failed to prepare E2EE bundle', { err, cid: topicCid });
+          this.getClient().logger('error', '[Encryption] createTopic: failed to prepare E2EE bundle', {
+            err,
+            cid: topicCid,
+          });
         }
       }
     }
@@ -1814,7 +2077,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
           const encryptionMgr = this.getClient().encryptionManager;
           const isEncryptionMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
-          const isOwnDeviceMessage = ownMessage && (!encryptionMgr?.deviceId || event.message.device_id === encryptionMgr.deviceId);
+          const isOwnDeviceMessage =
+            ownMessage && (!encryptionMgr?.deviceId || event.message.device_id === encryptionMgr.deviceId);
 
           if (this.state.isUpToDate || isThreadMessage) {
             if (!(isEncryptionMessage && isOwnDeviceMessage)) {
@@ -1902,7 +2166,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const encryptionMgr = this.getClient().encryptionManager;
           const ownMessage = event.user?.id === this.getClient().user?.id;
           const isEncryptionMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
-          const isOwnDeviceMessage = ownMessage && (!encryptionMgr?.deviceId || event.message.device_id === encryptionMgr.deviceId);
+          const isOwnDeviceMessage =
+            ownMessage && (!encryptionMgr?.deviceId || event.message.device_id === encryptionMgr.deviceId);
 
           if (!isOwnDeviceMessage && encryptionMgr?.initialized && isEncryptionMessage && this.cid) {
             encryptionMgr
@@ -2057,13 +2322,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             this.id &&
             encryptionMgrRemoved.isDesignatedEvictor(channel)
           ) {
-            encryptionMgrRemoved.evictMember(this.type, this.id, this.cid, removedUserId, true).catch((err: unknown) => {
-              this.getClient().logger('error', '[Encryption Event] evictMember after member.removed failed', {
-                err,
-                cid: this.cid,
-                user_id: removedUserId,
+            encryptionMgrRemoved
+              .evictMember(this.type, this.id, this.cid, removedUserId, true)
+              .catch((err: unknown) => {
+                this.getClient().logger('error', '[Encryption Event] evictMember after member.removed failed', {
+                  err,
+                  cid: this.cid,
+                  user_id: removedUserId,
+                });
               });
-            });
 
             if (Array.isArray(event.topic_cids)) {
               for (const topicCid of event.topic_cids) {
@@ -2071,13 +2338,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 const colonIdx = topicCid.indexOf(':');
                 const topicType = topicCid.substring(0, colonIdx);
                 const topicId = topicCid.substring(colonIdx + 1);
-                encryptionMgrRemoved.evictMember(topicType, topicId, topicCid, removedUserId, true).catch((err: unknown) => {
-                  this.getClient().logger('error', '[Encryption Event] topic evictMember after member.removed failed', {
-                    err,
-                    cid: topicCid,
-                    user_id: removedUserId,
+                encryptionMgrRemoved
+                  .evictMember(topicType, topicId, topicCid, removedUserId, true)
+                  .catch((err: unknown) => {
+                    this.getClient().logger(
+                      'error',
+                      '[Encryption Event] topic evictMember after member.removed failed',
+                      {
+                        err,
+                        cid: topicCid,
+                        user_id: removedUserId,
+                      },
+                    );
                   });
-                });
               }
             }
           }
@@ -2201,7 +2474,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 });
               })
               .catch((err: unknown) => {
-                this.getClient().logger('warn', '[Encryption] Failed to update E2EE cache for reaction.deleted', { err });
+                this.getClient().logger('warn', '[Encryption] Failed to update E2EE cache for reaction.deleted', {
+                  err,
+                });
               });
           }
         }
@@ -2258,10 +2533,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 await encryptionMgrAccept.repairRecoveryChannel(this.type, this.id, { mode: 'recheck_channel' });
               })
               .catch((err: unknown) => {
-                this.getClient().logger('error', '[Encryption Event] Failed to prepare recovery after invite_accepted', {
-                  err,
-                  cid: this.cid,
-                });
+                this.getClient().logger(
+                  'error',
+                  '[Encryption Event] Failed to prepare recovery after invite_accepted',
+                  {
+                    err,
+                    cid: this.cid,
+                  },
+                );
               });
           }
         }
@@ -2274,11 +2553,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           if (event.mls_enabled && encryptionMgrReject?.initialized && this.cid && this.type === 'team' && this.id) {
             const targetUserId = event.member.user_id;
             encryptionMgrReject.queuePendingEviction(this.cid, targetUserId).catch((err: unknown) => {
-              this.getClient().logger('error', '[Encryption Event] Failed to queue pending eviction after invite_rejected', {
-                err,
-                cid: this.cid,
-                user_id: targetUserId,
-              });
+              this.getClient().logger(
+                'error',
+                '[Encryption Event] Failed to queue pending eviction after invite_rejected',
+                {
+                  err,
+                  cid: this.cid,
+                  user_id: targetUserId,
+                },
+              );
             });
 
             if (Array.isArray(event.topic_cids)) {
@@ -2331,11 +2614,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           ) {
             const targetUserId = event.member.user_id;
             encryptionMgrSkip.evictMember(this.type, this.id, this.cid, targetUserId).catch((err: unknown) => {
-              this.getClient().logger('error', '[Encryption Event] Failed to evictMember after invite_messaging_skipped', {
-                err,
-                cid: this.cid,
-                user_id: targetUserId,
-              });
+              this.getClient().logger(
+                'error',
+                '[Encryption Event] Failed to evictMember after invite_messaging_skipped',
+                {
+                  err,
+                  cid: this.cid,
+                  user_id: targetUserId,
+                },
+              );
             });
           }
 
@@ -2446,7 +2733,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           case 'commit':
           case 'external_commit': {
             const isOwnDeviceCommit =
-              protoUserId === encryptionMgrProto.userId && !!protoDeviceId && protoDeviceId === encryptionMgrProto.deviceId;
+              protoUserId === encryptionMgrProto.userId &&
+              !!protoDeviceId &&
+              protoDeviceId === encryptionMgrProto.deviceId;
             if (isOwnDeviceCommit) break;
 
             encryptionMgrProto.processCommit(this.cid, protoMsg.commit, protoMsg.epoch).catch((err: unknown) => {
@@ -2551,7 +2840,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         ...quoted,
         content_type: quoted.content_type || 'standard',
         type: quoted.type || 'regular',
-        user: pickUserWithDisplayName(userId, this.getClient().state.users[userId], quoted.user, getUserInfo(userId, stateUsers)),
+        user: pickUserWithDisplayName(
+          userId,
+          this.getClient().state.users[userId],
+          quoted.user,
+          getUserInfo(userId, stateUsers),
+        ),
         attachments: quoted.attachments || [],
       };
     };
@@ -2675,7 +2969,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             ...quoted,
             content_type: quoted.content_type || 'standard',
             type: quoted.type || 'regular',
-            user: pickUserWithDisplayName(userId, this.getClient().state.users[userId], quoted.user, getUserInfo(userId, stateUsers)),
+            user: pickUserWithDisplayName(
+              userId,
+              this.getClient().state.users[userId],
+              quoted.user,
+              getUserInfo(userId, stateUsers),
+            ),
             attachments: quoted.attachments || [],
           };
         };

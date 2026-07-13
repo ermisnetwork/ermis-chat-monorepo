@@ -38,9 +38,6 @@ export const Channel: React.FC<ChannelProps> = React.memo(({
   // Force re-render when channel info is updated via WS
   const [channelUpdateCount, setChannelUpdateCount] = useState(0);
   useEffect(() => {
-
-    console.log('---activeChannel--', activeChannel)
-
     if (!activeChannel) return;
     const sub = activeChannel.on('channel.updated', () => setChannelUpdateCount((c) => c + 1));
     return () => sub.unsubscribe();

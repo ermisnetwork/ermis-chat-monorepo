@@ -1,30 +1,17 @@
-import { useState, useCallback } from 'react'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-import {
-  Forward,
-  Pin,
-  PinOff,
-  Pencil,
-  Copy,
-  Trash2,
-  MoreHorizontal,
-  MessageSquareQuote,
-} from 'lucide-react'
+import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import { Forward, Pin, PinOff, Pencil, Copy, Trash2, MoreHorizontal, MessageSquareQuote, XCircle } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk'
-import {
-  useMessageActions,
-  useChatClient,
-  MessageQuickReactions,
-} from '@ermis-network/ermis-chat-react'
-import { UhmConfirmDialog } from './UhmConfirmDialog'
+} from '@/components/ui/dropdown-menu';
+import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
+import { useMessageActions, useChatClient, MessageQuickReactions } from '@ermis-network/ermis-chat-react';
+import { UhmConfirmDialog } from './UhmConfirmDialog';
 
 /* ----------------------------------------------------------
    UhmMessageActions
@@ -33,15 +20,15 @@ import { UhmConfirmDialog } from './UhmConfirmDialog'
    ---------------------------------------------------------- */
 
 interface UhmMessageActionsProps {
-  message: FormatMessageResponse
-  isOwnMessage: boolean
-  onReply?: (message: FormatMessageResponse) => void
-  onForward?: (message: FormatMessageResponse) => void
-  onPinToggle?: (message: FormatMessageResponse, isPinned: boolean) => void
-  onEdit?: (message: FormatMessageResponse) => void
-  onCopy?: (message: FormatMessageResponse) => void
-  onDelete?: (message: FormatMessageResponse) => void
-  onDeleteForMe?: (message: FormatMessageResponse) => void
+  message: FormatMessageResponse;
+  isOwnMessage: boolean;
+  onReply?: (message: FormatMessageResponse) => void;
+  onForward?: (message: FormatMessageResponse) => void;
+  onPinToggle?: (message: FormatMessageResponse, isPinned: boolean) => void;
+  onEdit?: (message: FormatMessageResponse) => void;
+  onCopy?: (message: FormatMessageResponse) => void;
+  onDelete?: (message: FormatMessageResponse) => void;
+  onDeleteForMe?: (message: FormatMessageResponse) => void;
 }
 
 export function UhmMessageActions({
@@ -55,118 +42,137 @@ export function UhmMessageActions({
   onDelete: onDeleteProp,
   onDeleteForMe: onDeleteForMeProp,
 }: UhmMessageActionsProps) {
-  const { t } = useTranslation()
-  const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel } =
-    useChatClient()
-  const actions = useMessageActions(message, isOwnMessage)
+  const { t } = useTranslation();
+  const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel, syncMessages } = useChatClient();
+  const actions = useMessageActions(message, isOwnMessage);
+  const canCancelPendingE2eeSend =
+    isOwnMessage &&
+    message.status === 'sending' &&
+    Array.isArray(message.attachments) &&
+    message.attachments.some((attachment: any) => attachment?.local_object_url && attachment?.upload_status);
 
   /* --- Confirm dialog state for destructive actions --- */
   const [pendingDelete, setPendingDelete] = useState<{
-    type: 'for_me' | 'for_everyone'
-    execute: () => Promise<void>
-  } | null>(null)
+    type: 'for_me' | 'for_everyone';
+    execute: () => Promise<void>;
+  } | null>(null);
 
   /* --- Default handlers --- */
   const handleReply = useCallback(() => {
-    if (onReplyProp) onReplyProp(message)
-    else setQuotedMessage(message)
-  }, [message, onReplyProp, setQuotedMessage])
+    if (onReplyProp) onReplyProp(message);
+    else setQuotedMessage(message);
+  }, [message, onReplyProp, setQuotedMessage]);
 
   const handleForward = useCallback(() => {
-    if (onForwardProp) onForwardProp(message)
-    else setForwardingMessage(message)
-  }, [message, onForwardProp, setForwardingMessage])
+    if (onForwardProp) onForwardProp(message);
+    else setForwardingMessage(message);
+  }, [message, onForwardProp, setForwardingMessage]);
 
   const handlePinToggle = useCallback(async () => {
     if (onPinToggleProp) {
-      onPinToggleProp(message, actions.isPinned)
-      return
+      onPinToggleProp(message, actions.isPinned);
+      return;
     }
-    if (!activeChannel) return
+    if (!activeChannel) return;
     try {
-      if (actions.isPinned) await activeChannel.unpinMessage(message.id!)
-      else await activeChannel.pinMessage(message.id!)
+      if (actions.isPinned) await activeChannel.unpinMessage(message.id!);
+      else await activeChannel.pinMessage(message.id!);
     } catch (err) {
-      console.error('Failed to toggle pin', err)
+      console.error('Failed to toggle pin', err);
     }
-  }, [message, actions.isPinned, onPinToggleProp, activeChannel])
+  }, [message, actions.isPinned, onPinToggleProp, activeChannel]);
 
   const handleEdit = useCallback(() => {
-    if (onEditProp) onEditProp(message)
-    else setEditingMessage(message)
-  }, [message, onEditProp, setEditingMessage])
+    if (onEditProp) onEditProp(message);
+    else setEditingMessage(message);
+  }, [message, onEditProp, setEditingMessage]);
 
   const handleCopy = useCallback(async () => {
     if (onCopyProp) {
-      onCopyProp(message)
-      return
+      onCopyProp(message);
+      return;
     }
     if (message.text) {
       try {
-        await navigator.clipboard.writeText(message.text)
-        toast.success(t('message_actions.copy_success', 'Copied to clipboard'))
+        await navigator.clipboard.writeText(message.text);
+        toast.success(t('message_actions.copy_success', 'Copied to clipboard'));
       } catch (err) {
-        console.error('Failed to copy text:', err)
+        console.error('Failed to copy text:', err);
       }
     }
-  }, [message, onCopyProp, t])
+  }, [message, onCopyProp, t]);
+
+  const handleCancelPendingSend = useCallback(async () => {
+    if (!activeChannel || !message.id) return;
+    try {
+      await (activeChannel as any).cancelPendingE2eeSend?.(message.id);
+      syncMessages();
+      toast.success(t('message_actions.cancel_send_success', 'Send canceled'));
+    } catch (err) {
+      console.error('Failed to cancel pending E2EE send', err);
+      toast.error(t('message_actions.cancel_send_error', 'Could not cancel send'));
+    }
+  }, [activeChannel, message.id, syncMessages, t]);
 
   /* --- Actual delete logic (called after confirm) --- */
   const executeDeleteForEveryone = useCallback(async () => {
     if (onDeleteProp) {
-      onDeleteProp(message)
-      return
+      onDeleteProp(message);
+      return;
     }
-    if (!activeChannel) return
+    if (!activeChannel) return;
     try {
-      await activeChannel.deleteMessage(message.id!)
+      await activeChannel.deleteMessage(message.id!);
     } catch (err) {
-      console.error('Failed to delete message', err)
+      console.error('Failed to delete message', err);
     }
-  }, [message, onDeleteProp, activeChannel])
+  }, [message, onDeleteProp, activeChannel]);
 
   const executeDeleteForMe = useCallback(async () => {
     if (onDeleteForMeProp) {
-      onDeleteForMeProp(message)
-      return
+      onDeleteForMeProp(message);
+      return;
     }
-    if (!activeChannel) return
+    if (!activeChannel) return;
     try {
-      await activeChannel.deleteMessageForMe(message.id!)
+      await activeChannel.deleteMessageForMe(message.id!);
     } catch (err) {
-      console.error('Failed to delete message for me', err)
+      console.error('Failed to delete message for me', err);
     }
-  }, [message, onDeleteForMeProp, activeChannel])
+  }, [message, onDeleteForMeProp, activeChannel]);
 
   /* --- Handlers that open the confirm dialog --- */
   const handleDeleteForEveryone = useCallback(() => {
-    setPendingDelete({ type: 'for_everyone', execute: executeDeleteForEveryone })
-  }, [executeDeleteForEveryone])
+    setPendingDelete({ type: 'for_everyone', execute: executeDeleteForEveryone });
+  }, [executeDeleteForEveryone]);
 
   const handleDeleteForMe = useCallback(() => {
-    setPendingDelete({ type: 'for_me', execute: executeDeleteForMe })
-  }, [executeDeleteForMe])
+    setPendingDelete({ type: 'for_me', execute: executeDeleteForMe });
+  }, [executeDeleteForMe]);
 
   const handleConfirmDelete = useCallback(async () => {
     if (pendingDelete) {
-      await pendingDelete.execute()
-      setPendingDelete(null)
+      await pendingDelete.execute();
+      setPendingDelete(null);
     }
-  }, [pendingDelete])
+  }, [pendingDelete]);
 
   const handleCancelDelete = useCallback(() => {
-    setPendingDelete(null)
-  }, [])
+    setPendingDelete(null);
+  }, []);
 
   /* --- Check if we have any dropdown actions --- */
   const hasDropdownActions =
-    actions.canPin || actions.canEdit || actions.canCopy || actions.canDelete || actions.canDeleteForMe
+    canCancelPendingE2eeSend ||
+    actions.canPin ||
+    actions.canEdit ||
+    actions.canCopy ||
+    actions.canDelete ||
+    actions.canDeleteForMe;
 
   return (
     <>
-      <div
-        className={`ermis-message-list__actions`}
-      >
+      <div className={`ermis-message-list__actions`}>
         {/* Reply */}
         {actions.canReply && (
           <button
@@ -181,11 +187,7 @@ export function UhmMessageActions({
         )}
 
         {/* Reaction */}
-        <MessageQuickReactions 
-          message={message} 
-          isOwnMessage={isOwnMessage} 
-          disabled={!actions.hasCapReact } 
-        />
+        <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!actions.hasCapReact} />
 
         {/* Forward */}
         {actions.canForward && (
@@ -214,11 +216,25 @@ export function UhmMessageActions({
               </button>
             </DropdownMenuTrigger>
 
-            <DropdownMenuContent
-              align={isOwnMessage ? 'end' : 'start'}
-              sideOffset={6}
-              className="min-w-[180px] p-1"
-            >
+            <DropdownMenuContent align={isOwnMessage ? 'end' : 'start'} sideOffset={6} className="min-w-[180px] p-1">
+              {/* Cancel pending local E2EE send */}
+              {canCancelPendingE2eeSend && (
+                <DropdownMenuItem
+                  className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/30 transition-colors"
+                  onClick={handleCancelPendingSend}
+                >
+                  <XCircle className="w-4 h-4" />
+                  <span>{t('message_actions.cancel_send', 'Cancel send')}</span>
+                </DropdownMenuItem>
+              )}
+
+              {canCancelPendingE2eeSend &&
+                (actions.canPin ||
+                  actions.canEdit ||
+                  actions.canCopy ||
+                  actions.canDelete ||
+                  actions.canDeleteForMe) && <DropdownMenuSeparator className="my-1" />}
+
               {/* Pin */}
               {actions.canPin && (
                 <DropdownMenuItem
@@ -232,9 +248,7 @@ export function UhmMessageActions({
                     <Pin className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
                   )}
                   <span>
-                    {actions.isPinned
-                      ? t('message_actions.unpin', 'Unpin')
-                      : t('message_actions.pin', 'Pin')}
+                    {actions.isPinned ? t('message_actions.unpin', 'Unpin') : t('message_actions.pin', 'Pin')}
                   </span>
                 </DropdownMenuItem>
               )}
@@ -263,9 +277,8 @@ export function UhmMessageActions({
               )}
 
               {/* Separator before danger */}
-              {(actions.canPin || actions.canEdit || actions.canCopy) && (actions.canDelete || actions.canDeleteForMe) && (
-                <DropdownMenuSeparator className="my-1" />
-              )}
+              {(actions.canPin || actions.canEdit || actions.canCopy) &&
+                (actions.canDelete || actions.canDeleteForMe) && <DropdownMenuSeparator className="my-1" />}
 
               {/* Delete for me */}
               {actions.canDeleteForMe && (
@@ -308,8 +321,14 @@ export function UhmMessageActions({
           }
           message={
             pendingDelete.type === 'for_everyone'
-              ? t('message_actions.confirm_delete_everyone_message', 'This message will be permanently deleted for all participants. This action cannot be undone.')
-              : t('message_actions.confirm_delete_for_me_message', 'This message will be removed from your view. Other participants can still see it.')
+              ? t(
+                  'message_actions.confirm_delete_everyone_message',
+                  'This message will be permanently deleted for all participants. This action cannot be undone.',
+                )
+              : t(
+                  'message_actions.confirm_delete_for_me_message',
+                  'This message will be removed from your view. Other participants can still see it.',
+                )
           }
           confirmLabel={t('message_actions.confirm_delete_yes', 'Delete')}
           cancelLabel={t('actions.confirm_cancel', 'Cancel')}
@@ -317,5 +336,5 @@ export function UhmMessageActions({
         />
       )}
     </>
-  )
+  );
 }

@@ -32,12 +32,18 @@ jobs:
       - name: Build SDK and React
         run: yarn build
 
-      - name: Publish SDK to NPM
+      - name: Verify NPM package names
+        run: |
+          test "$(node -p "require('./packages/ermis-chat-sdk/package.json').name")" = "@ermis-network/ermis-chat-sdk"
+          test "$(node -p "require('./packages/ermis-chat-react/package.json').name")" = "@ermis-network/ermis-chat-react"
+          test "$(node -p "require('./packages/ermis-chat-react/package.json').dependencies['@ermis-network/ermis-chat-sdk']")" = "$(node -p "require('./packages/ermis-chat-sdk/package.json').version")"
+
+      - name: Publish @ermis-network/ermis-chat-sdk to NPM
         run: cd packages/ermis-chat-sdk && npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish React UI to NPM
+      - name: Publish @ermis-network/ermis-chat-react to NPM
         run: cd packages/ermis-chat-react && npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -16,6 +16,26 @@ import { toast, Toaster } from 'sonner'
 
 // Initialize client with env variables
 const PROJECT_ID = import.meta.env.VITE_CHAT_PROJECT_ID || '';
+const E2EE_ATTACHMENT_MULTIPART_ENABLED = import.meta.env.VITE_E2EE_ATTACHMENT_MULTIPART === 'true';
+const E2EE_ATTACHMENT_MULTIPART_UPLOAD_CONCURRENCY = parseOptionalPositiveInteger(
+  import.meta.env.VITE_E2EE_ATTACHMENT_MULTIPART_CONCURRENCY,
+);
+const E2EE_ATTACHMENT_UPLOAD_DEBUG = import.meta.env.VITE_E2EE_ATTACHMENT_UPLOAD_DEBUG === 'true';
+
+function parseOptionalPositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.floor(parsed);
+}
+
+if (E2EE_ATTACHMENT_UPLOAD_DEBUG && typeof window !== 'undefined') {
+  try {
+    window.localStorage.setItem('ermis_e2ee_attachment_upload_debug', '1');
+    (window as unknown as { __ERMIS_E2EE_ATTACHMENT_UPLOAD_DEBUG__?: boolean }).__ERMIS_E2EE_ATTACHMENT_UPLOAD_DEBUG__ =
+      true;
+  } catch {}
+}
 
 const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_DEFAULTS.BASE_URL, {
   recoverStateOnReconnect: true,
@@ -24,7 +44,7 @@ const chatClient = ErmisChat.getInstance(API_DEFAULTS.API_KEY, PROJECT_ID, API_D
     options: { message_limit: 1 },
   },
   // userBaseURL: `${API_DEFAULTS.USS_BASE_URL}/uss/v1`,
-  logger: ['warn', 'error'],
+  logger: ['info', 'warn', 'error'],
 });
 
 
@@ -36,7 +56,11 @@ async function initializeE2ee(userId: string) {
   if (!e2eeInitPromise) {
     e2eeInitPromise = (async () => {
       const wasmModule = await loadOpenMlsWasm('/openmls_wasm_bg.wasm');
-      await encryptionManager.initialize(chatClient, userId, { wasmModule });
+      await encryptionManager.initialize(chatClient, userId, {
+        wasmModule,
+        enableE2eeAttachmentMultipart: E2EE_ATTACHMENT_MULTIPART_ENABLED,
+        e2eeAttachmentMultipartUploadConcurrency: E2EE_ATTACHMENT_MULTIPART_UPLOAD_CONCURRENCY,
+      });
     })().catch((err) => {
       e2eeInitPromise = null;
       throw err;

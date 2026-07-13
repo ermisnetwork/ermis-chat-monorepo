@@ -361,6 +361,15 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     }));
   }
 
+  updateMessageById(
+    messageId: string,
+    updateFunc: (
+      msg: ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>,
+    ) => ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>,
+  ) {
+    this._updateMessage({ id: messageId }, updateFunc);
+  }
+
   _addToMessageList(
     messages: Array<ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>>,
     message: ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>,

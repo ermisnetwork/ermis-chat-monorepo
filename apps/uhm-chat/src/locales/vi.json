@@ -440,7 +440,10 @@
     "confirm_delete_for_me_title": "Xóa cho tôi",
     "confirm_delete_for_me_message": "Tin nhắn này sẽ bị xóa khỏi giao diện của bạn. Các thành viên khác vẫn có thể thấy nó.",
     "confirm_delete_yes": "Xóa",
-    "copy_success": "Đã sao chép vào bộ nhớ tạm"
+    "copy_success": "Đã sao chép vào bộ nhớ tạm",
+    "cancel_send": "Hủy gửi",
+    "cancel_send_success": "Đã hủy gửi",
+    "cancel_send_error": "Không thể hủy gửi"
   },
   "profile": {
     "title": "Thông tin cá nhân",

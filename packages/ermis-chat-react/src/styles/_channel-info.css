@@ -500,6 +500,15 @@
   margin-left: 2px;
 }
 
+.ermis-channel-info__media-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ermis-lightbox-spin 0.8s linear infinite;
+}
+
 /* ============================================
    Links List
    ============================================ */

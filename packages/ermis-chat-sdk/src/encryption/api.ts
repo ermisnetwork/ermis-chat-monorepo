@@ -34,6 +34,12 @@ import type {
   GetKeyPackagesByCidResponse,
   GetKeyPackagesResponse,
   HistoricalCiphertext,
+  CompleteE2eeAttachmentRequest,
+  CompleteE2eeAttachmentResponse,
+  DeleteE2eeAttachmentResponse,
+  DownloadE2eeAttachmentGrantResponse,
+  InitE2eeAttachmentRequest,
+  InitE2eeAttachmentResponse,
   KeyPackageCountResponse,
   KeyRotationRequest,
   ListArchiveAvailabilityResponse,
@@ -43,6 +49,8 @@ import type {
   QueryArchiveMaterialRequest,
   QueryEpochArchivesRequest,
   QueryEpochArchivesResponse,
+  QueryE2eeAttachmentsRequest,
+  QueryE2eeAttachmentsResponse,
   QuerySponsoredArchiveRecipientsResponse,
   RecoveryPublicKeyResponse,
   RecoveryVaultResponse,
@@ -282,9 +290,9 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   /** POST with X-Device-ID header */
-  private async _post<T>(url: string, data?: unknown): Promise<T> {
+  private async _post<T>(url: string, data?: unknown, headers?: Record<string, string>): Promise<T> {
     return await (this.client as any).doAxiosRequest('post', url, data, {
-      headers: this.deviceHeaders,
+      headers: { ...this.deviceHeaders, ...(headers || {}) },
     });
   }
 
@@ -292,6 +300,13 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   private async _get<T>(url: string, params?: Record<string, unknown>): Promise<T> {
     return await (this.client as any).doAxiosRequest('get', url, null, {
       params: params || {},
+      headers: this.deviceHeaders,
+    });
+  }
+
+  /** DELETE with X-Device-ID header */
+  private async _delete<T>(url: string): Promise<T> {
+    return await (this.client as any).doAxiosRequest('delete', url, null, {
       headers: this.deviceHeaders,
     });
   }
@@ -527,6 +542,67 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/message`,
       encodeSendMessageRequest(data),
+    );
+  }
+
+  /** Initialize E2EE attachment upload and receive presigned PUT URLs. */
+  async initAttachment(
+    channelType: string,
+    channelId: string,
+    data: InitE2eeAttachmentRequest,
+    options: { multipart?: boolean } = {},
+  ): Promise<InitE2eeAttachmentResponse> {
+    return await this._post(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/init`,
+      data,
+      options.multipart ? { 'X-Ermis-E2EE-Attachment-Upload': 'multipart-v1' } : undefined,
+    );
+  }
+
+  /** Query confirmed E2EE attachment projections for Channel Info media/files tabs. */
+  async queryE2eeAttachments(
+    channelType: string,
+    channelId: string,
+    data: QueryE2eeAttachmentsRequest = {},
+  ): Promise<QueryE2eeAttachmentsResponse> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/query`, data);
+  }
+
+  /** Complete an E2EE attachment after direct object upload. */
+  async completeAttachment(
+    channelType: string,
+    channelId: string,
+    attachmentId: string,
+    data: CompleteE2eeAttachmentRequest,
+  ): Promise<CompleteE2eeAttachmentResponse> {
+    return await this._post(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/${attachmentId}/complete`,
+      data,
+    );
+  }
+
+  /** Request a presigned GET URL for a confirmed E2EE attachment asset. */
+  async downloadAttachmentGrant(
+    channelType: string,
+    channelId: string,
+    attachmentId: string,
+    assetId: string,
+  ): Promise<DownloadE2eeAttachmentGrantResponse> {
+    return await this._post(
+      this.baseURL +
+        `/v1/e2ee/channels/${channelType}/${channelId}/attachments/${attachmentId}/assets/${assetId}/download-grant`,
+      {},
+    );
+  }
+
+  /** Cancel an unbound E2EE attachment. */
+  async deleteAttachment(
+    channelType: string,
+    channelId: string,
+    attachmentId: string,
+  ): Promise<DeleteE2eeAttachmentResponse> {
+    return await this._delete(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/attachments/${attachmentId}`,
     );
   }
 
