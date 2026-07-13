@@ -51,6 +51,10 @@ import {
   UsersResponse,
   ContactResult,
   Contact,
+  GlobalSyncRequest,
+  GlobalSyncResponse,
+  EventSyncResponse,
+  type SyncStateRecord,
 } from './types';
 
 function isString(x: unknown): x is string {
@@ -116,11 +120,22 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   /** Encryption Manager instance set by EncryptionManager.initialize() for E2EE event handling. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   encryptionManager?: any;
+  /** Message storage for offline persistence. Initialized on connectUser() for ALL channels. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messageStorage?: any;
   private userCache?: IndexedDBUserCache<ErmisChatGenerics>;
   private userCacheKey?: string;
   private userCacheSyncPromise: Promise<UsersResponse<ErmisChatGenerics> | void> | null = null;
 
   private eventSource: EventSourcePolyfill | null = null;
+
+  // ─── Event Sourcing Sync State ──────────────────────────────────────────────
+  /** Cursor for incremental removed-channels sync across performSync() calls. */
+  private _removedSyncCursor?: { removed_at: string; event_id: string };
+  /** Guard to prevent concurrent performSync() calls (debounce). */
+  private _syncInProgress = false;
+  /** Promise for the currently running sync, so callers can await the same run. */
+  private _syncPromise: Promise<void> | null = null;
 
   /**
    * Initializes a new Ermis Chat Client instance.
@@ -324,6 +339,22 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     // we generate the client id client side
     this.userID = connectionUser.id;
+
+    // Initialize message storage for offline persistence (works for ALL channels, not just E2EE).
+    // Uses the same IndexedDB database as encryptionManager (ermis_data_{userId})
+    // so E2EE and standard messages share the same `messages` table.
+    if (this.browser && !this.messageStorage) {
+      try {
+        const { IndexedDBEncryptionStorage } = await import('./encryption/storage');
+        this.messageStorage = new IndexedDBEncryptionStorage(connectionUser.id, this.logger);
+      } catch (err) {
+        this.logger('warn', 'client:connectUser() - Failed to initialize messageStorage', {
+          err,
+          tags: ['storage'],
+        });
+      }
+    }
+
     await this._hydrateUserCacheFromStorage();
 
     const setTokenPromise = this._setToken(connectionUser, connectionToken);
@@ -1259,39 +1290,44 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       tags: ['connection'],
     });
 
-    if (this.encryptionManager?.initialized) {
-      this.encryptionManager.markSyncStart();
-    }
-
+    // Try Event Sourcing sync first (faster, sequence-based)
     const cids = Object.keys(this.activeChannels);
     if (cids.length && this.recoverStateOnReconnect) {
-      this.logger('info', `client:recoverState() - Start the querying of ${cids.length} channels`, {
-        tags: ['connection', 'client'],
-      });
+      try {
+        await this.performSync();
+        this.logger('info', 'client:recoverState() - Event Sourcing sync completed', {
+          tags: ['connection', 'client', 'sync'],
+        });
+        this.dispatchEvent({
+          type: 'connection.recovered',
+        } as Event<ErmisChatGenerics>);
+      } catch (syncErr) {
+        this.logger('warn', 'client:recoverState() - Event sync failed, falling back to queryChannels', {
+          err: syncErr,
+          tags: ['connection', 'client', 'sync'],
+        });
 
-      const {
-        filter = { type: ['messaging', 'team', 'meeting'] } as ChannelFilters,
-        sort = [],
-        options = { message_limit: 1 },
-      } = this.options.recoveryConfig || {};
-      await this.queryChannels(filter, sort, options);
+        // Fallback to legacy queryChannels recovery
+        this.logger('info', `client:recoverState() - Start the querying of ${cids.length} channels`, {
+          tags: ['connection', 'client'],
+        });
 
-      this.logger('info', 'client:recoverState() - Querying channels finished', { tags: ['connection', 'client'] });
-      this.dispatchEvent({
-        type: 'connection.recovered',
-      } as Event<ErmisChatGenerics>);
+        const {
+          filter = { type: ['messaging', 'team', 'meeting'] } as ChannelFilters,
+          sort = [],
+          options = { message_limit: 1 },
+        } = this.options.recoveryConfig || {};
+        await this.queryChannels(filter, sort, options);
+
+        this.logger('info', 'client:recoverState() - Querying channels finished', { tags: ['connection', 'client'] });
+        this.dispatchEvent({
+          type: 'connection.recovered',
+        } as Event<ErmisChatGenerics>);
+      }
     } else {
       this.dispatchEvent({
         type: 'connection.recovered',
       } as Event<ErmisChatGenerics>);
-    }
-
-    if (this.encryptionManager?.initialized) {
-      try {
-        await this.encryptionManager.sync();
-      } catch (err) {
-        this.logger('error', '[Encryption] Failed to sync on reconnect', { err });
-      }
     }
 
     this.wsPromise = Promise.resolve();
@@ -1753,6 +1789,318 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   async unpinChannel(channelType: string, channelId: string) {
     return await this.post<APIResponse>(this.baseURL + `/channels/${channelType}/${channelId}/unpin`);
+  }
+
+  // ─── Event Sourcing Sync API ─────────────────────────────────────────────────
+
+  /**
+   * POST /sync — Sync events for multiple channels at once.
+   * This is the primary API for offline catch-up (cold start / background→foreground).
+   * @see intergration-guide.md Section 3.2
+   */
+  async globalSync(request: GlobalSyncRequest): Promise<GlobalSyncResponse<ErmisChatGenerics>> {
+    return await this.post<GlobalSyncResponse<ErmisChatGenerics>>(
+      this.baseURL + '/sync',
+      request,
+    );
+  }
+
+  /**
+   * Perform a full sync flow for all active channels.
+   * Features:
+   * - Debounce: only one sync runs at a time; concurrent calls await the same promise.
+   * - Selective sync: only syncs channels that have an initialized state.
+   * - Removed cursor persistence: incrementally syncs removed channels across calls.
+   * - CID-missing detection: channels in cursors but absent from response are treated as removed.
+   * - E2EE delegation: E2EE channels are delegated to encryptionManager if available.
+   * - User info enrichment: messages from sync events are enriched with cached user data.
+   * @see intergration-guide.md Section 4.1 (Cold Start) & Section 4.3 (Background→Foreground)
+   */
+  async performSync(): Promise<void> {
+    // Debounce: if a sync is already running, return the same promise
+    if (this._syncInProgress && this._syncPromise) {
+      this.logger('info', 'client:performSync() - Sync already in progress, reusing promise', {
+        tags: ['sync'],
+      });
+      return this._syncPromise;
+    }
+
+    this._syncInProgress = true;
+
+    // Start E2EE sync early to block websocket decryptions during sync
+    if (this.encryptionManager?.initialized) {
+      this.encryptionManager.markSyncStart();
+    }
+
+    // Run both None-E2E and E2E syncs concurrently
+    this._syncPromise = Promise.all([
+      this._performSyncInternal(),
+      this.encryptionManager?.initialized ? this.encryptionManager.sync() : Promise.resolve(),
+    ]).finally(() => {
+      this._syncInProgress = false;
+      this._syncPromise = null;
+    }) as unknown as Promise<void>;
+
+    return this._syncPromise;
+  }
+
+  /**
+   * Internal sync implementation. Should only be called via performSync().
+   */
+  private async _performSyncInternal(): Promise<void> {
+    const cursors: Record<string, number | { created_at: string; event_id?: string }> = {};
+
+    // Build cursors map from active channels (skip uninitialized and E2EE channels)
+    for (const [cid, channel] of Object.entries(this.activeChannels)) {
+      if (!channel?.state) continue; // Skip channels without initialized state
+
+      // Skip E2EE channels — handled separately by EncryptionManager
+      if (channel.data?.mls_enabled) continue;
+
+      if (channel.state.lastSyncedEventSeq > 0) {
+        cursors[cid] = channel.state.lastSyncedEventSeq;
+      } else if (channel.state.lastSyncedAt) {
+        cursors[cid] = { created_at: channel.state.lastSyncedAt };
+      } else {
+        // First sync — use epoch timestamp
+        cursors[cid] = { created_at: '1970-01-01T00:00:00Z' };
+      }
+    }
+
+    const totalChannels = Object.keys(cursors).length;
+    if (totalChannels === 0) return;
+
+    this.logger('info', `client:performSync() - Syncing ${totalChannels} channels`, {
+      tags: ['sync'],
+    });
+
+    // Dispatch sync start event for UI progress tracking
+    this.dispatchEvent({
+      type: 'sync.started',
+      total_channels: totalChannels,
+    } as Event<ErmisChatGenerics>);
+
+    if (totalChannels > 0) {
+      const syncRequest: GlobalSyncRequest = {
+        project_id: this.projectId,
+        cursors,
+        limit: 100,
+      };
+
+      // Include removed cursor for incremental removed-channels sync
+      if (this._removedSyncCursor) {
+        syncRequest.removed_cursor = this._removedSyncCursor;
+      }
+
+      let response: GlobalSyncResponse<ErmisChatGenerics>;
+      let attempt = 0;
+      const maxRetries = 3;
+      while (true) {
+        try {
+          response = await this.globalSync(syncRequest);
+          break;
+        } catch (err) {
+          attempt++;
+          if (attempt > maxRetries) {
+            this.dispatchEvent({
+              type: 'sync.failed',
+              error: err as Error,
+            } as Event<ErmisChatGenerics>);
+            throw err;
+          }
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          this.logger('warn', `client:performSync() - Sync failed, retrying in ${delay}ms (attempt ${attempt}/${maxRetries})`, { err, tags: ['sync'] });
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      // Collect user info for enrichment from all synced messages
+      const users = Object.values(this.state.users);
+
+      // Process each channel's sync result
+      for (const [cid, syncResult] of Object.entries(response)) {
+        if (cid === 'removed_channels') continue;
+
+        const channel = this.activeChannels[cid];
+        if (!channel) {
+          this.logger('warn', `client:performSync() - Channel ${cid} not in activeChannels, skipping`, {
+            tags: ['sync'],
+          });
+          continue;
+        }
+
+        const typedResult = syncResult as EventSyncResponse<ErmisChatGenerics>;
+
+        // Enrich messages in sync events with user info (#7)
+        if (typedResult.events && users.length > 0) {
+          for (const event of typedResult.events) {
+            if (event.message) {
+              const enriched = enrichWithUserInfo([event.message as any], users);
+              event.message = enriched[0];
+            }
+          }
+        }
+
+        await channel.applySyncResult(typedResult);
+
+        // If has_more, continue syncing individually
+        if (typedResult.has_more) {
+          this.logger('info', `client:performSync() - Channel ${cid} has more events, syncing individually`, {
+            tags: ['sync'],
+          });
+          await channel.syncUntilCaughtUp();
+        }
+      }
+
+      // CID-missing detection (#3): channels in cursors but NOT in response → user removed
+      const responseCids = new Set(
+        Object.keys(response).filter((k) => k !== 'removed_channels'),
+      );
+      for (const requestedCid of Object.keys(cursors)) {
+        if (!responseCids.has(requestedCid)) {
+          const channel = this.activeChannels[requestedCid];
+          if (channel) {
+            this.logger('info', `client:performSync() - Channel ${requestedCid} missing from response, user no longer a member`, {
+              tags: ['sync'],
+            });
+            channel.state.clearMessages();
+            channel.state.resetSyncState();
+            delete this.activeChannels[requestedCid];
+
+            this.dispatchEvent({
+              type: 'channel.deleted',
+              cid: requestedCid,
+            } as Event<ErmisChatGenerics>);
+          }
+        }
+      }
+
+      // Process removed channels (user kicked/left/removed)
+      if (response.removed_channels?.events?.length) {
+        for (const removedEvent of response.removed_channels.events) {
+          const channel = this.activeChannels[removedEvent.cid];
+          if (channel) {
+            this.logger('info', `client:performSync() - Removing channel ${removedEvent.cid}`, {
+              tags: ['sync'],
+              removal_type: removedEvent.removal_type,
+            });
+            channel.state.clearMessages();
+            channel.state.resetSyncState();
+            delete this.activeChannels[removedEvent.cid];
+
+            this.dispatchEvent({
+              type: 'channel.deleted',
+              cid: removedEvent.cid,
+              channel_id: removedEvent.channel_id,
+              channel_type: removedEvent.channel_type,
+            } as Event<ErmisChatGenerics>);
+          }
+        }
+
+        // Persist removed cursor for next sync (#2)
+        if (response.removed_channels.next_cursor) {
+          this._removedSyncCursor = response.removed_channels.next_cursor;
+        }
+      }
+    }
+
+
+    this.logger('info', 'client:performSync() - Sync completed', { tags: ['sync'] });
+    this.dispatchEvent({
+      type: 'sync.completed',
+    } as Event<ErmisChatGenerics>);
+
+    // Persist sync state to IndexedDB for offline recovery (#4)
+    this._persistSyncState().catch((err) => {
+      this.logger('warn', 'client:performSync() - Failed to persist sync state to IndexedDB', {
+        err,
+        tags: ['sync', 'storage'],
+      });
+    });
+  }
+
+  /**
+   * Save all active channels' sync state to IndexedDB.
+   * Called automatically after performSync() completes.
+   */
+  private async _persistSyncState(): Promise<void> {
+    const records: SyncStateRecord[] = [];
+    for (const [cid, channel] of Object.entries(this.activeChannels)) {
+      if (!channel?.state) continue;
+      // Skip channels with no sync state AND no hidden sequences to persist
+      if (
+        channel.state.lastSyncedEventSeq === 0 &&
+        channel.state.hiddenMessageSeqs.size === 0 &&
+        channel.state.hiddenEventSeqs.size === 0
+      ) continue;
+      records.push({
+        cid,
+        lastSyncedEventSeq: channel.state.lastSyncedEventSeq,
+        lastSyncedAt: channel.state.lastSyncedAt,
+        hiddenEventSeqs: Array.from(channel.state.hiddenEventSeqs),
+        hiddenMessageSeqs: Array.from(channel.state.hiddenMessageSeqs),
+        lastMsgSeqBeforeChatDeleted: channel.state.lastMsgSeqBeforeChatDeleted,
+        removedSyncCursor: this._removedSyncCursor,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    if (records.length > 0) {
+      await this.messageStorage?.saveSyncStateBatch(records);
+    }
+  }
+
+  /**
+   * Persist current sync state to IndexedDB immediately.
+   * Call this after modifying channel state (e.g. hiddenMessageSeqs)
+   * to ensure changes survive page refreshes.
+   */
+  async persistSyncState(): Promise<void> {
+    return this._persistSyncState();
+  }
+
+  /**
+   * Restore sync state from IndexedDB into active channel states.
+   * Should be called after channels have been loaded (e.g., after queryChannels).
+   * This enables subsequent performSync() calls to use event_seq cursors
+   * instead of falling back to timestamp-based sync.
+   */
+  async restoreSyncState(): Promise<void> {
+    try {
+      const records = (await this.messageStorage?.loadAllSyncStates()) || [];
+      if (records.length === 0) return;
+
+      this.logger('info', `client:restoreSyncState() - Restoring sync state for ${records.length} channels`, {
+        tags: ['sync', 'storage'],
+      });
+
+      for (const record of records) {
+        const channel = this.activeChannels[record.cid];
+        if (channel?.state) {
+          channel.state.lastSyncedEventSeq = record.lastSyncedEventSeq;
+          channel.state.lastSyncedAt = record.lastSyncedAt;
+          channel.state.hiddenEventSeqs = new Set(record.hiddenEventSeqs || []);
+          channel.state.hiddenMessageSeqs = new Set(record.hiddenMessageSeqs || []);
+          channel.state.lastMsgSeqBeforeChatDeleted = record.lastMsgSeqBeforeChatDeleted;
+        }
+        // Restore removed cursor from the first record that has one
+        if (record.removedSyncCursor && !this._removedSyncCursor) {
+          this._removedSyncCursor = record.removedSyncCursor;
+        }
+      }
+    } catch (err) {
+      this.logger('warn', 'client:restoreSyncState() - Failed to restore sync state', {
+        err,
+        tags: ['sync', 'storage'],
+      });
+    }
+  }
+
+  /**
+   * Remove a channel's persisted sync state from IndexedDB.
+   * Called when a channel is deleted or the user is removed.
+   */
+  async removeSyncState(cid: string): Promise<void> {
+    await this.messageStorage?.deleteSyncState(cid);
   }
 
   /**
