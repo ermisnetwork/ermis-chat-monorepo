@@ -100,14 +100,14 @@ Returns `true` if the error originated from a WebSocket transport failure (as op
 
 ## v1 Unsupported Feature Errors
 
-Some legacy SDK methods now throw normal JavaScript `Error` objects before making a network request because `ermis_end_user` v1 does not expose the old server capability:
+When v1 does not expose a legacy capability, the SDK throws `UnsupportedEndUserFeatureError` before changing state or making a network request. The error exports `code = 'END_USER_FEATURE_UNSUPPORTED'`, `feature`, and `endUserApiMode`.
 
 | Method or input                  | v1 behavior                                                                        |
 | -------------------------------- | ---------------------------------------------------------------------------------- |
 | `queryUsers()`                   | Throws; use `searchUsers(query, limit)`, `queryUser(id)`, or `getBatchUsers(ids)`. |
 | `syncUserCache()`                | Throws; `connectUser()` no longer schedules full user-list preload.                |
 | `connectToSSE()`                 | Throws; profile SSE is not supported.                                              |
-| `connectUser(user, token, true)` | Throws; exchange external auth on a trusted backend through `/uss/v1/auth/external`. |
+| `connectUser(user, token, { externalAuth: true })` | Throws; exchange external auth on a trusted backend through `/uss/v1/auth/external`. |
 | Wallet challenge/signature auth  | Throws; wallet auth is not exposed by v1.                                          |
 | `updateProfile({ about_me })`    | Throws; v1 supports profile display/avatar fields, not `about_me`.                 |
 
@@ -120,7 +120,7 @@ Treat these as permanent integration errors and update the caller rather than re
 :::
 
 :::caution
-**Token expiration errors** (codes `40`–`43`) are marked as non-retryable because they require a fresh token, not a simple retry. Use `client.refreshNewToken(refresh_token)` to obtain a new token, then retry the operation. See [Authentication — Token Refresh](./auth.md) for details.
+**Token expiration errors** (codes `40`–`43`) are marked as non-retryable for generic retry logic. When a refresh token is configured, the SDK performs one refresh and one request retry automatically. A terminal failure dispatches `auth.refresh_failed`; the application should clear its session. See [Authentication — Token Refresh](./auth.md) for details.
 :::
 
 ### Recommended Pattern

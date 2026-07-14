@@ -2,18 +2,6 @@
 
 The official React UI components for Ermis Chat.
 
-## Public Package Name
-
-<details>
-<summary>Change log</summary>
-
-- `2026-07-03`: Kept the public npm package under the official `@ermis-network/ermis-chat-react` scoped name.
-  - Reason: keep the React package aligned with the existing Ermis public package name before wider adoption.
-  - Integrator action: install/import `@ermis-network/ermis-chat-react`; install `@ermis-network/ermis-chat-sdk` as the matching core SDK dependency.
-  - Compatibility/default: React exports and CSS subpath stay the same under the scoped package name. Any temporary package names should be deprecated on npm.
-
-</details>
-
 ## E2EE UI Support
 
 - `CreateChannelModal` supports E2EE direct/group creation when `client.encryptionManager` is initialized.

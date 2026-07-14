@@ -46,6 +46,7 @@ function getStoredRefreshToken() {
 }
 
 const chatClientOptions: ErmisChatOptions = {
+  endUserApiMode: API_DEFAULTS.END_USER_API_MODE,
   recoverStateOnReconnect: true,
   recoveryConfig: {
     filter: { type: ['messaging', 'team'] },
@@ -116,10 +117,12 @@ function bootstrapMessage(phase: BootstrapPhase) {
 function BootstrapScreen({
   phase,
   error,
+  actionLabel,
   onRetry,
 }: {
   phase: BootstrapPhase;
   error?: string | null;
+  actionLabel?: string;
   onRetry?: () => void;
 }) {
   return (
@@ -140,7 +143,7 @@ function BootstrapScreen({
             onClick={onRetry}
             className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-[#7949EC] px-4 text-[13px] font-semibold text-white shadow-sm hover:bg-[#6840d8]"
           >
-            {i18n.t('app.retry', 'Try Again')}
+            {actionLabel || i18n.t('app.retry', 'Try Again')}
           </button>
         )}
       </div>
@@ -197,10 +200,11 @@ function AppContent() {
   const [chatReady, setChatReady] = useState(false);
   const [bootstrapPhase, setBootstrapPhase] = useState<BootstrapPhase>('restoring');
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapAction, setBootstrapAction] = useState<'retry' | 'login' | null>(null);
   const [pendingBootstrap, setPendingBootstrap] = useState<{
     userId: string;
     token: string;
-    refreshToken?: string | null;
+    refreshToken: string;
   } | null>(null);
 
   const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) === 'dark' ? 'dark' : 'light';
@@ -226,18 +230,18 @@ function AppContent() {
   const bootstrapSession = useCallback(async (
     userId: string,
     token: string,
-    options: { navigateToChat?: boolean; refreshToken?: string | null } = {},
+    options: { navigateToChat?: boolean; refreshToken: string },
   ) => {
-    const refreshToken = options.refreshToken || getStoredRefreshToken();
+    const refreshToken = options.refreshToken;
     setPendingBootstrap({ userId, token, refreshToken });
     setBootstrapError(null);
+    setBootstrapAction(null);
     setChatReady(false);
     setIsAuthenticated(false);
 
     try {
       setBootstrapPhase('connecting');
-      chatClient.setRefreshToken(refreshToken || getStoredRefreshToken);
-      await chatClient.connectUser({ id: userId }, token, false, refreshToken || getStoredRefreshToken);
+      await chatClient.connectUser({ id: userId }, token, { refreshToken });
 
       setBootstrapPhase('e2ee');
       await initializeE2ee(userId);
@@ -265,17 +269,54 @@ function AppContent() {
       if (isAuthFailure) {
         clearSavedSession();
         setPendingBootstrap(null);
-        setBootstrapPhase('idle');
-        setBootstrapError(null);
-        navigate('/login', { replace: true });
+        setBootstrapPhase('error');
+        setBootstrapAction('login');
+        setBootstrapError(i18n.t('app.session_expired', 'Your session has expired. Please sign in again.'));
         return;
       }
 
       setBootstrapPhase('error');
+      setBootstrapAction('retry');
       setBootstrapError(err?.message || i18n.t('app.bootstrap_failed', 'Could not finish secure startup.'));
       console.error('[Bootstrap] Failed to initialize chat:', err);
     }
   }, [clearSavedSession, navigate]);
+
+  const goToLogin = useCallback(() => {
+    setBootstrapPhase('idle');
+    setBootstrapError(null);
+    setBootstrapAction(null);
+    navigate('/login', { replace: true });
+  }, [navigate]);
+
+  const handleAuthRefreshFailed = useCallback(async () => {
+    clearSavedSession();
+    setPendingBootstrap(null);
+    setChatReady(false);
+    setIsAuthenticated(false);
+    setBootstrapPhase('error');
+    setBootstrapAction('login');
+    setBootstrapError(i18n.t('app.session_expired', 'Your session has expired. Please sign in again.'));
+    try {
+      await chatClient.disconnectUser();
+    } catch (error) {
+      console.error('[Auth] Failed to disconnect after refresh failure:', error);
+    }
+  }, [clearSavedSession]);
+
+  useEffect(() => {
+    const tokenSubscription = chatClient.on('auth.token_refreshed', (event) => {
+      if (event.token) localStorage.setItem(STORAGE_KEYS.TOKEN, event.token);
+      if (event.refresh_token) localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, event.refresh_token);
+    });
+    const failureSubscription = chatClient.on('auth.refresh_failed', () => {
+      void handleAuthRefreshFailed();
+    });
+    return () => {
+      tokenSubscription.unsubscribe();
+      failureSubscription.unsubscribe();
+    };
+  }, [handleAuthRefreshFailed]);
 
   // Restore login session from localStorage on mount
   useEffect(() => {
@@ -289,16 +330,17 @@ function AppContent() {
     const savedUserId = localStorage.getItem(STORAGE_KEYS.USER_ID);
     const savedRefreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
 
-    if (savedToken && savedUserId) {
+    if (savedToken && savedUserId && savedRefreshToken) {
       void bootstrapSession(savedUserId, savedToken, { refreshToken: savedRefreshToken });
     } else {
+      if (savedToken || savedUserId || savedRefreshToken) clearSavedSession();
       setBootstrapPhase('idle');
       setChatReady(false);
       setIsAuthenticated(false);
     }
-  }, [bootstrapSession, savedTheme]);
+  }, [bootstrapSession, clearSavedSession, savedTheme]);
 
-  const handleLoginSuccess = (userId: string, token: string, refreshToken?: string) => {
+  const handleLoginSuccess = (userId: string, token: string, refreshToken: string) => {
     void bootstrapSession(userId, token, { navigateToChat: true, refreshToken });
   };
 
@@ -315,12 +357,17 @@ function AppContent() {
       <BootstrapScreen
         phase={bootstrapPhase}
         error={bootstrapError}
-        onRetry={bootstrapPhase === 'error' && pendingBootstrap
-          ? () => void bootstrapSession(pendingBootstrap.userId, pendingBootstrap.token, {
-              navigateToChat: true,
-              refreshToken: pendingBootstrap.refreshToken,
-            })
-          : undefined}
+        actionLabel={bootstrapAction === 'login' ? i18n.t('login.title', 'Sign In') : undefined}
+        onRetry={
+          bootstrapPhase === 'error' && bootstrapAction === 'login'
+            ? goToLogin
+            : bootstrapPhase === 'error' && bootstrapAction === 'retry' && pendingBootstrap
+            ? () => void bootstrapSession(pendingBootstrap.userId, pendingBootstrap.token, {
+                navigateToChat: true,
+                refreshToken: pendingBootstrap.refreshToken,
+              })
+            : undefined
+        }
       />
     );
   }

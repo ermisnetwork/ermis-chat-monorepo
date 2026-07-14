@@ -15,7 +15,7 @@ import { LocaleToggle } from '../components/LocaleToggle'
 import { SEO } from '../components/SEO'
 
 interface LoginPageProps {
-  onLoginSuccess: (userId: string, token: string, refreshToken?: string) => void
+  onLoginSuccess: (userId: string, token: string, refreshToken: string) => void
 }
 
 function createAuthProvider() {
@@ -24,9 +24,11 @@ function createAuthProvider() {
         baseURL: API_DEFAULTS.BASE_URL,
         ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
         selfHosted: true,
+        endUserApiMode: API_DEFAULTS.END_USER_API_MODE,
       })
     : new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL, {
         ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
+        endUserApiMode: API_DEFAULTS.END_USER_API_MODE,
       })
 }
 
@@ -115,6 +117,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         const token = res.token || res.data?.token || res.access_token
         const refreshToken = res.refresh_token || res.data?.refresh_token
         if (!token) throw new Error(t('errors.missing_token'))
+        if (!refreshToken) throw new Error(t('errors.missing_refresh_token', 'Missing refresh token'))
 
         const payload = parseJwt(token)
         const finalUserId = res.user_id || res.user?.id || res.data?.user?.id || payload?.user_id || payload?.sub || payload?.id
@@ -123,11 +126,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
         localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId)
         localStorage.setItem(STORAGE_KEYS.TOKEN, token)
-        if (refreshToken) {
-          localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
-        } else {
-          localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
-        }
+        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
         localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
         onLoginSuccess(finalUserId, token, refreshToken)
       } else {
@@ -151,17 +150,16 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         const token = res.token || res.data?.token || res.access_token
         const refreshToken = res.refresh_token || res.data?.refresh_token
         if (!token) throw new Error(t('errors.missing_token'))
+        if (!refreshToken) throw new Error(t('errors.missing_refresh_token', 'Missing refresh token'))
 
         const payload = parseJwt(token)
         const finalUserId = res.user_id || res.user?.id || res.data?.user?.id || payload?.user_id || payload?.sub || payload?.id
 
+        if (!finalUserId) throw new Error(t('errors.missing_user'))
+
         localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId)
         localStorage.setItem(STORAGE_KEYS.TOKEN, token)
-        if (refreshToken) {
-          localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
-        } else {
-          localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
-        }
+        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
         localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
         onLoginSuccess(finalUserId, token, refreshToken)
       } else {

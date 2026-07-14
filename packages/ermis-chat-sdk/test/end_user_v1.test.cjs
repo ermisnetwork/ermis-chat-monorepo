@@ -34,6 +34,7 @@ async function makeClient(token = 'user-token') {
     baseURL: 'https://chat.example.test',
     userBaseURL: 'https://users.example.test/uss/v1',
     selfHosted: true,
+    endUserApiMode: 'v1',
     browser: false,
   });
   client.userID = 'me';
@@ -55,6 +56,7 @@ test('auth provider sends v1 auth bodies without apikey and adds compatibility a
     apiKey: 'legacy-api-key',
     baseURL: 'https://api.example.test/uss/v1',
     selfHosted: true,
+    endUserApiMode: 'v1',
   });
   const calls = [];
   auth.axiosInstance.post = async (url, data, config) => {
@@ -118,6 +120,7 @@ test('authenticated requests refresh expired access token and retry once', async
     baseURL: 'https://chat.example.test',
     userBaseURL: 'https://users.example.test/v1',
     selfHosted: true,
+    endUserApiMode: 'v1',
     browser: false,
     refreshToken: () => storedRefreshToken,
     onTokenRefresh: (tokens) => {
@@ -281,7 +284,11 @@ test('uploadAvatar posts multipart form to /users/me/avatar and normalizes full 
 
 test('legacy unrestricted listing, SSE, external auth, and wallet flows throw explicit v1 errors', async () => {
   const client = await makeClient();
-  const auth = new ErmisAuthProvider({ baseURL: 'https://api.example.test/v1', selfHosted: true });
+  const auth = new ErmisAuthProvider({
+    baseURL: 'https://api.example.test/v1',
+    selfHosted: true,
+    endUserApiMode: 'v1',
+  });
 
   await assert.rejects(() => client.queryUsers(), { message: END_USER_V1_UNSUPPORTED_LISTING });
   await assert.rejects(() => client.syncUserCache(), { message: END_USER_V1_UNSUPPORTED_LISTING });
@@ -289,7 +296,7 @@ test('legacy unrestricted listing, SSE, external auth, and wallet flows throw ex
   await assert.rejects(() => client.getExternalAuthToken({ id: 'me' }, 'token'), {
     message: END_USER_V1_UNSUPPORTED_EXTERNAL_AUTH,
   });
-  await assert.rejects(() => client.connectUser({ id: 'other' }, 'token', true), {
+  await assert.rejects(() => client.connectUser({ id: 'other' }, 'token', { externalAuth: true }), {
     message: END_USER_V1_UNSUPPORTED_EXTERNAL_AUTH,
   });
   await assert.rejects(() => auth.getWalletChallenge('0x0'), { message: END_USER_V1_UNSUPPORTED_WALLET });

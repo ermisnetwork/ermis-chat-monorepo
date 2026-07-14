@@ -25,7 +25,13 @@ Getting started with Ermis Chat requires three steps: **initialize the client**,
 ```typescript
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
-const chatClient = ErmisChat.getInstance('YOUR_API_KEY', 'YOUR_PROJECT_ID', 'API_BASE_URL');
+const chatClient = ErmisChat.getInstance({
+  apiKey: 'YOUR_API_KEY',
+  projectId: 'YOUR_PROJECT_ID',
+  baseURL: 'API_BASE_URL',
+  selfHosted: false,
+  endUserApiMode: 'legacy',
+});
 ```
 
 ### Step 2: Connect a User
@@ -43,7 +49,7 @@ await chatClient.connectUser(user, 'ERMIS_USER_TOKEN');
 
 #### Option B: External Authentication
 
-Use this when your application has its own backend and user system. In `ermis_end_user` v1, the browser SDK does not exchange external tokens directly. Your trusted backend calls `/uss/v1/auth/external`, then returns the Ermis `access_token` and `user_id` to the browser.
+Legacy mode supports `connectUser(user, externalToken, { externalAuth: true })`. In v1, the browser SDK does not exchange external tokens directly. Your trusted backend calls `/uss/v1/auth/external`, then returns the Ermis `access_token` and `user_id` to the browser.
 
 ```typescript
 const { user_id, access_token } = await yourBackend.exchangeExternalToken(appToken);
@@ -80,7 +86,13 @@ await channel.sendMessage({ text: 'Hello everyone!' });
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
 // 1. Initialize client
-const chatClient = ErmisChat.getInstance('YOUR_API_KEY', 'YOUR_PROJECT_ID', 'API_BASE_URL');
+const chatClient = ErmisChat.getInstance({
+  apiKey: 'YOUR_API_KEY',
+  projectId: 'YOUR_PROJECT_ID',
+  baseURL: 'API_BASE_URL',
+  selfHosted: false,
+  endUserApiMode: 'legacy',
+});
 
 // 2. Connect user with an Ermis access token
 const user = { id: 'user_1', name: 'User One', avatar: 'https://avatar.url' };

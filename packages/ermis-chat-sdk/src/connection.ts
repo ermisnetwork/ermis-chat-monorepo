@@ -107,12 +107,17 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
   private _isTokenExpiredError(error: { code?: string | number; message?: string } | undefined) {
     return (
       Number(error?.code) === chatCodes.TOKEN_EXPIRED ||
+      Number(error?.code) === chatCodes.WS_TOKEN_EXPIRED ||
       this._isTokenExpiredMessage(error?.message)
     );
   }
 
   private _isTokenExpiredCloseEvent(event: WebSocket.CloseEvent) {
-    return Number(event.code) === chatCodes.TOKEN_EXPIRED || this._isTokenExpiredMessage(event.reason);
+    return (
+      Number(event.code) === chatCodes.WS_TOKEN_EXPIRED ||
+      event.reason === 'JWT Expire' ||
+      this._isTokenExpiredMessage(event.reason)
+    );
   }
 
   setClient(client: ErmisChat<ErmisChatGenerics>) {
@@ -136,14 +141,11 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
       this.consecutiveFailures += 1;
 
       if (this._isTokenExpiredError(error)) {
-        this._log('connect() - WS failure due to expired token');
-        const refreshedToken = await this.client.refreshAccessToken();
-        if (refreshedToken) {
-          const healthCheck = await this._connect();
-          this.consecutiveFailures = 0;
-
-          this._log(`connect() - Re-established ws connection after token refresh: ${healthCheck}`);
-        }
+        this._log('connect() - WS failure due to expired token; refreshing token before retry', {}, 'warn');
+        await this.client.refreshAccessToken();
+        const healthCheck = await this._connect();
+        this.consecutiveFailures = 0;
+        this._log(`connect() - Re-established ws connection after token refresh: ${healthCheck}`);
       } else if (!error.isWSFailure) {
         // API rejected the connection and we should not retry
         throw new Error(
@@ -356,7 +358,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     // reconnect in case of on error or on close
     // also reconnect if the health check cycle fails
     let interval = options.interval;
-    if (!interval) {
+    if (interval === undefined) {
       interval = retryInterval(this.consecutiveFailures);
     }
     // reconnect, or try again after a little while...
@@ -381,6 +383,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
 
     try {
       if (options.refreshToken) {
+        this._log('_reconnect() - Refreshing token before websocket reconnect');
         await this.client.refreshAccessToken();
       }
       if (this.client.encryptionManager?.initialized) {
@@ -482,6 +485,23 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
       return;
     }
 
+    if (this._isTokenExpiredCloseEvent(event)) {
+      this.consecutiveFailures += 1;
+      this.totalFailures += 1;
+      this._setHealth(false);
+      this.isConnecting = false;
+
+      const error = this._errorFromWSEvent(event);
+      if (!this.isResolved) {
+        this.rejectPromise?.(error);
+        return;
+      }
+
+      this._log('onclose() - WS token expired. Refreshing token before reconnect ...', { event }, 'warn');
+      void this._reconnect({ interval: 0, refreshToken: true });
+      return;
+    }
+
     // Reserved codes (1005, 1006, 1015) are never sent on the wire by well-behaved
     // peers; the browser synthesizes them locally. Treat them the same as any
     // abnormal closure — bump failure counters and reconnect.
@@ -492,11 +512,10 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
 
     this.rejectPromise?.(this._errorFromWSEvent(event));
 
-    const refreshToken = this._isTokenExpiredCloseEvent(event);
     this._log(`onclose() - WS connection closed abnormally (code ${event.code}). Calling reconnect ...`, { event });
 
     // reconnect on abnormal failure
-    this._reconnect({ refreshToken });
+    void this._reconnect();
   };
 
   onerror = (wsID: number, event: WebSocket.ErrorEvent) => {

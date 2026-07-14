@@ -87,9 +87,3 @@ Con bot Github Actions tên là `"Publish SDKs to NPM"` sẽ lập tức chạy:
 3. Di chuyển vào React -> publish `@ermis-network/ermis-chat-react`.
 
 Vậy là xong! Phiên bản mới đã xuất hiện trên NPM. Mọi thứ rất dễ theo dõi!
-
-## Change log
-
-- `2026-07-03`: Added `scripts/publish-packages.sh` and `yarn publish:packages` for local parallel publishing of `@ermis-network/ermis-chat-sdk` and `@ermis-network/ermis-chat-react`.
-- `2026-07-06`: Added `scripts/publish-one-package.sh`, `yarn publish:sdk`, and `yarn publish:react` for sequential 2FA-friendly local publishing.
-- `2026-07-06`: Changed `scripts/publish-packages.sh` to publish SDK then React sequentially, wait for SDK registry propagation, and resume when SDK already exists but React is still missing.

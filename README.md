@@ -47,6 +47,8 @@ For cloud mode, generate an **API key** and **ProjectID** on the [Ermis Dashboar
 
 For self-hosted Bellboy deployments, the frontend can initialize the SDK with `selfHosted: true`; API key and project ID inputs are not required because tenant scope is resolved from the user JWT and server license.
 
+Select the auth/user backend independently with `endUserApiMode: 'legacy' | 'v1'`. If omitted, the default is `legacy` for both cloud and self-host.
+
 > **Note**: Ermis Dashboard will be available soon. Please contact our support team to create a client account and receive your API key. Contact support: [tony@ermis.network](mailto:tony@ermis.network)
 
 ### Step 2: Install Chat SDK
@@ -81,9 +83,9 @@ const options = {
   timeout: 6000,
 }; // optional
 
-const authProvider = new ErmisAuthProvider(API_KEY, BASE_URL, options);
+const authProvider = new ErmisAuthProvider(API_KEY, BASE_URL, { ...options, endUserApiMode: 'legacy' });
 // Self-host:
-// const authProvider = new ErmisAuthProvider({ baseURL: BASE_URL, selfHosted: true });
+// const authProvider = new ErmisAuthProvider({ baseURL: BASE_URL, selfHosted: true, endUserApiMode: 'v1' });
 ```
 
 **Send OTP to email:**
@@ -123,9 +125,9 @@ const options = {
   baseURL: BASE_URL,
 }; // optional
 
-const chatClient = ErmisChat.getInstance(API_KEY, PROJECT_ID, BASE_URL, options);
+const chatClient = ErmisChat.getInstance(API_KEY, PROJECT_ID, BASE_URL, { ...options, endUserApiMode: 'legacy' });
 // Self-host:
-// const chatClient = ErmisChat.getInstance({ baseURL: BASE_URL, selfHosted: true });
+// const chatClient = ErmisChat.getInstance({ baseURL: BASE_URL, selfHosted: true, endUserApiMode: 'v1' });
 ```
 
 After obtaining the token and user_id from the OTP verification step, connect the user to the chat:
@@ -138,6 +140,7 @@ await chatClient.connectUser(
     name: user_id,
   },
   token,
+  { refreshToken: refresh_token },
 );
 ```
 

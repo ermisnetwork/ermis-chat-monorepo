@@ -17,8 +17,9 @@
 - If replay cannot recover this device, Channel Info reveals the advanced reset action that reloads encrypted state on this device while keeping already shown messages.
 - If this device has no PIN or has incomplete history restore, uhm-chat shows a soft PIN popup after login/app entry; a locked vault alone does not interrupt login.
 - UHM defaults to SDK self-host mode (`VITE_ERMIS_SELF_HOSTED` unset or any value except `false`), so API key and project ID env vars are optional. Set `VITE_ERMIS_SELF_HOSTED=false` for cloud mode, where `VITE_API_KEY` and `VITE_CHAT_PROJECT_ID` are required.
-- UHM uses `ermis_end_user` v1 for auth and profile APIs. `VITE_USS_API_URL` is optional; when set, it may be the root host, `/v1`, or `/uss/v1`, and the SDK normalizes it to `/uss/v1`. When unset, UHM does not pass `userBaseURL`, so the SDK derives the end-user base from `VITE_API_URL`.
-- UHM persists v1 `refresh_token` after OTP/Google login. The SDK refreshes expired access tokens automatically and writes rotated tokens back to localStorage through `onTokenRefresh`.
+- `VITE_END_USER_API_MODE=legacy|v1` explicitly selects the auth/user contract for both `ErmisAuthProvider` and `ErmisChat`. If omitted, UHM uses `legacy` in both self-host and cloud mode. This selection performs no backend probe.
+- `VITE_USS_API_URL` is optional. Both API modes accept the root host, `/v1`, or `/uss/v1` and normalize it to `/uss/v1`.
+- UHM requires and persists `refresh_token` after OTP/Google login. The SDK refreshes expired access tokens automatically, writes rotated tokens to localStorage, and handles WS `4001` reconnect without interrupting the UI. Terminal refresh failure clears the session and returns the user to login with an expiry message.
 - UserPicker is search-driven for v1. It seeds from `client.state.users` and active friend channels on mount, does not call `queryUsers()`, and only performs remote user search when the search box is non-empty.
 - After the channel list loads, the SDK prepares all loaded E2EE channels in the background with sequential external join and reports progress through a compact secure-restore banner.
 - Active E2EE channels show running/pending restore progress from local `restore_progress` records without creating fake messages.

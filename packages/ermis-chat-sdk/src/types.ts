@@ -244,6 +244,11 @@ export type ChannelStateOptions = {
 
 export type RefreshTokenProvider = () => string | null | undefined | Promise<string | null | undefined>;
 export type RefreshTokenInput = string | null | undefined | RefreshTokenProvider;
+export type EndUserApiMode = 'legacy' | 'v1';
+export type ConnectUserOptions = {
+  externalAuth?: boolean;
+  refreshToken?: RefreshTokenInput;
+};
 export type TokenRefreshResult = APIResponse & {
   token: string;
   access_token?: string;
@@ -268,6 +273,8 @@ export type ErmisChatOptions = AxiosRequestConfig & {
    * are optional client configuration values and tenant scope is resolved from the user's JWT/license.
    */
   selfHosted?: boolean;
+  /** Selects the end-user API contract independently from the deployment mode. */
+  endUserApiMode?: EndUserApiMode;
   /**
    * Refresh token, or a function returning the latest refresh token. Used when the access token expires.
    */
@@ -350,8 +357,12 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   parent_id?: string;
   parent_cid?: string;
   project_id?: string;
+  reason?: string;
   reaction?: ReactionResponse<ErmisChatGenerics>;
   received_at?: string | Date;
+  refresh_token?: string;
+  status?: number;
+  token?: string;
   unread_messages?: number;
   user?: UserResponse<ErmisChatGenerics>;
   user_id?: string;

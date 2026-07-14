@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # User Management
 
-The SDK uses `ermis_end_user` v1 for user profile reads, search, and current-user profile updates. v1 intentionally does not expose unrestricted full-user listing.
+The SDK delegates user operations to the configured `endUserApiMode: 'legacy' | 'v1'` adapter. Legacy keeps the USS listing, SSE, and profile contract; v1 uses targeted user APIs and intentionally does not expose unrestricted full-user listing.
 
 ## Targeted User Retrieval
 
@@ -13,10 +13,9 @@ const user = await chatClient.queryUser('user-xyz');
 const users = await chatClient.getBatchUsers(['user-1', 'user-2']);
 ```
 
-- `queryUser(id)` calls `GET /users/:id`.
-- `getBatchUsers(ids)` calls `POST /users/batch` with `{ user_ids }`, de-dupes IDs, and chunks at 100 IDs per request.
-- Both methods use Bearer auth and do not send `project_id`.
-- Responses normalize `display_name -> name` and `avatar_url -> avatar` while preserving raw `display_name`, `avatar_url`, `status`, and `services`.
+- In v1, `queryUser(id)` calls `GET /users/:id`; `getBatchUsers(ids)` calls `POST /users/batch` with `{ user_ids }`, de-dupes IDs, and chunks at 100 IDs per request.
+- V1 requests use Bearer auth without `project_id`, and normalize `display_name -> name` and `avatar_url -> avatar` while preserving raw fields.
+- Legacy maps the same SDK methods to its existing project-scoped endpoints and response shapes.
 
 ## Search
 
@@ -34,14 +33,14 @@ await chatClient.searchUsers(1, 25, 'Jane Doe');
 
 For v1 this maps to `q=Jane Doe&limit=25` and ignores `page`.
 
-## Unsupported Listing APIs
+## Listing APIs
 
 ```typescript
-await chatClient.queryUsers(); // throws
-await chatClient.syncUserCache(); // throws
+await chatClient.queryUsers();
+await chatClient.syncUserCache();
 ```
 
-`queryUsers()` and `syncUserCache()` are unsupported because v1 has no full-user-list endpoint. The SDK also does not run background 10k-user cache sync after `connectUser()`.
+These methods work in legacy mode. In v1 they throw `UnsupportedEndUserFeatureError` with `feature = 'unrestricted_listing'` before making a request.
 
 ## Browser User Cache
 
@@ -56,7 +55,7 @@ The cache is updated by:
 - `updateProfile`
 - `uploadAvatar`
 
-When `projectId` is unavailable in self-host mode, the SDK scopes the cache by the normalized user/chat base URL plus the current user ID.
+The cache namespace includes the selected `endUserApiMode`, so legacy and v1 never read each other's records. When `projectId` is unavailable in self-host mode, the SDK also scopes the cache by the normalized user/chat base URL plus the current user ID.
 
 ## Updating Profiles
 
@@ -72,13 +71,13 @@ const response = await chatClient.uploadAvatar(newAvatarFile);
 console.log(response.avatar);
 ```
 
-`updateProfile()` maps `name -> display_name` and `avatar -> avatar_url`. `about_me` is not supported by v1 and throws an explicit error.
+In v1, `updateProfile()` maps `name -> display_name` and `avatar -> avatar_url`; `about_me` throws a typed unsupported error. Legacy keeps `/users/update`, including its existing profile fields.
 
-`uploadAvatar()` posts multipart data to `/users/me/avatar` and returns the normalized full user profile.
+V1 `uploadAvatar()` posts multipart data to `/users/me/avatar` and returns the normalized full user profile. Legacy uses `/users/upload`.
 
 ## Real-time Profile Sync
 
-Profile SSE is unsupported in v1. `connectToSSE()` throws an explicit unsupported error. Refresh user state through targeted reads/search, batch lookup, profile update calls, and message/member payload enrichment.
+Profile SSE is available in legacy mode. In v1, `connectToSSE()` throws `UnsupportedEndUserFeatureError`; refresh user state through targeted reads/search, batch lookup, profile update calls, and message/member payload enrichment.
 
 ## User Picker Guidance
 
