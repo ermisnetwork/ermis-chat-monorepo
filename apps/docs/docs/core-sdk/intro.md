@@ -25,7 +25,13 @@ Getting started with Ermis Chat requires three steps: **initialize the client**,
 ```typescript
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
-const chatClient = ErmisChat.getInstance('YOUR_API_KEY', 'YOUR_PROJECT_ID', 'API_BASE_URL');
+const chatClient = ErmisChat.getInstance({
+  apiKey: 'YOUR_API_KEY',
+  projectId: 'YOUR_PROJECT_ID',
+  baseURL: 'API_BASE_URL',
+  selfHosted: false,
+  endUserApiMode: 'legacy',
+});
 ```
 
 ### Step 2: Connect a User
@@ -43,27 +49,14 @@ await chatClient.connectUser(user, 'ERMIS_USER_TOKEN');
 
 #### Option B: External Authentication
 
-Use this when your application has its **own backend and user system**. This allows your users to chat through Ermis without needing to create separate Ermis accounts.
-
-**Setup (one-time):**
-
-1. Generate an **RSA key pair** on your backend.
-2. Sign your user's JWT token using the **private key** with the **RS256** algorithm.
-3. Provide the **public key** to Ermis.
-4. Ermis will issue you an **API Key** and **Project ID** to connect to the chat system.
-
-**Usage:**
-
-Set the third parameter `external_auth` to `true` and pass in the RS256-signed JWT from your backend:
+Legacy mode supports `connectUser(user, externalToken, { externalAuth: true })`. In v1, the browser SDK does not exchange external tokens directly. Your trusted backend calls `/uss/v1/auth/external`, then returns the Ermis `access_token` and `user_id` to the browser.
 
 ```typescript
-const user = { id: 'your_backend_user_id', name: 'User One', avatar: 'https://avatar.url' };
-await chatClient.connectUser(user, 'YOUR_RS256_SIGNED_JWT', true);
+const { user_id, access_token } = await yourBackend.exchangeExternalToken(appToken);
+await chatClient.connectUser({ id: user_id }, access_token);
 ```
 
-> **How it works:** When `external_auth` is `true`, the SDK sends your RS256-signed JWT to the Ermis backend. Ermis verifies the token using the public key you registered during setup. Once verified, it creates (or retrieves) the corresponding Ermis user and returns a valid session token. This is all handled internally — you only need to pass your backend JWT and set `external_auth` to `true`.
->
-> For setup details, see the [Authentication](./auth.md) guide.
+For setup details, see the [Authentication](./auth.md) guide.
 
 ### Step 3: Create & Join a Quick Channel
 
@@ -93,11 +86,17 @@ await channel.sendMessage({ text: 'Hello everyone!' });
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
 // 1. Initialize client
-const chatClient = ErmisChat.getInstance('YOUR_API_KEY', 'YOUR_PROJECT_ID', 'API_BASE_URL');
+const chatClient = ErmisChat.getInstance({
+  apiKey: 'YOUR_API_KEY',
+  projectId: 'YOUR_PROJECT_ID',
+  baseURL: 'API_BASE_URL',
+  selfHosted: false,
+  endUserApiMode: 'legacy',
+});
 
-// 2. Connect user (using external auth)
+// 2. Connect user with an Ermis access token
 const user = { id: 'user_1', name: 'User One', avatar: 'https://avatar.url' };
-await chatClient.connectUser(user, 'YOUR_BACKEND_TOKEN', true);
+await chatClient.connectUser(user, 'ERMIS_ACCESS_TOKEN');
 
 // 3. Create a quick channel
 const channel = await chatClient.createQuickChannel('General Discussion');

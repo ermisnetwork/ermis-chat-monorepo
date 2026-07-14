@@ -110,6 +110,29 @@ export function getMessageUserId(message: FormatMessageResponse): string {
   return message.user?.id || message.user_id || '';
 }
 
+export function getUserDisplayName(user: any, fallbackId?: string, ...fallbackUsers: any[]): string {
+  const users = [user, ...fallbackUsers].filter(Boolean);
+  const id =
+    fallbackId ||
+    users.find((candidate) => typeof candidate?.id === 'string' && candidate.id)?.id ||
+    users.find((candidate) => typeof candidate?.user_id === 'string' && candidate.user_id)?.user_id ||
+    '';
+
+  const pick = (fields: string[], skipId: boolean) => {
+    for (const candidate of users) {
+      for (const field of fields) {
+        const value = typeof candidate?.[field] === 'string' ? candidate[field].trim() : '';
+        if (!value) continue;
+        if (skipId && value === id) continue;
+        return value;
+      }
+    }
+    return '';
+  };
+
+  return pick(['display_name', 'name'], true) || pick(['email'], false) || pick(['phone'], false) || id;
+}
+
 /**
  * Replace @user_id with @UserName for plain text previews.
  * Returns the formatted string.
@@ -177,7 +200,7 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   // 1. Fallback: Global user cache from client state
   if (extraUsers && typeof extraUsers === 'object') {
     for (const [id, user] of Object.entries<any>(extraUsers)) {
-      setDisplayName(id, user?.name);
+      setDisplayName(id, getUserDisplayName(user, id));
     }
   }
 
@@ -185,7 +208,7 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   const members = channelState?.members;
   if (members && typeof members === 'object') {
     for (const [id, member] of Object.entries<any>(members)) {
-      const name = member?.user?.name || member?.user_id || id;
+      const name = getUserDisplayName(member?.user, member?.user_id || id);
       setDisplayName(id, name);
     }
   }
@@ -195,7 +218,7 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   if (Array.isArray(messages)) {
     messages.forEach((msg: any) => {
       const u = msg.user;
-      setDisplayName(u?.id, u?.name);
+      setDisplayName(u?.id || msg.user_id, getUserDisplayName(u, u?.id || msg.user_id));
     });
   }
 
@@ -203,7 +226,7 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   const watchers = channelState?.watchers;
   if (watchers && typeof watchers === 'object') {
     for (const [id, user] of Object.entries<any>(watchers)) {
-      setDisplayName(id, user?.name);
+      setDisplayName(id, getUserDisplayName(user, id));
     }
   }
 
@@ -372,7 +395,10 @@ export function getLastMessagePreview(
 
   const userId = lastMsg.user_id || '';
   const currentUser = userId && userId === myUserId ? client?.user : undefined;
-  const senderName = currentUser?.name || lastMsg.user?.name || (userId && userMap[userId]) || userId || '';
+  const senderName = getUserDisplayName(lastMsg.user, userId, currentUser, client?.state?.users?.[userId], {
+    id: userId,
+    name: userId && userMap[userId],
+  });
 
   // Display 'Sticker' if message is a sticker
   const isSticker = msgType === 'sticker' || (lastMsg as any).sticker_url;

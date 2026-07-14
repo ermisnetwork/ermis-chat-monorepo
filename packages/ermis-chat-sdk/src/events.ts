@@ -34,6 +34,7 @@ export const EVENT_MAP = {
   'reaction.new': true,
   'typing.start': true,
   'typing.stop': true,
+  'user.updated': true,
   'user.watching.start': true,
   'user.watching.stop': true,
   'connection.changed': true,

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useChatClient } from '../hooks/useChatClient';
-import { replaceMentionsForPreview, buildUserMap } from '../utils';
+import { replaceMentionsForPreview, buildUserMap, getMessageUserId, getUserDisplayName } from '../utils';
 import type { QuotedMessagePreviewProps } from '../types';
 import {
   isImageAttachment,
@@ -94,13 +94,15 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
   stickerLabel = 'Sticker',
   deletedMessageLabel = 'This message was deleted',
 }) => {
-  const { activeChannel } = useChatClient();
+  const { activeChannel, client } = useChatClient();
 
   const userMap = useMemo<Record<string, string>>(() => {
-    return buildUserMap(activeChannel?.state);
-  }, [activeChannel]);
+    return buildUserMap(activeChannel?.state, client?.state?.users);
+  }, [activeChannel, client?.state?.users]);
 
-  const authorName = quotedMessage.user?.name || quotedMessage.user?.id || 'Unknown';
+  const userId = getMessageUserId(quotedMessage as any);
+  const authorName =
+    getUserDisplayName(quotedMessage.user, userId, userId ? client?.state?.users?.[userId] : undefined) || 'Unknown';
   
   const rawText = quotedMessage.text?.trim() || '';
   const formattedText = useMemo(

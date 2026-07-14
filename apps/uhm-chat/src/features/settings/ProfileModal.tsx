@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Camera, Loader2, Mail, Phone, Hash, Copy, Music, Play, RotateCcw } from 'lucide-react';
-import { useChatClient, useChatUser, Avatar } from '@ermis-network/ermis-chat-react';
+import { useChatClient, useChatUser, Avatar, getUserDisplayName } from '@ermis-network/ermis-chat-react';
 import { toast } from 'sonner';
 import { UhmModal } from '@/components/custom/UhmModal';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
   const { t } = useTranslation();
   const { client } = useChatClient();
   const { user } = useChatUser();
-  const [name, setName] = useState(user?.name || '');
+  const userDisplayName = getUserDisplayName(user, user?.id);
+  const [name, setName] = useState(userDisplayName);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
@@ -38,7 +39,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
 
   useEffect(() => {
     if (isOpen) {
-      setName(user?.name || '');
+      setName(userDisplayName);
       setPreviewAvatar(null);
       setSelectedFile(null);
       setError(null);
@@ -149,7 +150,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
       }
 
       // 2. Update name if changed
-      if (trimmedName !== user?.name) {
+      if (trimmedName !== userDisplayName) {
         await client.updateProfile({ name: trimmedName });
       }
 
@@ -195,7 +196,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
           <div className="relative">
             <Avatar
               image={previewAvatar || user?.avatar}
-              name={user?.name || user?.id}
+              name={userDisplayName}
               size={100}
               className="ring-4 ring-background shadow-lg"
             />

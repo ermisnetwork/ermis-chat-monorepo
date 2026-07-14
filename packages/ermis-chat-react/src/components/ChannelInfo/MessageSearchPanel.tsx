@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useMemo, useEffect } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
-import { replaceMentionsForPreview, formatRelativeDate } from '../../utils';
+import { replaceMentionsForPreview, formatRelativeDate, getUserDisplayName } from '../../utils';
 import { Avatar } from '../Avatar';
 import { Panel as DefaultPanel } from '../Panel';
 import { useChatComponents } from '../../context/ChatComponentsContext';
@@ -64,7 +64,7 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
   loadingText = 'Searching...',
   debounceMs = 500,
 }) => {
-  const { setJumpToMessageId } = useChatClient();
+  const { setJumpToMessageId, client } = useChatClient();
   const { PanelComponent } = useChatComponents();
   const Panel = PanelComponent || DefaultPanel;
 
@@ -161,6 +161,8 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
 
         {/* Results */}
         {!loading && results.map((msg) => {
+          const userId = msg.user_id || msg.user?.id || '';
+          const displayName = getUserDisplayName(msg.user, userId, userId ? client?.state?.users?.[userId] : undefined);
           let parsedText = '';
           if (msg.text) {
             // Try standard replacement first
@@ -190,13 +192,13 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
             >
               <AvatarComponent
                 image={msg.user?.avatar || msg.user?.image || msg.user?.avatar_url}
-                name={msg.user?.name || msg.user_id}
+                name={displayName}
                 size={36}
               />
               <div className="ermis-search-panel__result-body">
                 <div className="ermis-search-panel__result-meta">
                   <span className="ermis-search-panel__result-name">
-                    {msg.user?.name || msg.user_id || 'Unknown'}
+                    {displayName || 'Unknown'}
                   </span>
                   <span className="ermis-search-panel__result-time">
                     {msg.created_at ? formatRelativeDate(msg.created_at) : ''}

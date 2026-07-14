@@ -4,44 +4,91 @@ The official core SDK for Ermis Chat.
 
 ## Public Module Structure
 
-<details>
-<summary>Change log</summary>
-
-- `2026-07-03`: Kept the public npm package under the official `@ermis-network/ermis-chat-sdk` scoped name.
-  - Reason: keep the SDK aligned with the existing Ermis public package name before wider adoption.
-  - Integrator action: install/import `@ermis-network/ermis-chat-sdk` and use `@ermis-network/ermis-chat-sdk/encryption` for encryption-only imports.
-  - Compatibility/default: runtime APIs and package exports are unchanged; only the npm package name and module specifier changed from the temporary unscoped naming. Any temporary package names should be deprecated on npm.
-
-</details>
-
 - Customer integrations should import from the package root, for example `import { ErmisChat, EncryptionManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk'`.
 - Encryption-specific integrations may import from `@ermis-network/ermis-chat-sdk/encryption`, which exposes `E2eeClient`, `EncryptionManager`, `IndexedDBEncryptionStorage`, `loadOpenMlsWasm`, public encryption types, and friendly aliases `EncryptionApiClient` and `BrowserEncryptionStorage`.
 - Deep imports from `@ermis-network/ermis-chat-sdk/src/*` are intentionally unsupported. The package publishes `dist/` and runtime assets from `public/`, not TypeScript source files.
 - Apps using OpenMLS must publish `openmls_wasm_bg.wasm` with their web assets. The SDK package includes this binary under `public/openmls_wasm_bg.wasm`; `loadOpenMlsWasm('/openmls_wasm_bg.wasm')` loads the bundled JS glue and that public binary.
 
-## E2EE Channel Helpers
+## Release Line
+
+Starting with `2.1.0`, one SDK line supports both the legacy USS contract and End User v1. Install SDK and React at the same version:
+
+```bash
+npm install @ermis-network/ermis-chat-sdk@2.1.0
+npm install @ermis-network/ermis-chat-react@2.1.0
+```
+
+Backend contract selection is runtime configuration through `endUserApiMode`, not an npm channel or an API probe. Existing `self-host` and `user-service` dist-tags may remain available for older releases, but new integrations should use the unified `2.x` line.
+
+## Client Configuration
+
+Cloud mode:
+
+```ts
+const client = ErmisChat.getInstance({
+  apiKey: API_KEY,
+  projectId: PROJECT_ID,
+  baseURL: BASE_URL,
+  selfHosted: false,
+  endUserApiMode: 'legacy',
+});
+```
+
+Self-host mode:
+
+```ts
+const client = ErmisChat.getInstance({
+  baseURL: BASE_URL,
+  selfHosted: true,
+  endUserApiMode: 'v1',
+});
+```
+
+`selfHosted` controls deployment and tenant behavior. `endUserApiMode` independently selects the user/auth adapter. Self-host mode omits `api_key` from the WebSocket URL and does not require SDK callers to send `project_id` on normal project-scoped requests. After `connectUser()`, Bellboy returns the license project ID in `health.check`; the SDK stores it for local caches and E2EE deterministic channel helpers.
+
+## Legacy USS And End User v1
+
+- Legacy routes include `/auth/get_otp_new`, `/auth/otp_login`, `/refresh_token`, legacy users/profile, SSE, wallet, and external auth. V1 routes include `/auth/otp/request`, `/auth/otp/verify`, `/auth/google`, `/auth/refresh`, and targeted users/profile endpoints.
+- Auth responses expose compatibility aliases: `success: true`, `token = access_token`, and top-level `user_id` when v1 returns it or when it can be read from the JWT payload.
+- `ErmisChat` calls the selected adapter's refresh endpoint when authenticated HTTP requests return 401, 403, or `TOKEN_EXPIRED`, then retries the original request once. Concurrent HTTP/WS failures share one refresh promise; WebSocket close `4001`/`JWT Expire` refreshes, reconnects, and recovers state without surfacing a handshake error to the app.
+- Use `refreshToken: () => localStorage.getItem('refresh_token')` and `onTokenRefresh` to keep app storage in sync with rotated access/refresh tokens.
+- Successful refreshes dispatch `auth.token_refreshed`; terminal refresh failures dispatch `auth.refresh_failed` so applications can clear the session.
+- V1 user APIs call `/users/:id`, `/users/batch`, `/users/search`, `/users/me`, and `/users/me/avatar`. The v1 adapter throws `UnsupportedEndUserFeatureError` with code `END_USER_FEATURE_UNSUPPORTED` for wallet, SSE, unrestricted listing, external auth, and `about_me`.
+- `searchUsers(query, limit)` is the preferred overload. The legacy `searchUsers(page, page_size, name)` overload maps to `q=name&limit=page_size` and ignores `page`.
+- The SDK no longer preloads all users after `connectUser()`. Browser cache hydration remains local-only, and cache entries are refreshed by `queryUser`, `getBatchUsers`, `searchUsers`, message/member enrichment, `updateProfile`, and `uploadAvatar`.
+- For external auth, exchange the external identity through a trusted backend calling `/uss/v1/auth/external`, then pass the returned `access_token` to `connectUser(user, access_token)`.
+
+### `connectUser` migration in 2.1.0
+
+```ts
+// Before
+await client.connectUser(user, token, false, refreshToken);
+await client.connectUser(user, externalToken, true);
+
+// 2.1.0
+await client.connectUser(user, token, { refreshToken });
+await client.connectUser(user, externalToken, { externalAuth: true }); // legacy only
+```
 
 <details>
-<summary>Change log</summary>
+<summary>Implementation progress</summary>
 
-- `2026-06-19`: E2EE message hydration now preserves sender display names when local user cache only contains a bare user id.
-
-  - Reason: freshly sent encrypted messages can otherwise replace the current user's name/email with the raw id in timelines and channel previews.
-  - Integrator action: rebuild SDK/React clients so encrypted message state uses the richer user object already available on the client.
-  - Compatibility/default: if no display name is available locally, clients keep the existing id fallback.
-
-- `2026-06-19`: E2EE message hydration now resolves `quoted_message` from decrypted local state or IndexedDB when only `quoted_message_id` is present, including sticker quotes stored as `type: 'sticker'`.
-
-  - Reason: quoted replies in encrypted channels must preview the replied-to plaintext without requiring Bellboy to decrypt or duplicate message bodies.
-  - Integrator action: rebuild SDK/React clients so reply previews can hydrate from local encrypted-message cache.
-  - Compatibility/default: if the quoted message is not available locally, clients keep the existing unavailable-message fallback.
-
-- `2026-06-19`: Added `restoreProgressWithIssues` to `client.encryptionManager.getRecoveryStatus()`.
-  - Reason: account-level PIN settings need channel-level unavailable-history diagnostics without showing permanent-gap warnings inside every channel.
-  - Integrator action: prefer the new records when rendering global PIN/history diagnostics; keep `getRestoreProgress(channelType, channelId)` for selected-channel progress and repair flows.
-  - Compatibility/default: existing `incompleteChannels` and `channelsWithPermanentGaps` arrays remain unchanged.
+- `2026-07-03` (production): Added flexible SDK self-host/cloud initialization.
+  - Code changed: SDK config parsing/types, AuthProvider API-key decoration, WebSocket URL construction, project-scoped client/channel payload helpers, and UHM app initialization/login wiring.
+  - Docs changed: SDK README client configuration, root README setup examples, and UHM runtime notes.
+  - Decision: cloud mode remains strict and backward compatible; self-host mode allows omitted `apiKey`/`projectId`, learns `project_id` from `health.check`, and avoids empty-scope user cache writes before that event.
+  - Performance: O(1) config/payload checks, no new HTTP/WS round trips, and slightly smaller self-host request payloads because `api_key`/`project_id` are omitted where Bellboy derives scope from claims.
+  - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `npm run build:sdk`, and `yarn workspace uhm-chat build` passed.
+- `2026-07-04` (production): Added SDK/UHM refresh-token flow for expired access tokens.
+  - Code changed: `TokenManager` stores refresh token/provider, `ErmisChat` refreshes and retries expired HTTP requests once, WebSocket reconnect refreshes before rebuilding the URL, and UHM stores/clears `refresh_token`.
+  - Docs changed: SDK README and core SDK auth/client docs document `refreshToken`, `onTokenRefresh`, and automatic retry behavior.
+  - Decision: refresh calls are single-flight per client; callback persistence failures are logged but do not fail the refreshed request.
+  - Performance: normal requests stay O(1) with no extra round trip; expired-token recovery adds one `POST /auth/refresh` plus one retry, and concurrent expired requests share the in-flight refresh promise.
+  - Verification: `yarn workspace @ermis-network/ermis-chat-sdk types`, `npm run build:sdk`, and `yarn workspace uhm-chat build` passed.
 
 </details>
+
+## E2EE Channel Helpers
 
 - `channel.removeMembersE2ee(members, e2eeOptions)` removes other members from an E2EE channel with an encryption commit and sends `self_remove: false`.
 - `channel.leaveChannelE2ee(userId)` self-leaves an E2EE channel by sending `self_remove: true`; this path does not include an encryption commit from the leaving user.

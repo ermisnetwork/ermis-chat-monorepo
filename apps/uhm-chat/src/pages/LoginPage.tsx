@@ -1,163 +1,176 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { GoogleLogin } from '@react-oauth/google';
-import { ErmisAuthProvider } from '@ermis-network/ermis-chat-sdk';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { useTranslation } from 'react-i18next';
-import uhmLogo from '../assets/uhm.svg';
-import { parseJwt, validateEmail, validatePhone, normalizePhone } from '../utils/helpers';
-import { STORAGE_KEYS, API_DEFAULTS, OTP_CONFIG } from '../utils/constants';
-import { ThemeToggle } from '../components/ThemeToggle';
-import { LocaleToggle } from '../components/LocaleToggle';
-import { SEO } from '../components/SEO';
+import React, { useState, useRef, useEffect } from 'react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { GoogleLogin } from '@react-oauth/google'
+import { ErmisAuthProvider } from '@ermis-network/ermis-chat-sdk'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { useTranslation } from 'react-i18next'
+import uhmLogo from '../assets/uhm.svg'
+import { parseJwt, validateEmail, validatePhone, normalizePhone } from '../utils/helpers'
+import { STORAGE_KEYS, API_DEFAULTS, OTP_CONFIG } from '../utils/constants'
+import { ThemeToggle } from '../components/ThemeToggle'
+import { LocaleToggle } from '../components/LocaleToggle'
+import { SEO } from '../components/SEO'
 
 interface LoginPageProps {
-  onLoginSuccess: (userId: string, token: string, refreshToken: string) => void;
+  onLoginSuccess: (userId: string, token: string, refreshToken: string) => void
+}
+
+function createAuthProvider() {
+  return API_DEFAULTS.SELF_HOSTED
+    ? new ErmisAuthProvider({
+        baseURL: API_DEFAULTS.BASE_URL,
+        ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
+        selfHosted: true,
+        endUserApiMode: API_DEFAULTS.END_USER_API_MODE,
+      })
+    : new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL, {
+        ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
+        endUserApiMode: API_DEFAULTS.END_USER_API_MODE,
+      })
 }
 
 export function LoginPage({ onLoginSuccess }: LoginPageProps) {
-  const { t } = useTranslation();
-  const [loginMode, setLoginMode] = useState<'email' | 'phone'>('email');
-  const [identifier, setIdentifier] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpCode, setOtpCode] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [fieldError, setFieldError] = useState('');
-  const [countdown, setCountdown] = useState(0);
-  const authProviderRef = useRef<ErmisAuthProvider | null>(null);
+  const { t } = useTranslation()
+  const [loginMode, setLoginMode] = useState<'email' | 'phone'>('email')
+  const [identifier, setIdentifier] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
+  const [otpCode, setOtpCode] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [fieldError, setFieldError] = useState('')
+  const [countdown, setCountdown] = useState(0)
+  const authProviderRef = useRef<ErmisAuthProvider | null>(null)
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let timer: NodeJS.Timeout
     if (otpSent && countdown > 0) {
-      timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+      timer = setTimeout(() => setCountdown(c => c - 1), 1000)
     }
-    return () => clearTimeout(timer);
-  }, [otpSent, countdown]);
+    return () => clearTimeout(timer)
+  }, [otpSent, countdown])
 
   const handleSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+    e.preventDefault()
 
-    let finalIdentifier = identifier.trim();
+    let finalIdentifier = identifier.trim()
 
     if (loginMode === 'email') {
       if (!identifier.trim() || !validateEmail(identifier)) {
-        setFieldError(t('errors.invalid_email'));
-        return;
+        setFieldError(t('errors.invalid_email'))
+        return
       }
     } else {
       if (!identifier.trim() || !validatePhone(identifier)) {
-        setFieldError(t('errors.invalid_phone'));
-        return;
+        setFieldError(t('errors.invalid_phone'))
+        return
       }
-      finalIdentifier = normalizePhone(identifier);
+      finalIdentifier = normalizePhone(identifier)
     }
 
-    setError('');
-    setFieldError('');
-    setLoading(true);
+    setError('')
+    setFieldError('')
+    setLoading(true)
 
     try {
-      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL);
-      authProviderRef.current = provider;
+      const provider = createAuthProvider()
+      authProviderRef.current = provider
 
-      let res;
+      let res
       if (loginMode === 'email') {
-        res = await provider.sendOtpToEmail(finalIdentifier);
+        res = await provider.sendOtpToEmail(finalIdentifier)
       } else {
-        res = await provider.sendOtpToPhone(finalIdentifier, OTP_CONFIG.PHONE_METHOD);
+        res = await provider.sendOtpToPhone(finalIdentifier, OTP_CONFIG.PHONE_METHOD)
       }
 
       if (res && res.success !== false) {
-        setOtpSent(true);
-        setCountdown(OTP_CONFIG.COUNTDOWN_SECONDS);
-        setOtpCode(''); // reset code
+        setOtpSent(true)
+        setCountdown(OTP_CONFIG.COUNTDOWN_SECONDS)
+        setOtpCode('') // reset code
       } else {
-        setError(res.message || t('errors.otp_failed'));
+        setError(res.message || t('errors.otp_failed'))
       }
     } catch (err: any) {
-      setError(err?.message || t('errors.system_otp_err'));
+      setError(err?.message || t('errors.system_otp_err'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+    e.preventDefault()
     if (otpCode.length < OTP_CONFIG.CODE_LENGTH) {
-      setError(t('errors.otp_incomplete'));
-      return;
+      setError(t('errors.otp_incomplete'))
+      return
     }
-    setError('');
-    setLoading(true);
+    setError('')
+    setLoading(true)
 
     try {
-      const provider = authProviderRef.current;
-      if (!provider) throw new Error(t('errors.invalid_session'));
+      const provider = authProviderRef.current
+      if (!provider) throw new Error(t('errors.invalid_session'))
 
-      const res = (await provider.verifyOtp(otpCode)) as any;
+      const res = await provider.verifyOtp(otpCode) as any
       if (res && res.success !== false) {
-        const token = res.token || res.data?.token || res.access_token;
-        if (!token) throw new Error(t('errors.missing_token'));
-        const refreshToken = res.refresh_token || res.data?.refresh_token;
-        if (!refreshToken) throw new Error(t('errors.missing_refresh_token', 'Missing refresh token'));
+        const token = res.token || res.data?.token || res.access_token
+        const refreshToken = res.refresh_token || res.data?.refresh_token
+        if (!token) throw new Error(t('errors.missing_token'))
+        if (!refreshToken) throw new Error(t('errors.missing_refresh_token', 'Missing refresh token'))
 
-        const payload = parseJwt(token);
-        const finalUserId =
-          res.user_id || res.user?.id || res.data?.user?.id || payload?.user_id || payload?.sub || payload?.id;
+        const payload = parseJwt(token)
+        const finalUserId = res.user_id || res.user?.id || res.data?.user?.id || payload?.user_id || payload?.sub || payload?.id
 
-        if (!finalUserId) throw new Error(t('errors.missing_user'));
+        if (!finalUserId) throw new Error(t('errors.missing_user'))
 
-        localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId);
-        localStorage.setItem(STORAGE_KEYS.TOKEN, token);
-        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
-        localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID());
-        onLoginSuccess(finalUserId, token, refreshToken);
+        localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId)
+        localStorage.setItem(STORAGE_KEYS.TOKEN, token)
+        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
+        localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
+        onLoginSuccess(finalUserId, token, refreshToken)
       } else {
-        setError(res.message || t('errors.wrong_otp'));
+        setError(res.message || t('errors.wrong_otp'))
       }
     } catch (err: any) {
-      setError(err?.message || t('errors.system_verify_err'));
+      setError(err?.message || t('errors.system_verify_err'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleGoogleSuccess = async (credentialResponse: any) => {
-    setError('');
-    setLoading(true);
+    setError('')
+    setLoading(true)
     try {
-      const provider = new ErmisAuthProvider(API_DEFAULTS.API_KEY, API_DEFAULTS.BASE_URL);
+      const provider = createAuthProvider()
 
-      const res = (await provider.loginWithGoogle(credentialResponse.credential)) as any;
+      const res = await provider.loginWithGoogle(credentialResponse.credential) as any
       if (res && res.success !== false) {
-        const token = res.token || res.data?.token || res.access_token;
-        if (!token) throw new Error(t('errors.missing_token'));
-        const refreshToken = res.refresh_token || res.data?.refresh_token;
-        if (!refreshToken) throw new Error(t('errors.missing_refresh_token', 'Missing refresh token'));
+        const token = res.token || res.data?.token || res.access_token
+        const refreshToken = res.refresh_token || res.data?.refresh_token
+        if (!token) throw new Error(t('errors.missing_token'))
+        if (!refreshToken) throw new Error(t('errors.missing_refresh_token', 'Missing refresh token'))
 
-        const payload = parseJwt(token);
-        const finalUserId =
-          res.user_id || res.user?.id || res.data?.user?.id || payload?.user_id || payload?.sub || payload?.id;
-        if (!finalUserId) throw new Error(t('errors.missing_user'));
+        const payload = parseJwt(token)
+        const finalUserId = res.user_id || res.user?.id || res.data?.user?.id || payload?.user_id || payload?.sub || payload?.id
 
-        localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId);
-        localStorage.setItem(STORAGE_KEYS.TOKEN, token);
-        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
-        localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID());
-        onLoginSuccess(finalUserId, token, refreshToken);
+        if (!finalUserId) throw new Error(t('errors.missing_user'))
+
+        localStorage.setItem(STORAGE_KEYS.USER_ID, finalUserId)
+        localStorage.setItem(STORAGE_KEYS.TOKEN, token)
+        localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
+        localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
+        onLoginSuccess(finalUserId, token, refreshToken)
       } else {
-        setError(res.message || t('errors.google_failed'));
+        setError(res.message || t('errors.google_failed'))
       }
     } catch (err: any) {
-      setError(err?.message || t('errors.system_google_err'));
+      setError(err?.message || t('errors.system_google_err'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   return (
     <div className="flex min-h-screen bg-zinc-50 dark:bg-[#1a1828] items-center justify-center p-4 sm:p-8">
@@ -165,6 +178,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       {/* Container chính: card bọc toàn bộ chia đôi trên màn lớn */}
       <div className="w-full max-w-6xl">
         <div className="flex flex-col lg:flex-row overflow-hidden rounded-[2rem] bg-white dark:bg-[#211f30] shadow-2xl border border-zinc-200/50 dark:border-zinc-800/50">
+
           {/* Cột trái (Giới thiệu) */}
           <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-zinc-900 via-zinc-900 to-[#12082a] p-10 xl:p-12 text-white relative overflow-hidden flex-col justify-between">
             {/* Background decorations */}
@@ -178,11 +192,15 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
               <h1 className="text-4xl xl:text-5xl xl:leading-[1.15] font-semibold whitespace-pre-line text-zinc-50 tracking-tight">
                 {t('login.hero_title')}
               </h1>
-              <p className="mt-6 text-lg text-zinc-300 max-w-md leading-relaxed">{t('login.hero_subtitle')}</p>
+              <p className="mt-6 text-lg text-zinc-300 max-w-md leading-relaxed">
+                {t('login.hero_subtitle')}
+              </p>
             </div>
 
             <div className="relative z-10">
-              <div className="text-sm font-medium text-zinc-500">{t('login.hero_footer')}</div>
+              <div className="text-sm font-medium text-zinc-500">
+                {t('login.hero_footer')}
+              </div>
             </div>
           </div>
 
@@ -223,90 +241,54 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
                   {!otpSent ? (
                     <div className="space-y-6">
-                      <Tabs
-                        value={loginMode}
-                        onValueChange={(v) => {
-                          setLoginMode(v as 'email' | 'phone');
-                          setIdentifier('');
-                          setError('');
-                          setFieldError('');
-                        }}
-                        className="w-full"
-                      >
+                      <Tabs value={loginMode} onValueChange={(v) => {
+                        setLoginMode(v as 'email' | 'phone')
+                        setIdentifier('')
+                        setError('')
+                        setFieldError('')
+                      }} className="w-full">
                         <TabsList className="relative mb-6 grid w-full grid-cols-2 p-1 bg-zinc-100 dark:bg-[#2a2640] rounded-xl h-12">
                           <div
-                            className={`absolute left-1 top-1 bottom-1 w-[calc(50%-0.25rem)] rounded-lg bg-white dark:bg-[#211f30] shadow-sm transition-transform duration-300 ease-out ${
-                              loginMode === 'phone' ? 'translate-x-full' : 'translate-x-0'
-                            }`}
+                            className={`absolute left-1 top-1 bottom-1 w-[calc(50%-0.25rem)] rounded-lg bg-white dark:bg-[#211f30] shadow-sm transition-transform duration-300 ease-out ${loginMode === 'phone' ? 'translate-x-full' : 'translate-x-0'}`}
                           />
-                          <TabsTrigger
-                            value="email"
-                            className="relative z-10 rounded-lg py-2 data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors font-medium text-zinc-500 dark:text-zinc-400 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-50"
-                          >
-                            {t('login.email_tab')}
-                          </TabsTrigger>
-                          <TabsTrigger
-                            value="phone"
-                            className="relative z-10 rounded-lg py-2 data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors font-medium text-zinc-500 dark:text-zinc-400 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-50"
-                          >
-                            {t('login.phone_tab')}
-                          </TabsTrigger>
+                          <TabsTrigger value="email" className="relative z-10 rounded-lg py-2 data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors font-medium text-zinc-500 dark:text-zinc-400 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-50">{t('login.email_tab')}</TabsTrigger>
+                          <TabsTrigger value="phone" className="relative z-10 rounded-lg py-2 data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none transition-colors font-medium text-zinc-500 dark:text-zinc-400 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-50">{t('login.phone_tab')}</TabsTrigger>
                         </TabsList>
 
                         <form onSubmit={handleSendOtp} noValidate className="space-y-6 animate-in fade-in duration-500">
                           <TabsContent value="email" className="mt-0 space-y-2.5 outline-none">
-                            <Label htmlFor="email" className="text-zinc-700 dark:text-zinc-300 font-semibold">
-                              {t('login.email_label')}
-                            </Label>
+                            <Label htmlFor="email" className="text-zinc-700 dark:text-zinc-300 font-semibold">{t('login.email_label')}</Label>
                             <Input
                               id="email"
                               type="text"
                               value={identifier}
-                              onChange={(e) => {
-                                setIdentifier(e.target.value);
-                                setFieldError('');
-                              }}
+                              onChange={(e) => { setIdentifier(e.target.value); setFieldError('') }}
                               onBlur={() => {
-                                if (identifier.trim() && !validateEmail(identifier))
-                                  setFieldError(t('errors.invalid_email'));
+                                if (identifier.trim() && !validateEmail(identifier)) setFieldError(t('errors.invalid_email'))
                               }}
                               placeholder={t('login.email_placeholder')}
                               disabled={loading}
-                              className={`bg-zinc-50 dark:bg-[#1a1828] border-zinc-200 dark:border-zinc-800 h-12 rounded-xl focus-visible:ring-[#7949EC] ${
-                                fieldError && loginMode === 'email'
-                                  ? 'border-destructive focus-visible:ring-destructive'
-                                  : ''
-                              }`}
+                              className={`bg-zinc-50 dark:bg-[#1a1828] border-zinc-200 dark:border-zinc-800 h-12 rounded-xl focus-visible:ring-[#7949EC] ${fieldError && loginMode === 'email' ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                             />
                             {fieldError && loginMode === 'email' && (
-                              <p className="text-xs text-destructive mt-1 animate-in fade-in duration-200">
-                                {fieldError}
-                              </p>
+                              <p className="text-xs text-destructive mt-1 animate-in fade-in duration-200">{fieldError}</p>
                             )}
                           </TabsContent>
 
                           <TabsContent value="phone" className="mt-0 space-y-2.5 outline-none">
-                            <Label htmlFor="phone" className="text-zinc-700 dark:text-zinc-300 font-semibold">
-                              {t('login.phone_label')}
-                            </Label>
+                            <Label htmlFor="phone" className="text-zinc-700 dark:text-zinc-300 font-semibold">{t('login.phone_label')}</Label>
                             <div className="flex rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#1a1828] overflow-hidden focus-within:ring-2 focus-within:ring-[#7949EC] focus-within:border-transparent transition-all h-12">
                               <div className="flex items-center justify-center bg-zinc-100 dark:bg-[#211f30] px-4 border-r border-zinc-200 dark:border-zinc-800">
                                 <span className="mr-2 text-base select-none">🇻🇳</span>
-                                <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 select-none">
-                                  +84
-                                </span>
+                                <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 select-none">+84</span>
                               </div>
                               <input
                                 id="phone"
                                 type="tel"
                                 value={identifier}
-                                onChange={(e) => {
-                                  setIdentifier(e.target.value);
-                                  setFieldError('');
-                                }}
+                                onChange={(e) => { setIdentifier(e.target.value); setFieldError('') }}
                                 onBlur={() => {
-                                  if (identifier.trim() && !validatePhone(identifier))
-                                    setFieldError(t('errors.invalid_phone'));
+                                  if (identifier.trim() && !validatePhone(identifier)) setFieldError(t('errors.invalid_phone'))
                                 }}
                                 className="flex-1 bg-transparent px-4 py-2 text-sm focus:outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-600 text-zinc-900 dark:text-zinc-100"
                                 placeholder={t('login.phone_placeholder')}
@@ -314,32 +296,21 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                               />
                             </div>
                             {fieldError && loginMode === 'phone' && (
-                              <p className="text-xs text-destructive mt-1 animate-in fade-in duration-200">
-                                {fieldError}
-                              </p>
+                              <p className="text-xs text-destructive mt-1 animate-in fade-in duration-200">{fieldError}</p>
                             )}
                           </TabsContent>
 
-                          <Button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full h-12 rounded-xl bg-[#7949EC] hover:bg-[#5027B1] text-white font-semibold text-base transition-colors shadow-lg shadow-[#7949EC]/20"
-                          >
+                          <Button type="submit" disabled={loading} className="w-full h-12 rounded-xl bg-[#7949EC] hover:bg-[#5027B1] text-white font-semibold text-base transition-colors shadow-lg shadow-[#7949EC]/20">
                             {loading ? t('login.sending') : t('login.send_otp')}
                           </Button>
                         </form>
                       </Tabs>
                     </div>
                   ) : (
-                    <form
-                      onSubmit={handleVerifyOtp}
-                      className="space-y-8 animate-in slide-in-from-right-8 fade-in duration-500"
-                    >
+                    <form onSubmit={handleVerifyOtp} className="space-y-8 animate-in slide-in-from-right-8 fade-in duration-500">
                       <div className="space-y-6">
                         <div className="text-center lg:text-left">
-                          <Label className="text-base text-zinc-700 dark:text-zinc-300 font-semibold">
-                            {t('login.otp_label')}
-                          </Label>
+                          <Label className="text-base text-zinc-700 dark:text-zinc-300 font-semibold">{t('login.otp_label')}</Label>
                           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
                             {t('login.otp_desc').replace('{{identifier}}', identifier)}
                           </p>
@@ -356,38 +327,38 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                               value={otpCode[idx] || ''}
                               disabled={loading}
                               onChange={(e) => {
-                                const val = e.target.value.replace(/\D/g, '');
-                                if (!val) return;
+                                const val = e.target.value.replace(/\D/g, '')
+                                if (!val) return
 
-                                const newOtp = otpCode.split('');
-                                newOtp[idx] = val;
-                                const finalOtp = newOtp.join('');
-                                setOtpCode(finalOtp.slice(0, 6));
+                                const newOtp = otpCode.split('')
+                                newOtp[idx] = val
+                                const finalOtp = newOtp.join('')
+                                setOtpCode(finalOtp.slice(0, 6))
 
                                 if (val && idx < 5) {
-                                  const next = document.getElementById(`otp-input-${idx + 1}`);
-                                  next?.focus();
+                                  const next = document.getElementById(`otp-input-${idx + 1}`)
+                                  next?.focus()
                                 }
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === 'Backspace') {
-                                  e.preventDefault();
-                                  const newOtp = otpCode.split('');
-                                  newOtp[idx] = '';
-                                  setOtpCode(newOtp.join(''));
+                                  e.preventDefault()
+                                  const newOtp = otpCode.split('')
+                                  newOtp[idx] = ''
+                                  setOtpCode(newOtp.join(''))
                                   if (idx > 0) {
-                                    const prev = document.getElementById(`otp-input-${idx - 1}`);
-                                    prev?.focus();
+                                    const prev = document.getElementById(`otp-input-${idx - 1}`)
+                                    prev?.focus()
                                   }
                                 }
                               }}
                               onPaste={(e) => {
-                                e.preventDefault();
-                                const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+                                e.preventDefault()
+                                const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
                                 if (pasted) {
-                                  setOtpCode(pasted);
-                                  const focusIdx = Math.min(pasted.length, 5);
-                                  document.getElementById(`otp-input-${focusIdx === 6 ? 5 : focusIdx}`)?.focus();
+                                  setOtpCode(pasted)
+                                  const focusIdx = Math.min(pasted.length, 5)
+                                  document.getElementById(`otp-input-${focusIdx === 6 ? 5 : focusIdx}`)?.focus()
                                 }
                               }}
                               className="h-12 w-10 sm:h-14 sm:w-12 rounded-xl text-center text-xl font-bold bg-zinc-50 dark:bg-[#1a1828] border-zinc-200 dark:border-zinc-800 focus-visible:ring-[#7949EC] focus-visible:border-transparent transition-all"
@@ -397,33 +368,15 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                       </div>
 
                       <div className="flex flex-col gap-4">
-                        <Button
-                          type="submit"
-                          disabled={loading || otpCode.length < 6}
-                          className="w-full h-12 rounded-xl bg-[#7949EC] hover:bg-[#5027B1] text-white font-semibold text-base transition-colors shadow-lg shadow-[#7949EC]/20"
-                        >
+                        <Button type="submit" disabled={loading || otpCode.length < 6} className="w-full h-12 rounded-xl bg-[#7949EC] hover:bg-[#5027B1] text-white font-semibold text-base transition-colors shadow-lg shadow-[#7949EC]/20">
                           {loading ? t('login.verifying') : t('login.verify')}
                         </Button>
                         <div className="flex gap-3">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={loading}
-                            onClick={() => setOtpSent(false)}
-                            className="flex-1 h-12 rounded-xl border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium"
-                          >
+                          <Button type="button" variant="outline" disabled={loading} onClick={() => setOtpSent(false)} className="flex-1 h-12 rounded-xl border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium">
                             {t('login.back')}
                           </Button>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={countdown > 0 || loading}
-                            onClick={handleSendOtp}
-                            className="flex-1 h-12 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-[#2a2640] dark:hover:bg-[#332e50] text-zinc-700 dark:text-zinc-300 font-medium transition-colors"
-                          >
-                            {countdown > 0
-                              ? t('login.resend_wait').replace('{{seconds}}', countdown.toString())
-                              : t('login.resend')}
+                          <Button type="button" variant="secondary" disabled={countdown > 0 || loading} onClick={handleSendOtp} className="flex-1 h-12 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-[#2a2640] dark:hover:bg-[#332e50] text-zinc-700 dark:text-zinc-300 font-medium transition-colors">
+                            {countdown > 0 ? t('login.resend_wait').replace('{{seconds}}', countdown.toString()) : t('login.resend')}
                           </Button>
                         </div>
                       </div>
@@ -462,5 +415,5 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         </div>
       </div>
     </div>
-  );
+  )
 }

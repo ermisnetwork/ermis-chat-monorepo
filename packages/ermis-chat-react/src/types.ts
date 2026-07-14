@@ -1756,7 +1756,7 @@ export type UserPickerProps = {
   excludeUserIds?: string[];
   /** Users that are pre-selected on mount */
   initialSelectedUsers?: UserPickerUser[];
-  /** Page size for queryUsers (default: 30) */
+  /** Search result limit for user-service queries (default: 30) */
   pageSize?: number;
   /** Custom avatar component */
   AvatarComponent?: React.ComponentType<AvatarProps>;
@@ -1775,7 +1775,6 @@ export type UserPickerProps = {
   searchPlaceholder?: string;
   loadingText?: string;
   emptyText?: string;
-  loadingMoreText?: string;
   selectedEmptyLabel?: string;
   friendsOnly?: boolean;
 };

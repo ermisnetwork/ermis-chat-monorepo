@@ -11,34 +11,34 @@ The Ermis Chat SDK provides a structured error system with typed error codes, re
 
 Every failed REST or WebSocket request returns a numeric error code. The SDK maps these codes to human-readable names and classifies whether a retry is safe.
 
-| Code | Name | Retryable |
-|------|------|-----------|
-| `-1` | `InternalSystemError` | ✅ Yes |
-| `2` | `AccessKeyError` | ❌ No |
-| `3` | `AuthenticationFailedError` | ✅ Yes |
-| `4` | `InputError` | ❌ No |
-| `6` | `DuplicateUsernameError` | ❌ No |
-| `9` | `RateLimitError` | ✅ Yes |
-| `16` | `DoesNotExistError` | ❌ No |
-| `17` | `NotAllowedError` | ❌ No |
-| `18` | `EventNotSupportedError` | ❌ No |
-| `19` | `ChannelFeatureNotSupportedError` | ❌ No |
-| `20` | `MessageTooLongError` | ❌ No |
-| `21` | `MultipleNestingLevelError` | ❌ No |
-| `22` | `PayloadTooBigError` | ❌ No |
-| `23` | `RequestTimeoutError` | ✅ Yes |
-| `24` | `MaxHeaderSizeExceededError` | ❌ No |
-| `40` | `AuthErrorTokenExpired` | ❌ No |
-| `41` | `AuthErrorTokenNotValidYet` | ❌ No |
-| `42` | `AuthErrorTokenUsedBeforeIssuedAt` | ❌ No |
-| `43` | `AuthErrorTokenSignatureInvalid` | ❌ No |
-| `44` | `CustomCommandEndpointMissingError` | ❌ No |
-| `45` | `CustomCommandEndpointCallError` | ✅ Yes |
-| `60` | `CoolDownError` | ✅ Yes |
-| `69` | `ErrWrongRegion` | ❌ No |
-| `70` | `ErrQueryChannelPermissions` | ❌ No |
-| `71` | `ErrTooManyConnections` | ✅ Yes |
-| `99` | `AppSuspendedError` | ❌ No |
+| Code | Name                                | Retryable |
+| ---- | ----------------------------------- | --------- |
+| `-1` | `InternalSystemError`               | ✅ Yes    |
+| `2`  | `AccessKeyError`                    | ❌ No     |
+| `3`  | `AuthenticationFailedError`         | ✅ Yes    |
+| `4`  | `InputError`                        | ❌ No     |
+| `6`  | `DuplicateUsernameError`            | ❌ No     |
+| `9`  | `RateLimitError`                    | ✅ Yes    |
+| `16` | `DoesNotExistError`                 | ❌ No     |
+| `17` | `NotAllowedError`                   | ❌ No     |
+| `18` | `EventNotSupportedError`            | ❌ No     |
+| `19` | `ChannelFeatureNotSupportedError`   | ❌ No     |
+| `20` | `MessageTooLongError`               | ❌ No     |
+| `21` | `MultipleNestingLevelError`         | ❌ No     |
+| `22` | `PayloadTooBigError`                | ❌ No     |
+| `23` | `RequestTimeoutError`               | ✅ Yes    |
+| `24` | `MaxHeaderSizeExceededError`        | ❌ No     |
+| `40` | `AuthErrorTokenExpired`             | ❌ No     |
+| `41` | `AuthErrorTokenNotValidYet`         | ❌ No     |
+| `42` | `AuthErrorTokenUsedBeforeIssuedAt`  | ❌ No     |
+| `43` | `AuthErrorTokenSignatureInvalid`    | ❌ No     |
+| `44` | `CustomCommandEndpointMissingError` | ❌ No     |
+| `45` | `CustomCommandEndpointCallError`    | ✅ Yes    |
+| `60` | `CoolDownError`                     | ✅ Yes    |
+| `69` | `ErrWrongRegion`                    | ❌ No     |
+| `70` | `ErrQueryChannelPermissions`        | ❌ No     |
+| `71` | `ErrTooManyConnections`             | ✅ Yes    |
+| `99` | `AppSuspendedError`                 | ❌ No     |
 
 ---
 
@@ -98,6 +98,21 @@ Returns `true` if the error originated from a WebSocket transport failure (as op
 
 ---
 
+## v1 Unsupported Feature Errors
+
+When v1 does not expose a legacy capability, the SDK throws `UnsupportedEndUserFeatureError` before changing state or making a network request. The error exports `code = 'END_USER_FEATURE_UNSUPPORTED'`, `feature`, and `endUserApiMode`.
+
+| Method or input                  | v1 behavior                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `queryUsers()`                   | Throws; use `searchUsers(query, limit)`, `queryUser(id)`, or `getBatchUsers(ids)`. |
+| `syncUserCache()`                | Throws; `connectUser()` no longer schedules full user-list preload.                |
+| `connectToSSE()`                 | Throws; profile SSE is not supported.                                              |
+| `connectUser(user, token, { externalAuth: true })` | Throws; exchange external auth on a trusted backend through `/uss/v1/auth/external`. |
+| Wallet challenge/signature auth  | Throws; wallet auth is not exposed by v1.                                          |
+| `updateProfile({ about_me })`    | Throws; v1 supports profile display/avatar fields, not `about_me`.                 |
+
+Treat these as permanent integration errors and update the caller rather than retrying.
+
 ## Best Practices
 
 :::tip
@@ -105,7 +120,7 @@ Returns `true` if the error originated from a WebSocket transport failure (as op
 :::
 
 :::caution
-**Token expiration errors** (codes `40`–`43`) are marked as non-retryable because they require a fresh token, not a simple retry. Use `client.refreshNewToken(refresh_token)` to obtain a new token, then retry the operation. See [Authentication — Token Refresh](./auth.md) for details.
+**Token expiration errors** (codes `40`–`43`) are marked as non-retryable for generic retry logic. When a refresh token is configured, the SDK performs one refresh and one request retry automatically. A terminal failure dispatches `auth.refresh_failed`; the application should clear its session. See [Authentication — Token Refresh](./auth.md) for details.
 :::
 
 ### Recommended Pattern

@@ -5,7 +5,7 @@ import { MessageActionsBox } from './MessageActionsBox';
 import { MessageReactions } from './MessageReactions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { useChatClient } from '../hooks/useChatClient';
-import { formatTime } from '../utils';
+import { formatTime, getMessageUserId, getUserDisplayName } from '../utils';
 import { isSystemMessage, isDeletedDisplayMessage, isStickerMessage, isSignalMessage } from '../messageTypeUtils';
 
 export type { MessageItemProps, SystemMessageItemProps } from '../types';
@@ -114,8 +114,10 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
 
   const canReact = hasCapability('send-reaction');
 
-  const userName = message.user?.name || message.user_id;
-  const userAvatar = message.user?.avatar;
+  const userId = getMessageUserId(message);
+  const cachedUser = userId ? client?.state?.users?.[userId] : undefined;
+  const userName = getUserDisplayName(message.user, userId, cachedUser);
+  const userAvatar = message.user?.avatar || (message.user as any)?.avatar_url || cachedUser?.avatar || cachedUser?.avatar_url;
 
   const directQuotedMessage = (message as any).quoted_message;
   const stateQuotedMessage = findQuotedMessageInChannelState(activeChannel, (message as any).quoted_message_id);

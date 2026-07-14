@@ -18,6 +18,13 @@ import { TokenManager } from './token_manager';
 import { isErrorResponse } from './errors';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
+  createEndUserClientApi,
+  resolveEndUserApiMode,
+  resolveEndUserBaseURL,
+  type EndUserClientApi,
+  type EndUserRequestMethod,
+} from './end_user';
+import {
   addFileToFormData,
   axiosParamsSerializer,
   chatCodes,
@@ -38,35 +45,83 @@ import {
   ChannelSort,
   ChannelStateOptions,
   ConnectAPIResponse,
+  ConnectUserOptions,
   DefaultGenerics,
+  EndUserApiMode,
   ErrorFromResponse,
   Event,
   EventHandler,
   ExtendableGenerics,
   Logger,
   QueryChannelsAPIResponse,
+  RefreshTokenInput,
   SendFileAPIResponse,
-  TokenRefreshAPIResponse,
+  TokenRefreshResult,
   ErmisChatOptions,
   UserResponse,
   ContactResponse,
   UsersResponse,
   ContactResult,
   Contact,
+  ErmisChatConfig,
 } from './types';
 
 function isString(x: unknown): x is string {
   return typeof x === 'string' || x instanceof String;
 }
 
-type ConnectUserAuthOptions = {
-  refreshToken?: string | null;
+type ResolvedErmisChatConfig = {
+  apiKey: string;
+  projectId: string;
+  baseURL: string;
+  options: ErmisChatOptions;
+  selfHosted: boolean;
 };
 
-type RefreshableAxiosOptions = AxiosRequestConfig & {
-  config?: AxiosRequestConfig & { maxBodyLength?: number };
-  _retriedWithRefresh?: boolean;
-};
+function resolveErmisChatConfig(
+  apiKeyOrConfig: string | ErmisChatConfig,
+  projectId?: string,
+  baseURL?: string,
+  options?: ErmisChatOptions,
+): ResolvedErmisChatConfig {
+  if (typeof apiKeyOrConfig === 'object' && apiKeyOrConfig !== null) {
+    const { apiKey = '', projectId: configProjectId = '', baseURL: configBaseURL, ...inputOptions } = apiKeyOrConfig;
+    const selfHosted = inputOptions.selfHosted === true;
+
+    if (!configBaseURL) {
+      throw new Error('ErmisChat config requires baseURL');
+    }
+    if (!selfHosted && (!apiKey || !configProjectId)) {
+      throw new Error('ErmisChat cloud mode requires apiKey and projectId');
+    }
+
+    return {
+      apiKey,
+      projectId: configProjectId,
+      baseURL: configBaseURL,
+      options: inputOptions,
+      selfHosted,
+    };
+  }
+
+  const inputOptions = options || {};
+  const selfHosted = inputOptions.selfHosted === true;
+
+  if (!baseURL) {
+    throw new Error('ErmisChat constructor requires baseURL');
+  }
+  if (!selfHosted && (!apiKeyOrConfig || !projectId)) {
+    throw new Error('ErmisChat cloud mode requires apiKey and projectId');
+  }
+
+  return {
+    apiKey: apiKeyOrConfig || '',
+    projectId: projectId || '',
+    baseURL,
+    options: inputOptions,
+    selfHosted,
+  };
+}
 
 /**
  * The ErmisChat Client represents the connection securely established between your application
@@ -94,6 +149,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   clientID?: string;
   apiKey: string;
   projectId: string;
+  selfHosted: boolean;
+  endUserApiMode: EndUserApiMode;
   /** Internal mapped registry of event listeners. */
   listeners: Record<string, Array<(event: Event<ErmisChatGenerics>) => void>>;
   logger: Logger;
@@ -129,7 +186,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   encryptionManager?: any;
   private userCache?: IndexedDBUserCache<ErmisChatGenerics>;
   private userCacheKey?: string;
-  private userCacheSyncPromise: Promise<UsersResponse<ErmisChatGenerics> | void> | null = null;
+  private refreshTokenPromise: Promise<TokenRefreshResult> | null = null;
+  private endUserApi!: EndUserClientApi<ErmisChatGenerics>;
 
   private eventSource: EventSourcePolyfill | null = null;
 
@@ -141,13 +199,24 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * @param baseURL   - The API base endpoint assigned to your project.
    * @param options   - Additional connection rules and configuration options.
    */
-  constructor(apiKey: string, projectId: string, baseURL: string, options?: ErmisChatOptions) {
-    this.apiKey = apiKey;
-    this.projectId = projectId;
+  constructor(config: ErmisChatConfig);
+  constructor(apiKey: string, projectId: string, baseURL: string, options?: ErmisChatOptions);
+  constructor(
+    apiKeyOrConfig: string | ErmisChatConfig,
+    projectId?: string,
+    baseURL?: string,
+    options?: ErmisChatOptions,
+  ) {
+    const resolvedConfig = resolveErmisChatConfig(apiKeyOrConfig, projectId, baseURL, options);
+
+    this.apiKey = resolvedConfig.apiKey;
+    this.projectId = resolvedConfig.projectId;
+    this.selfHosted = resolvedConfig.selfHosted;
     this.listeners = {};
     this.state = new ClientState<ErmisChatGenerics>();
 
-    const inputOptions = options || {};
+    const inputOptions = resolvedConfig.options;
+    this.endUserApiMode = resolveEndUserApiMode(inputOptions.endUserApiMode, this.selfHosted);
 
     this.browser = typeof inputOptions.browser !== 'undefined' ? inputOptions.browser : typeof window !== 'undefined';
     this.node = !this.browser;
@@ -168,7 +237,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     this.axiosInstance = axios.create(this.options);
 
-    this.setBaseURL(baseURL);
+    this.setBaseURL(resolvedConfig.baseURL);
 
     // WS connection is initialized when setUser is called
     this.wsConnection = null;
@@ -178,6 +247,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.activeChannels = {};
 
     this.tokenManager = new TokenManager();
+    this.tokenManager.setRefreshTokenOrProvider(this.options.refreshToken);
     this.consecutiveFailures = 0;
     this.defaultWSTimeout = 15000;
 
@@ -185,6 +255,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     this.logger = getLogger(inputOptions.logger);
     setSdkLogger(inputOptions.logger);
+    this.logger('info', 'client:constructor - end-user API selected', { endUserApiMode: this.endUserApiMode });
     this.recoverStateOnReconnect = this.options.recoverStateOnReconnect;
   }
 
@@ -199,77 +270,93 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * @returns           The shared ErmisChat client instance.
    */
   public static getInstance<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics>(
+    config: ErmisChatConfig,
+  ): ErmisChat<ErmisChatGenerics>;
+  public static getInstance<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics>(
     key: string,
     projectId: string,
     baseURL: string,
     options?: ErmisChatOptions,
+  ): ErmisChat<ErmisChatGenerics>;
+  public static getInstance<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics>(
+    keyOrConfig: string | ErmisChatConfig,
+    projectId?: string,
+    baseURL?: string,
+    options?: ErmisChatOptions,
   ): ErmisChat<ErmisChatGenerics> {
     if (!ErmisChat._instance) {
-      ErmisChat._instance = new ErmisChat<ErmisChatGenerics>(key, projectId, baseURL, options);
+      ErmisChat._instance =
+        typeof keyOrConfig === 'object'
+          ? new ErmisChat<ErmisChatGenerics>(keyOrConfig)
+          : new ErmisChat<ErmisChatGenerics>(keyOrConfig, projectId as string, baseURL as string, options);
     }
 
     return ErmisChat._instance as ErmisChat<ErmisChatGenerics>;
   }
 
-  async refreshNewToken(refresh_token: string) {
-    return await this.post<TokenRefreshAPIResponse>(this.userBaseURL + '/refresh_token', { refresh_token });
+  async refreshNewToken(refreshToken: string): Promise<TokenRefreshResult> {
+    return this.endUserApi.refreshToken(refreshToken);
   }
 
-  private _isRefreshTokenRequest(url: string) {
-    return url.replace(/\/+$/, '').endsWith('/refresh_token');
-  }
-
-  private _shouldRefreshAuth(error: any, url: string, options: RefreshableAxiosOptions) {
-    if (options._retriedWithRefresh || this._isRefreshTokenRequest(url)) return false;
-    const status = error?.response?.status;
-    const code = error?.response?.data?.code;
-    return status === 401 || status === 403 || String(code) === String(chatCodes.TOKEN_EXPIRED);
+  setRefreshToken(refreshTokenOrProvider?: RefreshTokenInput) {
+    this.tokenManager.setRefreshTokenOrProvider(refreshTokenOrProvider);
   }
 
   private _dispatchRefreshFailed(error: unknown, reason = 'refresh_failed') {
     const status = (error as any)?.response?.status || (error as any)?.status;
-    this.dispatchEvent({
-      type: 'auth.refresh_failed',
-      reason,
-      status,
-    } as Event<ErmisChatGenerics>);
+    this.dispatchEvent({ type: 'auth.refresh_failed', reason, status } as Event<ErmisChatGenerics>);
   }
 
-  async refreshAccessToken(): Promise<TokenRefreshAPIResponse> {
-    const existingPromise = this.tokenManager.refreshPromise as Promise<TokenRefreshAPIResponse> | null;
-    if (existingPromise) return existingPromise;
+  async refreshAccessToken(): Promise<TokenRefreshResult> {
+    if (this.refreshTokenPromise) return this.refreshTokenPromise;
 
-    const refreshToken = this.tokenManager.getRefreshToken();
-    if (!refreshToken) {
-      const error = new Error('No refresh token available');
-      this._dispatchRefreshFailed(error, 'missing_refresh_token');
-      throw error;
-    }
-
-    const refreshPromise = this.refreshNewToken(refreshToken)
-      .then((response) => {
-        if (!response?.token || !response?.refresh_token) {
-          throw new Error('Refresh token response is missing token fields');
-        }
-        this.tokenManager.setTokens(response.token, response.refresh_token);
-        this.dispatchEvent({
-          type: 'auth.token_refreshed',
-          token: response.token,
-          refresh_token: response.refresh_token,
-          user_id: response.user_id,
-        } as Event<ErmisChatGenerics>);
-        return response;
-      })
-      .catch((error) => {
-        this._dispatchRefreshFailed(error);
+    const refreshPromise = (async () => {
+      const refreshToken = await this.tokenManager.getRefreshToken();
+      if (!refreshToken) {
+        const error = new Error('No refresh token available');
+        this._dispatchRefreshFailed(error, 'missing_refresh_token');
         throw error;
-      })
-      .finally(() => {
-        this.tokenManager.refreshPromise = null;
-      });
+      }
 
-    this.tokenManager.refreshPromise = refreshPromise;
-    return refreshPromise;
+      const refreshed = await this.refreshNewToken(refreshToken);
+      this.tokenManager.setToken(refreshed.token);
+      if (refreshed.refresh_token) {
+        this.tokenManager.setRefreshTokenOrProvider(refreshed.refresh_token);
+      }
+      if (this.options.onTokenRefresh) {
+        try {
+          await this.options.onTokenRefresh(refreshed);
+        } catch (callbackError) {
+          this.logger('warn', 'client:refreshAccessToken() - onTokenRefresh callback failed', {
+            tags: ['api', 'auth', 'client'],
+            error: callbackError,
+          });
+        }
+      }
+
+      this.logger('info', 'client:refreshAccessToken() - refreshed access token', {
+        tags: ['api', 'auth', 'client'],
+      });
+      this.dispatchEvent({
+        type: 'auth.token_refreshed',
+        token: refreshed.token,
+        refresh_token: refreshed.refresh_token,
+        user_id: refreshed.user_id,
+      } as unknown as Event<ErmisChatGenerics>);
+      return refreshed;
+    })().catch((error) => {
+      if ((error as Error).message !== 'No refresh token available') this._dispatchRefreshFailed(error);
+      throw error;
+    });
+
+    this.refreshTokenPromise = refreshPromise;
+    try {
+      return await refreshPromise;
+    } finally {
+      if (this.refreshTokenPromise === refreshPromise) {
+        this.refreshTokenPromise = null;
+      }
+    }
   }
 
   getAuthType() {
@@ -278,39 +365,47 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   setBaseURL(baseURL: string) {
     this.baseURL = baseURL;
-    this.userBaseURL = this.options.userBaseURL || baseURL + '/uss/v1';
+    this.userBaseURL = resolveEndUserBaseURL(this.options.userBaseURL || baseURL, this.endUserApiMode);
+
+    this.endUserApi = createEndUserClientApi<ErmisChatGenerics>({
+      mode: this.endUserApiMode,
+      baseURL: this.userBaseURL,
+      apiKey: this.apiKey,
+      getProjectId: () => this._projectIdForInternalUse(),
+      transport: {
+        request: <T>(method: EndUserRequestMethod, url: string, data?: unknown, requestOptions = {}) =>
+          this.doAxiosRequest<T>(method, url, data, requestOptions),
+        publicRequest: <T>(method: EndUserRequestMethod, url: string, data?: unknown, requestOptions = {}) =>
+          this._doPublicEndUserRequest<T>(method, url, data, requestOptions),
+      },
+    });
 
     this.wsBaseURL = this.baseURL.replace('http', 'ws').replace(':3030', ':8800');
   }
 
-  async getExternalAuthToken(user: UserResponse<ErmisChatGenerics>, token: string | null) {
-    const params: any = { apikey: this.apiKey, name: user.name };
-    if (user.avatar) {
-      params.avatar = user.avatar;
-    }
-    const url = this.userBaseURL + '/get_token/external_auth';
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+  _projectIdForInternalUse() {
+    return this.projectId || undefined;
+  }
+
+  _requireProjectId(context: string) {
+    if (this.projectId) return this.projectId;
+
+    throw new Error(
+      `${context} requires projectId. In self-hosted mode, call connectUser first so Bellboy returns project_id via health.check, or pass projectId in the ErmisChat config.`,
+    );
+  }
+
+  _withProjectId<T extends Record<string, unknown>>(payload: T): T & { project_id?: string } {
+    if (this.selfHosted) return payload;
+
+    return {
+      ...payload,
+      project_id: this.projectId,
     };
-    if (token) {
-      const tokenStr = typeof token === 'string' && token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-      headers['Authorization'] = tokenStr;
-    }
-    try {
-      const response = await this.axiosInstance.get(url, {
-        params,
-        headers,
-      });
-      return response.data;
-    } catch (error: any) {
-      let errorMsg = 'Failed to fetch external auth token';
-      if (error.response && error.response.data) {
-        errorMsg = error.response.data.message || JSON.stringify(error.response.data);
-      } else if (error.message) {
-        errorMsg = error.message;
-      }
-      throw new Error(errorMsg);
-    }
+  }
+
+  async getExternalAuthToken(user: UserResponse<ErmisChatGenerics>, token: string | null) {
+    return this.endUserApi.externalAuth(user, token);
   }
 
   /**
@@ -319,14 +414,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    *
    * @param user                - The User object containing `id`, `name`, and optional `avatar`.
    * @param userTokenOrProvider - The JWT token or an async token provider function.
-   * @param extenal_auth        - Set to `true` to use your custom backend external authentication flow.
+   * @param options             - External auth and refresh token options.
    * @returns                     A promise resolving to the API connection response once authenticated.
    */
   connectUser = async (
     user: UserResponse<ErmisChatGenerics>,
     userTokenOrProvider: string | null,
-    external_auth?: boolean, // pass true if you are using external auth
-    authOptions: ConnectUserAuthOptions = {},
+    options: ConnectUserOptions = {},
   ) => {
     this.logger('info', 'client:connectUser() - started', {
       tags: ['connection', 'client'],
@@ -338,15 +432,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     let connectionUser = user;
     let connectionToken = userTokenOrProvider;
 
-    // If external auth is enabled, get the token from the server
-    if (external_auth) {
-      const external_auth_token = await this.getExternalAuthToken(user, userTokenOrProvider);
-
-      connectionToken = external_auth_token.token;
-      connectionUser = {
-        ...user,
-        id: external_auth_token.user_id,
-      };
+    if (options.externalAuth) {
+      const externalUser = await this.getExternalAuthToken(user, userTokenOrProvider);
+      connectionUser = { ...user, ...(externalUser.user || {}), id: externalUser.user_id || user.id };
+      connectionToken = externalUser.token || externalUser.access_token || userTokenOrProvider;
     }
 
     /**
@@ -395,7 +484,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.userID = connectionUser.id;
     await this._hydrateUserCacheFromStorage();
 
-    const setTokenPromise = this._setToken(connectionUser, connectionToken, authOptions);
+    const setTokenPromise = this._setToken(connectionUser, connectionToken, options.refreshToken);
     this._setUser(connectionUser);
     this._upsertUser(
       {
@@ -414,10 +503,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     try {
       const result = await this.setUserPromise;
-      // Call SSE after successful connect
-      await this.connectToSSE();
-      this._scheduleUserCacheSync();
-
       // Automatically fetch full profile asynchronously and dispatch event
       this.queryUser(connectionUser.id)
         .then((fullProfile) => {
@@ -445,8 +530,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   _setToken = (
     user: UserResponse<ErmisChatGenerics>,
     userTokenOrProvider: string | null,
-    authOptions: ConnectUserAuthOptions = {},
-  ) => this.tokenManager.setTokenOrProvider(userTokenOrProvider, user, authOptions);
+    refreshTokenOrProvider: RefreshTokenInput = this.options.refreshToken,
+  ) => this.tokenManager.setTokenOrProvider(userTokenOrProvider, user, refreshTokenOrProvider);
 
   _setUser(user: UserResponse<ErmisChatGenerics>) {
     this.user = { ...user };
@@ -455,9 +540,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   private _getUserCache(): IndexedDBUserCache<ErmisChatGenerics> | null {
     if (!this.browser || !this.userID) return null;
-    const key = `${this.projectId}:${this.userID}`;
+    const namespace = `${this.projectId || this.userBaseURL || this.baseURL || 'default'}:${this.endUserApiMode}`;
+    const key = `${namespace}:${this.userID}`;
     if (!this.userCache || this.userCacheKey !== key) {
-      this.userCache = new IndexedDBUserCache<ErmisChatGenerics>(this.projectId, this.userID);
+      this.userCache = new IndexedDBUserCache<ErmisChatGenerics>(namespace, this.userID);
       this.userCacheKey = key;
     }
     return this.userCache;
@@ -542,17 +628,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
   }
 
-  private _scheduleUserCacheSync(): void {
-    if (!this.browser || this.userCacheSyncPromise) return;
-    this.userCacheSyncPromise = this.syncUserCache(10000, 1)
-      .catch((err) => {
-        this.logger('warn', 'client:userCache - failed to sync users', { err });
-      })
-      .finally(() => {
-        this.userCacheSyncPromise = null;
-      });
-  }
-
   closeConnection = async (timeout?: number) => {
     if (this.cleaningIntervalRef != null) {
       clearInterval(this.cleaningIntervalRef);
@@ -610,7 +685,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.deviceId = undefined;
     this.userCache = undefined;
     this.userCacheKey = undefined;
-    this.userCacheSyncPromise = null;
 
     // remove the user specific fields
     delete this.user;
@@ -741,11 +815,52 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     );
   }
 
+  private _isTokenExpiredResponse(response?: AxiosResponse<unknown>) {
+    if (!response) return false;
+    const data = (response.data || {}) as Partial<APIErrorResponse>;
+    const isExpiredCode = (code: unknown) => code === 'TOKEN_EXPIRED' || Number(code) === chatCodes.TOKEN_EXPIRED;
+    return (
+      response.status === 401 || response.status === 403 || isExpiredCode(data.code) || isExpiredCode(data.ermis_code)
+    );
+  }
+
+  private async _doPublicEndUserRequest<T>(
+    method: EndUserRequestMethod,
+    url: string,
+    data?: unknown,
+    options: AxiosRequestConfig = {},
+  ): Promise<T> {
+    const requestConfig = this._enrichPublicAxiosOptions(options);
+    let response: AxiosResponse<T>;
+    this._logApiRequest(method, url, data, requestConfig);
+    switch (method) {
+      case 'get':
+        response = await this.axiosInstance.get(url, requestConfig);
+        break;
+      case 'post':
+        response = await this.axiosInstance.post(url, data, requestConfig);
+        break;
+      case 'postForm':
+        response = await this.axiosInstance.postForm(url, data, requestConfig);
+        break;
+      case 'patch':
+        response = await this.axiosInstance.patch(url, data, requestConfig);
+        break;
+      default:
+        throw new Error(`Unsupported public end-user request method: ${method}`);
+    }
+    this._logApiResponse(method, url, response);
+    return this.handleResponse(response);
+  }
+
   doAxiosRequest = async <T>(
     type: string,
     url: string,
     data?: unknown,
-    options: RefreshableAxiosOptions = {},
+    options: AxiosRequestConfig & {
+      config?: AxiosRequestConfig & { maxBodyLength?: number };
+      __tokenRefreshAttempted?: boolean;
+    } = {},
   ): Promise<T> => {
     await this.tokenManager.tokenReady();
 
@@ -788,18 +903,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       this._logApiError(type, url, e, options);
       this.consecutiveFailures += 1;
       if (e.response) {
-        if (this._shouldRefreshAuth(e, url, options)) {
+        if (this._isTokenExpiredResponse(e.response) && !options.__tokenRefreshAttempted) {
           await this.refreshAccessToken();
-          const retryOptions: RefreshableAxiosOptions = {
+          const retryOptions = {
             ...options,
-            _retriedWithRefresh: true,
-            headers: {
-              ...(options.headers || {}),
-            },
+            __tokenRefreshAttempted: true,
+            headers: { ...(options.headers || {}) },
           };
           delete (retryOptions.headers as Record<string, unknown>).Authorization;
           delete (retryOptions.headers as Record<string, unknown>).authorization;
-          return await this.doAxiosRequest<T>(type, url, data, retryOptions);
+          return this.doAxiosRequest<T>(type, url, data, retryOptions);
         }
         return this.handleResponse(e.response);
       } else {
@@ -1131,6 +1244,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       event,
     });
 
+    if (event.type === 'health.check' && typeof event.project_id === 'string' && event.project_id) {
+      this._updateProjectID(event.project_id);
+    }
+
     if (event.type === 'health.check' && event.me) {
       const remaining = (event.me as any).key_packages_remaining;
       if (typeof remaining === 'number') {
@@ -1417,21 +1534,15 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
   }
   public async connectToSSE(onCallBack?: (data: any) => void): Promise<void> {
+    const sseUrl = this.endUserApi.getSseUrl();
     if (this.eventSource) {
       this.logger('info', 'client:connectToSSE() - SSE connection already established', {});
       return;
     }
     let token = this._getToken();
-
-    if (!token?.startsWith('Bearer ')) {
-      token = `Bearer ${token}`;
-    }
-    const headers = {
-      method: 'GET',
-      Authorization: token,
-    };
-    this.eventSource = new EventSourcePolyfill(this.userBaseURL + '/sse/subscribe', {
-      headers,
+    if (!token?.startsWith('Bearer ')) token = `Bearer ${token}`;
+    this.eventSource = new EventSourcePolyfill(sseUrl, {
+      headers: { method: 'GET', Authorization: token },
       heartbeatTimeout: 60000,
     });
     this.eventSource.onopen = () => {
@@ -1439,51 +1550,35 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     };
     this.eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
-
-      this.logger('info', `client:connectToSSE() - SSE message received event :  ${JSON.stringify(data)}`, { event });
-      if (data.type === 'AccountUserChainProjects') {
-        const userInfo: UserResponse<ErmisChatGenerics> = {
-          id: data.id,
-          name: data.name,
-          avatar: data.avatar,
-          about_me: data.about_me,
-          project_id: data.project_id,
-        };
-
-        // 1. Update current user info if ID matches
-        if (this.user?.id === userInfo.id) {
-          this.user = { ...this.user, ...userInfo };
-        }
-
-        // 2. Update Client State
-        this._upsertUser(userInfo);
-
-        if (onCallBack) {
-          onCallBack(data);
-        }
-
-        this.dispatchEvent({
-          type: 'user.updated',
-          user: userInfo,
-          me: this.user?.id === userInfo.id ? this.user : undefined,
-        } as any);
-      }
+      if (data.type !== 'AccountUserChainProjects') return;
+      const userInfo = {
+        id: data.id,
+        name: data.name,
+        avatar: data.avatar,
+        about_me: data.about_me,
+        project_id: data.project_id,
+      } as UserResponse<ErmisChatGenerics>;
+      if (this.user?.id === userInfo.id) this.user = { ...this.user, ...userInfo };
+      this._upsertUser(userInfo);
+      onCallBack?.(data);
+      this.dispatchEvent({
+        type: 'user.updated',
+        user: userInfo,
+        me: this.user?.id === userInfo.id ? this.user : undefined,
+      } as Event<ErmisChatGenerics>);
     };
     this.eventSource.onerror = (event: any) => {
-      this.logger('error', `client:connectToSSE() - SSE connection error : ${JSON.stringify(event.data)} `, { event });
       if (event.status === 401) {
-        this.logger('error', 'client:connectToSSE() - Unauthorized (401). Aborting the connection.', {});
-        this.disconnectFromSSE();
-      } else if (
+        void this.disconnectFromSSE();
+        return;
+      }
+      if (
         this.eventSource?.readyState === EventSourcePolyfill.CLOSED ||
         this.eventSource?.readyState === EventSourcePolyfill.CONNECTING
       ) {
         this.eventSource.close();
-        this.eventSource = null; // Clear reference so reconnect doesn't bail out early
-        setTimeout(() => {
-          this.logger('info', 'client:connectToSSE() - Reconnecting to SSE', {});
-          this.connectToSSE(onCallBack);
-        }, 3000);
+        this.eventSource = null;
+        setTimeout(() => void this.connectToSSE(onCallBack), 3000);
       }
     };
   }
@@ -1497,37 +1592,22 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
   }
 
-  async queryUsers(page_size?: number, page?: number): Promise<UsersResponse<ErmisChatGenerics>> {
-    // Make sure we wait for the connect promise if there is a pending one
+  async queryUsers(page_size = 100, page = 1): Promise<UsersResponse<ErmisChatGenerics>> {
     await this.wsPromise;
     const userIDAtRequest = this.userID;
-
-    let project_id = this.projectId;
-    // Return a list of users
-    const data = await this.get<UsersResponse<ErmisChatGenerics>>(this.userBaseURL + '/users', {
-      project_id,
-      page,
-      page_size,
-    });
-
-    if (userIDAtRequest && this.userID === userIDAtRequest) {
-      this._upsertUsers(data.data);
-    }
-
-    return data;
+    const response = await this.endUserApi.queryUsers(page_size, page);
+    if (userIDAtRequest && this.userID === userIDAtRequest) this._upsertUsers(response.data);
+    return response;
   }
 
   async syncUserCache(page_size = 10000, page = 1): Promise<UsersResponse<ErmisChatGenerics>> {
-    return await this.queryUsers(page_size, page);
+    return this.queryUsers(page_size, page);
   }
 
   async queryUser(user_id: string): Promise<UserResponse<ErmisChatGenerics>> {
     const userIDAtRequest = this.userID;
-    const project_id = this.projectId;
 
-    const userResponse = await this.get<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/' + user_id, {
-      project_id,
-    });
+    const userResponse = await this.endUserApi.queryUser(user_id);
 
     if (userIDAtRequest && this.userID === userIDAtRequest) {
       this._upsertUser(userResponse);
@@ -1535,46 +1615,41 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return userResponse;
   }
 
-  async getBatchUsers(users: string[], page?: number, page_size?: number) {
+  async getBatchUsers(users: string[], _page?: number, _page_size?: number) {
     const userIDAtRequest = this.userID;
-    let project_id = this.projectId;
-
-    const usersRepsonse = await this.post<UsersResponse<ErmisChatGenerics>>(
-      this.userBaseURL + '/users/batch?page=1&page_size=10000',
-      { users, project_id },
-      { page, page_size },
-    );
+    const allUsers = await this.endUserApi.getBatchUsers(users, _page || 1, _page_size || 10000);
 
     if (userIDAtRequest && this.userID === userIDAtRequest) {
-      this._upsertUsers(usersRepsonse.data);
+      this._upsertUsers(allUsers);
     }
 
-    return usersRepsonse.data || [];
+    return allUsers;
   }
 
-  async searchUsers(page: number, page_size: number, name?: string): Promise<UsersResponse<ErmisChatGenerics>> {
-    let project_id = this.projectId;
+  async searchUsers(query: string, limit?: number): Promise<UsersResponse<ErmisChatGenerics>>;
+  async searchUsers(page: number, page_size: number, name?: string): Promise<UsersResponse<ErmisChatGenerics>>;
+  async searchUsers(
+    queryOrPage: string | number,
+    limitOrPageSize = 20,
+    legacyName?: string,
+  ): Promise<UsersResponse<ErmisChatGenerics>> {
+    const usersResponse = await this.endUserApi.searchUsers({
+      query: (typeof queryOrPage === 'string' ? queryOrPage : legacyName || '').trim(),
+      page: typeof queryOrPage === 'number' ? queryOrPage : 1,
+      pageSize: Number(limitOrPageSize) || 20,
+    });
 
-    const usersResponse = await this.post<UsersResponse<ErmisChatGenerics>>(
-      this.userBaseURL + '/users/search',
-      undefined,
-      {
-        page,
-        page_size,
-        name,
-        project_id,
-      },
-    );
-
-    // this.state.updateUsers(usersResponse.data);
+    this._upsertUsers(usersResponse.data);
 
     return usersResponse;
   }
 
   async queryContacts(): Promise<ContactResult> {
-    let project_id = this.projectId;
-    const contactResponse = await this.post<ContactResponse>(this.baseURL + '/contacts/list', { project_id });
-    const userIds = contactResponse.project_id_user_ids[project_id];
+    const contactResponse = await this.post<ContactResponse>(this.baseURL + '/contacts/list', this._withProjectId({}));
+    const contactGroups = this.projectId
+      ? contactResponse.project_id_user_ids[this.projectId]
+      : Object.values(contactResponse.project_id_user_ids).flat();
+    const userIds = contactGroups || [];
     const contact_users: UserResponse<ErmisChatGenerics>[] = [];
     const block_users: UserResponse<ErmisChatGenerics>[] = [];
 
@@ -1611,17 +1686,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * @returns The response containing the new avatar URL.
    */
   async uploadAvatar(file: File) {
-    const formData = new FormData();
-    formData.append('avatar', file);
-    let response = await this.post<{ avatar: string }>(this.userBaseURL + '/users/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await this.endUserApi.uploadAvatar(file);
     if (this.user) {
-      this.user.avatar = response.avatar;
-      const new_user = { ...this.user, avatar: response.avatar };
-      this._upsertUser(new_user);
+      this.user = { ...this.user, ...response };
+      this._upsertUser(this.user);
 
       this.dispatchEvent({
         type: 'user.updated',
@@ -1632,7 +1700,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return response;
   }
   async updateProfile(updates: Partial<UserResponse<ErmisChatGenerics>>) {
-    let response = await this.patch<UserResponse<ErmisChatGenerics>>(this.userBaseURL + '/users/update', updates);
+    const response = await this.endUserApi.updateProfile(updates);
     this.user = response;
     this._upsertUser(response);
 
@@ -1665,11 +1733,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     // Make sure we wait for the connect promise if there is a pending one
     await this.wsPromise;
 
-    let project_id = this.projectId;
-
     // Return a list of channels
     const payload = {
-      filter_conditions: { ...filterConditions, project_id },
+      filter_conditions: this._withProjectId({ ...filterConditions }),
       sort,
       ...options,
     };
@@ -1824,7 +1890,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   }
 
   async searchPublicChannel(search_term: string, offset = 0, limit = 25) {
-    let project_id = this.projectId;
+    const project_id = this._requireProjectId('searchPublicChannel');
 
     return await this.post<APIResponse>(this.baseURL + `/channels/public/search`, {
       project_id,
@@ -1903,7 +1969,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   getChannel = (channelType: string, custom: ChannelData<ErmisChatGenerics>) => {
     const uuid = randomId();
-    const id = `${this.projectId}:${uuid}`;
+    const id = `${this._requireProjectId('getChannel')}:${uuid}`;
     // only allow 1 channel object per cid
     const cid = `${channelType}:${id}`;
     if (cid in this.activeChannels && !this.activeChannels[cid].disconnected) {
@@ -2005,6 +2071,46 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.userAgent = userAgent;
   }
 
+  _enrichPublicAxiosOptions(
+    options: AxiosRequestConfig & { config?: AxiosRequestConfig } = {
+      params: {},
+      headers: {},
+      config: {},
+    },
+  ): AxiosRequestConfig {
+    if (!options.headers?.['x-client-request-id']) {
+      options.headers = {
+        ...options.headers,
+        'x-client-request-id': randomId(),
+      };
+    }
+    const {
+      params: axiosRequestConfigParams,
+      headers: axiosRequestConfigHeaders,
+      ...axiosRequestConfigRest
+    } = this.options.axiosRequestConfig || {};
+
+    const params = {
+      ...options.params,
+      ...(axiosRequestConfigParams || {}),
+    };
+
+    return {
+      params,
+      headers: {
+        'stream-auth-type': this.getAuthType(),
+        'X-Stream-Client': this.getUserAgent(),
+        ...(this.deviceId ? { 'X-Device-ID': this.deviceId } : {}),
+        ...options.headers,
+        ...(axiosRequestConfigHeaders || {}),
+        [E2EE_BYTES_HEADER]: E2EE_BYTES_WIRE_FORMAT,
+      },
+
+      ...options.config,
+      ...(axiosRequestConfigRest || {}),
+    };
+  }
+
   _enrichAxiosOptions(
     options: AxiosRequestConfig & { config?: AxiosRequestConfig } = {
       params: {},
@@ -2014,7 +2120,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   ): AxiosRequestConfig {
     let token = this._getToken();
 
-    if (!token?.startsWith('Bearer ')) {
+    if (token && !token.startsWith('Bearer ')) {
       token = `Bearer ${token}`;
     }
 

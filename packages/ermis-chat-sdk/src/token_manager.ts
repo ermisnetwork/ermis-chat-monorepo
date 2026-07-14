@@ -1,4 +1,4 @@
-import { ExtendableGenerics, DefaultGenerics, UserResponse } from './types';
+import { ExtendableGenerics, DefaultGenerics, RefreshTokenInput, RefreshTokenProvider, UserResponse } from './types';
 
 /**
  * TokenManager
@@ -7,14 +7,13 @@ import { ExtendableGenerics, DefaultGenerics, UserResponse } from './types';
  */
 export class TokenManager<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   loadTokenPromise: Promise<string> | null;
-  refreshPromise: Promise<unknown> | null;
   refreshToken?: string;
+  refreshTokenProvider?: RefreshTokenProvider;
   token?: string;
   user?: UserResponse<ErmisChatGenerics>;
 
   constructor() {
     this.loadTokenPromise = null;
-    this.refreshPromise = null;
   }
 
   /**
@@ -23,26 +22,59 @@ export class TokenManager<ErmisChatGenerics extends ExtendableGenerics = Default
   setTokenOrProvider = async (
     tokenOrProvider: string | null,
     user: UserResponse<ErmisChatGenerics>,
-    options: { refreshToken?: string | null } = {},
+    refreshTokenOrProvider?: RefreshTokenInput,
   ) => {
     this.user = user;
 
     if (typeof tokenOrProvider === 'string') {
       this.token = tokenOrProvider;
     }
-    if (typeof options.refreshToken === 'string') {
-      this.refreshToken = options.refreshToken;
+    if (refreshTokenOrProvider !== undefined) {
+      this.setRefreshTokenOrProvider(refreshTokenOrProvider);
     }
 
     this.loadTokenPromise = Promise.resolve(this.token as string);
   };
 
-  setTokens = (token: string, refreshToken?: string | null) => {
+  /**
+   * Replace the active access token after a successful refresh.
+   */
+  setToken = (token: string) => {
     this.token = token;
-    if (typeof refreshToken === 'string') {
-      this.refreshToken = refreshToken;
+    this.loadTokenPromise = Promise.resolve(token);
+  };
+
+  /**
+   * Set the refresh token or a provider returning the latest refresh token.
+   */
+  setRefreshTokenOrProvider = (refreshTokenOrProvider?: RefreshTokenInput) => {
+    if (refreshTokenOrProvider === undefined) return;
+
+    if (refreshTokenOrProvider === null) {
+      this.refreshToken = undefined;
+      this.refreshTokenProvider = undefined;
+      return;
     }
-    this.loadTokenPromise = Promise.resolve(this.token);
+
+    if (typeof refreshTokenOrProvider === 'function') {
+      this.refreshToken = undefined;
+      this.refreshTokenProvider = refreshTokenOrProvider;
+      return;
+    }
+
+    this.refreshToken = refreshTokenOrProvider || undefined;
+    this.refreshTokenProvider = undefined;
+  };
+
+  /**
+   * Returns the current refresh token, resolving a provider when configured.
+   */
+  getRefreshToken = async () => {
+    if (this.refreshTokenProvider) {
+      const token = await this.refreshTokenProvider();
+      return token || undefined;
+    }
+    return this.refreshToken;
   };
 
   /**
@@ -51,7 +83,7 @@ export class TokenManager<ErmisChatGenerics extends ExtendableGenerics = Default
   reset = () => {
     this.token = undefined;
     this.refreshToken = undefined;
-    this.refreshPromise = null;
+    this.refreshTokenProvider = undefined;
     this.user = undefined;
     this.loadTokenPromise = null;
   };
@@ -64,9 +96,5 @@ export class TokenManager<ErmisChatGenerics extends ExtendableGenerics = Default
   /** Returns the current token */
   getToken = () => {
     return this.token;
-  };
-
-  getRefreshToken = () => {
-    return this.refreshToken;
   };
 }

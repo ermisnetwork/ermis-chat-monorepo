@@ -9,32 +9,56 @@ REACT_NAME="@ermis-network/ermis-chat-react"
 
 TAG="${NPM_TAG:-latest}"
 OTP="${NPM_OTP:-}"
+SDK_OTP="${NPM_SDK_OTP:-}"
+REACT_OTP="${NPM_REACT_OTP:-}"
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmjs.org}"
+WAIT_TIMEOUT="${NPM_PUBLISH_WAIT_TIMEOUT:-120}"
+WAIT_INTERVAL="${NPM_PUBLISH_WAIT_INTERVAL:-5}"
 DRY_RUN=0
 SKIP_BUILD=0
 SKIP_PACK=0
 YES=0
 
+if [[ -n "$OTP" ]]; then
+  SDK_OTP="${SDK_OTP:-$OTP}"
+  REACT_OTP="${REACT_OTP:-$OTP}"
+fi
+
 usage() {
   cat <<'USAGE'
 Usage: scripts/publish-packages.sh [options]
 
-Publishes both Ermis packages in parallel:
-  - @ermis-network/ermis-chat-sdk
-  - @ermis-network/ermis-chat-react
+Publishes both Ermis packages sequentially:
+  1. @ermis-network/ermis-chat-sdk
+  2. @ermis-network/ermis-chat-react
+
+This script is resumable. If the SDK version already exists but React does not,
+it skips SDK and continues with React. After SDK publish, it waits until npm
+registry can resolve that SDK version before publishing React.
+
+For npm web-based 2FA, do not pass --otp. npm publish will pause, ask you to
+press ENTER to open the browser, and continue after browser verification.
 
 Options:
-  --tag <tag>      npm dist-tag to publish with. Default: latest
-  --otp <code>     npm 2FA one-time password. Also accepts NPM_OTP
-  --dry-run        Run npm publish --dry-run for both packages
-  --skip-build     Skip yarn build
-  --skip-pack      Skip npm pack --dry-run checks
-  --yes            Do not prompt before real publish
-  -h, --help       Show this help
+  --tag <tag>          npm dist-tag to publish with. Default: latest
+  --otp <code>         npm 2FA one-time password for both packages. Also accepts NPM_OTP
+  --otp-sdk <code>     npm 2FA one-time password for SDK. Also accepts NPM_SDK_OTP
+  --otp-react <code>   npm 2FA one-time password for React. Also accepts NPM_REACT_OTP
+  --registry <url>     npm registry. Default: https://registry.npmjs.org
+  --wait-timeout <sec> seconds to wait for SDK registry propagation. Default: 120
+  --wait-interval <s>  seconds between registry checks. Default: 5
+  --dry-run            Run npm publish --dry-run for both packages
+  --skip-build         Skip yarn build
+  --skip-pack          Skip npm pack --dry-run checks
+  --yes                Do not prompt before real publish
+  -h, --help           Show this help
 
 Examples:
   scripts/publish-packages.sh --dry-run
   scripts/publish-packages.sh --yes
-  scripts/publish-packages.sh --tag beta --otp 123456 --yes
+  scripts/publish-packages.sh --tag beta --yes
+  scripts/publish-packages.sh --otp-sdk 111111 --otp-react 222222 --yes
+  scripts/publish-packages.sh --registry https://registry.npmjs.org --yes
 USAGE
 }
 
@@ -69,7 +93,7 @@ version_exists() {
   local err_file
   err_file="$(mktemp)"
 
-  if npm view "$package_name@$version" version >/dev/null 2>"$err_file"; then
+  if npm view "$package_name@$version" version --registry "$NPM_REGISTRY" >/dev/null 2>"$err_file"; then
     rm -f "$err_file"
     return 0
   fi
@@ -85,24 +109,47 @@ version_exists() {
   exit 1
 }
 
+wait_for_version() {
+  local package_name="$1"
+  local version="$2"
+  local waited=0
+
+  log "Waiting for npm registry"
+  while true; do
+    if version_exists "$package_name" "$version"; then
+      printf '%s@%s is visible on npm.\n' "$package_name" "$version"
+      return 0
+    fi
+
+    if (( waited >= WAIT_TIMEOUT )); then
+      fail "$package_name@$version is still not visible on npm after ${WAIT_TIMEOUT}s"
+    fi
+
+    printf 'Waiting for %s@%s... %ss/%ss\n' "$package_name" "$version" "$waited" "$WAIT_TIMEOUT"
+    sleep "$WAIT_INTERVAL"
+    waited=$((waited + WAIT_INTERVAL))
+  done
+}
+
 publish_one() {
   local package_dir="$1"
   local package_name="$2"
-  local log_file="$3"
+  local otp_code="$3"
   local publish_args=(--tag "$TAG" --access public)
 
   if [[ "$DRY_RUN" == "1" ]]; then
     publish_args+=(--dry-run)
   fi
 
-  if [[ -n "$OTP" ]]; then
-    publish_args+=(--otp "$OTP")
+  if [[ -n "$otp_code" ]]; then
+    publish_args+=(--otp "$otp_code")
   fi
 
+  log "Publishing $package_name"
   (
     cd "$package_dir"
-    npm publish "${publish_args[@]}"
-  ) >"$log_file" 2>&1
+    npm publish --registry "$NPM_REGISTRY" "${publish_args[@]}"
+  )
 }
 
 while [[ $# -gt 0 ]]; do
@@ -115,6 +162,33 @@ while [[ $# -gt 0 ]]; do
     --otp)
       [[ $# -ge 2 ]] || fail "--otp requires a value"
       OTP="$2"
+      SDK_OTP="${SDK_OTP:-$OTP}"
+      REACT_OTP="${REACT_OTP:-$OTP}"
+      shift 2
+      ;;
+    --otp-sdk)
+      [[ $# -ge 2 ]] || fail "--otp-sdk requires a value"
+      SDK_OTP="$2"
+      shift 2
+      ;;
+    --otp-react)
+      [[ $# -ge 2 ]] || fail "--otp-react requires a value"
+      REACT_OTP="$2"
+      shift 2
+      ;;
+    --registry)
+      [[ $# -ge 2 ]] || fail "--registry requires a value"
+      NPM_REGISTRY="$2"
+      shift 2
+      ;;
+    --wait-timeout)
+      [[ $# -ge 2 ]] || fail "--wait-timeout requires a value"
+      WAIT_TIMEOUT="$2"
+      shift 2
+      ;;
+    --wait-interval)
+      [[ $# -ge 2 ]] || fail "--wait-interval requires a value"
+      WAIT_INTERVAL="$2"
       shift 2
       ;;
     --dry-run)
@@ -163,17 +237,31 @@ log "Packages"
 printf '%s@%s\n' "$SDK_NAME" "$SDK_VERSION"
 printf '%s@%s\n' "$REACT_NAME" "$REACT_VERSION"
 printf 'dist-tag: %s\n' "$TAG"
+printf 'registry: %s\n' "$NPM_REGISTRY"
+
+SDK_EXISTS=0
+REACT_EXISTS=0
 
 if [[ "$DRY_RUN" != "1" ]]; then
   log "Checking npm authentication"
-  npm whoami >/dev/null || fail "npm authentication failed; run npm login or set NODE_AUTH_TOKEN"
+  npm whoami --registry "$NPM_REGISTRY" >/dev/null || fail "npm authentication failed; run npm login --registry=$NPM_REGISTRY or set NODE_AUTH_TOKEN"
 
   log "Checking npm versions"
   if version_exists "$SDK_NAME" "$SDK_VERSION"; then
-    fail "$SDK_NAME@$SDK_VERSION already exists on npm"
+    SDK_EXISTS=1
   fi
   if version_exists "$REACT_NAME" "$REACT_VERSION"; then
-    fail "$REACT_NAME@$REACT_VERSION already exists on npm"
+    REACT_EXISTS=1
+  fi
+
+  if [[ "$SDK_EXISTS" == "1" && "$REACT_EXISTS" == "1" ]]; then
+    fail "$SDK_NAME@$SDK_VERSION and $REACT_NAME@$REACT_VERSION already exist on npm"
+  fi
+  if [[ "$SDK_EXISTS" != "1" && "$REACT_EXISTS" == "1" ]]; then
+    fail "$REACT_NAME@$REACT_VERSION exists but $SDK_NAME@$SDK_VERSION does not; check package versions"
+  fi
+  if [[ "$SDK_EXISTS" == "1" && "$REACT_EXISTS" != "1" ]]; then
+    printf '%s@%s already exists; resuming with React publish.\n' "$SDK_NAME" "$SDK_VERSION"
   fi
 fi
 
@@ -184,12 +272,16 @@ fi
 
 if [[ "$SKIP_PACK" != "1" ]]; then
   log "Running npm pack --dry-run checks"
-  (cd "$SDK_DIR" && npm pack --dry-run --json >/dev/null)
-  (cd "$REACT_DIR" && npm pack --dry-run --json >/dev/null)
+  if [[ "$DRY_RUN" == "1" || "$SDK_EXISTS" != "1" ]]; then
+    (cd "$SDK_DIR" && npm pack --dry-run --json >/dev/null)
+  fi
+  if [[ "$DRY_RUN" == "1" || "$REACT_EXISTS" != "1" ]]; then
+    (cd "$REACT_DIR" && npm pack --dry-run --json >/dev/null)
+  fi
 fi
 
 if [[ "$DRY_RUN" != "1" && "$YES" != "1" ]]; then
-  printf '\nPublish both packages in parallel now? [y/N] '
+  printf '\nPublish missing packages sequentially now? [y/N] '
   read -r answer
   case "$answer" in
     y|Y|yes|YES) ;;
@@ -197,34 +289,30 @@ if [[ "$DRY_RUN" != "1" && "$YES" != "1" ]]; then
   esac
 fi
 
-SDK_LOG="$(mktemp "${TMPDIR:-/tmp}/ermis-chat-sdk-publish.XXXXXX.log")"
-REACT_LOG="$(mktemp "${TMPDIR:-/tmp}/ermis-chat-react-publish.XXXXXX.log")"
+if [[ "$DRY_RUN" == "1" ]]; then
+  publish_one "$SDK_DIR" "$SDK_NAME" "$SDK_OTP"
+  publish_one "$REACT_DIR" "$REACT_NAME" "$REACT_OTP"
+else
+  if [[ "$SDK_EXISTS" != "1" ]]; then
+    publish_one "$SDK_DIR" "$SDK_NAME" "$SDK_OTP"
+    wait_for_version "$SDK_NAME" "$SDK_VERSION"
+  else
+    log "Skipping $SDK_NAME"
+    printf '%s@%s already exists on npm.\n' "$SDK_NAME" "$SDK_VERSION"
+  fi
 
-log "Publishing both packages in parallel"
-publish_one "$SDK_DIR" "$SDK_NAME" "$SDK_LOG" &
-SDK_PID=$!
-publish_one "$REACT_DIR" "$REACT_NAME" "$REACT_LOG" &
-REACT_PID=$!
-
-SDK_STATUS=0
-REACT_STATUS=0
-wait "$SDK_PID" || SDK_STATUS=$?
-wait "$REACT_PID" || REACT_STATUS=$?
-
-printf '\n--- %s publish log ---\n' "$SDK_NAME"
-cat "$SDK_LOG"
-printf '\n--- %s publish log ---\n' "$REACT_NAME"
-cat "$REACT_LOG"
-
-rm -f "$SDK_LOG" "$REACT_LOG"
-
-if [[ "$SDK_STATUS" != "0" || "$REACT_STATUS" != "0" ]]; then
-  fail "publish failed: $SDK_NAME=$SDK_STATUS, $REACT_NAME=$REACT_STATUS"
+  if [[ "$REACT_EXISTS" != "1" ]]; then
+    wait_for_version "$SDK_NAME" "$SDK_VERSION"
+    publish_one "$REACT_DIR" "$REACT_NAME" "$REACT_OTP"
+  else
+    log "Skipping $REACT_NAME"
+    printf '%s@%s already exists on npm.\n' "$REACT_NAME" "$REACT_VERSION"
+  fi
 fi
 
 log "Done"
 if [[ "$DRY_RUN" == "1" ]]; then
   printf 'Dry run completed for %s@%s and %s@%s.\n' "$SDK_NAME" "$SDK_VERSION" "$REACT_NAME" "$REACT_VERSION"
 else
-  printf 'Published %s@%s and %s@%s with dist-tag %s.\n' "$SDK_NAME" "$SDK_VERSION" "$REACT_NAME" "$REACT_VERSION" "$TAG"
+  printf 'Publish flow completed for %s@%s and %s@%s with dist-tag %s.\n' "$SDK_NAME" "$SDK_VERSION" "$REACT_NAME" "$REACT_VERSION" "$TAG"
 fi

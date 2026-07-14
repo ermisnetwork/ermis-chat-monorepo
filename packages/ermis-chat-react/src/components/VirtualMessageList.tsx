@@ -22,7 +22,7 @@ import {
   type MessageBubbleProps,
 } from './MessageRenderers';
 import { isStickerMessage } from '../messageTypeUtils';
-import { getDateKey, formatDateLabel, getMessageUserId, formatReadTimestamp } from '../utils';
+import { getDateKey, formatDateLabel, getMessageUserId, formatReadTimestamp, getUserDisplayName } from '../utils';
 import { QuotedMessagePreview } from './QuotedMessagePreview';
 import { PinnedMessages } from './PinnedMessages';
 import { ReadReceipts } from './ReadReceipts';
@@ -213,7 +213,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     if (membersList.length === 2 && !isPending) {
       const otherUser = membersList.find(m => m.user_id !== currentUserId);
       if (otherUser && isPendingMember(otherUser.channel_role)) {
-        return otherUser.user?.name || otherUser.user?.id || 'User';
+        return getUserDisplayName(otherUser.user, otherUser.user_id) || 'User';
       }
     }
     return null;
@@ -584,8 +584,11 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       }
 
       const isOwn = entry.isOwnMessage;
-      const userName = entry.message.user?.name || entry.message.user_id;
-      const userAvatar = entry.message.user?.avatar;
+      const userId = getMessageUserId(entry.message);
+      const cachedUser = userId ? client?.state?.users?.[userId] : undefined;
+      const userName = getUserDisplayName(entry.message.user, userId, cachedUser);
+      const userAvatar =
+        entry.message.user?.avatar || entry.message.user?.avatar_url || cachedUser?.avatar || cachedUser?.avatar_url;
       const groupKey = `group-${entry.message.id || `g-${entry.index}`}`;
 
       // Check if we need a time separator BEFORE this group

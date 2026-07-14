@@ -7,7 +7,7 @@ import type {
 } from '@ermis-network/ermis-chat-sdk';
 import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
-import { removeAccents, buildUserMap } from '../utils';
+import { removeAccents, buildUserMap, getUserDisplayName } from '../utils';
 import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
 
 function isE2eeAttachmentManifest(attachment: unknown): attachment is E2eeAttachmentManifest {
@@ -215,10 +215,10 @@ export function useForwardMessage(message: FormatMessageResponse, onDismiss: () 
     let formattedMessage = { ...message };
     if (formattedMessage.text && formattedMessage.mentioned_users && formattedMessage.mentioned_users.length > 0) {
       let newText = formattedMessage.text;
-      const userMap = buildUserMap(activeChannel.state);
+      const userMap = buildUserMap(activeChannel.state, client.state.users);
 
       formattedMessage.mentioned_users.forEach((userId) => {
-        const name = userMap[userId] || client.state.users[userId]?.name || userId;
+        const name = userMap[userId] || getUserDisplayName(client.state.users[userId], userId);
         newText = newText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
       });
       formattedMessage.text = newText;

@@ -9,7 +9,7 @@ import {
   isVideoAttachment,
   isVoiceRecordingAttachment,
 } from '../messageTypeUtils';
-import { replaceMentionsForPreview, buildUserMap } from '../utils';
+import { replaceMentionsForPreview, buildUserMap, getMessageUserId, getUserDisplayName } from '../utils';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import type { PinnedMessageItemProps, PinnedMessagesProps } from '../types';
 
@@ -27,14 +27,16 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
 }) => {
-  const { activeChannel } = useChatClient();
-  const userName = message.user?.name || message.user_id || 'Unknown';
-  const userAvatar = message.user?.avatar;
+  const { activeChannel, client } = useChatClient();
+  const userId = getMessageUserId(message);
+  const cachedUser = userId ? client?.state?.users?.[userId] : undefined;
+  const userName = getUserDisplayName(message.user, userId, cachedUser) || 'Unknown';
+  const userAvatar = message.user?.avatar || (message.user as any)?.avatar_url || cachedUser?.avatar || cachedUser?.avatar_url;
   const hasAttachments = message.attachments && message.attachments.length > 0;
 
   const userMap = useMemo<Record<string, string>>(() => {
-    return buildUserMap(activeChannel?.state);
-  }, [activeChannel?.state]);
+    return buildUserMap(activeChannel?.state, client?.state?.users);
+  }, [activeChannel?.state, client?.state?.users]);
 
   let previewText = message.text || '';
   const isSticker = isStickerMessage(message);
