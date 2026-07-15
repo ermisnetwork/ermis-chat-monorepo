@@ -1,33 +1,39 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { UserPicker, getUserDisplayName } from '@ermis-network/ermis-chat-react';
-import type { AddMemberModalProps, UserPickerUser, UserPickerItemProps, UserPickerSelectedBoxProps } from '@ermis-network/ermis-chat-react';
+import type {
+  AddMemberModalProps,
+  UserPickerUser,
+  UserPickerItemProps,
+  UserPickerSelectedBoxProps,
+} from '@ermis-network/ermis-chat-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X, Loader2, Search, Check } from 'lucide-react';
 
-const CustomSelectedBox: React.FC<UserPickerSelectedBoxProps> = ({
-  users, onRemove, AvatarComponent, emptyLabel: _emptyLabel,
-}) => {
+const CustomSelectedBox: React.FC<UserPickerSelectedBoxProps> = ({ users, onRemove, AvatarComponent }) => {
   if (users.length === 0) return null;
 
   return (
     <div className="shrink-0 flex flex-wrap gap-2 px-4 pt-4 pb-2 bg-white/50 dark:bg-zinc-900/50 border-b border-zinc-100 dark:border-zinc-800/50">
-      {users.map(u => {
+      {users.map((u) => {
         const displayName = getUserDisplayName(u, u.id);
         return (
-        <div key={u.id} className="flex items-center gap-1.5 px-2 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors rounded-lg shadow-sm border border-zinc-200/50 dark:border-zinc-700/50">
-          <AvatarComponent image={u.avatar} name={displayName} size={20} />
-          <span className="text-[13px] font-medium text-zinc-800 dark:text-zinc-200 max-w-[100px] truncate">
-            {displayName}
-          </span>
-          <button
-            className="p-0.5 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors"
-            onClick={() => onRemove(u.id)}
-            aria-label={`Remove ${displayName}`}
+          <div
+            key={u.id}
+            className="flex items-center gap-1.5 px-2 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors rounded-lg shadow-sm border border-zinc-200/50 dark:border-zinc-700/50"
           >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+            <AvatarComponent image={u.avatar} name={displayName} size={20} />
+            <span className="text-[13px] font-medium text-zinc-800 dark:text-zinc-200 max-w-[100px] truncate">
+              {displayName}
+            </span>
+            <button
+              className="p-0.5 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors"
+              onClick={() => onRemove(u.id)}
+              aria-label={`Remove ${displayName}`}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         );
       })}
     </div>
@@ -64,13 +70,7 @@ const CustomSearchInput: React.FC<{
   </div>
 );
 
-const CustomUserItem: React.FC<UserPickerItemProps> = ({
-  user,
-  selected,
-  disabled,
-  onToggle,
-  AvatarComponent,
-}) => {
+const CustomUserItem: React.FC<UserPickerItemProps> = ({ user, selected, disabled, onToggle, AvatarComponent }) => {
   const displayName = getUserDisplayName(user, user.id);
 
   return (
@@ -90,21 +90,20 @@ const CustomUserItem: React.FC<UserPickerItemProps> = ({
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-[14px] font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-          {displayName}
-        </div>
+        <div className="text-[14px] font-semibold text-zinc-900 dark:text-zinc-100 truncate">{displayName}</div>
         {(user.email || user.phone) && (
-          <div className="text-[12px] text-zinc-500 truncate mt-0.5">
-            {user.email || user.phone}
-          </div>
+          <div className="text-[12px] text-zinc-500 truncate mt-0.5">{user.email || user.phone}</div>
         )}
       </div>
-      <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors shadow-sm
-      ${selected
-        ? 'bg-indigo-500 border-indigo-500 text-white'
-        : 'border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800'
+      <div
+        className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors shadow-sm
+      ${
+        selected
+          ? 'bg-indigo-500 border-indigo-500 text-white'
+          : 'border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800'
       }
-    `}>
+    `}
+      >
         {selected && <Check className="w-3.5 h-3.5" strokeWidth={3} />}
       </div>
     </button>
@@ -121,10 +120,7 @@ export const UhmAddMemberModal: React.FC<AddMemberModalProps> = ({
   const [selectedUsers, setSelectedUsers] = useState<UserPickerUser[]>([]);
   const [isAdding, setIsAdding] = useState(false);
 
-  const excludeUserIds = useMemo(
-    () => currentMembers.map((m: any) => m.user_id),
-    [currentMembers],
-  );
+  const excludeUserIds = useMemo(() => currentMembers.map((m: any) => m.user_id), [currentMembers]);
 
   const handleSelectionChange = useCallback((users: UserPickerUser[]) => {
     setSelectedUsers(users);
@@ -134,7 +130,7 @@ export const UhmAddMemberModal: React.FC<AddMemberModalProps> = ({
     if (selectedUsers.length === 0 || isAdding) return;
     try {
       setIsAdding(true);
-      const memberIds = selectedUsers.map(u => u.id);
+      const memberIds = selectedUsers.map((u) => u.id);
       const encryptionManager = channel.getClient().encryptionManager;
       if (channel.data?.mls_enabled && encryptionManager?.initialized && channel.id && channel.cid) {
         await encryptionManager.addMembers(channel.type, channel.id, channel.cid, memberIds);
@@ -190,7 +186,6 @@ export const UhmAddMemberModal: React.FC<AddMemberModalProps> = ({
           </div>
 
           <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/20 flex justify-end gap-3 items-center">
-
             <button
               onClick={onClose}
               className="px-4 py-2 text-[14px] font-medium rounded-xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"

@@ -595,8 +595,8 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                             key={i}
                             className="w-[3px] bg-red-400 dark:bg-red-500 rounded-full animate-wave"
                             style={{
-                              animationDelay: `${Math.random() * 0.5}s`,
-                              animationDuration: `${0.8 + Math.random() * 0.4}s`,
+                              animationDelay: `${(i % 8) * 0.05}s`,
+                              animationDuration: `${0.8 + (i % 5) * 0.1}s`,
                             }}
                           />
                         ))}

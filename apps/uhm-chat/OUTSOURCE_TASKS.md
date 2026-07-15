@@ -16,7 +16,7 @@ Allowed status: `TODO | IN_PROGRESS | BLOCKED | DEFERRED | DONE`. Only one Codex
 | FE-002 | Remove PIN/archive UI and pin exact SDK versions | DONE | Codex | SDK-005 | Exact versions set; workspace and tarball-backed app builds passed |
 | FE-003 | Smoke test with package tarballs outside monorepo | DONE | Codex | SDK-005 | `/private/tmp/uhm-chat-external-smoke`; tarball install and production build passed |
 | FE-004 | Install registry packages and create final lockfile | BLOCKED | Codex | SDK-006 | Registry release not published |
-| FE-005 | Build, lint, E2EE smoke test, and clean initial commit | BLOCKED | Codex | FE-004 | — |
+| FE-005 | Build, lint, E2EE smoke test, and clean initial commit | BLOCKED | Codex | FE-004 | Standalone source build/lint pass; registry install, live E2EE smoke, and initial commit pending |
 | DOC-001 | Update SDK/app docs, release guide, and research progress log | DONE | Codex | FE-005 | SDK/React/app README, `EXTERNAL_RELEASE.md`, and 2026-07-15 research entry |
 | WASM-001 | Build WASM without epoch archive and replace artifact | DEFERRED | User | FE-005 | Current WASM checksum/size must remain unchanged |
 | BE-001 | Analyze attachment/base64 contract for `bellboy-external` | BLOCKED | Later phase | FE-005 | Backend scope intentionally unchanged |
