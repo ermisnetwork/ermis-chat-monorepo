@@ -9,8 +9,9 @@ Allowed status: `TODO | IN_PROGRESS | BLOCKED | DEFERRED | DONE`. Only one Codex
 | SDK-002 | Remove high-level PIN/epoch archive from core SDK | DONE | Codex | SDK-001 | External contract test and endpoint/type negative audit passed |
 | SDK-003 | Remove PIN/recovery from React SDK | DONE | Codex | SDK-002 | React build and package tarball audit passed |
 | SDK-004 | Exclude `/src`, sourcemaps, and internal files from packages | DONE | Codex | SDK-003 | `files=["/dist"]` for React; sourcemaps disabled |
-| SDK-005 | Build, test, and audit both package tarballs | DONE | Codex | SDK-004 | Core/React build; external contract, attachment, media tests; npm pack and dry-run passed |
-| SDK-006 | Publish both packages with npm dist-tag `external` | BLOCKED | Codex + user npm approval | SDK-005 | `npm whoami` failed with `E401 Unauthorized`; no package published |
+| SDK-004A | Add the Ermis-approved license file to both tarballs | BLOCKED | User / legal | SDK-004 | No license file exists in the repository; Codex will not invent legal terms |
+| SDK-005 | Build, test, and audit both package tarballs | BLOCKED | Codex | SDK-004A | Technical gates passed; final pack acceptance waits for approved license |
+| SDK-006 | Publish both packages with npm dist-tag `external` | BLOCKED | Codex + user npm approval | SDK-005 | License pending; `npm whoami` also failed with `E401 Unauthorized`; no package published |
 | FE-001 | Create sanitized standalone app and `.env.example` | DONE | Codex | PLAN-001 | Standalone source created at `/Users/khoakheu/Ermis-workspace/chat/uhm-chat-external` |
 | FE-002 | Remove PIN/archive UI and pin exact SDK versions | DONE | Codex | SDK-005 | Exact versions set; workspace and tarball-backed app builds passed |
 | FE-003 | Smoke test with package tarballs outside monorepo | DONE | Codex | SDK-005 | `/private/tmp/uhm-chat-external-smoke`; tarball install and production build passed |

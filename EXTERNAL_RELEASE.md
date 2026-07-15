@@ -12,6 +12,7 @@ bash scripts/publish-packages.sh --tag external --dry-run
 
 Audit both tarballs before publishing:
 
+- the Ermis-approved license file is present (the repository currently has no license text; do not publish until legal supplies it);
 - no `/src`, test/config files, `.map`, or `sourcesContent`;
 - no high-level encrypted-history API/UI/endpoint strings outside the documented temporary WASM binary/glue exception;
 - React package depends on the exact matching core version;
