@@ -1,6 +1,6 @@
 {
   "name": "@ermis-network/ermis-chat-react",
-  "version": "2.1.0",
+  "version": "2.1.0-external.1",
   "description": "React UI components for Ermis Chat",
   "author": "Ermis",
   "homepage": "https://ermis.network/",
@@ -16,11 +16,10 @@
     "./dist/index.css": "./dist/index.css"
   },
   "files": [
-    "/dist",
-    "/src"
+    "/dist"
   ],
   "dependencies": {
-    "@ermis-network/ermis-chat-sdk": "2.1.0",
+    "@ermis-network/ermis-chat-sdk": "2.1.0-external.1",
     "react-ts-audio-recorder": "^1.1.4",
     "virtua": "^0.48.8",
     "frimousse": "^0.3.0"

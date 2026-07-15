@@ -12,7 +12,7 @@ export default defineConfig([
     format: ['cjs', 'esm'],
     outDir: 'dist',
     dts: true,
-    sourcemap: true,
+    sourcemap: false,
     clean: true,
     splitting: false,
     external: ['axios', 'form-data', 'isomorphic-ws', 'https', 'ws', 'event-source-polyfill'],
@@ -34,7 +34,7 @@ export default defineConfig([
     entry: ['src/index.ts', 'src/encryption/index.ts'],
     format: ['cjs', 'esm'],
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false,
     splitting: false,
     external: ['axios', 'form-data', 'isomorphic-ws', 'ws', 'event-source-polyfill'],
     define: {
@@ -58,7 +58,7 @@ export default defineConfig([
     entry: ['src/index.ts'],
     format: ['iife'],
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false,
     minify: true,
     splitting: false,
     globalName: 'ErmisChatSDK',
@@ -83,7 +83,7 @@ export default defineConfig([
     entry: ['src/wasm_worker.ts'],
     format: ['esm'],
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false,
     splitting: false,
     noExternal: [/(.*)/], // Bundle everything into the worker
     outExtension() {

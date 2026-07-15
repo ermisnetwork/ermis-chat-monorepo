@@ -16,14 +16,10 @@ import {
 } from './encoding';
 import type { APIResponse, ExtendableGenerics, DefaultGenerics } from '../types';
 import type {
-  ArchiveBlobRecord,
-  ArchiveKeyWrapRecord,
   BatchAddMembersToTopicsRequest,
   BatchExternalJoinTopicsRequest,
   BatchTopicResponse,
   ChannelSyncResult,
-  CiphertextCursor,
-  CiphertextQueryResponse,
   CommitEvictionRequest,
   CommitEvictionResponse,
   DeviceKeyPackage,
@@ -33,7 +29,6 @@ import type {
   GetGroupInfoResponse,
   GetKeyPackagesByCidResponse,
   GetKeyPackagesResponse,
-  HistoricalCiphertext,
   CompleteE2eeAttachmentRequest,
   CompleteE2eeAttachmentResponse,
   DeleteE2eeAttachmentResponse,
@@ -42,31 +37,18 @@ import type {
   InitE2eeAttachmentResponse,
   KeyPackageCountResponse,
   KeyRotationRequest,
-  ListArchiveAvailabilityResponse,
   MemberKeyPackages,
-  MemberSnapshotRecord,
   EncryptionOperationResponse,
-  QueryArchiveMaterialRequest,
-  QueryEpochArchivesRequest,
-  QueryEpochArchivesResponse,
   QueryE2eeAttachmentsRequest,
   QueryE2eeAttachmentsResponse,
-  QuerySponsoredArchiveRecipientsResponse,
-  RecoveryPublicKeyResponse,
-  RecoveryVaultResponse,
   RemovedChannelsSyncResult,
   ScopeSyncResponse,
   SendE2eeMessageRequest,
-  SponsoredArchiveRecipient,
   UnifiedSyncResponse,
   UpdateE2eeMessageRequest,
-  UploadEpochArchiveRequest,
-  UploadEpochArchiveResponse,
   UploadGroupInfoRequest,
   UploadKeyPackagesRequest,
   UploadKeyPackagesResponse,
-  UploadRecoveryVaultRequest,
-  UploadRecoveryVaultResponse,
   EventCursor,
   RemovedSyncCursor,
 } from './types';
@@ -85,33 +67,6 @@ type RawGetKeyPackagesByCidResponse = Omit<GetKeyPackagesByCidResponse, 'members
   members: RawMemberKeyPackages[];
 };
 type RawGetGroupInfoResponse = Omit<GetGroupInfoResponse, 'group_info'> & { group_info: Base64Bytes };
-type RawRecoveryVaultResponse = Omit<RecoveryVaultResponse, 'vault_bytes'> & { vault_bytes: Base64Bytes };
-type RawRecoveryPublicKeyResponse = Omit<RecoveryPublicKeyResponse, 'public_key'> & { public_key: Base64Bytes };
-type RawArchiveBlobRecord = Omit<ArchiveBlobRecord, 'encrypted_archive_bytes' | 'aead_nonce' | 'aead_aad'> & {
-  encrypted_archive_bytes: Base64Bytes;
-  aead_nonce: Base64Bytes;
-  aead_aad: Base64Bytes;
-};
-type RawArchiveKeyWrapRecord = Omit<ArchiveKeyWrapRecord, 'hpke_kem_output' | 'hpke_ciphertext' | 'hpke_info'> & {
-  hpke_kem_output: Base64Bytes;
-  hpke_ciphertext: Base64Bytes;
-  hpke_info: Base64Bytes;
-};
-type RawMemberSnapshotRecord = Omit<MemberSnapshotRecord, 'snapshot_bytes'> & { snapshot_bytes: Base64Bytes };
-type RawQueryEpochArchivesResponse = Omit<QueryEpochArchivesResponse, 'blobs' | 'wraps' | 'snapshots'> & {
-  blobs?: RawArchiveBlobRecord[];
-  wraps?: RawArchiveKeyWrapRecord[];
-  snapshots?: Record<string, RawMemberSnapshotRecord>;
-};
-
-type RawSponsoredArchiveRecipient = Omit<SponsoredArchiveRecipient, 'public_key'> & { public_key: unknown };
-type RawQuerySponsoredArchiveRecipientsResponse = Omit<QuerySponsoredArchiveRecipientsResponse, 'recipients'> & {
-  recipients: RawSponsoredArchiveRecipient[];
-};
-type RawHistoricalCiphertext = Omit<HistoricalCiphertext, 'mls_ciphertext'> & { mls_ciphertext: Base64Bytes };
-type RawCiphertextQueryResponse = Omit<CiphertextQueryResponse, 'ciphertexts'> & {
-  ciphertexts: RawHistoricalCiphertext[];
-};
 
 function encodeBytesField(bytes: Uint8Array, fieldName: string): Base64Bytes {
   return encodeBytesToBase64(normalizeRequiredBytes(bytes, fieldName));
@@ -179,27 +134,6 @@ function encodeUpdateMessageRequest(data: UpdateE2eeMessageRequest): Record<stri
   };
 }
 
-function encodeArchiveUploadRequest(data: UploadEpochArchiveRequest): Record<string, unknown> {
-  return {
-    ...data,
-    encrypted_archive: {
-      ciphertext: encodeBytesField(data.encrypted_archive.ciphertext, 'encrypted_archive.ciphertext'),
-      nonce: encodeBytesField(data.encrypted_archive.nonce, 'encrypted_archive.nonce'),
-      aead_aad: encodeBytesField(data.encrypted_archive.aead_aad, 'encrypted_archive.aead_aad'),
-    },
-    snapshot: {
-      ...data.snapshot,
-      snapshot_bytes: encodeBytesField(data.snapshot.snapshot_bytes, 'snapshot.snapshot_bytes'),
-    },
-    wraps: data.wraps.map((wrap) => ({
-      ...wrap,
-      hpke_kem_output: encodeBytesField(wrap.hpke_kem_output, 'wrap.hpke_kem_output'),
-      hpke_ciphertext: encodeBytesField(wrap.hpke_ciphertext, 'wrap.hpke_ciphertext'),
-      hpke_info: encodeBytesField(wrap.hpke_info, 'wrap.hpke_info'),
-    })),
-  };
-}
-
 function encodeBatchAddMembersToTopicsRequest(data: BatchAddMembersToTopicsRequest): Record<string, unknown> {
   return {
     ...data,
@@ -236,28 +170,6 @@ function decodeKeyPackagesByCidResponse(raw: RawGetKeyPackagesByCidResponse): Ge
       key_packages: member.key_packages.map(decodeDeviceKeyPackage),
     })),
   };
-}
-
-function decodeArchiveBlob(raw: RawArchiveBlobRecord): ArchiveBlobRecord {
-  return {
-    ...raw,
-    encrypted_archive_bytes: decodeBytesField(raw.encrypted_archive_bytes, 'encrypted_archive_bytes'),
-    aead_nonce: decodeBytesField(raw.aead_nonce, 'aead_nonce'),
-    aead_aad: decodeBytesField(raw.aead_aad, 'aead_aad'),
-  };
-}
-
-function decodeArchiveKeyWrap(raw: RawArchiveKeyWrapRecord): ArchiveKeyWrapRecord {
-  return {
-    ...raw,
-    hpke_kem_output: decodeBytesField(raw.hpke_kem_output, 'hpke_kem_output'),
-    hpke_ciphertext: decodeBytesField(raw.hpke_ciphertext, 'hpke_ciphertext'),
-    hpke_info: decodeBytesField(raw.hpke_info, 'hpke_info'),
-  };
-}
-
-function decodeMemberSnapshot(raw: RawMemberSnapshotRecord): MemberSnapshotRecord {
-  return { ...raw, snapshot_bytes: decodeBytesField(raw.snapshot_bytes, 'snapshot_bytes') };
 }
 
 /**
@@ -370,134 +282,6 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       ...(countPerDevice && countPerDevice > 1 ? { count_per_device: countPerDevice } : {}),
     });
     return decodeKeyPackagesByCidResponse(raw);
-  }
-
-  // ---- Recovery Vault ----
-
-  async uploadRecoveryVault(data: UploadRecoveryVaultRequest): Promise<UploadRecoveryVaultResponse> {
-    return await this._post<UploadRecoveryVaultResponse>(this.baseURL + '/v1/e2ee/recovery/vault', {
-      vault_bytes: encodeBytesField(data.vault_bytes, 'vault_bytes'),
-      ...(data.expected_revision !== undefined ? { expected_revision: data.expected_revision } : {}),
-    });
-  }
-
-  async getRecoveryVault(): Promise<RecoveryVaultResponse> {
-    const raw = await this._get<RawRecoveryVaultResponse>(this.baseURL + '/v1/e2ee/recovery/vault');
-    return { ...raw, vault_bytes: decodeBytesField(raw.vault_bytes, 'vault_bytes') };
-  }
-
-  async getRecoveryPublicKey(userId: string): Promise<RecoveryPublicKeyResponse> {
-    const raw = await this._get<RawRecoveryPublicKeyResponse>(this.baseURL + `/v1/e2ee/recovery/public_key/${userId}`);
-    return { ...raw, public_key: decodeBytesField(raw.public_key, 'public_key') };
-  }
-
-  // ---- Epoch Archives ----
-
-  async uploadEpochArchive(
-    channelType: string,
-    channelId: string,
-    data: UploadEpochArchiveRequest,
-  ): Promise<UploadEpochArchiveResponse> {
-    return await this._post(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives`,
-      encodeArchiveUploadRequest(data),
-    );
-  }
-
-  async querySponsoredArchiveRecipients(
-    channelType: string,
-    channelId: string,
-    epoch: number,
-  ): Promise<QuerySponsoredArchiveRecipientsResponse> {
-    const raw = await this._post<RawQuerySponsoredArchiveRecipientsResponse>(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/recipients/query`,
-      { epoch },
-    );
-    return {
-      ...raw,
-      recipients: raw.recipients.map((recipient) => ({
-        ...recipient,
-        public_key: decodeBytesField(recipient.public_key, 'recipient.public_key'),
-      })),
-    };
-  }
-
-  async queryEpochArchives(
-    channelType: string,
-    channelId: string,
-    data: QueryEpochArchivesRequest,
-  ): Promise<QueryEpochArchivesResponse> {
-    const raw = await this._post<RawQueryEpochArchivesResponse>(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/query`,
-      data,
-    );
-    return {
-      ...raw,
-      blobs: raw.blobs?.map(decodeArchiveBlob),
-      wraps: raw.wraps?.map(decodeArchiveKeyWrap),
-      snapshots: raw.snapshots
-        ? Object.fromEntries(
-            Object.entries(raw.snapshots).map(([hash, snapshot]) => [hash, decodeMemberSnapshot(snapshot)]),
-          )
-        : undefined,
-    };
-  }
-
-  async listArchiveAvailability(
-    channelType: string,
-    channelId: string,
-    data: { cursor?: string; limit?: number } = {},
-  ): Promise<ListArchiveAvailabilityResponse> {
-    return await this._post<ListArchiveAvailabilityResponse>(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/availability/query`,
-      data,
-    );
-  }
-
-  async queryArchiveMaterial(
-    channelType: string,
-    channelId: string,
-    data: QueryArchiveMaterialRequest,
-  ): Promise<QueryEpochArchivesResponse> {
-    const raw = await this._post<RawQueryEpochArchivesResponse>(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/material/query`,
-      data,
-    );
-    return {
-      ...raw,
-      blobs: raw.blobs?.map(decodeArchiveBlob),
-      wraps: raw.wraps?.map(decodeArchiveKeyWrap),
-      snapshots: raw.snapshots
-        ? Object.fromEntries(
-            Object.entries(raw.snapshots).map(([hash, snapshot]) => [hash, decodeMemberSnapshot(snapshot)]),
-          )
-        : undefined,
-    };
-  }
-
-  async getArchiveSnapshot(channelType: string, channelId: string, hash: string): Promise<MemberSnapshotRecord> {
-    const raw = await this._get<RawMemberSnapshotRecord>(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/snapshot/${hash}`,
-    );
-    return decodeMemberSnapshot(raw);
-  }
-
-  async queryArchiveCiphertexts(
-    channelType: string,
-    channelId: string,
-    data: { epoch_from: number; epoch_to: number; cursor?: CiphertextCursor; limit?: number },
-  ): Promise<CiphertextQueryResponse> {
-    const raw = await this._post<RawCiphertextQueryResponse>(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/ciphertexts/query`,
-      data,
-    );
-    return {
-      ...raw,
-      ciphertexts: raw.ciphertexts.map((ciphertext) => ({
-        ...ciphertext,
-        mls_ciphertext: decodeBytesField(ciphertext.mls_ciphertext, 'mls_ciphertext'),
-      })),
-    };
   }
 
   // ---- Enable E2EE ----

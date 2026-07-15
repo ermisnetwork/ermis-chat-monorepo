@@ -58,7 +58,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   e2eeLabel = 'End-to-end encrypted',
   e2eeDescription = 'Only channel members can read encrypted messages.',
   e2eeUnavailableLabel = 'E2EE is unavailable on this device.',
-  e2eeRecoveryPolicy = 'member_assisted',
   TabsComponent,
   FooterComponent,
   GroupFieldsComponent,
@@ -166,7 +165,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           const bundle = await encryptionManager.createE2eeChannel('messaging', null, null, members);
           Object.assign(payload, {
             mls_enabled: true,
-            e2ee_recovery_policy: e2eeRecoveryPolicy,
             channel_id: bundle.channel_id,
             ...bundle,
           });
@@ -178,10 +176,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           createdChannel = client.channel('messaging', response.channel.id);
           await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
           markChannelAsFullyQueried(createdChannel.cid);
-          if (e2eeEnabled && client.encryptionManager?.initialized && createdChannel.id) {
-            client.encryptionManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
-              .catch((err: unknown) => console.warn('[E2EE] Initial epoch archive failed:', err));
-          }
         }
       } else {
         // Group Channel
@@ -215,7 +209,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           const bundle = await encryptionManager.createE2eeChannel('team', channelId, cid, memberIds);
           Object.assign(payload, {
             mls_enabled: true,
-            e2ee_recovery_policy: e2eeRecoveryPolicy,
             ...bundle,
           });
           createdChannel = client.channel('team', channelId, payload);
@@ -227,10 +220,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           createdChannel = client.channel('team', response.channel.id);
           await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
           markChannelAsFullyQueried(createdChannel.cid);
-          if (e2eeEnabled && client.encryptionManager?.initialized && createdChannel.id) {
-            client.encryptionManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
-              .catch((err: unknown) => console.warn('[E2EE] Initial epoch archive failed:', err));
-          }
         }
       }
 
@@ -260,7 +249,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
     isPublic,
     description,
     e2eeEnabled,
-    e2eeRecoveryPolicy,
     e2eeUnavailableLabel,
     onSuccess,
     onClose,

@@ -5,7 +5,7 @@ export default defineConfig({
   format: ['cjs', 'esm'],
   outDir: 'dist',
   dts: true,
-  sourcemap: true,
+  sourcemap: false,
   clean: true,
   splitting: false,
   external: ['react', 'react-dom', '@ermis-network/ermis-chat-sdk'],

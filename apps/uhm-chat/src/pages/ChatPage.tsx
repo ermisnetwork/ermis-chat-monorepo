@@ -1,110 +1,112 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
-import { useSearchParams } from 'react-router-dom'
-import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
-import type { Channel as ChannelType, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash } from 'lucide-react'
-import * as Tooltip from '@radix-ui/react-tooltip'
-import { SidebarHeader } from '@/components/SidebarHeader'
-import { ContactsPanel } from '@/features/chat/ContactsPanel'
-import { InvitesPanel } from '@/features/chat/InvitesPanel'
-import { TopicsPanel } from '@/features/chat/TopicsPanel'
-import { SearchPanel } from '@/features/chat/SearchPanel'
-import { ChannelListSkeleton } from '@/features/chat/ChannelListSkeleton'
-import { ChannelListEmpty } from '@/features/chat/ChannelListEmpty'
-import { UhmChannelActions } from '@/features/chat/UhmChannelActions'
-import { ChannelEmptyState } from '@/features/chat/ChannelEmptyState'
-import { CustomCreateChannelModal } from '@/components/custom/CustomCreateChannelModal'
-import { ConnectionStatusBanner } from '@/features/chat/ConnectionStatusBanner'
-import { useConnectionStatus } from '@/hooks/useConnectionStatus'
-import { useUIStore } from '@/store/useUIStore'
-import { UhmMessageActions } from '@/features/chat/UhmMessageActions'
-import { UhmMessageInput } from '@/features/chat/UhmMessageInput'
-import { GlobalPickers } from '@/features/chat/GlobalPickers'
-import { UhmChannelInfoHeader } from '@/features/chat/UhmChannelInfoHeader'
-import { UhmChannelInfoCover } from '@/features/chat/UhmChannelInfoCover'
-import { UhmEditChannelModal } from '@/features/chat/UhmEditChannelModal'
-import { UhmTopicModal } from '@/features/chat/UhmTopicModal'
-import { UhmChannelInfoActions } from '@/features/chat/UhmChannelInfoActions'
-import { UhmChannelInfoTabHeader } from '@/features/chat/UhmChannelInfoTabHeader'
-import { UhmAddMemberButton } from '@/features/chat/UhmAddMemberButton'
-import { UhmAddMemberModal } from '@/features/chat/UhmAddMemberModal'
-import { UhmMessageSearchPanel } from '@/features/chat/UhmMessageSearchPanel'
-import { UhmChannelSettingsPanel } from '@/features/chat/UhmChannelSettingsPanel'
-import { UhmMemberItem } from '@/features/chat/UhmMemberItem'
-import { UhmTabEmptyState } from '@/features/chat/UhmTabEmptyState'
-import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState'
-import { UhmSignalMessage } from '@/features/chat/UhmSignalMessage'
-import { UserProfileModal } from '@/features/chat/UserProfileModal'
-import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
-import { SEO } from '@/components/SEO'
-import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
-import { useNotification } from '@/hooks/useNotification'
-import { isSafari } from '@/utils/browser'
-import { toast } from 'sonner'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
+import {
+  ChannelList,
+  Channel,
+  VirtualMessageList,
+  ChannelHeader,
+  ChannelInfo,
+  useChatClient,
+  isGroupChannel,
+  isTopicChannel,
+  isPendingMember,
+} from '@ermis-network/ermis-chat-react';
+import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk';
+import {
+  Info,
+  Phone,
+  Video,
+  Image as ImageIcon,
+  Film,
+  Mic,
+  Paperclip,
+  LockKeyhole,
+  RotateCw,
+  Hash,
+} from 'lucide-react';
+import * as Tooltip from '@radix-ui/react-tooltip';
+import { SidebarHeader } from '@/components/SidebarHeader';
+import { ContactsPanel } from '@/features/chat/ContactsPanel';
+import { InvitesPanel } from '@/features/chat/InvitesPanel';
+import { TopicsPanel } from '@/features/chat/TopicsPanel';
+import { SearchPanel } from '@/features/chat/SearchPanel';
+import { ChannelListSkeleton } from '@/features/chat/ChannelListSkeleton';
+import { ChannelListEmpty } from '@/features/chat/ChannelListEmpty';
+import { UhmChannelActions } from '@/features/chat/UhmChannelActions';
+import { ChannelEmptyState } from '@/features/chat/ChannelEmptyState';
+import { CustomCreateChannelModal } from '@/components/custom/CustomCreateChannelModal';
+import { ConnectionStatusBanner } from '@/features/chat/ConnectionStatusBanner';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
+import { useUIStore } from '@/store/useUIStore';
+import { UhmMessageActions } from '@/features/chat/UhmMessageActions';
+import { UhmMessageInput } from '@/features/chat/UhmMessageInput';
+import { GlobalPickers } from '@/features/chat/GlobalPickers';
+import { UhmChannelInfoHeader } from '@/features/chat/UhmChannelInfoHeader';
+import { UhmChannelInfoCover } from '@/features/chat/UhmChannelInfoCover';
+import { UhmEditChannelModal } from '@/features/chat/UhmEditChannelModal';
+import { UhmTopicModal } from '@/features/chat/UhmTopicModal';
+import { UhmChannelInfoActions } from '@/features/chat/UhmChannelInfoActions';
+import { UhmChannelInfoTabHeader } from '@/features/chat/UhmChannelInfoTabHeader';
+import { UhmAddMemberButton } from '@/features/chat/UhmAddMemberButton';
+import { UhmAddMemberModal } from '@/features/chat/UhmAddMemberModal';
+import { UhmMessageSearchPanel } from '@/features/chat/UhmMessageSearchPanel';
+import { UhmChannelSettingsPanel } from '@/features/chat/UhmChannelSettingsPanel';
+import { UhmMemberItem } from '@/features/chat/UhmMemberItem';
+import { UhmTabEmptyState } from '@/features/chat/UhmTabEmptyState';
+import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState';
+import { UhmSignalMessage } from '@/features/chat/UhmSignalMessage';
+import { UserProfileModal } from '@/features/chat/UserProfileModal';
+import { SEO } from '@/components/SEO';
+import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount';
+import { useNotification } from '@/hooks/useNotification';
+import { isSafari } from '@/utils/browser';
+import { toast } from 'sonner';
 
 const isEffectiveE2eeChannel = (channel: ChannelType | null | undefined, client: any) => {
-  if (channel?.data?.mls_enabled === true) return true
-  const parentCid = channel?.data?.parent_cid as string | undefined
-  if (!parentCid) return false
-  return client?.activeChannels?.[parentCid]?.data?.mls_enabled === true
-}
-
-const isUserGatedRestoreProgress = (progress: RestoreProgressRecord | null | undefined) =>
-  Boolean(
-    progress &&
-    (progress.requires_user_action === 'unlock_recovery_vault' ||
-      (progress.target_epochs?.length || 0) > 0 ||
-      (progress.permanent_gaps?.length || 0) > 0 ||
-      (progress.transient_failures?.length || 0) > 0),
-  )
+  if (channel?.data?.mls_enabled === true) return true;
+  const parentCid = channel?.data?.parent_cid as string | undefined;
+  if (!parentCid) return false;
+  return client?.activeChannels?.[parentCid]?.data?.mls_enabled === true;
+};
 
 export function ChatPage() {
-  const { t, i18n } = useTranslation()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const { client, activeChannel, setActiveChannel } = useChatClient()
-  const recovery = useRecoveryPin()
-  const { status, retryConnection } = useConnectionStatus(client)
-  const totalUnreadCount = useTotalUnreadCount()
-  useNotification(activeChannel)
+  const { t, i18n } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { client, activeChannel, setActiveChannel } = useChatClient();
+  const { status, retryConnection } = useConnectionStatus(client);
+  const totalUnreadCount = useTotalUnreadCount();
+  useNotification(activeChannel);
 
   // Directly update browser tab title with unread count (more reliable than Helmet)
   useEffect(() => {
-    document.title = totalUnreadCount > 0
-      ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) Uhm Chat`
-      : 'Uhm Chat'
-  }, [totalUnreadCount])
+    document.title =
+      totalUnreadCount > 0 ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) Uhm Chat` : 'Uhm Chat';
+  }, [totalUnreadCount]);
 
-  const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels')
-  const [isSearchMode, setIsSearchMode] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [drillDownChannel, setDrillDownChannel] = useState<ChannelType | null>(null)
+  const [activePanel, setActivePanel] = useState<'channels' | 'contacts' | 'invites' | 'topics'>('channels');
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [drillDownChannel, setDrillDownChannel] = useState<ChannelType | null>(null);
 
   // Auto-clear drill-down when activeChannel switches to a non-topic channel
   // (e.g. user clicks a DM in the collapsed ChannelList — the ChannelList's internal
   // handler calls setActiveChannel but doesn't know about drillDownChannel)
   useEffect(() => {
-    if (!activeChannel || !drillDownChannel) return
+    if (!activeChannel || !drillDownChannel) return;
     // If the activeChannel is NOT a child topic of drillDownChannel, clear drill-down
-    const isChildTopic = activeChannel.data?.parent_cid === drillDownChannel.cid
-    const isSameChannel = activeChannel.cid === drillDownChannel.cid
+    const isChildTopic = activeChannel.data?.parent_cid === drillDownChannel.cid;
+    const isSameChannel = activeChannel.cid === drillDownChannel.cid;
     if (!isChildTopic && !isSameChannel) {
-      setDrillDownChannel(null)
-      setActivePanel('channels')
+      setDrillDownChannel(null);
+      setActivePanel('channels');
     }
-  }, [activeChannel, drillDownChannel])
-  const [showChannelInfo, setShowChannelInfo] = useState(false)
-  const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
-  const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
-  const [profileUserId, setProfileUserId] = useState<string | null>(null)
-  const [rotatingKeyCid, setRotatingKeyCid] = useState<string | null>(null)
-  const [isRecoveryGateOpen, setIsRecoveryGateOpen] = useState(false)
-  const [recoveryGateDismissed, setRecoveryGateDismissed] = useState(false)
-  const [activeRestoreProgress, setActiveRestoreProgress] = useState<RestoreProgressRecord | null>(null)
-  const [activeRestoreProgressCheckedCid, setActiveRestoreProgressCheckedCid] = useState<string | null>(null)
-  const activeRestoreEnqueuedCidRef = useRef<string | null>(null)
-  const activeRestorePromptedCidRef = useRef<string | null>(null)
-  const activeRestoreProgressRequestRef = useRef(0)
+  }, [activeChannel, drillDownChannel]);
+  const [showChannelInfo, setShowChannelInfo] = useState(false);
+  const [hasOpenedInfo, setHasOpenedInfo] = useState(false);
+  const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [rotatingKeyCid, setRotatingKeyCid] = useState<string | null>(null);
   const {
     isCreateChannelModalOpen,
     closeCreateChannelModal,
@@ -112,12 +114,12 @@ export function ChatPage() {
     openCreateTopicModal,
     openEditTopicModal,
     closeTopicModal,
-    openEmojiPicker
-  } = useUIStore()
+    openEmojiPicker,
+  } = useUIStore();
 
   // Track if we are currently restoring from URL
-  const isRestoringRef = useRef(false)
-  const [hasAttemptedRestore, setHasAttemptedRestore] = useState(false)
+  const isRestoringRef = useRef(false);
+  const [hasAttemptedRestore, setHasAttemptedRestore] = useState(false);
 
   // 1. Restore active channel from URL on mount
   // Instead of calling ch.watch() (which duplicates the queryChannels call from
@@ -126,438 +128,329 @@ export function ChatPage() {
   useEffect(() => {
     if (!client?.userID) return;
 
-    const channelId = searchParams.get('channel')
-    const channelType = searchParams.get('type') || 'messaging'
+    const channelId = searchParams.get('channel');
+    const channelType = searchParams.get('type') || 'messaging';
 
     if (!channelId || activeChannel || isRestoringRef.current || hasAttemptedRestore) {
-      if (!channelId) setHasAttemptedRestore(true)
-      return
+      if (!channelId) setHasAttemptedRestore(true);
+      return;
     }
 
-    isRestoringRef.current = true
+    isRestoringRef.current = true;
 
     /** Apply the restored channel to React state.
      *  Do NOT call markChannelAsFullyQueried here — queryChannels only loads
      *  ~1 message per channel (sidebar preview). useChannelMessages must still
      *  call channel.query() to load the full 25 messages for the chat view. */
     const applyChannel = (ch: ChannelType) => {
-
       if (isTopicChannel(ch) && ch.data?.parent_cid) {
-        const parentCid = ch.data.parent_cid as string
-        const parent = client.activeChannels[parentCid]
+        const parentCid = ch.data.parent_cid as string;
+        const parent = client.activeChannels[parentCid];
         if (parent) {
-          setActiveChannel(ch)
-          setDrillDownChannel(parent)
-          setActivePanel('topics')
+          setActiveChannel(ch);
+          setDrillDownChannel(parent);
+          setActivePanel('topics');
         } else {
-          setActiveChannel(ch)
+          setActiveChannel(ch);
         }
       } else if (isGroupChannel(ch) && ch.data?.topics_enabled) {
-        setActiveChannel(ch)
-        setDrillDownChannel(ch)
-        setActivePanel('topics')
+        setActiveChannel(ch);
+        setDrillDownChannel(ch);
+        setActivePanel('topics');
       } else {
-        setActiveChannel(ch)
+        setActiveChannel(ch);
       }
 
-      setHasAttemptedRestore(true)
-      requestAnimationFrame(() => { isRestoringRef.current = false })
-    }
+      setHasAttemptedRestore(true);
+      requestAnimationFrame(() => {
+        isRestoringRef.current = false;
+      });
+    };
 
     // Fast path: channel already hydrated (e.g. queryChannels finished first)
-    const cid = `${channelType}:${channelId}`
-    const cached = client.activeChannels[cid]
+    const cid = `${channelType}:${channelId}`;
+    const cached = client.activeChannels[cid];
     if (cached?.initialized) {
-      applyChannel(cached)
-      return
+      applyChannel(cached);
+      return;
     }
 
     // Normal path: wait for ChannelList's queryChannels to finish
-    let resolved = false
+    let resolved = false;
     const tryResolve = () => {
-      if (resolved) return false
-      const ch = client.activeChannels[cid]
+      if (resolved) return false;
+      const ch = client.activeChannels[cid];
       if (ch?.initialized) {
-        resolved = true
-        sub.unsubscribe()
-        applyChannel(ch)
-        return true
+        resolved = true;
+        sub.unsubscribe();
+        applyChannel(ch);
+        return true;
       }
-      return false
-    }
+      return false;
+    };
 
     const sub = client.on('channels.queried', () => {
-      if (tryResolve()) return
+      if (tryResolve()) return;
 
       // Fallback: channel not in queryChannels results — fetch individually
-      resolved = true
-      sub.unsubscribe()
-      const fallback = client.channel(channelType, channelId)
-      fallback.watch({ messages: { limit: 25, include_hidden_messages: true } })
+      resolved = true;
+      sub.unsubscribe();
+      const fallback = client.channel(channelType, channelId);
+      fallback
+        .watch({ messages: { limit: 25, include_hidden_messages: true } })
         .then(() => applyChannel(fallback))
         .catch((e) => {
-          console.error("Failed to restore channel from URL:", e)
-          setHasAttemptedRestore(true)
-          requestAnimationFrame(() => { isRestoringRef.current = false })
-        })
-    })
+          console.error('Failed to restore channel from URL:', e);
+          setHasAttemptedRestore(true);
+          requestAnimationFrame(() => {
+            isRestoringRef.current = false;
+          });
+        });
+    });
 
     // Safety: recheck immediately in case the event already fired before we subscribed
-    const recheckId = setTimeout(() => tryResolve(), 100)
+    const recheckId = setTimeout(() => tryResolve(), 100);
 
     // Ultimate safety net: if restore doesn't complete in 5s, drop the skeleton
     const safetyId = setTimeout(() => {
       if (!resolved) {
-        resolved = true
-        sub.unsubscribe()
-        console.warn('[ChatPage] URL restore timed out after 5s, dropping skeleton overlay')
-        setHasAttemptedRestore(true)
-        requestAnimationFrame(() => { isRestoringRef.current = false })
+        resolved = true;
+        sub.unsubscribe();
+        console.warn('[ChatPage] URL restore timed out after 5s, dropping skeleton overlay');
+        setHasAttemptedRestore(true);
+        requestAnimationFrame(() => {
+          isRestoringRef.current = false;
+        });
       }
-    }, 5000)
+    }, 5000);
 
     return () => {
-      sub.unsubscribe()
-      clearTimeout(recheckId)
-      clearTimeout(safetyId)
-    }
-  }, [client?.userID, searchParams, activeChannel, hasAttemptedRestore, setActiveChannel])
+      sub.unsubscribe();
+      clearTimeout(recheckId);
+      clearTimeout(safetyId);
+    };
+  }, [client?.userID, searchParams, activeChannel, hasAttemptedRestore, setActiveChannel]);
 
   // 2. Sync active channel to URL when it changes
   useEffect(() => {
     if (isRestoringRef.current || !hasAttemptedRestore) return;
 
     if (activeChannel?.id) {
-      const currentId = searchParams.get('channel')
-      const currentType = searchParams.get('type')
+      const currentId = searchParams.get('channel');
+      const currentType = searchParams.get('type');
       if (currentId !== activeChannel.id || currentType !== activeChannel.type) {
-        setSearchParams({ channel: activeChannel.id, type: activeChannel.type }, { replace: true })
+        setSearchParams({ channel: activeChannel.id, type: activeChannel.type }, { replace: true });
       }
     } else {
-      const currentId = searchParams.get('channel')
+      const currentId = searchParams.get('channel');
       if (currentId) {
-        setSearchParams({}, { replace: true })
+        setSearchParams({}, { replace: true });
       }
     }
-  }, [activeChannel?.id, activeChannel?.type, setSearchParams, searchParams, hasAttemptedRestore])
-
-  const refreshActiveRestoreProgress = useCallback(async () => {
-    const requestId = activeRestoreProgressRequestRef.current + 1
-    activeRestoreProgressRequestRef.current = requestId
-    setActiveRestoreProgressCheckedCid(null)
-
-    if (!activeChannel?.id || !activeChannel.type || !activeChannel.cid || !isEffectiveE2eeChannel(activeChannel, client)) {
-      setActiveRestoreProgress(null)
-      return
-    }
-    const cid = activeChannel.cid
-    const progress = await recovery.loadRestoreProgress(activeChannel.type, activeChannel.id)
-    if (activeRestoreProgressRequestRef.current !== requestId) return
-    setActiveRestoreProgress(progress)
-    setActiveRestoreProgressCheckedCid(cid)
-  }, [
-    activeChannel?.id,
-    activeChannel?.type,
-    activeChannel?.cid,
-    activeChannel?.data?.mls_enabled,
-    activeChannel?.data?.parent_cid,
-    client,
-    recovery,
-  ])
-
-  useEffect(() => {
-    refreshActiveRestoreProgress()
-  }, [refreshActiveRestoreProgress, recovery.recoveryStatus])
-
-  useEffect(() => {
-    if (!client?.on) return
-    const sub = client.on('e2ee.restore_progress' as any, (event: any) => {
-      if (!activeChannel?.cid || event?.cid !== activeChannel.cid) return
-      setActiveRestoreProgress(event.restore_progress || null)
-      setActiveRestoreProgressCheckedCid(event.cid)
-    })
-    return () => sub.unsubscribe()
-  }, [client, activeChannel?.cid])
-
-  useEffect(() => {
-    const status = recovery.recoveryStatus
-    if (!status) return
-    if (status.unlocked || !status.hasVault) {
-      setIsRecoveryGateOpen(false)
-      return
-    }
-    if (status.hasIncompleteRestore && !recoveryGateDismissed) {
-      setIsRecoveryGateOpen(true)
-    }
-  }, [recovery.recoveryStatus, recoveryGateDismissed])
-
-  useEffect(() => {
-    if (!activeChannel?.id || !isEffectiveE2eeChannel(activeChannel, client)) return
-    if (!activeChannel.cid || activeRestoreProgressCheckedCid !== activeChannel.cid) return
-
-    if (!activeRestoreProgress) {
-      if (recovery.recoveryStatus?.unlocked) {
-        if (activeRestoreEnqueuedCidRef.current === activeChannel.cid) return
-        activeRestoreEnqueuedCidRef.current = activeChannel.cid || null
-        recovery.enqueueRestore(activeChannel.type, activeChannel.id, 'active')
-        return
-      }
-
-      if (
-        !recoveryGateDismissed &&
-        recovery.recoveryStatus?.hasVault &&
-        recovery.recoveryStatus?.incompleteChannels.includes(activeChannel.cid) &&
-        activeRestorePromptedCidRef.current !== activeChannel.cid
-      ) {
-        activeRestorePromptedCidRef.current = activeChannel.cid || null
-        setIsRecoveryGateOpen(true)
-      }
-      return
-    }
-
-    const needsRestore =
-      isUserGatedRestoreProgress(activeRestoreProgress) &&
-      ['pending', 'partial', 'failed'].includes(activeRestoreProgress.status)
-    if (!needsRestore) return
-
-    if (recovery.recoveryStatus?.unlocked) {
-      if (activeRestoreEnqueuedCidRef.current === activeRestoreProgress.cid) return
-      activeRestoreEnqueuedCidRef.current = activeRestoreProgress.cid
-      recovery.enqueueRestore(activeChannel.type, activeChannel.id, 'active')
-      return
-    }
-
-    if (
-      !recoveryGateDismissed &&
-      recovery.recoveryStatus?.hasVault &&
-      activeRestorePromptedCidRef.current !== activeRestoreProgress.cid
-    ) {
-      activeRestorePromptedCidRef.current = activeRestoreProgress.cid
-      setIsRecoveryGateOpen(true)
-    }
-  }, [
-    activeChannel?.id,
-    activeChannel?.type,
-    activeChannel?.cid,
-    activeChannel?.data?.mls_enabled,
-    activeChannel?.data?.parent_cid,
-    activeRestoreProgress,
-    activeRestoreProgressCheckedCid,
-    recoveryGateDismissed,
-    client,
-    recovery,
-  ])
+  }, [activeChannel?.id, activeChannel?.type, setSearchParams, searchParams, hasAttemptedRestore]);
 
   // Localized action labels passed to SDK ChannelList/TopicList
-  const actionLabels = useMemo(() => ({
-    pinChannel: t('actions.pin_channel'),
-    unpinChannel: t('actions.unpin_channel'),
-    pinTopic: t('actions.pin_topic'),
-    unpinTopic: t('actions.unpin_topic'),
-    blockUser: t('actions.block_user'),
-    unblockUser: t('actions.unblock_user'),
-    editTopic: t('actions.edit_topic'),
-    closeTopic: t('actions.close_topic'),
-    reopenTopic: t('actions.reopen_topic'),
-    createTopic: t('actions.create_topic'),
-    deleteTopic: t('actions.delete_topic'),
-    deleteChannel: t('actions.delete_channel'),
-    leaveChannel: t('actions.leave_channel'),
-    truncateChannel: t('actions.truncate_channel'),
-  }), [t])
+  const actionLabels = useMemo(
+    () => ({
+      pinChannel: t('actions.pin_channel'),
+      unpinChannel: t('actions.unpin_channel'),
+      pinTopic: t('actions.pin_topic'),
+      unpinTopic: t('actions.unpin_topic'),
+      blockUser: t('actions.block_user'),
+      unblockUser: t('actions.unblock_user'),
+      editTopic: t('actions.edit_topic'),
+      closeTopic: t('actions.close_topic'),
+      reopenTopic: t('actions.reopen_topic'),
+      createTopic: t('actions.create_topic'),
+      deleteTopic: t('actions.delete_topic'),
+      deleteChannel: t('actions.delete_channel'),
+      leaveChannel: t('actions.leave_channel'),
+      truncateChannel: t('actions.truncate_channel'),
+    }),
+    [t],
+  );
 
-  const systemMessageTranslations = useMemo(() => ({
-    changeName: t('system_messages.changeName'),
-    changeAvatar: t('system_messages.changeAvatar'),
-    changeDescription: t('system_messages.changeDescription'),
-    removed: t('system_messages.removed'),
-    banned: t('system_messages.banned'),
-    unbanned: t('system_messages.unbanned'),
-    promoted: t('system_messages.promoted'),
-    demoted: t('system_messages.demoted'),
-    permissionsUpdated: t('system_messages.permissionsUpdated'),
-    joined: t('system_messages.joined'),
-    declined: t('system_messages.declined'),
-    left: t('system_messages.left'),
-    clearedHistory: t('system_messages.clearedHistory'),
-    changeType: t('system_messages.changeType'),
-    cooldownOn: t('system_messages.cooldownOn'),
-    cooldownOff: t('system_messages.cooldownOff'),
-    bannedWordsUpdated: t('system_messages.bannedWordsUpdated'),
-    added: t('system_messages.added'),
-    adminTransfer: t('system_messages.adminTransfer'),
-    pinned: t('system_messages.pinned'),
-    unpinned: t('system_messages.unpinned'),
-    public: t('system_messages.public'),
-    private: t('system_messages.private'),
-    userFallback: t('system_messages.user_fallback'),
-    adminFallback: t('system_messages.admin_fallback'),
-    durationUnitMin: t('signal_messages.durationUnitMin'),
-    durationUnitSec: t('signal_messages.durationUnitSec'),
-  }), [t])
+  const systemMessageTranslations = useMemo(
+    () => ({
+      changeName: t('system_messages.changeName'),
+      changeAvatar: t('system_messages.changeAvatar'),
+      changeDescription: t('system_messages.changeDescription'),
+      removed: t('system_messages.removed'),
+      banned: t('system_messages.banned'),
+      unbanned: t('system_messages.unbanned'),
+      promoted: t('system_messages.promoted'),
+      demoted: t('system_messages.demoted'),
+      permissionsUpdated: t('system_messages.permissionsUpdated'),
+      joined: t('system_messages.joined'),
+      declined: t('system_messages.declined'),
+      left: t('system_messages.left'),
+      clearedHistory: t('system_messages.clearedHistory'),
+      changeType: t('system_messages.changeType'),
+      cooldownOn: t('system_messages.cooldownOn'),
+      cooldownOff: t('system_messages.cooldownOff'),
+      bannedWordsUpdated: t('system_messages.bannedWordsUpdated'),
+      added: t('system_messages.added'),
+      adminTransfer: t('system_messages.adminTransfer'),
+      pinned: t('system_messages.pinned'),
+      unpinned: t('system_messages.unpinned'),
+      public: t('system_messages.public'),
+      private: t('system_messages.private'),
+      userFallback: t('system_messages.user_fallback'),
+      adminFallback: t('system_messages.admin_fallback'),
+      durationUnitMin: t('signal_messages.durationUnitMin'),
+      durationUnitSec: t('signal_messages.durationUnitSec'),
+    }),
+    [t],
+  );
 
-  const signalMessageTranslations = useMemo(() => ({
-    calling: t('signal_messages.calling'),
-    incomingAudioCall: t('signal_messages.incomingAudioCall'),
-    incomingVideoCall: t('signal_messages.incomingVideoCall'),
-    outgoingAudioCall: t('signal_messages.outgoingAudioCall'),
-    outgoingVideoCall: t('signal_messages.outgoingVideoCall'),
-    missedAudioCall: t('signal_messages.missedAudioCall'),
-    missedVideoCall: t('signal_messages.missedVideoCall'),
-    cancelAudioCall: t('signal_messages.cancelAudioCall'),
-    cancelVideoCall: t('signal_messages.cancelVideoCall'),
-    rejectedAudioCallRecipient: t('signal_messages.rejectedAudioCallRecipient'),
-    rejectedAudioCallYou: t('signal_messages.rejectedAudioCallYou'),
-    rejectedVideoCallRecipient: t('signal_messages.rejectedVideoCallRecipient'),
-    rejectedVideoCallYou: t('signal_messages.rejectedVideoCallYou'),
-    busyRecipient: t('signal_messages.busyRecipient'),
-    durationUnitMin: t('signal_messages.durationUnitMin'),
-    durationUnitSec: t('signal_messages.durationUnitSec'),
-  }), [t])
+  const signalMessageTranslations = useMemo(
+    () => ({
+      calling: t('signal_messages.calling'),
+      incomingAudioCall: t('signal_messages.incomingAudioCall'),
+      incomingVideoCall: t('signal_messages.incomingVideoCall'),
+      outgoingAudioCall: t('signal_messages.outgoingAudioCall'),
+      outgoingVideoCall: t('signal_messages.outgoingVideoCall'),
+      missedAudioCall: t('signal_messages.missedAudioCall'),
+      missedVideoCall: t('signal_messages.missedVideoCall'),
+      cancelAudioCall: t('signal_messages.cancelAudioCall'),
+      cancelVideoCall: t('signal_messages.cancelVideoCall'),
+      rejectedAudioCallRecipient: t('signal_messages.rejectedAudioCallRecipient'),
+      rejectedAudioCallYou: t('signal_messages.rejectedAudioCallYou'),
+      rejectedVideoCallRecipient: t('signal_messages.rejectedVideoCallRecipient'),
+      rejectedVideoCallYou: t('signal_messages.rejectedVideoCallYou'),
+      busyRecipient: t('signal_messages.busyRecipient'),
+      durationUnitMin: t('signal_messages.durationUnitMin'),
+      durationUnitSec: t('signal_messages.durationUnitSec'),
+    }),
+    [t],
+  );
 
-  const activeRestoreTotal = useMemo(() => {
-    if (!activeRestoreProgress) return 0
-    const target = activeRestoreProgress.target_epochs?.length || 0
-    const known = new Set([
-      ...activeRestoreProgress.completed_epochs,
-      ...activeRestoreProgress.permanent_gaps.map((gap) => gap.epoch),
-      ...activeRestoreProgress.transient_failures.map((failure) => failure.epoch),
-    ]).size
-    return Math.max(target, known)
-  }, [activeRestoreProgress])
-  const e2eeBootstrapRunning = recovery.recoveryStatus?.e2eeBootstrapRunning === true
-  const e2eeBootstrapCompleted = recovery.recoveryStatus?.e2eeBootstrapCompleted || 0
-  const e2eeBootstrapTotal = recovery.recoveryStatus?.e2eeBootstrapTotal || 0
+  const roleLabels = useMemo(
+    () => ({
+      owner: t('roles.owner'),
+      moder: t('roles.moder'),
+      member: t('roles.member'),
+      pending: t('roles.pending'),
+    }),
+    [t],
+  );
 
-  const activeRestoreCompleted = activeRestoreProgress?.completed_epochs.length || 0
-  const getRestoreBadge = useCallback((channel: ChannelType): { label: string; tone: 'pending' | 'running' } | null => {
-    const cid = channel.cid
-    if (!cid) return null
-    const progress = activeRestoreProgress?.cid === cid ? activeRestoreProgress : null
-    if (progress?.status === 'running') {
-      const total = progress.target_epochs?.length || activeRestoreTotal
-      return {
-        label: total > 0
-          ? t('recovery_pin.restore_progress_short', { restored: progress.completed_epochs.length, total })
-          : t('recovery_pin.status_restore_running'),
-        tone: 'running',
-      }
-    }
-    if (
-      (isUserGatedRestoreProgress(progress) && ['pending', 'partial', 'failed'].includes(progress?.status || '')) ||
-      recovery.recoveryStatus?.incompleteChannels.includes(cid)
-    ) {
-      return { label: t('recovery_pin.status_restore_pending'), tone: 'pending' }
-    }
-    return null
-  }, [activeRestoreProgress, activeRestoreTotal, recovery.recoveryStatus, t])
-
-  const roleLabels = useMemo(() => ({
-    owner: t('roles.owner'),
-    moder: t('roles.moder'),
-    member: t('roles.member'),
-    pending: t('roles.pending'),
-  }), [t])
-
-  const handleTopicDrillDown = useCallback((channel: ChannelType) => {
-    setDrillDownChannel(channel)
-    setActiveChannel(channel)
-    setActivePanel('topics')
-  }, [setActiveChannel])
+  const handleTopicDrillDown = useCallback(
+    (channel: ChannelType) => {
+      setDrillDownChannel(channel);
+      setActiveChannel(channel);
+      setActivePanel('topics');
+    },
+    [setActiveChannel],
+  );
 
   const handleBackFromTopics = useCallback(() => {
-    setActivePanel('channels')
-    setDrillDownChannel(null)
-  }, [])
+    setActivePanel('channels');
+    setDrillDownChannel(null);
+  }, []);
 
+  const handleTruncateChannel = useCallback(
+    async (channel: ChannelType) => {
+      try {
+        await channel.truncate();
+        toast.success(t('chat.history_cleared', 'History cleared'));
+      } catch (err) {
+        console.error('Failed to truncate channel', err);
+        toast.error(t('chat.history_clear_failed', 'Failed to clear history'));
+      }
+    },
+    [t],
+  );
 
-  const handleTruncateChannel = useCallback(async (channel: ChannelType) => {
-    try {
-      await channel.truncate()
-      toast.success(t('chat.history_cleared', 'History cleared'));
-    } catch (err) {
-      console.error('Failed to truncate channel', err)
-      toast.error(t('chat.history_clear_failed', 'Failed to clear history'));
-    }
-  }, [t])
-
-  const handleTruncateChannelForMe = useCallback(async (channel: ChannelType) => {
-    try {
-      await channel.truncate({ for_me: true })
-      toast.success(t('chat.history_cleared', 'History cleared'));
-    } catch (err) {
-      console.error('Failed to clear history for me', err)
-      toast.error(t('chat.history_clear_failed', 'Failed to clear history'));
-    }
-  }, [t])
+  const handleTruncateChannelForMe = useCallback(
+    async (channel: ChannelType) => {
+      try {
+        await channel.truncate({ for_me: true });
+        toast.success(t('chat.history_cleared', 'History cleared'));
+      } catch (err) {
+        console.error('Failed to clear history for me', err);
+        toast.error(t('chat.history_clear_failed', 'Failed to clear history'));
+      }
+    },
+    [t],
+  );
 
   const toggleChannelInfo = useCallback(() => {
-    setHasOpenedInfo(true)
-    setInfoChannel(null) // use activeChannel from context
-    setShowChannelInfo((prev) => !prev)
-  }, [])
+    setHasOpenedInfo(true);
+    setInfoChannel(null); // use activeChannel from context
+    setShowChannelInfo((prev) => !prev);
+  }, []);
 
   const handleMentionClick = useCallback((userId: string) => {
     setProfileUserId(userId);
   }, []);
 
-  const handleAddReactionClick = useCallback((e: React.MouseEvent, messageId: string) => {
-    if (!activeChannel) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const layoutId = `emoji-picker-trigger-${messageId}`;
-    openEmojiPicker(rect, async (emoji) => {
-      try {
-        await activeChannel.sendReaction(messageId, emoji);
-      } catch (err) {
-        console.error('Failed to send reaction from global picker', err);
-      }
-    }, layoutId);
-  }, [activeChannel, openEmojiPicker]);
+  const handleAddReactionClick = useCallback(
+    (e: React.MouseEvent, messageId: string) => {
+      if (!activeChannel) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const layoutId = `emoji-picker-trigger-${messageId}`;
+      openEmojiPicker(
+        rect,
+        async (emoji) => {
+          try {
+            await activeChannel.sendReaction(messageId, emoji);
+          } catch (err) {
+            console.error('Failed to send reaction from global picker', err);
+          }
+        },
+        layoutId,
+      );
+    },
+    [activeChannel, openEmojiPicker],
+  );
 
-  const handleSendMessageFromProfile = useCallback(async (userId: string, existingChannel?: ChannelType) => {
-    if (!client || !client.userID) return;
-    try {
-      if (existingChannel) {
-        setActiveChannel(existingChannel);
-      } else {
-        const dmChannel = client.channel('messaging', {
-          members: [client.userID, userId]
-        });
-        await dmChannel.watch();
-        setActiveChannel(dmChannel);
+  const handleSendMessageFromProfile = useCallback(
+    async (userId: string, existingChannel?: ChannelType) => {
+      if (!client || !client.userID) return;
+      try {
+        if (existingChannel) {
+          setActiveChannel(existingChannel);
+        } else {
+          const dmChannel = client.channel('messaging', {
+            members: [client.userID, userId],
+          });
+          await dmChannel.watch();
+          setActiveChannel(dmChannel);
+        }
+        // Reset panels to channels view
+        setActivePanel('channels');
+        setDrillDownChannel(null);
+      } catch (e) {
+        console.error('Error navigating to DM', e);
       }
-      // Reset panels to channels view
-      setActivePanel('channels');
-      setDrillDownChannel(null);
-    } catch (e) {
-      console.error('Error navigating to DM', e);
-    }
-  }, [client, setActiveChannel]);
+    },
+    [client, setActiveChannel],
+  );
 
   /** Info button injected into ChannelHeader's right side */
   const renderHeaderRight = useCallback(
     (channel: ChannelType, actionDisabled?: boolean) => {
-      const isE2ee = isEffectiveE2eeChannel(channel, client)
-      const isTopic = Boolean(channel.data?.parent_cid)
-      const currentUserRole = client.userID ? channel.state?.members?.[client.userID]?.channel_role : undefined
-      const canRotateKey = isE2ee && !isTopic && ['owner', 'moder'].includes(String(currentUserRole))
-      const encryptionManager = client.encryptionManager
-      const rotating = rotatingKeyCid === channel.cid
-      const restoreBadge = isE2ee ? getRestoreBadge(channel) : null
+      const isE2ee = isEffectiveE2eeChannel(channel, client);
+      const isTopic = Boolean(channel.data?.parent_cid);
+      const currentUserRole = client.userID ? channel.state?.members?.[client.userID]?.channel_role : undefined;
+      const canRotateKey = isE2ee && !isTopic && ['owner', 'moder'].includes(String(currentUserRole));
+      const encryptionManager = client.encryptionManager;
+      const rotating = rotatingKeyCid === channel.cid;
 
       const handleRotateKey = async () => {
-        if (!canRotateKey || !encryptionManager?.initialized || !channel.cid || rotating) return
+        if (!canRotateKey || !encryptionManager?.initialized || !channel.cid || rotating) return;
         try {
-          setRotatingKeyCid(channel.cid)
-          const result = await encryptionManager.keyRotation(channel.cid)
-          toast.success(t('e2ee.rotate_success', { epoch: result.epoch }))
+          setRotatingKeyCid(channel.cid);
+          const result = await encryptionManager.keyRotation(channel.cid);
+          toast.success(t('e2ee.rotate_success', { epoch: result.epoch }));
         } catch (err: any) {
-          console.error('[E2EE] Key rotation failed', err)
-          toast.error(err?.message || t('e2ee.rotate_failed'))
+          console.error('[E2EE] Key rotation failed', err);
+          toast.error(err?.message || t('e2ee.rotate_failed'));
         } finally {
-          setRotatingKeyCid(null)
+          setRotatingKeyCid(null);
         }
-      }
+      };
 
       return (
         <>
@@ -571,15 +464,6 @@ export function ChatPage() {
               {typeof encryptionManager?.getEpoch === 'function' && !isTopic && (
                 <span className="font-mono opacity-70">{encryptionManager.getEpoch(channel.cid) ?? '?'}</span>
               )}
-            </div>
-          )}
-          {restoreBadge && (
-            <div className={`hidden md:inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold ${
-              restoreBadge.tone === 'running'
-                  ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300'
-                  : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
-            }`}>
-              <span>{restoreBadge.label}</span>
             </div>
           )}
           {canRotateKey && (
@@ -603,12 +487,15 @@ export function ChatPage() {
             <Info className="w-[18px] h-[18px]" />
           </button>
         </>
-      )
+      );
     },
-    [client, getRestoreBadge, rotatingKeyCid, t, toggleChannelInfo],
-  )
+    [client, rotatingKeyCid, t, toggleChannelInfo],
+  );
 
-  const safariCallTooltip = t('safari_call.tooltip', 'Calls are not supported on Safari. Please use Chrome or Firefox.')
+  const safariCallTooltip = t(
+    'safari_call.tooltip',
+    'Calls are not supported on Safari. Please use Chrome or Firefox.',
+  );
 
   /** Wrap a button with Radix Tooltip (Safari only) */
   const withSafariTooltip = (btn: React.ReactNode) => (
@@ -627,7 +514,7 @@ export function ChatPage() {
         </Tooltip.Portal>
       </Tooltip.Root>
     </Tooltip.Provider>
-  )
+  );
 
   /** Audio call button injected into ChannelHeader */
   const renderAudioCallButton = useCallback(
@@ -641,11 +528,11 @@ export function ChatPage() {
         >
           <Phone className="w-[18px] h-[18px]" />
         </button>
-      )
-      return isSafari ? withSafariTooltip(btn) : btn
+      );
+      return isSafari ? withSafariTooltip(btn) : btn;
     },
     [t, safariCallTooltip],
-  )
+  );
 
   /** Video call button injected into ChannelHeader */
   const renderVideoCallButton = useCallback(
@@ -659,11 +546,11 @@ export function ChatPage() {
         >
           <Video className="w-[18px] h-[18px]" />
         </button>
-      )
-      return isSafari ? withSafariTooltip(btn) : btn
+      );
+      return isSafari ? withSafariTooltip(btn) : btn;
     },
     [t, safariCallTooltip],
-  )
+  );
 
   // Reset UI state when leaving a channel or channel is deleted
   useEffect(() => {
@@ -690,7 +577,7 @@ export function ChatPage() {
       client.on('notification.channel_deleted', handleChannelExit),
     ];
 
-    return () => listeners.forEach(l => l.unsubscribe());
+    return () => listeners.forEach((l) => l.unsubscribe());
   }, [client, activeChannel, drillDownChannel]);
 
   // Auto-accept topics when parent channel invitation is accepted
@@ -707,15 +594,14 @@ export function ChatPage() {
           const channel = client.activeChannels[acceptedCid];
           if (channel && isGroupChannel(channel)) {
             // Find all pending topics of this team channel
-            const topics: ChannelType[] = Object.values(client.activeChannels).filter((ch: any) =>
-              isTopicChannel(ch) &&
-              (ch.data?.parent_cid === acceptedCid || ch.cid.includes(channel.id))
+            const topics: ChannelType[] = Object.values(client.activeChannels).filter(
+              (ch: any) => isTopicChannel(ch) && (ch.data?.parent_cid === acceptedCid || ch.cid.includes(channel.id)),
             ) as ChannelType[];
 
             for (const topic of topics) {
               const ms = topic.state?.membership as any;
               if (isPendingMember(ms?.channel_role)) {
-                topic.acceptInvite('accept').catch(() => { });
+                topic.acceptInvite('accept').catch(() => {});
               }
             }
           }
@@ -728,22 +614,22 @@ export function ChatPage() {
   }, [client]);
 
   const channelInfoTitle = useMemo(() => {
-    const targetChannel = infoChannel || activeChannel
-    if (!targetChannel) return ''
-    const isTopic = !!targetChannel.data?.parent_cid
-    return isTopic ? t('chat.info_title_topic') : t('chat.info_title_channel')
-  }, [infoChannel, activeChannel, t])
+    const targetChannel = infoChannel || activeChannel;
+    if (!targetChannel) return '';
+    const isTopic = !!targetChannel.data?.parent_cid;
+    return isTopic ? t('chat.info_title_topic') : t('chat.info_title_channel');
+  }, [infoChannel, activeChannel, t]);
 
   // Show full-page loading when restoring a channel from URL (prevents empty/welcome flash)
-  const isRestoringFromUrl = !hasAttemptedRestore && !!searchParams.get('channel')
+  const isRestoringFromUrl = !hasAttemptedRestore && !!searchParams.get('channel');
 
-  const CustomMemberItem = useCallback((props: any) => (
-    <UhmMemberItem {...props} onUserClick={setProfileUserId} />
-  ), []);
+  const CustomMemberItem = useCallback((props: any) => <UhmMemberItem {...props} onUserClick={setProfileUserId} />, []);
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      <SEO title={totalUnreadCount > 0 ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) Uhm Chat` : 'Uhm Chat'} />
+      <SEO
+        title={totalUnreadCount > 0 ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) Uhm Chat` : 'Uhm Chat'}
+      />
 
       {/* Full-page loading overlay while restoring channel from URL */}
       {isRestoringFromUrl && (
@@ -761,13 +647,30 @@ export function ChatPage() {
             <div className="flex-1 flex flex-col py-1">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-3" style={{ animationDelay: `${i * 60}ms` }}>
-                  <div className={`w-10 h-10 shrink-0 bg-zinc-200 dark:bg-[#2a2640] animate-pulse ${i % 3 === 0 ? 'rounded-[25%]' : 'rounded-full'}`} />
+                  <div
+                    className={`w-10 h-10 shrink-0 bg-zinc-200 dark:bg-[#2a2640] animate-pulse ${
+                      i % 3 === 0 ? 'rounded-[25%]' : 'rounded-full'
+                    }`}
+                  />
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                      <div className={`h-3.5 rounded-md bg-zinc-200 dark:bg-[#2a2640] animate-pulse ${['w-28', 'w-32', 'w-20', 'w-36', 'w-24', 'w-30', 'w-28', 'w-20'][i]}`} style={{ animationDelay: `${i * 80}ms` }} />
-                      <div className="h-3 w-10 rounded-md bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" style={{ animationDelay: `${i * 100}ms` }} />
+                      <div
+                        className={`h-3.5 rounded-md bg-zinc-200 dark:bg-[#2a2640] animate-pulse ${
+                          ['w-28', 'w-32', 'w-20', 'w-36', 'w-24', 'w-30', 'w-28', 'w-20'][i]
+                        }`}
+                        style={{ animationDelay: `${i * 80}ms` }}
+                      />
+                      <div
+                        className="h-3 w-10 rounded-md bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse"
+                        style={{ animationDelay: `${i * 100}ms` }}
+                      />
                     </div>
-                    <div className={`h-3 rounded-md bg-zinc-100 dark:bg-[#2a2640]/50 animate-pulse ${['w-40', 'w-36', 'w-44', 'w-28', 'w-48', 'w-32', 'w-40', 'w-36'][i]}`} style={{ animationDelay: `${i * 100 + 40}ms` }} />
+                    <div
+                      className={`h-3 rounded-md bg-zinc-100 dark:bg-[#2a2640]/50 animate-pulse ${
+                        ['w-40', 'w-36', 'w-44', 'w-28', 'w-48', 'w-32', 'w-40', 'w-36'][i]
+                      }`}
+                      style={{ animationDelay: `${i * 100 + 40}ms` }}
+                    />
                   </div>
                 </div>
               ))}
@@ -791,10 +694,21 @@ export function ChatPage() {
             {/* Messages area skeleton */}
             <div className="flex-1 flex flex-col justify-end gap-4 p-5">
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className={`flex items-end gap-2.5 ${i % 2 === 0 ? '' : 'flex-row-reverse'}`} style={{ animationDelay: `${i * 120}ms` }}>
-                  {i % 2 === 0 && <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse shrink-0" />}
+                <div
+                  key={i}
+                  className={`flex items-end gap-2.5 ${i % 2 === 0 ? '' : 'flex-row-reverse'}`}
+                  style={{ animationDelay: `${i * 120}ms` }}
+                >
+                  {i % 2 === 0 && (
+                    <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse shrink-0" />
+                  )}
                   <div className={`flex flex-col gap-1 ${i % 2 === 0 ? 'items-start' : 'items-end'}`}>
-                    <div className={`h-10 rounded-2xl bg-zinc-100 dark:bg-[#2a2640]/40 animate-pulse ${['w-52', 'w-36', 'w-64', 'w-44', 'w-56'][i]}`} style={{ animationDelay: `${i * 100}ms` }} />
+                    <div
+                      className={`h-10 rounded-2xl bg-zinc-100 dark:bg-[#2a2640]/40 animate-pulse ${
+                        ['w-52', 'w-36', 'w-64', 'w-44', 'w-56'][i]
+                      }`}
+                      style={{ animationDelay: `${i * 100}ms` }}
+                    />
                   </div>
                 </div>
               ))}
@@ -809,14 +723,15 @@ export function ChatPage() {
 
       {/* Sidebar */}
       <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
-
         {/* Channels + Topics — width-based push animation */}
         {/* Channel list shrinks 380→66px (overflow-hidden clips to avatars on left) */}
         {/* Topics panel fills the remaining 314px, creating a push effect */}
         <div className="absolute inset-0 flex">
           {/* Channel list — shrinks width, overflow-hidden clips to show only avatars */}
           <div
-            className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${drillDownChannel ? 'channel-sidebar-collapsed' : ''}`}
+            className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${
+              drillDownChannel ? 'channel-sidebar-collapsed' : ''
+            }`}
             style={{ width: drillDownChannel ? 66 : 380 }}
           >
             {/* Inner always 380px — parent clips it */}
@@ -833,7 +748,10 @@ export function ChatPage() {
                   searchQuery={searchQuery}
                   onSearchQueryChange={setSearchQuery}
                   onSearchOpen={() => setIsSearchMode(true)}
-                  onSearchClose={() => { setIsSearchMode(false); setSearchQuery('') }}
+                  onSearchClose={() => {
+                    setIsSearchMode(false);
+                    setSearchQuery('');
+                  }}
                 />
               </div>
 
@@ -852,41 +770,65 @@ export function ChatPage() {
                   actionLabels={actionLabels}
                   deletedMessageLabel={t('chat.deleted_message')}
                   stickerMessageLabel={t('chat.preview_sticker')}
-                  photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
-                  videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
-                  voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
-                  fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
+                  photoMessageLabel={
+                    <span className="inline-flex items-center gap-1">
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      {t('chat.preview_photo')}
+                    </span>
+                  }
+                  videoMessageLabel={
+                    <span className="inline-flex items-center gap-1">
+                      <Film className="w-3.5 h-3.5" />
+                      {t('chat.preview_video')}
+                    </span>
+                  }
+                  voiceRecordingMessageLabel={
+                    <span className="inline-flex items-center gap-1">
+                      <Mic className="w-3.5 h-3.5" />
+                      {t('chat.preview_voice')}
+                    </span>
+                  }
+                  fileMessageLabel={
+                    <span className="inline-flex items-center gap-1">
+                      <Paperclip className="w-3.5 h-3.5" />
+                      {t('chat.preview_file')}
+                    </span>
+                  }
                   encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
-                  encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
+                  encryptedMessageUnavailableLabel={t(
+                    'chat.encrypted_message_unavailable',
+                    'Encrypted message unavailable',
+                  )}
                   systemMessageTranslations={systemMessageTranslations}
                   signalMessageTranslations={signalMessageTranslations}
                 />
 
                 {/* SearchPanel overlay */}
-                <div className={`absolute inset-0 z-10 transition-all duration-200 ease-out ${isSearchMode
-                  ? 'scale-100 opacity-100'
-                  : 'scale-95 opacity-0 pointer-events-none'
-                  }`}>
+                <div
+                  className={`absolute inset-0 z-10 transition-all duration-200 ease-out ${
+                    isSearchMode ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'
+                  }`}
+                >
                   {isSearchMode && (
                     <SearchPanel
                       searchQuery={searchQuery}
-                      onSelectChannel={(channel) => { 
-                        setIsSearchMode(false); 
+                      onSelectChannel={(channel) => {
+                        setIsSearchMode(false);
                         setSearchQuery('');
-                        
+
                         if (isTopicChannel(channel) && channel.data?.parent_cid) {
-                          const parentCid = channel.data.parent_cid as string
-                          const parent = client.activeChannels[parentCid]
+                          const parentCid = channel.data.parent_cid as string;
+                          const parent = client.activeChannels[parentCid];
                           if (parent) {
-                            setDrillDownChannel(parent)
-                            setActivePanel('topics')
+                            setDrillDownChannel(parent);
+                            setActivePanel('topics');
                           }
                         } else if (isGroupChannel(channel) && channel.data?.topics_enabled) {
-                          setDrillDownChannel(channel)
-                          setActivePanel('topics')
+                          setDrillDownChannel(channel);
+                          setActivePanel('topics');
                         } else {
-                          setDrillDownChannel(null)
-                          setActivePanel('channels')
+                          setDrillDownChannel(null);
+                          setActivePanel('channels');
                         }
                       }}
                     />
@@ -908,15 +850,42 @@ export function ChatPage() {
                 onBack={handleBackFromTopics}
                 onCreateTopic={openCreateTopicModal}
                 onEditTopic={openEditTopicModal}
-                onShowChannelInfo={() => { setHasOpenedInfo(true); setInfoChannel(drillDownChannel); setShowChannelInfo(true) }}
+                onShowChannelInfo={() => {
+                  setHasOpenedInfo(true);
+                  setInfoChannel(drillDownChannel);
+                  setShowChannelInfo(true);
+                }}
                 deletedMessageLabel={t('chat.deleted_message')}
                 stickerMessageLabel={t('chat.preview_sticker')}
-                photoMessageLabel={<span className="inline-flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5" />{t('chat.preview_photo')}</span>}
-                videoMessageLabel={<span className="inline-flex items-center gap-1"><Film className="w-3.5 h-3.5" />{t('chat.preview_video')}</span>}
-                voiceRecordingMessageLabel={<span className="inline-flex items-center gap-1"><Mic className="w-3.5 h-3.5" />{t('chat.preview_voice')}</span>}
-                fileMessageLabel={<span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t('chat.preview_file')}</span>}
+                photoMessageLabel={
+                  <span className="inline-flex items-center gap-1">
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    {t('chat.preview_photo')}
+                  </span>
+                }
+                videoMessageLabel={
+                  <span className="inline-flex items-center gap-1">
+                    <Film className="w-3.5 h-3.5" />
+                    {t('chat.preview_video')}
+                  </span>
+                }
+                voiceRecordingMessageLabel={
+                  <span className="inline-flex items-center gap-1">
+                    <Mic className="w-3.5 h-3.5" />
+                    {t('chat.preview_voice')}
+                  </span>
+                }
+                fileMessageLabel={
+                  <span className="inline-flex items-center gap-1">
+                    <Paperclip className="w-3.5 h-3.5" />
+                    {t('chat.preview_file')}
+                  </span>
+                }
                 encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
-                encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
+                encryptedMessageUnavailableLabel={t(
+                  'chat.encrypted_message_unavailable',
+                  'Encrypted message unavailable',
+                )}
                 systemMessageTranslations={systemMessageTranslations}
                 signalMessageTranslations={signalMessageTranslations}
               />
@@ -941,12 +910,20 @@ export function ChatPage() {
         </div>
 
         {/* Contacts Panel — absolute overlay that slides over everything */}
-        <div className={`absolute inset-0 z-20 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'contacts' ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div
+          className={`absolute inset-0 z-20 flex flex-col transition-transform duration-300 ease-in-out ${
+            activePanel === 'contacts' ? 'translate-x-0' : 'translate-x-full'
+          }`}
+        >
           <ContactsPanel onBack={() => setActivePanel('channels')} />
         </div>
 
         {/* Invites Panel — absolute overlay that slides over everything */}
-        <div className={`absolute inset-0 z-20 flex flex-col transition-transform duration-300 ease-in-out ${activePanel === 'invites' ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div
+          className={`absolute inset-0 z-20 flex flex-col transition-transform duration-300 ease-in-out ${
+            activePanel === 'invites' ? 'translate-x-0' : 'translate-x-full'
+          }`}
+        >
           <InvitesPanel onBack={() => setActivePanel('channels')} />
         </div>
       </div>
@@ -956,53 +933,55 @@ export function ChatPage() {
         {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
         <ConnectionStatusBanner status={status} onRetry={retryConnection} />
 
-        {e2eeBootstrapRunning && e2eeBootstrapTotal > 0 && (
-          <div className="mx-4 mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-[12px] font-semibold text-violet-800 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200">
-            {t('recovery_pin.bootstrap_progress', {
-              completed: e2eeBootstrapCompleted,
-              total: e2eeBootstrapTotal,
-            })}
-          </div>
-        )}
-
         <Channel EmptyStateIndicator={ChannelEmptyState}>
           <ChannelHeader
-            title={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? t('chat.topics_general', 'general') : undefined}
-            AvatarComponent={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? () => (
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-[#2a2640]">
-                <Hash className="w-6 h-6" />
-              </div>
-            ) : undefined}
+            title={
+              activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled
+                ? t('chat.topics_general', 'general')
+                : undefined
+            }
+            AvatarComponent={
+              activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled
+                ? () => (
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-[#2a2640]">
+                      <Hash className="w-6 h-6" />
+                    </div>
+                  )
+                : undefined
+            }
             renderRight={renderHeaderRight}
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
-
-          {activeRestoreProgress?.status === 'running' && activeRestoreTotal > 0 && (
-            <div className="mx-4 mt-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-[12px] font-semibold text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
-              {t('recovery_pin.restore_progress_detail', {
-                restored: activeRestoreCompleted,
-                total: activeRestoreTotal,
-              })}
-            </div>
-          )}
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
             messageRenderers={{ signal: UhmSignalMessage }}
             dateLocale={i18n.language}
             bannedOverlayTitle={t('overlays.bannedTitle', 'You are banned')}
-            bannedOverlaySubtitle={t('overlays.bannedSubtitle', 'You have been banned from this channel and cannot send or receive messages.')}
+            bannedOverlaySubtitle={t(
+              'overlays.bannedSubtitle',
+              'You have been banned from this channel and cannot send or receive messages.',
+            )}
             pendingOverlayTitle={t('overlays.pendingTitle', 'Channel Invitation')}
-            pendingOverlaySubtitle={t('overlays.pendingSubtitle', 'You have been invited to join this channel. Do you accept?')}
+            pendingOverlaySubtitle={t(
+              'overlays.pendingSubtitle',
+              'You have been invited to join this channel. Do you accept?',
+            )}
             pendingRejectLabel={t('overlays.reject', 'Decline')}
             pendingAcceptLabel={t('overlays.accept', 'Accept')}
             pendingSkipLabel={t('overlays.skip', 'Skip')}
             skippedOverlayTitle={t('overlays.skippedTitle', 'Invitation Skipped')}
-            skippedOverlaySubtitle={t('overlays.skippedSubtitle', 'You skipped this invitation. You will not receive messages.')}
+            skippedOverlaySubtitle={t(
+              'overlays.skippedSubtitle',
+              'You skipped this invitation. You will not receive messages.',
+            )}
             skippedAcceptLabel={t('overlays.accept', 'Accept')}
             closedTopicOverlayTitle={t('overlays.closedTopicTitle', 'Topic Closed')}
-            closedTopicOverlaySubtitle={t('overlays.closedTopicSubtitle', 'This topic is closed. No new messages can be sent.')}
+            closedTopicOverlaySubtitle={t(
+              'overlays.closedTopicSubtitle',
+              'This topic is closed. No new messages can be sent.',
+            )}
             closedTopicReopenLabel={t('overlays.reopen', 'Reopen')}
             emptyTitle={t('chat.empty_title')}
             emptySubtitle={t('chat.empty_subtitle')}
@@ -1032,7 +1011,7 @@ export function ChatPage() {
               return t('overlays.typing.multipleTyping', {
                 name1: names[0],
                 name2: names[1],
-                count: names.length - 2
+                count: names.length - 2,
               });
             }}
             deletedMessageLabel={t('chat.deleted_message', 'This message was deleted')}
@@ -1049,8 +1028,16 @@ export function ChatPage() {
       </div>
 
       {/* Right Panel — ChannelInfo (instant layout snap + smooth content fade) */}
-      <div className={`shrink-0 overflow-hidden border-l border-zinc-200/50 dark:border-zinc-800/50 ${showChannelInfo ? 'w-[380px]' : 'w-0 border-l-0'}`}>
-        <div className={`w-[380px] h-full bg-white dark:bg-[#1a1828] transition-opacity duration-200 ease-in ${showChannelInfo ? 'opacity-100' : 'opacity-0'}`}>
+      <div
+        className={`shrink-0 overflow-hidden border-l border-zinc-200/50 dark:border-zinc-800/50 ${
+          showChannelInfo ? 'w-[380px]' : 'w-0 border-l-0'
+        }`}
+      >
+        <div
+          className={`w-[380px] h-full bg-white dark:bg-[#1a1828] transition-opacity duration-200 ease-in ${
+            showChannelInfo ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
           {hasOpenedInfo && (
             <ChannelInfo
               channel={infoChannel || undefined}
@@ -1100,24 +1087,13 @@ export function ChatPage() {
       </div>
 
       {isCreateChannelModalOpen && (
-        <CustomCreateChannelModal
-          isOpen={isCreateChannelModalOpen}
-          onClose={closeCreateChannelModal}
-        />
+        <CustomCreateChannelModal isOpen={isCreateChannelModalOpen} onClose={closeCreateChannelModal} />
       )}
       {topicAction.type === 'create' && topicAction.channel && (
-        <UhmTopicModal
-          isOpen={true}
-          onClose={closeTopicModal}
-          parentChannel={topicAction.channel}
-        />
+        <UhmTopicModal isOpen={true} onClose={closeTopicModal} parentChannel={topicAction.channel} />
       )}
       {topicAction.type === 'edit' && topicAction.channel && (
-        <UhmTopicModal
-          isOpen={true}
-          onClose={closeTopicModal}
-          topic={topicAction.channel}
-        />
+        <UhmTopicModal isOpen={true} onClose={closeTopicModal} topic={topicAction.channel} />
       )}
       <UserProfileModal
         isOpen={!!profileUserId}
@@ -1125,27 +1101,7 @@ export function ChatPage() {
         userId={profileUserId}
         onSendMessage={handleSendMessageFromProfile}
       />
-      <UhmRecoveryPinDialog
-        isOpen={isRecoveryGateOpen}
-        onClose={() => {
-          activeRestorePromptedCidRef.current = activeChannel?.cid || null
-          setRecoveryGateDismissed(true)
-          setIsRecoveryGateOpen(false)
-        }}
-        variant="gate"
-        onSkip={() => {
-          activeRestorePromptedCidRef.current = activeChannel?.cid || null
-          setRecoveryGateDismissed(true)
-          setIsRecoveryGateOpen(false)
-        }}
-        onUnlocked={() => {
-          setRecoveryGateDismissed(false)
-          setIsRecoveryGateOpen(false)
-          recovery.refresh()
-          refreshActiveRestoreProgress()
-        }}
-      />
       <GlobalPickers />
     </div>
-  )
+  );
 }

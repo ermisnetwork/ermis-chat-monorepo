@@ -1366,11 +1366,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (parentEncryptionEnabled || explicitEncryptionEnabled) {
       const encryptionManager = this.getClient().encryptionManager;
       payload.data.mls_enabled = true;
-      if (ownTopicGroup) {
-        payload.data.e2ee_recovery_policy = data?.e2ee_recovery_policy || 'member_assisted';
-      } else {
-        delete payload.data.e2ee_recovery_policy;
-      }
       if (ownTopicGroup && encryptionManager?.initialized) {
         try {
           if (!topicCid) {
@@ -2541,14 +2536,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           ) {
             encryptionMgrAccept
               .ensureChannelReady(this.type, this.id, this.cid, { source: 'invite_accepted' })
-              .then(async () => {
-                if (!encryptionMgrAccept.isRecoveryVaultUnlocked()) return;
-                await encryptionMgrAccept.repairRecoveryChannel(this.type, this.id, { mode: 'recheck_channel' });
-              })
               .catch((err: unknown) => {
                 this.getClient().logger(
                   'error',
-                  '[Encryption Event] Failed to prepare recovery after invite_accepted',
+                  '[Encryption Event] Failed to prepare E2EE after invite_accepted',
                   {
                     err,
                     cid: this.cid,
@@ -2758,7 +2749,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 protocol_type: protoType,
               });
               encryptionMgrProto.sync().catch((syncErr: unknown) => {
-                this.getClient().logger('error', '[Encryption Event] Recovery sync failed after protocol commit', {
+                this.getClient().logger('error', '[Encryption Event] E2EE sync failed after protocol commit', {
                   err: syncErr,
                   cid: this.cid,
                 });

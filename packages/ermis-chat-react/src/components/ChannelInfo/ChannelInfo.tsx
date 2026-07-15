@@ -434,19 +434,15 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     try {
       setIsEnablingE2ee(true);
       const memberUserIds = Object.keys(channel.state?.members || {});
-      const recoveryPolicy = (channel.data as any)?.e2ee_recovery_policy || 'member_assisted';
       const result = await client.encryptionManager.enableE2ee(
         channel.type,
         channel.id,
         channel.cid,
         memberUserIds,
-        recoveryPolicy,
       );
       channel.data = {
         ...channel.data,
         mls_enabled: true,
-        e2ee_recovery_policy:
-          result?.channel?.e2ee_recovery_policy || result?.e2ee_recovery_policy || recoveryPolicy,
         mls_enabled_at: result?.channel?.mls_enabled_at || result?.mls_enabled_at || new Date().toISOString(),
         mls_epoch: result?.channel?.mls_epoch ?? result?.epoch ?? channel.data?.mls_epoch,
       } as any;

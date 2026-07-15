@@ -12,96 +12,40 @@
  * - Provider key store
  * - Sync timestamps
  */
-
 import { normalizeRequiredBytes } from './encoding';
 import { randomId } from '../utils';
 import type { Logger } from '../types';
 import { setSdkLogger, sdkLog } from '../logger';
 import MiniSearch from 'minisearch';
-
 import type {
-  ArchiveAckRecord,
-  ArchiveScope,
   ChannelRepairState,
-  EpochArchiveCheckpoint,
   E2eeStoredMessage,
   EventCursor,
   EncryptionStorageAdapter,
   EncryptionSyncCheckpoint,
-  PendingArchiveUpload,
   PendingE2eeSendRecord,
-  PendingDeferredArchive,
   PendingE2eeSnapshot,
   RemovedSyncCursor,
-  RestoreProgressRecord,
-  RestoreStatus,
 } from './types';
-
 // ============================================================
 // IndexedDB Implementation (Browser Default)
 // ============================================================
-
 const DB_NAME_PREFIX = 'ermis_mls';
 /** Global DB (no userId) — only used for migrating legacy device_id */
 const DB_NAME_LEGACY = 'ermis_mls';
 const DB_VERSION = 6;
-
 const STORE_IDENTITY = 'identity';
 const STORE_MESSAGES = 'messages';
 const STORE_PENDING_SENDS = 'pending_sends';
 const STORE_META = 'meta';
 const STORE_GROUPS = 'groups';
-const STORE_ARCHIVE_UPLOADS = 'archive_uploads';
-const STORE_DEFERRED_ARCHIVES = 'deferred_archives';
-const STORE_ARCHIVE_ACKS = 'archive_acks';
-const STORE_RESTORE_PROGRESS = 'restore_progress';
-const ARCHIVE_STASH_KEY_META = 'archive_stash_key';
 const LEGACY_SYNC_PREFIX = 'sync:';
 const SCOPE_SYNC_PREFIX = 'scope_sync:';
 const CHANNEL_REPAIR_PREFIX = 'channel_repair:';
 const CHANNEL_REPAIR_LOCK_PREFIX = 'channel_repair_lock:';
-const EPOCH_ARCHIVE_CHECKPOINT_PREFIX = 'epoch_archive_checkpoint:';
 const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
-
 /** localStorage key for device_id — global, per-browser */
 const DEVICE_ID_LS_KEY = 'ermis_device_id';
-
-function normalizeDeferredArchiveRecord(record: PendingDeferredArchive): PendingDeferredArchive {
-  return {
-    ...record,
-    encrypted_archive: {
-      ciphertext: normalizeRequiredBytes(record.encrypted_archive.ciphertext, 'encrypted_archive.ciphertext'),
-      nonce: normalizeRequiredBytes(record.encrypted_archive.nonce, 'encrypted_archive.nonce'),
-      aead_aad: normalizeRequiredBytes(record.encrypted_archive.aead_aad, 'encrypted_archive.aead_aad'),
-    },
-    snapshot: {
-      ...record.snapshot,
-      snapshot_bytes: normalizeRequiredBytes(record.snapshot.snapshot_bytes, 'snapshot.snapshot_bytes'),
-    },
-    encrypted_adk: {
-      ciphertext: normalizeRequiredBytes(record.encrypted_adk.ciphertext, 'encrypted_adk.ciphertext'),
-      nonce: normalizeRequiredBytes(record.encrypted_adk.nonce, 'encrypted_adk.nonce'),
-    },
-  };
-}
-
-function normalizeEpochArchiveCheckpoint(record: EpochArchiveCheckpoint): EpochArchiveCheckpoint {
-  return {
-    ...record,
-    encrypted_archive_bytes: {
-      ciphertext: normalizeRequiredBytes(
-        record.encrypted_archive_bytes.ciphertext,
-        'encrypted_archive_bytes.ciphertext',
-      ),
-      nonce: normalizeRequiredBytes(record.encrypted_archive_bytes.nonce, 'encrypted_archive_bytes.nonce'),
-    },
-    snapshot: {
-      ...record.snapshot,
-      snapshot_bytes: normalizeRequiredBytes(record.snapshot.snapshot_bytes, 'snapshot.snapshot_bytes'),
-    },
-  };
-}
-
 function eventCursorFromStoredValue(value: unknown): EventCursor | null {
   if (!value) return null;
   if (
@@ -119,7 +63,6 @@ function eventCursorFromStoredValue(value: unknown): EventCursor | null {
   }
   return null;
 }
-
 /**
  * Default encryption storage adapter using browser IndexedDB.
  *
@@ -136,7 +79,6 @@ function eventCursorFromStoredValue(value: unknown): EventCursor | null {
 export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private readonly dbName: string;
-
   /**
    * @param userId - The current user's ID. Used to scope the IndexedDB
    *                 database name so each user's encryption state is isolated.
@@ -151,25 +93,20 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       this.dbName = DB_NAME_LEGACY;
     }
   }
-
   /**
    * Open (or create) the IndexedDB database.
    * Caches the connection promise for reuse.
    */
   private openDB(): Promise<IDBDatabase> {
     if (this.dbPromise) return this.dbPromise;
-
     this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.dbName, DB_VERSION);
-
       request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
         const db = (event.target as IDBOpenDBRequest).result;
-
         // Identity store: key = "userId:deviceId"
         if (!db.objectStoreNames.contains(STORE_IDENTITY)) {
           db.createObjectStore(STORE_IDENTITY);
         }
-
         // Messages store: key = message id, indexes by cid
         if (!db.objectStoreNames.contains(STORE_MESSAGES)) {
           const msgStore = db.createObjectStore(STORE_MESSAGES, {
@@ -178,7 +115,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           msgStore.createIndex('cid', 'cid', { unique: false });
           msgStore.createIndex('cid_created', ['cid', 'created_at'], { unique: false });
         }
-
         if (!db.objectStoreNames.contains(STORE_PENDING_SENDS)) {
           const pendingStore = db.createObjectStore(STORE_PENDING_SENDS, {
             keyPath: 'message_id',
@@ -187,58 +123,30 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           pendingStore.createIndex('cid', 'cid', { unique: false });
           pendingStore.createIndex('updated_at', 'updated_at', { unique: false });
         }
-
         // Meta store: key-value for device_id, snapshot, sync timestamps
         if (!db.objectStoreNames.contains(STORE_META)) {
           db.createObjectStore(STORE_META);
         }
-
         // Groups store: key = cid → marker
         if (!db.objectStoreNames.contains(STORE_GROUPS)) {
           db.createObjectStore(STORE_GROUPS);
         }
-
-        if (!db.objectStoreNames.contains(STORE_ARCHIVE_UPLOADS)) {
-          db.createObjectStore(STORE_ARCHIVE_UPLOADS);
-        }
-
-        if (!db.objectStoreNames.contains(STORE_DEFERRED_ARCHIVES)) {
-          db.createObjectStore(STORE_DEFERRED_ARCHIVES);
-        }
-
-        if (!db.objectStoreNames.contains(STORE_ARCHIVE_ACKS)) {
-          db.createObjectStore(STORE_ARCHIVE_ACKS);
-        }
-
-        if (!db.objectStoreNames.contains(STORE_RESTORE_PROGRESS)) {
-          const restoreStore = db.createObjectStore(STORE_RESTORE_PROGRESS, {
-            keyPath: ['device_id', 'cid'],
-          });
-          restoreStore.createIndex('status', 'status', { unique: false });
-          restoreStore.createIndex('device_id', 'device_id', { unique: false });
-          restoreStore.createIndex('device_status', ['device_id', 'status'], { unique: false });
-        }
       };
-
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => {
         this.dbPromise = null;
         reject(request.error);
       };
     });
-
     return this.dbPromise;
   }
-
   // ---- Device ID (global, per-browser via localStorage) ----
-
   async getDeviceId(): Promise<string> {
     // 1. Check localStorage first
     if (typeof localStorage !== 'undefined') {
       const stored = localStorage.getItem(DEVICE_ID_LS_KEY);
       if (stored) return stored;
     }
-
     // 2. Backward compat: migrate from legacy global IndexedDB
     try {
       const legacyId = await this._migrateLegacyDeviceId();
@@ -246,7 +154,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     } catch (_) {
       // IndexedDB unavailable — generate new
     }
-
     // 3. Generate new device ID
     const deviceId = `web-${randomId()}`;
     if (typeof localStorage !== 'undefined') {
@@ -254,7 +161,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     }
     return deviceId;
   }
-
   /**
    * Migrate device_id from legacy global IndexedDB (`ermis_mls`) to localStorage.
    * Returns the migrated ID or null if not found.
@@ -262,7 +168,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   private async _migrateLegacyDeviceId(): Promise<string | null> {
     return new Promise<string | null>((resolve) => {
       const request = indexedDB.open(DB_NAME_LEGACY, DB_VERSION);
-
       request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
         // Legacy DB doesn't exist yet — nothing to migrate
         const db = (event.target as IDBOpenDBRequest).result;
@@ -287,28 +192,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         if (!db.objectStoreNames.contains(STORE_GROUPS)) {
           db.createObjectStore(STORE_GROUPS);
         }
-        if (!db.objectStoreNames.contains(STORE_ARCHIVE_UPLOADS)) {
-          db.createObjectStore(STORE_ARCHIVE_UPLOADS);
-        }
-
-        if (!db.objectStoreNames.contains(STORE_DEFERRED_ARCHIVES)) {
-          db.createObjectStore(STORE_DEFERRED_ARCHIVES);
-        }
-
-        if (!db.objectStoreNames.contains(STORE_ARCHIVE_ACKS)) {
-          db.createObjectStore(STORE_ARCHIVE_ACKS);
-        }
-
-        if (!db.objectStoreNames.contains(STORE_RESTORE_PROGRESS)) {
-          const restoreStore = db.createObjectStore(STORE_RESTORE_PROGRESS, {
-            keyPath: ['device_id', 'cid'],
-          });
-          restoreStore.createIndex('status', 'status', { unique: false });
-          restoreStore.createIndex('device_id', 'device_id', { unique: false });
-          restoreStore.createIndex('device_status', ['device_id', 'status'], { unique: false });
-        }
       };
-
       request.onsuccess = () => {
         const db = request.result;
         try {
@@ -340,13 +224,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           resolve(null);
         }
       };
-
       request.onerror = () => resolve(null);
     });
   }
-
   // ---- Identity ----
-
   async saveIdentity(userId: string, deviceId: string, identityBytes: Uint8Array): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -357,7 +238,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadIdentity(userId: string, deviceId: string): Promise<Uint8Array | null> {
     const db = await this.openDB();
     return new Promise<Uint8Array | null>((resolve, reject) => {
@@ -368,9 +248,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   // ---- E2EE Messages ----
-
   async saveE2eeMessage(message: E2eeStoredMessage): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -385,7 +263,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadE2eeMessage(messageId: string): Promise<E2eeStoredMessage | null> {
     const db = await this.openDB();
     return new Promise<E2eeStoredMessage | null>((resolve, reject) => {
@@ -396,17 +273,14 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async loadE2eeMessages(messageIds: string[]): Promise<Map<string, E2eeStoredMessage>> {
     const ids = Array.from(new Set(messageIds.filter(Boolean)));
     if (ids.length === 0) return new Map();
-
     const db = await this.openDB();
     return new Promise<Map<string, E2eeStoredMessage>>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readonly');
       const store = tx.objectStore(STORE_MESSAGES);
       const results = new Map<string, E2eeStoredMessage>();
-
       for (const id of ids) {
         const request = store.get(id);
         request.onsuccess = () => {
@@ -416,12 +290,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         };
         request.onerror = () => reject(request.error);
       }
-
       tx.oncomplete = () => resolve(results);
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async deleteE2eeMessage(messageId: string): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -442,7 +314,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async getE2eeMessages(cid: string, limit = 50): Promise<E2eeStoredMessage[]> {
     const db = await this.openDB();
     return new Promise<E2eeStoredMessage[]>((resolve, reject) => {
@@ -459,13 +330,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async clearE2eeMessages(cid: string): Promise<void> {
     const db = await this.openDB();
-
     // Collect message IDs for this channel to purge from search index
     const msgIds: string[] = [];
-
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readwrite');
       const store = tx.objectStore(STORE_MESSAGES);
@@ -496,9 +364,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   // ---- Pending E2EE Sends ----
-
   async savePendingE2eeSend(record: PendingE2eeSendRecord): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -508,7 +374,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadPendingE2eeSend(messageId: string): Promise<PendingE2eeSendRecord | null> {
     const db = await this.openDB();
     return new Promise<PendingE2eeSendRecord | null>((resolve, reject) => {
@@ -518,7 +383,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async listPendingE2eeSends(statuses?: string[]): Promise<PendingE2eeSendRecord[]> {
     const db = await this.openDB();
     return new Promise<PendingE2eeSendRecord[]>((resolve, reject) => {
@@ -542,7 +406,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async deletePendingE2eeSend(messageId: string): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -552,9 +415,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   // ---- E2EE Message Search (MiniSearch-powered) ----
-
   /** MiniSearch instance — lazily initialized on first search. */
   private _searchIndex: MiniSearch<E2eeStoredMessage> | null = null;
   /** Set of indexed message IDs — for dedup on incremental add. */
@@ -563,7 +424,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   private _indexReady = false;
   /** Promise for the build-in-progress (prevents double-build). */
   private _indexBuildPromise: Promise<void> | null = null;
-
   /**
    * Create a fresh MiniSearch instance with fields tuned for chat messages.
    */
@@ -619,7 +479,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       },
     });
   }
-
   /**
    * Build the search index from all messages in IndexedDB.
    * Called lazily on first search. Subsequent calls are no-ops.
@@ -627,7 +486,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   private async _ensureIndex(): Promise<void> {
     if (this._indexReady) return;
     if (this._indexBuildPromise) return this._indexBuildPromise;
-
     this._indexBuildPromise = (async () => {
       const db = await this.openDB();
       const allMsgs = await new Promise<E2eeStoredMessage[]>((resolve, reject) => {
@@ -637,10 +495,8 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         request.onsuccess = () => resolve((request.result as E2eeStoredMessage[]) || []);
         request.onerror = () => reject(request.error);
       });
-
       this._searchIndex = this._createSearchIndex();
       this._indexedIds = new Set();
-
       // Filter messages with searchable text content
       const indexable = allMsgs.filter((msg) => msg.text && msg.text.length > 0);
       if (indexable.length > 0) {
@@ -649,15 +505,12 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           this._indexedIds.add(msg.id);
         }
       }
-
       this._indexReady = true;
       this._indexBuildPromise = null;
       sdkLog('info', `[Encryption Storage] Search index built: ${indexable.length} messages indexed`);
     })();
-
     return this._indexBuildPromise;
   }
-
   /**
    * Incrementally add/update a single message in the search index.
    * Called from saveE2eeMessage() after successful IndexedDB write.
@@ -665,7 +518,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   private _indexMessage(message: E2eeStoredMessage): void {
     if (!this._searchIndex || !this._indexReady) return;
     if (!message.text || message.text.length === 0) return;
-
     try {
       if (this._indexedIds.has(message.id)) {
         // Update: remove old, add new
@@ -677,38 +529,28 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       sdkLog('warn', '[Encryption Storage] Failed to index message:', message.id, err);
     }
   }
-
   async searchE2eeMessages(searchTerm: string, limit = 25): Promise<E2eeStoredMessage[]> {
     await this._ensureIndex();
     if (!this._searchIndex) return [];
-
     const results = this._searchIndex.search(searchTerm);
-
     // Sort by created_at descending (MiniSearch returns by relevance score)
     const sorted = results
       .sort((a, b) => new Date((b as any).created_at).getTime() - new Date((a as any).created_at).getTime())
       .slice(0, limit);
-
     return sorted as unknown as E2eeStoredMessage[];
   }
-
   async searchE2eeMessagesByCid(cid: string, searchTerm: string, limit = 25): Promise<E2eeStoredMessage[]> {
     await this._ensureIndex();
     if (!this._searchIndex) return [];
-
     const results = this._searchIndex.search(searchTerm, {
       filter: (result) => (result as any).cid === cid,
     });
-
     const sorted = results
       .sort((a, b) => new Date((b as any).created_at).getTime() - new Date((a as any).created_at).getTime())
       .slice(0, limit);
-
     return sorted as unknown as E2eeStoredMessage[];
   }
-
   // ---- Group State ----
-
   async saveGroupState(cid: string, marker: unknown): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -719,7 +561,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadGroupState(cid: string): Promise<unknown | null> {
     const db = await this.openDB();
     return new Promise<unknown | null>((resolve, reject) => {
@@ -730,7 +571,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async listGroupCids(): Promise<string[]> {
     const db = await this.openDB();
     return new Promise<string[]>((resolve, reject) => {
@@ -741,7 +581,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async deleteGroup(cid: string): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -752,9 +591,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   // ---- Provider State ----
-
   async saveProviderState(userId: string, deviceId: string, providerBytes: Uint8Array): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -765,7 +602,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadProviderState(userId: string, deviceId: string): Promise<Uint8Array | null> {
     const db = await this.openDB();
     return new Promise<Uint8Array | null>((resolve, reject) => {
@@ -776,9 +612,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   // ---- Sync Timestamps ----
-
   async saveSyncTimestamp(cid: string, timestamp: string): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -789,7 +623,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadSyncTimestamp(cid: string): Promise<string | null> {
     const db = await this.openDB();
     return new Promise<string | null>((resolve, reject) => {
@@ -800,9 +633,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   // ---- Batch Sync Cursors ----
-
   async loadAllSyncTimestamps(): Promise<Record<string, string>> {
     const db = await this.openDB();
     return new Promise<Record<string, string>>((resolve, reject) => {
@@ -826,7 +657,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       cursorReq.onerror = () => reject(cursorReq.error);
     });
   }
-
   async loadScopeSyncCursor(scopeCid: string): Promise<EventCursor | null> {
     const db = await this.openDB();
     return new Promise<EventCursor | null>((resolve, reject) => {
@@ -839,7 +669,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           resolve(scopeCursor);
           return;
         }
-
         const legacyReq = store.get(`${LEGACY_SYNC_PREFIX}${scopeCid}`);
         legacyReq.onsuccess = () => resolve(eventCursorFromStoredValue(legacyReq.result));
         legacyReq.onerror = () => reject(legacyReq.error);
@@ -847,7 +676,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       scopeReq.onerror = () => reject(scopeReq.error);
     });
   }
-
   async saveScopeSyncCursor(scopeCid: string, cursor: EventCursor): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -858,7 +686,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadAllScopeSyncCursors(): Promise<Record<string, EventCursor>> {
     const db = await this.openDB();
     return new Promise<Record<string, EventCursor>>((resolve, reject) => {
@@ -888,7 +715,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       cursorReq.onerror = () => reject(cursorReq.error);
     });
   }
-
   async saveAllScopeSyncCursors(cursors: Record<string, EventCursor>): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -901,7 +727,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadChannelRepairState(scopeCid: string): Promise<ChannelRepairState | null> {
     const db = await this.openDB();
     return new Promise<ChannelRepairState | null>((resolve, reject) => {
@@ -912,7 +737,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async saveChannelRepairState(state: ChannelRepairState): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -923,7 +747,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async deleteChannelRepairState(scopeCid: string): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -934,19 +757,15 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async saveEncryptionSyncCheckpoint(checkpoint: EncryptionSyncCheckpoint): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');
       const store = tx.objectStore(STORE_META);
-
       store.put(checkpoint.provider_bytes, `provider:${checkpoint.user_id}:${checkpoint.device_id}`);
-
       for (const [scopeCid, cursor] of Object.entries(checkpoint.scope_cursors || {})) {
         store.put(cursor, `${SCOPE_SYNC_PREFIX}${scopeCid}`);
       }
-
       for (const [cid, snapshots] of Object.entries(checkpoint.pending_snapshots || {})) {
         const key = `pending_e2ee_snapshots:${cid}`;
         if (snapshots.length === 0) {
@@ -955,16 +774,13 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           store.put(snapshots, key);
         }
       }
-
       for (const state of checkpoint.repair_states || []) {
         store.put(state, `${CHANNEL_REPAIR_PREFIX}${state.scope_cid}`);
       }
-
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async tryAcquireRepairLock(scopeCid: string, ownerId: string, ttlMs: number): Promise<boolean> {
     const db = await this.openDB();
     return new Promise<boolean>((resolve, reject) => {
@@ -973,10 +789,14 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       const key = `${CHANNEL_REPAIR_LOCK_PREFIX}${scopeCid}`;
       const request = store.get(key);
       let acquired = false;
-
       request.onsuccess = () => {
         const now = Date.now();
-        const current = request.result as { owner_id?: string; expires_at?: number } | undefined;
+        const current = request.result as
+          | {
+              owner_id?: string;
+              expires_at?: number;
+            }
+          | undefined;
         if (current?.owner_id && current.expires_at && current.expires_at > now && current.owner_id !== ownerId) {
           acquired = false;
           return;
@@ -989,7 +809,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async releaseRepairLock(scopeCid: string, ownerId: string): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -997,9 +816,12 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       const store = tx.objectStore(STORE_META);
       const key = `${CHANNEL_REPAIR_LOCK_PREFIX}${scopeCid}`;
       const request = store.get(key);
-
       request.onsuccess = () => {
-        const current = request.result as { owner_id?: string } | undefined;
+        const current = request.result as
+          | {
+              owner_id?: string;
+            }
+          | undefined;
         if (!current || current.owner_id === ownerId) {
           store.delete(key);
         }
@@ -1009,7 +831,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async saveAllSyncTimestamps(timestamps: Record<string, string>): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -1022,7 +843,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   async loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null> {
     const db = await this.openDB();
     return new Promise<RemovedSyncCursor | null>((resolve, reject) => {
@@ -1057,7 +877,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async saveRemovedSyncCursor(cursor: RemovedSyncCursor): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -1068,9 +887,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   // ---- Pending E2EE encrypted snapshots ----
-
   async loadPendingE2eeSnapshots(cid: string): Promise<PendingE2eeSnapshot[]> {
     const db = await this.openDB();
     return new Promise<PendingE2eeSnapshot[]>((resolve, reject) => {
@@ -1081,7 +898,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async savePendingE2eeSnapshots(cid: string, messages: PendingE2eeSnapshot[]): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -1097,9 +913,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
   // ---- Pending Evictions ----
-
   async loadPendingEvictions(): Promise<Record<string, string[]>> {
     const db = await this.openDB();
     return new Promise<Record<string, string[]>>((resolve, reject) => {
@@ -1110,7 +924,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onerror = () => reject(request.error);
     });
   }
-
   async savePendingEvictions(data: Record<string, string[]>): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -1123,318 +936,6 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  // ---- PIN Epoch Archive recovery ----
-
-  async saveArchiveUpload(upload: PendingArchiveUpload): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readwrite');
-      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
-      const archiveBlobId = (upload.upload as any)?.archive_blob_id || 'unknown';
-      store.put(upload, `${upload.cid}:${upload.epoch}:${archiveBlobId}`);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async loadPendingArchiveUploads(): Promise<PendingArchiveUpload[]> {
-    const db = await this.openDB();
-    return new Promise<PendingArchiveUpload[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readonly');
-      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
-      const request = store.getAll();
-      request.onsuccess = () => resolve((request.result as PendingArchiveUpload[]) || []);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readwrite');
-      const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
-      if (archiveBlobId) {
-        store.delete(`${cid}:${epoch}:${archiveBlobId}`);
-      } else {
-        const prefix = `${cid}:${epoch}:`;
-        const cursorReq = store.openCursor();
-        cursorReq.onsuccess = () => {
-          const cursor = cursorReq.result;
-          if (cursor) {
-            if (String(cursor.key).startsWith(prefix)) cursor.delete();
-            cursor.continue();
-          }
-        };
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async saveDeferredArchive(archive: PendingDeferredArchive): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readwrite');
-      const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
-      store.put(archive, `${archive.cid}:${archive.epoch}:${archive.archive_blob_id}`);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async loadPendingDeferredArchives(): Promise<PendingDeferredArchive[]> {
-    const db = await this.openDB();
-    return new Promise<PendingDeferredArchive[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readonly');
-      const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
-      const request = store.getAll();
-      request.onsuccess = () =>
-        resolve(((request.result as PendingDeferredArchive[]) || []).map(normalizeDeferredArchiveRecord));
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readwrite');
-      const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
-      if (archiveBlobId) {
-        store.delete(`${cid}:${epoch}:${archiveBlobId}`);
-      } else {
-        const prefix = `${cid}:${epoch}:`;
-        const cursorReq = store.openCursor();
-        cursorReq.onsuccess = () => {
-          const cursor = cursorReq.result;
-          if (cursor) {
-            if (String(cursor.key).startsWith(prefix)) cursor.delete();
-            cursor.continue();
-          }
-        };
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async saveArchiveAck(record: ArchiveAckRecord): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readwrite');
-      const store = tx.objectStore(STORE_ARCHIVE_ACKS);
-      store.put(record, `${record.cid}:${record.epoch}:${record.scope}:${record.coverage_key}`);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async loadArchiveAck(
-    cid: string,
-    epoch: number,
-    scope: ArchiveScope,
-    coverageKey: string,
-  ): Promise<ArchiveAckRecord | null> {
-    const db = await this.openDB();
-    return new Promise<ArchiveAckRecord | null>((resolve, reject) => {
-      const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readonly');
-      const store = tx.objectStore(STORE_ARCHIVE_ACKS);
-      const request = store.get(`${cid}:${epoch}:${scope}:${coverageKey}`);
-      request.onsuccess = () => {
-        if (request.result || scope !== 'account_owned') {
-          resolve((request.result as ArchiveAckRecord) || null);
-          return;
-        }
-        const legacyRequest = store.get(`${cid}:${epoch}:${coverageKey}`);
-        legacyRequest.onsuccess = () => {
-          const legacy = legacyRequest.result as ArchiveAckRecord | undefined;
-          resolve(
-            legacy
-              ? {
-                  ...legacy,
-                  scope: 'account_owned',
-                  coverage_key: coverageKey,
-                  recovery_key_id: legacy.recovery_key_id || coverageKey,
-                }
-              : null,
-          );
-        };
-        legacyRequest.onerror = () => reject(legacyRequest.error);
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async saveEpochArchiveCheckpoint(checkpoint: EpochArchiveCheckpoint): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_META, 'readwrite');
-      tx.objectStore(STORE_META).put(
-        checkpoint,
-        `${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${checkpoint.scope_cid}:${checkpoint.epoch}`,
-      );
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async loadEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<EpochArchiveCheckpoint | null> {
-    const db = await this.openDB();
-    return new Promise<EpochArchiveCheckpoint | null>((resolve, reject) => {
-      const tx = db.transaction(STORE_META, 'readonly');
-      const request = tx.objectStore(STORE_META).get(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
-      request.onsuccess = () =>
-        resolve(request.result ? normalizeEpochArchiveCheckpoint(request.result as EpochArchiveCheckpoint) : null);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async loadEpochArchiveCheckpoints(): Promise<EpochArchiveCheckpoint[]> {
-    const db = await this.openDB();
-    return new Promise<EpochArchiveCheckpoint[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_META, 'readonly');
-      const store = tx.objectStore(STORE_META);
-      const checkpoints: EpochArchiveCheckpoint[] = [];
-      const request = store.openCursor();
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (!cursor) {
-          resolve(checkpoints);
-          return;
-        }
-        if (String(cursor.key).startsWith(EPOCH_ARCHIVE_CHECKPOINT_PREFIX)) {
-          checkpoints.push(normalizeEpochArchiveCheckpoint(cursor.value as EpochArchiveCheckpoint));
-        }
-        cursor.continue();
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_META, 'readwrite');
-      tx.objectStore(STORE_META).delete(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async saveArchiveStashKey(key: CryptoKey): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_META, 'readwrite');
-      const store = tx.objectStore(STORE_META);
-      store.put(key, ARCHIVE_STASH_KEY_META);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async loadArchiveStashKey(): Promise<CryptoKey | null> {
-    const db = await this.openDB();
-    return new Promise<CryptoKey | null>((resolve, reject) => {
-      const tx = db.transaction(STORE_META, 'readonly');
-      const store = tx.objectStore(STORE_META);
-      const request = store.get(ARCHIVE_STASH_KEY_META);
-      request.onsuccess = () => resolve((request.result as CryptoKey) || null);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_META, 'readwrite');
-      const store = tx.objectStore(STORE_META);
-      store.put(publicKey, `recovery_public_key:${userId}`);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async loadRecoveryPublicKey(userId: string): Promise<Uint8Array | null> {
-    const db = await this.openDB();
-    return new Promise<Uint8Array | null>((resolve, reject) => {
-      const tx = db.transaction(STORE_META, 'readonly');
-      const store = tx.objectStore(STORE_META);
-      const request = store.get(`recovery_public_key:${userId}`);
-      request.onsuccess = () => resolve((request.result as Uint8Array) || null);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async saveRestoreProgress(record: RestoreProgressRecord): Promise<void> {
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readwrite');
-      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
-      store.put(record);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async loadRestoreProgress(userId: string, deviceId: string, cid: string): Promise<RestoreProgressRecord | null> {
-    const db = await this.openDB();
-    return new Promise<RestoreProgressRecord | null>((resolve, reject) => {
-      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readonly');
-      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
-      const request = store.get([deviceId, cid]);
-      request.onsuccess = () => {
-        const record = request.result as RestoreProgressRecord | undefined;
-        resolve(record && record.user_id === userId ? record : null);
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async loadIncompleteRestores(userId: string, deviceId: string): Promise<RestoreProgressRecord[]> {
-    const statuses: RestoreStatus[] = ['pending', 'running', 'partial', 'failed'];
-    const groups = await Promise.all(
-      statuses.map((status) => this._loadRestoreProgressByDeviceStatus(userId, deviceId, status)),
-    );
-    return groups.flat();
-  }
-
-  async loadRestoresWithPermanentGaps(userId: string, deviceId: string): Promise<RestoreProgressRecord[]> {
-    return this._loadRestoreProgressByDeviceStatus(userId, deviceId, 'done_with_gaps');
-  }
-
-  async deleteRestoreProgress(userId: string, deviceId: string, cid: string): Promise<void> {
-    const existing = await this.loadRestoreProgress(userId, deviceId, cid);
-    if (!existing) return;
-    const db = await this.openDB();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readwrite');
-      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
-      store.delete([deviceId, cid]);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  private async _loadRestoreProgressByDeviceStatus(
-    userId: string,
-    deviceId: string,
-    status: RestoreStatus,
-  ): Promise<RestoreProgressRecord[]> {
-    const db = await this.openDB();
-    return new Promise<RestoreProgressRecord[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readonly');
-      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
-      const index = store.index('device_status');
-      const request = index.getAll(IDBKeyRange.only([deviceId, status]));
-      request.onsuccess = () => {
-        const records = ((request.result as RestoreProgressRecord[]) || []).filter(
-          (record) => record.user_id === userId,
-        );
-        resolve(records);
-      };
-      request.onerror = () => reject(request.error);
     });
   }
 }

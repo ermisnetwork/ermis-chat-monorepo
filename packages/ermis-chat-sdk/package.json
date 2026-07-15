@@ -1,6 +1,6 @@
 {
   "name": "@ermis-network/ermis-chat-sdk",
-  "version": "2.1.0",
+  "version": "2.1.0-external.1",
   "description": "Ermis Chat SDK",
   "author": "Ermis",
   "homepage": "https://ermis.network/",
@@ -79,6 +79,7 @@
     "types": "tsc --noEmit",
     "test:media": "node --test test/e2ee_media_streaming.test.cjs",
     "test:attachments": "node --test test/e2ee_attachments.test.cjs",
-    "test:repair": "node --test test/recovery_repair.test.cjs"
+    "test:external": "node --test test/external_contract.test.cjs",
+    "test:repair": "node --test test/external_contract.test.cjs"
   }
 }

@@ -3,7 +3,6 @@ import { StableWSConnection } from './connection';
 import { EVENT_MAP } from './events';
 
 export type Role = 'owner' | 'moder' | 'member' | 'pending' | 'skipped' | string;
-export type E2eeRecoveryPolicy = 'member_assisted' | 'self_owned_only';
 
 /* Unknown Record */
 export type UR = Record<string, unknown>;
@@ -66,7 +65,6 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     mls_enabled_at?: string;
     mls_epoch?: number;
     e2ee_group_id?: string;
-    e2ee_recovery_policy?: E2eeRecoveryPolicy;
   };
 
 export type QueryChannelsAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = APIResponse & {
@@ -420,7 +418,6 @@ export type CreateTopicData = {
   image?: string;
   gate?: boolean;
   mls_enabled?: boolean;
-  e2ee_recovery_policy?: E2eeRecoveryPolicy;
   [key: string]: any;
 };
 
@@ -480,7 +477,6 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     name?: string;
     is_pinned?: boolean;
     mls_enabled?: boolean;
-    e2ee_recovery_policy?: E2eeRecoveryPolicy;
     e2ee_group_id?: string;
     gate?: boolean;
     /** @deprecated Bootstrap commits are merged locally by the creator and ignored by Bellboy. */
