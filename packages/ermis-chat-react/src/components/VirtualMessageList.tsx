@@ -1,37 +1,36 @@
-import React, { useState, useRef, useCallback, useMemo, useEffect, useLayoutEffect } from 'react';
-import { VList as _VList, type VListHandle } from 'virtua';
-
-// Workaround for React 19 JSX element type mismatch with virtua's VList
-const VList = _VList as any;
 import type { MessageLabel } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from '../hooks/useChatClient';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { VList as _VList, type VListHandle } from 'virtua';
+import { canManageChannel, isPendingMember, isSkippedMember } from '../channelRoleUtils';
+import { isDirectChannel, isPublicGroupChannel } from '../channelTypeUtils';
 import { useBannedState } from '../hooks/useBannedState';
 import { useBlockedState } from '../hooks/useBlockedState';
-import { usePendingState } from '../hooks/usePendingState';
-import { useLoadMessages } from '../hooks/useLoadMessages';
-import { useScrollToMessage } from '../hooks/useScrollToMessage';
-import { useChannelMessages } from '../hooks/useChannelMessages';
 import { useChannelProfile } from '../hooks/useChannelData';
+import { useChannelMessages } from '../hooks/useChannelMessages';
+import { useChatClient } from '../hooks/useChatClient';
+import { useLoadMessages } from '../hooks/useLoadMessages';
+import { usePendingState } from '../hooks/usePendingState';
+import { useScrollToMessage } from '../hooks/useScrollToMessage';
+import { isStickerMessage, isUnavailableDisplayMessage } from '../messageTypeUtils';
+import type { MessageListProps } from '../types';
+import { formatDateLabel, getDateKey, getMessageUserId } from '../utils';
 import { Avatar } from './Avatar';
-import { MessageItem } from './MessageItem';
-import { SystemMessageItem } from './MessageItem';
-import { isPublicGroupChannel, isDirectChannel } from '../channelTypeUtils';
-import { canManageChannel, isSkippedMember, isPendingMember } from '../channelRoleUtils';
+import { BannedOverlay } from './BannedOverlay';
+import { ClosedTopicOverlay } from './ClosedTopicOverlay';
+import { MessageItem, SystemMessageItem } from './MessageItem';
 import {
   defaultMessageRenderers,
   type MessageBubbleProps,
 } from './MessageRenderers';
-import { isStickerMessage } from '../messageTypeUtils';
-import { getDateKey, formatDateLabel, getMessageUserId, formatReadTimestamp } from '../utils';
-import { QuotedMessagePreview } from './QuotedMessagePreview';
-import { PinnedMessages } from './PinnedMessages';
-import { ReadReceipts } from './ReadReceipts';
-import { TypingIndicator } from './TypingIndicator';
 import { PendingOverlay } from './PendingOverlay';
+import { PinnedMessages } from './PinnedMessages';
+import { QuotedMessagePreview } from './QuotedMessagePreview';
+import { ReadReceipts } from './ReadReceipts';
 import { SkippedOverlay } from './SkippedOverlay';
-import { BannedOverlay } from './BannedOverlay';
-import { ClosedTopicOverlay } from './ClosedTopicOverlay';
-import type { MessageListProps } from '../types';
+import { TypingIndicator } from './TypingIndicator';
+
+// Workaround for React 19 JSX element type mismatch with virtua's VList
+const VList = _VList as any;
 
 /* ----------------------------------------------------------
    Internal sub-components
@@ -182,6 +181,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   onMentionClick,
   onUserNameClick,
   onAddReactionClick,
+  GapIndicatorComponent,
+  gapIndicatorLabel,
 }) => {
   const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
   const { isBanned } = useBannedState(activeChannel, client.userID);
@@ -390,6 +391,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     }, [setHasMore, setHasNewer]),
     includeHiddenMessages,
     containerRef,
+    vlistRef,
   });
 
   const lastAutoScrollKeyRef = useRef<string | null>(null);
@@ -404,20 +406,15 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     const isOwnLastMessage =
       lastMessage.user_id === currentUserId || lastMessage.user?.id === currentUserId;
     if (!isOwnLastMessage && !isAtBottomRef.current && !isNearBottom()) return;
-    if (!isOwnLastMessage && jumpingRef.current) return;
     if (loadingMoreRef.current || loadingNewerRef.current) return;
 
     lastAutoScrollKeyRef.current = key;
     isAtBottomRef.current = true;
     holdScrollLoadLock(750);
 
+    // Single call — scrollToBottom already retries via rAF (up to 10 times)
+    // if VList hasn't measured its viewport yet.
     scrollToBottom(false);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => scrollToBottom(false));
-    });
-    setTimeout(() => scrollToBottom(false), 80);
-    setTimeout(() => scrollToBottom(false), 180);
-    setTimeout(() => scrollToBottom(false), 360);
   }, [activeChannel?.cid, currentUserId, messages, scrollToBottom, isNearBottom, holdScrollLoadLock]);
 
   const hasOverlay = Boolean(isClosedTopic || isPending || isBanned || isBlocked || isSkipped);
@@ -477,6 +474,21 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       validReaders: Array<{ id: string; name?: string; avatar?: string; last_read?: Date | string }>;
       hasReaders: boolean;
     };
+    // Helpers to find adjacent renderable messages (skipping 'unavailable' placeholders)
+    const getPrevValidMessage = (currentIndex: number) => {
+      for (let i = currentIndex - 1; i >= 0; i--) {
+        if (!isUnavailableDisplayMessage(messages[i])) return messages[i];
+      }
+      return null;
+    };
+
+    const getNextValidMessage = (currentIndex: number) => {
+      for (let i = currentIndex + 1; i < messages.length; i++) {
+        if (!isUnavailableDisplayMessage(messages[i])) return messages[i];
+      }
+      return null;
+    };
+
     const entries: MsgEntry[] = messages.map((message, index) => {
       const isOwnMessage =
         message.user_id === currentUserId || message.user?.id === currentUserId;
@@ -484,8 +496,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         isStickerMessage(message) ? 'sticker' : (message.type || 'regular')
       ) as MessageLabel;
 
-      // Date separator
-      const prevMsg = index > 0 ? messages[index - 1] : null;
+      // Find previous valid message (skip unavailable)
+      const prevMsg = getPrevValidMessage(index);
       const showDateSeparator =
         !prevMsg || getDateKey(message.created_at) !== getDateKey(prevMsg.created_at);
       const prevType = (prevMsg?.type || 'regular') as MessageLabel;
@@ -499,7 +511,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         prevType === 'signal' ||
         getMessageUserId(prevMsg) !== getMessageUserId(message) ||
         prevTimeGap;
-      const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
+      const nextMsg = getNextValidMessage(index);
       const nextType = (nextMsg?.type || 'regular') as MessageLabel;
       const nextShowDateSeparator = nextMsg
         ? getDateKey(nextMsg.created_at) !== getDateKey(message.created_at)
@@ -533,6 +545,29 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         );
       }
 
+      // Gap indicator: detect real msg_seq gaps between adjacent messages
+      if (GapIndicatorComponent && entry.index > 0 && activeChannel) {
+        const prevMsg = messages[entry.index - 1];
+        const currMsg = entry.message;
+        const prevSeq = (prevMsg as any).msg_seq as number | undefined;
+        const currSeq = (currMsg as any).msg_seq as number | undefined;
+        if (prevSeq && currSeq && currSeq - prevSeq > 1) {
+          const isFake = typeof activeChannel.state?.isFakeMessageGap === 'function'
+            ? activeChannel.state.isFakeMessageGap(prevSeq, currSeq)
+            : false;
+          if (!isFake) {
+            elements.push(
+              <div key={`gap-${prevSeq}-${currSeq}`} className="ermis-message-list__gap-indicator">
+                <GapIndicatorComponent
+                  channel={activeChannel}
+                  gapSeqRange={[prevSeq + 1, currSeq - 1]}
+                />
+              </div>
+            );
+          }
+        }
+      }
+
       // Custom renderMessage
       if (renderMessage) {
         elements.push(
@@ -556,6 +591,12 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
             />
           </div>
         );
+        i++;
+        continue;
+      }
+
+      // Unavailable messages — skip rendering entirely (they act only as msg_seq placeholders for gap detection)
+      if (isUnavailableDisplayMessage(entry.message)) {
         i++;
         continue;
       }
@@ -729,6 +770,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     encryptedMessageLabel,
     encryptedMessageFailedLabel,
     encryptedMessageDecryptingLabel,
+    GapIndicatorComponent,
+    activeChannel,
   ]);
 
   if (isBanned || isBlocked) {

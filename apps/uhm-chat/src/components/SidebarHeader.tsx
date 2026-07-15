@@ -1,4 +1,4 @@
-import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut, ArrowLeft, X, KeyRound } from 'lucide-react'
+import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut, ArrowLeft, X, KeyRound, Database } from 'lucide-react'
 import { useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -86,6 +86,55 @@ export function SidebarHeader({
       localStorage.removeItem(STORAGE_KEYS.TOKEN)
       localStorage.removeItem(STORAGE_KEYS.USER_ID)
       localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID)
+      window.location.href = '/login'
+    }
+  }
+
+  const handleClearCache = async () => {
+    if (!window.confirm(t('chat.menu_clear_cache_confirm', 'Are you sure you want to clear all cache data and log out?'))) {
+      return
+    }
+
+    try {
+      if (client?.userID) {
+        // Disconnect to release DB locks
+        await client.disconnectUser()
+
+        // Delete ALL IndexedDB databases for this domain
+        const dbs = await indexedDB.databases()
+        const deletePromises = dbs.map(db => {
+          return new Promise<void>((resolve) => {
+            if (db.name) {
+              const req = indexedDB.deleteDatabase(db.name)
+              req.onsuccess = () => resolve()
+              req.onerror = () => resolve()
+              req.onblocked = () => {
+                console.warn(`Delete database ${db.name} was blocked. Resolving anyway to continue logout.`)
+                resolve()
+              }
+            } else {
+              resolve()
+            }
+          })
+        })
+
+        await Promise.all(deletePromises)
+        console.log(`Successfully deleted all IndexedDB caches`)
+      }
+    } catch (err) {
+      console.error('Clear cache error', err)
+    } finally {
+      // Clear localStorage
+      localStorage.clear()
+
+      // Clear cookies
+      document.cookie.split(';').forEach((c) => {
+        document.cookie = c
+          .replace(/^ +/, '')
+          .replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/')
+      })
+
+      // Redirect to login
       window.location.href = '/login'
     }
   }
@@ -197,25 +246,31 @@ export function SidebarHeader({
                 <KeyRound className="mr-2 h-4 w-4" />
                 <span>{t('recovery_pin.menu_label')}</span>
               </div>
-              <span className={`text-xs ${
-                recovery.recoveryStatus?.unlocked
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-zinc-500 dark:text-zinc-400'
-              }`}>
+              <span className={`text-xs ${recovery.recoveryStatus?.unlocked
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-zinc-500 dark:text-zinc-400'
+                }`}>
                 {recovery.recoveryStatus === null
                   ? t('recovery_pin.menu_checking')
                   : recovery.recoveryStatus.hasVault === false
-                  ? t('recovery_pin.menu_not_set')
-                  : recovery.recoveryStatus.unlocked
-                    ? t('recovery_pin.menu_active')
-                    : t('recovery_pin.menu_locked')}
+                    ? t('recovery_pin.menu_not_set')
+                    : recovery.recoveryStatus.unlocked
+                      ? t('recovery_pin.menu_active')
+                      : t('recovery_pin.menu_locked')}
               </span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
 
+            <DropdownMenuItem className="cursor-pointer text-orange-500 focus:text-orange-500 focus:bg-orange-50 dark:focus:bg-orange-950/50" onClick={handleClearCache}>
+              <Database className="h-4 w-4" />
+              <span>{t('chat.menu_clear_cache', 'Clear Cache & Data')}</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
             <DropdownMenuItem className="cursor-pointer text-red-500 focus:text-red-500 focus:bg-red-50 dark:focus:bg-red-950/50" onClick={handleLogout}>
-              <LogOut className="mr-2 h-4 w-4" />
+              <LogOut className="h-4 w-4" />
               <span>{t('chat.menu_logout', 'Đăng xuất')}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>

@@ -39,12 +39,17 @@
     "server_error": "Server is busy, please try again later."
   },
   "chat": {
+    "loading_messages": "Loading...",
+    "retry_load": "Retry loading messages",
+    "load_missing": "Load {{count}} missing messages",
     "search_channels": "Search...",
     "empty_dropdown": "No functions yet",
     "menu_theme": "Theme",
     "menu_locale": "Language",
     "menu_invites": "Invites",
     "menu_contacts": "Contacts",
+    "menu_clear_cache": "Clear Cache & Data",
+    "menu_clear_cache_confirm": "Are you sure you want to clear all cache data (IndexedDB, LocalStorage, Cookies) and log out?",
     "menu_logout": "Log Out",
     "menu_profile_anonymous": "Anonymous User",
     "create_channel_title": "New Message",
@@ -164,6 +169,7 @@
     "back_home": "Back to Home"
   },
   "app": {
+    "syncing": "Syncing...",
     "connecting": "Connecting to server...",
     "bootstrap_restoring": "Restoring your session...",
     "bootstrap_connecting": "Signing in and preparing your session...",

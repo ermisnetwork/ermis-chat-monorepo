@@ -78,6 +78,7 @@ export default defineConfig({
   server: {
     port: 3001,
     strictPort: true,
+    allowedHosts: ['3001test.ermis.network'],
     watch: {
       // Prevent HMR full-page reloads caused by tsup --watch rebuilding dist/
       ignored: [

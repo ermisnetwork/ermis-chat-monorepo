@@ -39,12 +39,17 @@
     "server_error": "Hệ thống đang bận, vui lòng thử lại sau giây lát."
   },
   "chat": {
+    "loading_messages": "Đang tải...",
+    "retry_load": "Thử lại",
+    "load_missing": "Tải {{count}} tin nhắn bị thiếu",
     "search_channels": "Tìm kiếm...",
     "empty_dropdown": "Chưa có chức năng",
     "menu_theme": "Giao diện",
     "menu_locale": "Ngôn ngữ",
     "menu_invites": "Lời mời",
     "menu_contacts": "Danh bạ",
+    "menu_clear_cache": "Dọn dẹp bộ nhớ đệm",
+    "menu_clear_cache_confirm": "Bạn có chắc chắn muốn xóa toàn bộ bộ nhớ đệm (IndexedDB, LocalStorage, Cookies) và đăng xuất không?",
     "menu_logout": "Đăng xuất",
     "menu_profile_anonymous": "Người dùng ẩn danh",
     "create_channel_title": "Tạo tin nhắn mới",
@@ -164,6 +169,7 @@
     "back_home": "Quay về trang chủ"
   },
   "app": {
+    "syncing": "Đang đồng bộ...",
     "connecting": "Đang kết nối đến máy chủ...",
     "bootstrap_restoring": "Đang khôi phục phiên đăng nhập...",
     "bootstrap_connecting": "Đang đăng nhập và chuẩn bị phiên...",

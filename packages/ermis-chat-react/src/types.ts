@@ -758,6 +758,10 @@ export type MessageListProps = {
   signalMessageTranslations?: SignalMessageTranslations;
   /** Whether to include hidden (deleted) messages in the initial channel query. Defaults to true. */
   includeHiddenMessages?: boolean;
+  /** Custom gap indicator component shown between messages when a real msg_seq gap is detected */
+  GapIndicatorComponent?: React.ComponentType<{ channel: any; gapSeqRange: [number, number] }>;
+  /** I18n Label for the gap indicator "Load N missing messages" button */
+  gapIndicatorLabel?: string | ((count: number) => string);
 };
 
 /* ----------------------------------------------------------

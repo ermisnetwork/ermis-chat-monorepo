@@ -231,6 +231,14 @@ export type ChannelQueryOptions = {
     id_around?: string;
     include_hidden_messages?: boolean;
   };
+  messages_seq?: {
+    seq?: number;
+    anchor_seq?: number;
+    before?: number;
+    after?: number;
+    limit?: number;
+    include_hidden_messages?: boolean;
+  };
 };
 
 export type ChannelStateOptions = {

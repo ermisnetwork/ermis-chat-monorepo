@@ -136,6 +136,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   private _syncInProgress = false;
   /** Promise for the currently running sync, so callers can await the same run. */
   private _syncPromise: Promise<void> | null = null;
+  /** Timestamp of the last successful performSync to throttle redundant bursts. */
+  private _lastSyncCompletedAt = 0;
 
   /**
    * Initializes a new Ermis Chat Client instance.
@@ -563,9 +565,18 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     const encryptionMgr = this.encryptionManager;
     if (encryptionMgr && typeof encryptionMgr.destroy === 'function') {
-      encryptionMgr.destroy();
+      await encryptionMgr.destroy();
       this.encryptionManager = undefined;
     }
+    
+    if (this.messageStorage && typeof this.messageStorage.close === 'function') {
+      await this.messageStorage.close();
+    }
+
+    if (this.userCache && typeof this.userCache.close === 'function') {
+      await this.userCache.close();
+    }
+
     this.deviceId = undefined;
     this.userCache = undefined;
     this.userCacheKey = undefined;
@@ -1683,6 +1694,17 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       }
     });
 
+    // Ensure all channels are instantiated in activeChannels first.
+    // This allows restoreSyncState() to populate lastMsgSeqBeforeChatDeleted
+    // BEFORE hydrateChannels() runs _initializeState() and addMessagesSorted().
+    data.channels.forEach((channelState) => {
+      this.channel(channelState.channel.type, channelState.channel.id);
+    });
+
+    // Restore sync states from IndexedDB into the newly instantiated channels
+    // so that lastMsgSeqBeforeChatDeleted is available for filtering messages below.
+    await this.restoreSyncState();
+
     // Hydrate E2EE messages from local cache BEFORE initializing state.
     // Without this, encrypted API messages overwrite decrypted local messages,
     // causing the UI to show "encrypted message" until the user switches channels.
@@ -1709,8 +1731,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
 
     const { channels, userIds } = this.hydrateChannels(data.channels, stateOptions);
-
-    // if (userIds.length > 0) {
     //   await this.getBatchUsers(userIds);
     // }
 
@@ -1816,7 +1836,15 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * - User info enrichment: messages from sync events are enriched with cached user data.
    * @see intergration-guide.md Section 4.1 (Cold Start) & Section 4.3 (Background→Foreground)
    */
-  async performSync(): Promise<void> {
+  async performSync(force = false): Promise<void> {
+    // Throttle: don't sync if we just synced successfully within the last 2500ms, unless forced
+    if (!force && this._lastSyncCompletedAt && Date.now() - this._lastSyncCompletedAt < 2500) {
+      this.logger('info', 'client:performSync() - Throttled: Sync completed recently, skipping', {
+        tags: ['sync'],
+      });
+      return Promise.resolve();
+    }
+
     // Debounce: if a sync is already running, return the same promise
     if (this._syncInProgress && this._syncPromise) {
       this.logger('info', 'client:performSync() - Sync already in progress, reusing promise', {
@@ -1836,7 +1864,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this._syncPromise = Promise.all([
       this._performSyncInternal(),
       this.encryptionManager?.initialized ? this.encryptionManager.sync() : Promise.resolve(),
-    ]).finally(() => {
+    ]).then(() => {
+      this._lastSyncCompletedAt = Date.now();
+    }).finally(() => {
       this._syncInProgress = false;
       this._syncPromise = null;
     }) as unknown as Promise<void>;
@@ -1859,12 +1889,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
       if (channel.state.lastSyncedEventSeq > 0) {
         cursors[cid] = channel.state.lastSyncedEventSeq;
-      } else if (channel.state.lastSyncedAt) {
-        cursors[cid] = { created_at: channel.state.lastSyncedAt };
-      } else {
-        // First sync — use epoch timestamp
-        cursors[cid] = { created_at: '1970-01-01T00:00:00Z' };
       }
+      // Channels without a saved event_seq are skipped from global sync.
+      // They will get their messages via normal channel query instead.
+      // NEVER use created_at timestamp as a sync cursor.
     }
 
     const totalChannels = Object.keys(cursors).length;
@@ -1952,28 +1980,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         }
       }
 
-      // CID-missing detection (#3): channels in cursors but NOT in response → user removed
-      const responseCids = new Set(
-        Object.keys(response).filter((k) => k !== 'removed_channels'),
-      );
-      for (const requestedCid of Object.keys(cursors)) {
-        if (!responseCids.has(requestedCid)) {
-          const channel = this.activeChannels[requestedCid];
-          if (channel) {
-            this.logger('info', `client:performSync() - Channel ${requestedCid} missing from response, user no longer a member`, {
-              tags: ['sync'],
-            });
-            channel.state.clearMessages();
-            channel.state.resetSyncState();
-            delete this.activeChannels[requestedCid];
-
-            this.dispatchEvent({
-              type: 'channel.deleted',
-              cid: requestedCid,
-            } as Event<ErmisChatGenerics>);
-          }
-        }
-      }
+      // Note: We no longer do CID-missing detection here.
+      // If a channel is in cursors but omitted from the response, it simply means there are no new events.
+      // Channel removals are exclusively handled via the removed_channels payload below.
 
       // Process removed channels (user kicked/left/removed)
       if (response.removed_channels?.events?.length) {

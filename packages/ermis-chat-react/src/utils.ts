@@ -1,5 +1,4 @@
 import React from 'react';
-import type { MentionMember } from './types';
 import type { Attachment, FormatMessageResponse, Channel } from '@ermis-network/ermis-chat-sdk';
 import {
   parseSystemMessage,
@@ -344,8 +343,23 @@ export function getLastMessagePreview(
     signalMessageTranslations?: SignalMessageTranslations;
   },
 ): { text: React.ReactNode; user: string; timestamp?: string | Date } {
-  const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
-  if (!lastMsg) return { text: '', user: '' };
+  // Walk backwards through latestMessages to find the first non-deleted message.
+  // This prevents the channel list from "jumping" when a message is deleted
+  // for everyone, because the preview falls back to the previous real message
+  // instead of flashing "This message was deleted".
+  const messages = channel.state?.latestMessages;
+  if (!messages || messages.length === 0) return { text: '', user: '' };
+
+  let lastMsg: (typeof messages)[number] | undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (!isDeletedDisplayMessage(messages[i])) {
+      lastMsg = messages[i];
+      break;
+    }
+  }
+  // If every message is deleted, fall back to the most recent one so we still
+  // show *something* (the deleted label) rather than a blank row.
+  if (!lastMsg) lastMsg = messages[messages.length - 1];
 
   const timestamp = lastMsg.created_at;
 

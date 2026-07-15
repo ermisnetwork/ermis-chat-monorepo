@@ -50,6 +50,19 @@ export class IndexedDBUserCache<ErmisChatGenerics extends ExtendableGenerics = D
     return this.dbPromise;
   }
 
+  async close(): Promise<void> {
+    if (this.dbPromise) {
+      try {
+        const db = await this.dbPromise;
+        if (db) db.close();
+      } catch (err) {
+        // Ignore errors
+      } finally {
+        this.dbPromise = null;
+      }
+    }
+  }
+
   async saveUsers(users: Array<UserResponse<ErmisChatGenerics>>): Promise<void> {
     const validUsers = users.filter((user) => user?.id);
     if (validUsers.length === 0) return;

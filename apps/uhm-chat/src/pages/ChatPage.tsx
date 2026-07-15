@@ -37,9 +37,12 @@ import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState'
 import { UhmSignalMessage } from '@/features/chat/UhmSignalMessage'
 import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
+import { SyncStatusBanner } from '@/features/chat/SyncStatusBanner'
+import { MessageGapIndicator } from '@/features/chat/MessageGapIndicator'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { useNotification } from '@/hooks/useNotification'
+import { useSyncStatus } from '@/hooks/useSyncStatus'
 import { isSafari } from '@/utils/browser'
 import { toast } from 'sonner'
 
@@ -67,6 +70,33 @@ export function ChatPage() {
   const { status, retryConnection } = useConnectionStatus(client)
   const totalUnreadCount = useTotalUnreadCount()
   useNotification(activeChannel)
+  const syncState = useSyncStatus(client)
+
+  // Event Sourcing: Cold start sync + background→foreground sync
+  useEffect(() => {
+    if (!client) return
+
+    // Cold start: restore persisted sync state then sync (Section 4.1)
+    client.restoreSyncState()
+      .then(() => client.performSync())
+      .catch((err: unknown) => {
+        console.warn('[Sync] Initial sync failed:', err)
+      })
+
+    // Background → Foreground sync (Section 4.3)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        client.performSync().catch((err: unknown) => {
+          console.warn('[Sync] Visibility change sync failed:', err)
+        })
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [client])
 
   // Directly update browser tab title with unread count (more reliable than Helmet)
   useEffect(() => {
@@ -955,6 +985,8 @@ export function ChatPage() {
       <div className="flex-1 flex flex-col relative min-w-0">
         {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
         <ConnectionStatusBanner status={status} onRetry={retryConnection} />
+        {/* Sync Progress Banner — shows during active sync */}
+        <SyncStatusBanner syncState={syncState} />
 
         {e2eeBootstrapRunning && e2eeBootstrapTotal > 0 && (
           <div className="mx-4 mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-[12px] font-semibold text-violet-800 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200">
@@ -1007,6 +1039,7 @@ export function ChatPage() {
             emptyTitle={t('chat.empty_title')}
             emptySubtitle={t('chat.empty_subtitle')}
             jumpToLatestLabel={t('overlays.jumpToLatest')}
+            GapIndicatorComponent={MessageGapIndicator}
             blockedOverlayTitle={t('overlays.blockedTitle')}
             blockedOverlaySubtitle={t('overlays.blockedSubtitle')}
             pendingInviteeLabel={(name) => t('overlays.pendingInviteeLabel', { name })}

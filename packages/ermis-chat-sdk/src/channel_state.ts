@@ -57,6 +57,20 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     messages: Array<ReturnType<ChannelState<ErmisChatGenerics>['formatMessage']>>;
   }[] = [];
   topics?: Channel<ErmisChatGenerics>[] = [];
+
+  // ─── Event Sourcing Sync State ──────────────────────────────────────────────
+  /** The highest event_seq that has been successfully synced for this channel. */
+  lastSyncedEventSeq: number;
+  /** RFC3339 timestamp cursor used for the first sync when no event_seq is available. */
+  lastSyncedAt: string | null;
+  /** Whether the channel has more sync events to fetch. */
+  hasMoreSyncEvents: boolean;
+  /** Set of event_seq values that are hidden (delete-for-me). Used for fake gap detection on WS. */
+  hiddenEventSeqs: Set<number>;
+  /** Set of msg_seq values that are hidden/deleted-for-me. Used for fake gap detection on UI pagination. */
+  hiddenMessageSeqs: Set<number>;
+  /** Lower bound msg_seq for truncated/cleared history. Messages at or below this seq are deleted. */
+  lastMsgSeqBeforeChatDeleted: number | null;
   constructor(channel: Channel<ErmisChatGenerics>) {
     this._channel = channel;
     this.watcher_count = 0;
@@ -70,6 +84,13 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     this.unreadCount = 0;
     this.isUpToDate = true;
     this.last_message_at = channel?.state?.last_message_at != null ? new Date(channel.state.last_message_at) : null;
+    // Event Sourcing Sync State init
+    this.lastSyncedEventSeq = 0;
+    this.lastSyncedAt = null;
+    this.hasMoreSyncEvents = false;
+    this.hiddenEventSeqs = new Set();
+    this.hiddenMessageSeqs = new Set();
+    this.lastMsgSeqBeforeChatDeleted = null;
   }
 
   get messages() {
@@ -143,6 +164,40 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     );
 
     for (let i = 0; i < messagesToAdd.length; i += 1) {
+      const rawMsg = messagesToAdd[i] as any;
+
+      // Filter out messages that were deleted in a clear history / truncate action
+      if (
+        this.lastMsgSeqBeforeChatDeleted !== null &&
+        rawMsg.msg_seq &&
+        rawMsg.msg_seq <= this.lastMsgSeqBeforeChatDeleted
+      ) {
+        continue;
+      }
+
+      // Filter out hidden individual messages
+      if (rawMsg.msg_seq && this.hiddenMessageSeqs.has(rawMsg.msg_seq)) {
+        continue;
+      }
+
+      // Handle display_type from server query responses (Section 5.1)
+      // 'unavailable' messages: don't add to UI state. 
+      // Gap tracking is handled globally by `hiddenMessageSeqs` which is persisted to `sync_state` meta store.
+      if (rawMsg.display_type === 'unavailable') {
+        if (rawMsg.msg_seq && this._channel?.cid) {
+          this.hiddenMessageSeqs.add(rawMsg.msg_seq);
+        }
+        continue; // Don't add to UI state
+      }
+
+      // 'deleted' messages: keep in state with type 'deleted' so the UI can
+      // render "This message was deleted" placeholders. Without this, deleted
+      // messages only survive in React state via the IndexedDB cache overlay
+      // and vanish whenever syncMessages() replaces state from latestMessages.
+      if (rawMsg.display_type === 'deleted') {
+        rawMsg.type = 'deleted';
+      }
+
       // If message is already formatted we can skip the tasks below
       // This will be true for messages that are already present at the state -> this happens when we perform merging of message sets
       // This will be also true for message previews used by some SDKs
@@ -192,6 +247,79 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
           'created_at',
           addIfDoesNotExist,
         );
+      }
+
+      // Persist to IndexedDB for offline access (fire-and-forget).
+      // Only persist non-E2EE messages here; E2EE messages are already
+      // handled by EncryptionManager after decryption.
+      if (
+        this._channel?.cid &&
+        message.id &&
+        !(message as any).content_type?.startsWith?.('mls')
+      ) {
+        const client = this._channel.getClient() as any;
+        const storage = client?.messageStorage || client?.encryptionManager?.storage;
+        if (storage?.saveMessage) {
+          const msgAny = message as any;
+          void storage.saveMessage({
+            id: message.id,
+            cid: this._channel.cid,
+            content_type: 'standard',
+            type: msgAny.type || 'regular',
+            text: msgAny.text || '',
+            created_at: message.created_at instanceof Date
+              ? message.created_at.toISOString()
+              : String(message.created_at || ''),
+            updated_at: message.updated_at instanceof Date
+              ? message.updated_at.toISOString()
+              : msgAny.updated_at || undefined,
+            user_id: msgAny.user?.id || '',
+            user: msgAny.user,
+            attachments: msgAny.attachments,
+            msg_seq: msgAny.msg_seq,
+            last_event_seq: msgAny.last_event_seq,
+            deleted_at: msgAny.deleted_at instanceof Date
+              ? msgAny.deleted_at.toISOString()
+              : msgAny.deleted_at || undefined,
+            parent_id: msgAny.parent_id,
+            quoted_message_id: msgAny.quoted_message_id,
+            reaction_counts: msgAny.reaction_counts,
+            latest_reactions: msgAny.latest_reactions,
+            pinned: msgAny.pinned,
+            pinned_at: msgAny.pinned_at instanceof Date
+              ? msgAny.pinned_at.toISOString()
+              : msgAny.pinned_at || undefined,
+            mentioned_users: msgAny.mentioned_users,
+          }).catch(() => {});
+        }
+      }
+    }
+
+    if (timestampChanged && targetMessageSetIndex !== -1) {
+      const msgs = this.messageSets[targetMessageSetIndex].messages;
+      let maxTime = 0;
+      for (const msg of msgs) {
+        if (msg.status !== 'sending' && msg.created_at) {
+          if (msg.created_at.getTime() > maxTime) {
+            maxTime = msg.created_at.getTime();
+          }
+        }
+      }
+      let changed = false;
+      for (let j = 0; j < msgs.length; j++) {
+        const msg = msgs[j];
+        if (msg.status === 'sending' && msg.created_at) {
+          if (msg.created_at.getTime() <= maxTime) {
+            maxTime += 1;
+            msg.created_at = new Date(maxTime);
+            changed = true;
+          } else {
+            maxTime = msg.created_at.getTime();
+          }
+        }
+      }
+      if (changed) {
+        msgs.sort((a, b) => (a.created_at?.getTime() || 0) - (b.created_at?.getTime() || 0));
       }
     }
 
@@ -390,6 +518,15 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       );
       this.messageSets[messageSetIndex].messages = messages;
       isRemoved = removed;
+    }
+
+    // Also remove from IndexedDB (fire-and-forget)
+    if (isRemoved && messageToRemove.id && this._channel) {
+      const client = this._channel.getClient() as any;
+      const storage = client?.messageStorage || client?.encryptionManager?.storage;
+      if (storage?.deleteMessage) {
+        void storage.deleteMessage(messageToRemove.id).catch(() => {});
+      }
     }
 
     return isRemoved;
@@ -635,5 +772,167 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     }
 
     return { targetMessageSetIndex, messagesToAdd };
+  }
+
+  // ─── Event Sourcing Sync Methods ──────────────────────────────────────────────
+
+  /**
+   * Merge hidden sequences from a sync response into the current state.
+   * Prevents false-positive gap detection for events/messages that were
+   * intentionally hidden (deleted-for-me).
+   * @see intergration-guide.md Section 6.1
+   */
+  mergeHiddenSequences(hiddenEventSeqs: number[], hiddenMessageSeqs: number[]) {
+    hiddenEventSeqs.forEach((seq) => this.hiddenEventSeqs.add(seq));
+    hiddenMessageSeqs.forEach((seq) => this.hiddenMessageSeqs.add(seq));
+  }
+
+  /**
+   * Delete messages whose msg_seq is at or below the given threshold.
+   * Used for truncate/clear-history operations.
+   * @see intergration-guide.md Section 5.5, Rule 1
+   */
+  truncateMessagesBySeq(maxSeq: number) {
+    this.lastMsgSeqBeforeChatDeleted = maxSeq;
+    this.messageSets.forEach((set) => {
+      set.messages = set.messages.filter(
+        (msg) => !(msg as any).msg_seq || (msg as any).msg_seq > maxSeq,
+      );
+    });
+
+    // Also delete from IndexedDB (Section 5.5, Rule 1)
+    if (this._channel?.cid) {
+      const client = this._channel.getClient() as any;
+      const storage = client?.messageStorage || client?.encryptionManager?.storage;
+      if (storage?.deleteMessagesBefore) {
+        void storage.deleteMessagesBefore(this._channel.cid, maxSeq).catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * Remove messages whose msg_seq appears in the given hidden list.
+   * Used for delete-for-me (single-sided deletion).
+   * @see intergration-guide.md Section 5.5, Rule 2
+   */
+  removeHiddenMessages(hiddenMsgSeqs: number[]) {
+    if (hiddenMsgSeqs.length === 0) return;
+    const seqSet = new Set(hiddenMsgSeqs);
+
+    // Collect message IDs to delete from DB before filtering
+    const idsToDelete: string[] = [];
+    this.messageSets.forEach((set) => {
+      set.messages.forEach((msg) => {
+        if ((msg as any).msg_seq && seqSet.has((msg as any).msg_seq) && msg.id) {
+          idsToDelete.push(msg.id);
+        }
+      });
+      set.messages = set.messages.filter(
+        (msg) => !(msg as any).msg_seq || !seqSet.has((msg as any).msg_seq),
+      );
+    });
+
+    // Delete from IndexedDB (Section 5.5, Rule 2)
+    if (idsToDelete.length > 0 && this._channel) {
+      const client = this._channel.getClient() as any;
+      const storage = client?.messageStorage || client?.encryptionManager?.storage;
+      if (storage?.deleteMessage) {
+        for (const id of idsToDelete) {
+          void storage.deleteMessage(id).catch(() => {});
+        }
+      }
+    }
+  }
+
+  /**
+   * Detect whether an incoming WS event_seq represents a real gap, a fake gap,
+   * or a normal sequential event.
+   * @see intergration-guide.md Section 6.2
+   * @returns 'ok' for sequential/duplicate, 'fake_gap' when all missing seqs are hidden, 'real_gap' otherwise
+   */
+  detectEventSeqGap(incomingEventSeq: number): 'ok' | 'fake_gap' | 'real_gap' {
+    const expectedSeq = this.lastSyncedEventSeq + 1;
+
+    // Duplicate or sequential
+    if (incomingEventSeq <= this.lastSyncedEventSeq) {
+      return 'ok';
+    }
+    if (incomingEventSeq === expectedSeq) {
+      return 'ok';
+    }
+
+    // Gap detected: check if all missing seqs are in the hidden set
+    for (let seq = expectedSeq; seq < incomingEventSeq; seq++) {
+      if (!this.hiddenEventSeqs.has(seq)) {
+        return 'real_gap';
+      }
+    }
+    return 'fake_gap';
+  }
+
+  /**
+   * Check if a gap between two adjacent messages' msg_seq values is a fake gap
+   * (i.e. all missing seqs are either hidden or truncated).
+   * @see intergration-guide.md Section 6.3
+   * @returns true if the gap is fake and no backfill is needed
+   */
+  isFakeMessageGap(seqA: number, seqB: number): boolean {
+    for (let seq = seqA + 1; seq < seqB; seq++) {
+      const isHidden = this.hiddenMessageSeqs.has(seq);
+      const isTruncated =
+        this.lastMsgSeqBeforeChatDeleted !== null && seq <= this.lastMsgSeqBeforeChatDeleted;
+      if (!isHidden && !isTruncated) {
+        return false; // Real gap — backfill needed
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Reset all sync-related state. Called when a channel is removed/deleted.
+   */
+  resetSyncState() {
+    this.lastSyncedEventSeq = 0;
+    this.lastSyncedAt = null;
+    this.hasMoreSyncEvents = false;
+    this.hiddenEventSeqs = new Set();
+    this.hiddenMessageSeqs = new Set();
+    this.lastMsgSeqBeforeChatDeleted = null;
+  }
+
+  /**
+   * Memory optimization: prune hidden sequence entries that are too far behind
+   * the current sync cursor. Entries below (lastSyncedEventSeq - buffer) will
+   * never be referenced again for gap detection.
+   * @param buffer Number of recent seqs to keep (default 1000)
+   */
+  cleanupHiddenSequences(buffer = 1000) {
+    const eventThreshold = this.lastSyncedEventSeq - buffer;
+    if (eventThreshold > 0) {
+      for (const seq of this.hiddenEventSeqs) {
+        if (seq < eventThreshold) {
+          this.hiddenEventSeqs.delete(seq);
+        }
+      }
+    }
+
+    // For message seqs, use the lowest msg_seq in the current message list as the threshold
+    const lowestMsgSeq = this.messageSets.reduce((min, set) => {
+      for (const msg of set.messages) {
+        const seq = (msg as any).msg_seq;
+        if (typeof seq === 'number' && (min === 0 || seq < min)) {
+          min = seq;
+        }
+      }
+      return min;
+    }, 0);
+
+    if (lowestMsgSeq > 0) {
+      for (const seq of this.hiddenMessageSeqs) {
+        if (seq < lowestMsgSeq) {
+          this.hiddenMessageSeqs.delete(seq);
+        }
+      }
+    }
   }
 }

@@ -2018,8 +2018,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 status: 'received',
                 pinned_at: null,
                 updated_at: null,
-                // keep the original user in case the event didn't include it fully
-                user: event.message?.user || msg.user,
+                user: { ...msg.user, ...event.message?.user },
                 user_id: (event.message as any)?.user_id || msg.user_id,
               }));
             } else {
@@ -3059,10 +3058,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const isE2ee = this._isEffectiveE2ee();
     const storage = this.getClient().encryptionManager?.storage;
     const messageOptions = options?.messages as any;
-    const isWindowedQuery = Boolean(messageOptions?.id_lt || messageOptions?.id_gt || messageOptions?.id_around);
+    const seqOptions = options?.messages_seq as any;
+    const isWindowedQuery = Boolean(
+      messageOptions?.id_lt || 
+      messageOptions?.id_gt || 
+      messageOptions?.id_around ||
+      seqOptions?.anchor_seq ||
+      seqOptions?.seq
+    );
     if (!isE2ee || !storage || !this.cid || isWindowedQuery) return;
 
-    const limit = typeof messageOptions?.limit === 'number' ? messageOptions.limit : 25;
+    const limit = typeof seqOptions?.limit === 'number' 
+      ? seqOptions.limit 
+      : (typeof messageOptions?.limit === 'number' ? messageOptions.limit : 25);
     storage
       .getMessages(this.cid, limit)
       .then((storedMessages: any[]) => {
@@ -3175,6 +3183,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this.state.addPinnedMessages(state.pinned_messages || []);
 
     const messages = uniqueMessages || [];
+
+    // Extract the highest last_event_seq from the queried messages to seed the sync cursor.
+    // This allows the channel to be included in future global syncs after its initial query.
+    let maxEventSeq = 0;
+    for (const msg of messages) {
+      if (typeof (msg as any).last_event_seq === 'number') {
+        maxEventSeq = Math.max(maxEventSeq, (msg as any).last_event_seq);
+      }
+    }
+    if (maxEventSeq > this.state.lastSyncedEventSeq) {
+      this.state.lastSyncedEventSeq = maxEventSeq;
+    }
+
     if (!this.state.messages) {
       this.state.initMessages();
     }
@@ -3355,29 +3376,90 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           }
           break;
 
+        case 'message.pinned':
+          if (event.message) {
+            event.message.user = event.message.user || (event as any).sender || event.user;
+            channelState.addPinnedMessage(event.message as any);
+            channelState.addMessageSorted(event.message as any, true);
+          }
+          break;
+
+        case 'message.unpinned':
+          if (event.message) {
+            event.message.user = event.message.user || (event as any).sender || event.user;
+            channelState.removePinnedMessage(event.message as any);
+            channelState.addMessageSorted(event.message as any, true);
+          }
+          break;
+
+        case 'channel.updated':
+          if (event.channel) {
+            this.data = {
+              ...this.data,
+              ...event.channel,
+              own_capabilities: event.channel?.own_capabilities ?? this.data?.own_capabilities,
+            };
+          }
+          break;
+
+        case 'member.added':
+        case 'member.updated':
+          if (event.member?.user_id) {
+            event.member.user = event.member.user || (event as any).sender || event.user;
+            channelState.members[event.member.user_id] = event.member;
+
+            if (event.member.user?.id === this._client.user?.id) {
+              channelState.membership = event.member;
+            }
+          }
+          break;
+
+        case 'member.removed': {
+          const removedUserId = event.member?.user_id || event.user?.id;
+          if (removedUserId) {
+            delete channelState.members[removedUserId];
+          }
+          break;
+        }
+
         case 'message.deleted':
         case 'message.deleted_for_me':
           const msgId = event.message?.id || (event as any).message_id;
           if (msgId) {
             const msg = channelState.findMessage(msgId);
             if (msg && ((msg as any).last_event_seq ?? 0) < eventSeq) {
-              channelState.updateMessageById(msgId, (m) => ({
-                ...m,
-                type: 'deleted',
-                updated_at: event.created_at || new Date().toISOString(),
-                deleted_at: event.created_at || new Date().toISOString(),
-                text: '',
-                last_event_seq: eventSeq,
-              }));
+              let updatedMsg: any;
+              channelState.updateMessageById(msgId, (m) => {
+                updatedMsg = {
+                  ...m,
+                  type: 'deleted',
+                  updated_at: event.created_at || new Date().toISOString(),
+                  deleted_at: event.created_at || new Date().toISOString(),
+                  text: '',
+                  last_event_seq: eventSeq,
+                };
+                return updatedMsg;
+              });
 
-              // We ALSO soft delete it in storage!
-              this._client.messageStorage?.saveMessage(this.cid, {
-                id: msgId,
-                type: 'deleted',
-                last_event_seq: eventSeq,
-                channel_id: this.id,
-                channel_type: this.type,
-              } as any);
+              // Soft delete it in storage, preserving the rest of the fields
+              if (updatedMsg && this._client.messageStorage?.saveMessage) {
+                this._client.messageStorage.saveMessage(updatedMsg).catch(() => {});
+              }
+            } else if (!msg && this._client.messageStorage?.loadMessage) {
+              // Message is not in RAM, but we must update it in IndexedDB so it's deleted when user scrolls up
+              this._client.messageStorage.loadMessage(msgId).then((storedMsg: any) => {
+                if (storedMsg && ((storedMsg as any).last_event_seq ?? 0) < eventSeq) {
+                  const updatedMsg = {
+                    ...storedMsg,
+                    type: 'deleted',
+                    updated_at: event.created_at || new Date().toISOString(),
+                    deleted_at: event.created_at || new Date().toISOString(),
+                    text: '',
+                    last_event_seq: eventSeq,
+                  };
+                  this._client.messageStorage?.saveMessage(updatedMsg).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
           break;
@@ -3389,12 +3471,33 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           if (reactMsgId && (event as any).latest_reactions) {
             const msg = channelState.findMessage(reactMsgId);
             if (msg && ((msg as any).last_event_seq ?? 0) < eventSeq) {
-              channelState.updateMessageById(reactMsgId, (m) => ({
-                ...m,
-                latest_reactions: (event as any).latest_reactions as any,
-                reaction_counts: (event as any).reaction_counts as any,
-                last_event_seq: eventSeq,
-              }));
+              let updatedMsg: any;
+              channelState.updateMessageById(reactMsgId, (m) => {
+                updatedMsg = {
+                  ...m,
+                  latest_reactions: (event as any).latest_reactions as any,
+                  reaction_counts: (event as any).reaction_counts as any,
+                  last_event_seq: eventSeq,
+                };
+                return updatedMsg;
+              });
+              
+              if (updatedMsg && this._client.messageStorage?.saveMessage) {
+                this._client.messageStorage.saveMessage(updatedMsg).catch(() => {});
+              }
+            } else if (!msg && this._client.messageStorage?.loadMessage) {
+              // Message not in RAM, update reactions in IndexedDB
+              this._client.messageStorage.loadMessage(reactMsgId).then((storedMsg: any) => {
+                if (storedMsg && ((storedMsg as any).last_event_seq ?? 0) < eventSeq) {
+                  const updatedMsg = {
+                    ...storedMsg,
+                    latest_reactions: (event as any).latest_reactions as any,
+                    reaction_counts: (event as any).reaction_counts as any,
+                    last_event_seq: eventSeq,
+                  };
+                  this._client.messageStorage?.saveMessage(updatedMsg).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
           break;
