@@ -1,55 +1,55 @@
-import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react'
-import type { ErmisChat, Channel } from '@ermis-network/ermis-chat-sdk'
+import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
+import type { ErmisChat, Channel } from '@ermis-network/ermis-chat-sdk';
 
 // ── Types ────────────────────────────────────────────────────────
 
 export interface TopicResult {
-  topic: Channel
-  parentName: string
-  parentImage?: string
+  topic: Channel;
+  parentName: string;
+  parentImage?: string;
 }
 
 export interface UseGlobalSearchReturn {
   // Section 1 — local instant
-  myChannels: Channel[]
+  myChannels: Channel[];
   // Section 2 — local instant
-  topics: TopicResult[]
+  topics: TopicResult[];
   // Section 3 — API debounced
-  publicChannels: any[]
-  isSearchingPublic: boolean
+  publicChannels: any[];
+  isSearchingPublic: boolean;
   // Section 4 — API validation-gated
-  users: any[]
-  isSearchingUsers: boolean
-  userSearchHint: string | null
+  users: any[];
+  isSearchingUsers: boolean;
+  userSearchHint: string | null;
   // Actions
-  selectPublicChannel: (channelData: any) => Promise<Channel>
-  selectOrCreateDM: (targetUserId: string) => Promise<Channel>
+  selectPublicChannel: (channelData: any) => Promise<Channel>;
+  selectOrCreateDM: (targetUserId: string) => Promise<Channel>;
 }
 
 // ── Validation & Normalization helpers ───────────────────────────
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const PHONE_REGEX = /^\+?\d{9,15}$/
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^\+?\d{9,15}$/;
 
 function isValidEmailOrPhone(term: string): boolean {
-  return EMAIL_REGEX.test(term) || PHONE_REGEX.test(term)
+  return EMAIL_REGEX.test(term) || PHONE_REGEX.test(term);
 }
 
 function normalizeSearchText(str: string): string {
-  if (!str) return ''
+  if (!str) return '';
   return str
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D')
-    .toLowerCase()
+    .toLowerCase();
 }
 
 // ── Debounce constants ───────────────────────────────────────────
 
-const PUBLIC_DEBOUNCE_MS = 400
-const PUBLIC_MIN_CHARS = 2
-const USER_DEBOUNCE_MS = 500
+const PUBLIC_DEBOUNCE_MS = 400;
+const PUBLIC_MIN_CHARS = 2;
+const USER_DEBOUNCE_MS = 500;
 
 // ── Hook ─────────────────────────────────────────────────────────
 
@@ -60,214 +60,200 @@ const USER_DEBOUNCE_MS = 500
  * @param client - ErmisChat singleton instance
  * @param searchTerm - Current search input value
  */
-export function useGlobalSearch(
-  client: ErmisChat | null | undefined,
-  searchTerm: string,
-): UseGlobalSearchReturn {
-  const deferredSearchTerm = useDeferredValue(searchTerm)
-  const term = deferredSearchTerm.trim().toLowerCase()
-  const currentUserId = client?.userID
+export function useGlobalSearch(client: ErmisChat | null | undefined, searchTerm: string): UseGlobalSearchReturn {
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const term = deferredSearchTerm.trim().toLowerCase();
+  const currentUserId = client?.userID;
 
   // ── API result states ──────────────────────────────────────────
-  const [publicChannels, setPublicChannels] = useState<any[]>([])
-  const [isSearchingPublic, setIsSearchingPublic] = useState(false)
-  const [users, setUsers] = useState<any[]>([])
-  const [isSearchingUsers, setIsSearchingUsers] = useState(false)
+  const [publicChannels, setPublicChannels] = useState<any[]>([]);
+  const [isSearchingPublic, setIsSearchingPublic] = useState(false);
+  const [users, setUsers] = useState<any[]>([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
 
   // Refs for cleanup
-  const publicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const userTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const publicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Section 1: My Channels (local instant) ─────────────────────
   const myChannels = useMemo(() => {
-    if (!client || !term) return []
-    const normalizedTerm = normalizeSearchText(term)
-    const searchWords = normalizedTerm.split(/\\s+/).filter(Boolean)
+    if (!client || !term) return [];
+    const normalizedTerm = normalizeSearchText(term);
+    const searchWords = normalizedTerm.split(/\\s+/).filter(Boolean);
 
-    const results: Channel[] = []
+    const results: Channel[] = [];
     for (const ch of Object.values(client.activeChannels)) {
-      if (ch.type === 'topic') continue
-      const name = normalizeSearchText((ch.data?.name as string) || '')
-      if (searchWords.every(word => name.includes(word))) {
-        results.push(ch)
-        if (results.length >= 50) break
+      if (ch.type === 'topic') continue;
+      const name = normalizeSearchText((ch.data?.name as string) || '');
+      if (searchWords.every((word) => name.includes(word))) {
+        results.push(ch);
+        if (results.length >= 50) break;
       }
     }
-    return results
-  }, [client, term])
+    return results;
+  }, [client, term]);
 
   // ── Section 2: Topics (local instant) ──────────────────────────
   const topics = useMemo<TopicResult[]>(() => {
-    if (!client || !term) return []
-    const results: TopicResult[] = []
-    const normalizedTerm = normalizeSearchText(term)
-    const searchWords = normalizedTerm.split(/\\s+/).filter(Boolean)
+    if (!client || !term) return [];
+    const results: TopicResult[] = [];
+    const normalizedTerm = normalizeSearchText(term);
+    const searchWords = normalizedTerm.split(/\\s+/).filter(Boolean);
 
     for (const ch of Object.values(client.activeChannels)) {
-      if (
-        ch.type !== 'team' ||
-        !ch.data?.topics_enabled ||
-        !ch.state?.topics ||
-        ch.state.topics.length === 0
-      ) continue
+      if (ch.type !== 'team' || !ch.data?.topics_enabled || !ch.state?.topics || ch.state.topics.length === 0) continue;
 
-      const parentName = (ch.data?.name as string) || ch.cid
-      const parentImage = ch.data?.image as string | undefined
+      const parentName = (ch.data?.name as string) || ch.cid;
+      const parentImage = ch.data?.image as string | undefined;
 
       for (const topic of ch.state.topics as Channel[]) {
-        const topicName = normalizeSearchText((topic.data?.name as string) || '')
-        if (searchWords.every(word => topicName.includes(word))) {
-          results.push({ topic, parentName, parentImage })
-          if (results.length >= 50) break
+        const topicName = normalizeSearchText((topic.data?.name as string) || '');
+        if (searchWords.every((word) => topicName.includes(word))) {
+          results.push({ topic, parentName, parentImage });
+          if (results.length >= 50) break;
         }
       }
-      if (results.length >= 50) break
+      if (results.length >= 50) break;
     }
 
-    return results
-  }, [client, term])
+    return results;
+  }, [client, term]);
 
   // ── Section 3: Public Channels (API debounced) ─────────────────
   useEffect(() => {
     if (publicTimerRef.current) {
-      clearTimeout(publicTimerRef.current)
-      publicTimerRef.current = null
+      clearTimeout(publicTimerRef.current);
+      publicTimerRef.current = null;
     }
 
     if (!client || term.length < PUBLIC_MIN_CHARS) {
-      setPublicChannels([])
-      setIsSearchingPublic(false)
-      return
+      setPublicChannels([]);
+      setIsSearchingPublic(false);
+      return;
     }
 
-    setIsSearchingPublic(true)
-    let cancelled = false
+    setIsSearchingPublic(true);
+    let cancelled = false;
 
     publicTimerRef.current = setTimeout(async () => {
       try {
-        const response = await client.searchPublicChannel(searchTerm.trim())
+        const response = await client.searchPublicChannel(searchTerm.trim());
         if (!cancelled) {
-          const items = (response as any)?.search_result?.channels || (response as any)?.channels || []
-          setPublicChannels(items)
+          const items = (response as any)?.search_result?.channels || (response as any)?.channels || [];
+          setPublicChannels(items);
         }
       } catch (err) {
-        console.error('[useGlobalSearch] Public channel search error:', err)
-        if (!cancelled) setPublicChannels([])
+        console.error('[useGlobalSearch] Public channel search error:', err);
+        if (!cancelled) setPublicChannels([]);
       } finally {
-        if (!cancelled) setIsSearchingPublic(false)
+        if (!cancelled) setIsSearchingPublic(false);
       }
-    }, PUBLIC_DEBOUNCE_MS)
+    }, PUBLIC_DEBOUNCE_MS);
 
     return () => {
-      cancelled = true
+      cancelled = true;
       if (publicTimerRef.current) {
-        clearTimeout(publicTimerRef.current)
-        publicTimerRef.current = null
+        clearTimeout(publicTimerRef.current);
+        publicTimerRef.current = null;
       }
-    }
-  }, [client, term, searchTerm])
+    };
+  }, [client, term, searchTerm]);
 
   // ── Section 4: Users (API validation-gated) ────────────────────
   const userSearchHint = useMemo(() => {
-    if (!term) return null
-    if (isValidEmailOrPhone(searchTerm.trim())) return null
-    return 'search.user_hint' // i18n key
-  }, [term, searchTerm])
+    if (!term) return null;
+    if (isValidEmailOrPhone(searchTerm.trim())) return null;
+    return 'search.user_hint'; // i18n key
+  }, [term, searchTerm]);
 
   useEffect(() => {
     if (userTimerRef.current) {
-      clearTimeout(userTimerRef.current)
-      userTimerRef.current = null
+      clearTimeout(userTimerRef.current);
+      userTimerRef.current = null;
     }
 
-    const rawTerm = searchTerm.trim()
+    const rawTerm = searchTerm.trim();
     if (!client || !rawTerm || !isValidEmailOrPhone(rawTerm)) {
-      setUsers([])
-      setIsSearchingUsers(false)
-      return
+      setUsers([]);
+      setIsSearchingUsers(false);
+      return;
     }
 
-    setIsSearchingUsers(true)
-    let cancelled = false
+    setIsSearchingUsers(true);
+    let cancelled = false;
 
     userTimerRef.current = setTimeout(async () => {
       try {
-        const response = await client.searchUsers(1, 25, rawTerm)
+        const response = await client.searchUsers(rawTerm, 25);
         if (!cancelled) {
           // Filter out current user from results
-          const filtered = (response?.data || []).filter(
-            (u: any) => u.id !== currentUserId,
-          )
-          setUsers(filtered)
+          const filtered = (response?.data || []).filter((u: any) => u.id !== currentUserId);
+          setUsers(filtered);
         }
       } catch (err) {
-        console.error('[useGlobalSearch] User search error:', err)
-        if (!cancelled) setUsers([])
+        console.error('[useGlobalSearch] User search error:', err);
+        if (!cancelled) setUsers([]);
       } finally {
-        if (!cancelled) setIsSearchingUsers(false)
+        if (!cancelled) setIsSearchingUsers(false);
       }
-    }, USER_DEBOUNCE_MS)
+    }, USER_DEBOUNCE_MS);
 
     return () => {
-      cancelled = true
+      cancelled = true;
       if (userTimerRef.current) {
-        clearTimeout(userTimerRef.current)
-        userTimerRef.current = null
+        clearTimeout(userTimerRef.current);
+        userTimerRef.current = null;
       }
-    }
-  }, [client, searchTerm, currentUserId])
+    };
+  }, [client, searchTerm, currentUserId]);
 
   // ── Actions ────────────────────────────────────────────────────
 
   const selectPublicChannel = useCallback(
     async (channelData: any): Promise<Channel> => {
-      if (!client) throw new Error('Client not available')
+      if (!client) throw new Error('Client not available');
 
-      const cid = channelData.cid
+      const cid = channelData.cid;
       if (client.activeChannels[cid]) {
-        return client.activeChannels[cid]
+        return client.activeChannels[cid];
       }
 
       // Channel ID in Ermis SDK is the part after the first colon in the CID
-      const type = channelData.type || 'team'
-      const id = cid.substring(cid.indexOf(':') + 1)
+      const type = channelData.type || 'team';
+      const id = cid.substring(cid.indexOf(':') + 1);
 
-      const channel = client.channel(type, id)
-      await channel.watch()
-      return channel
+      const channel = client.channel(type, id);
+      await channel.watch();
+      return channel;
     },
     [client],
-  )
+  );
 
   const selectOrCreateDM = useCallback(
     async (targetUserId: string): Promise<Channel> => {
-      if (!client || !currentUserId) throw new Error('Client not available')
+      if (!client || !currentUserId) throw new Error('Client not available');
 
       // 1. Check existing DM in activeChannels
       const existing = Object.values(client.activeChannels).find((ch) => {
-        if (ch.type !== 'messaging' || !ch.state?.members) return false
-        const memberIds = Object.keys(ch.state.members)
-        return (
-          memberIds.length === 2 &&
-          memberIds.includes(currentUserId) &&
-          memberIds.includes(targetUserId)
-        )
-      })
-      if (existing) return existing
+        if (ch.type !== 'messaging' || !ch.state?.members) return false;
+        const memberIds = Object.keys(ch.state.members);
+        return memberIds.length === 2 && memberIds.includes(currentUserId) && memberIds.includes(targetUserId);
+      });
+      if (existing) return existing;
 
       // 2. Create new DM (same pattern as CreateChannelModal)
       let dm = client.channel('messaging', {
         members: [currentUserId, targetUserId],
-      } as any)
-      const response = (await dm.create()) as any
+      } as any);
+      const response = (await dm.create()) as any;
       if (response?.channel?.id) {
-        dm = client.channel('messaging', response.channel.id)
-        await dm.watch()
+        dm = client.channel('messaging', response.channel.id);
+        await dm.watch();
       }
-      return dm
+      return dm;
     },
     [client, currentUserId],
-  )
+  );
 
   return {
     myChannels,
@@ -279,5 +265,5 @@ export function useGlobalSearch(
     userSearchHint,
     selectPublicChannel,
     selectOrCreateDM,
-  }
+  };
 }

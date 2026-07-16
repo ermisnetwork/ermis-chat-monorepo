@@ -3,6 +3,7 @@ import type { MessageReactionsProps } from '../types';
 
 import { useChatClient } from '../hooks/useChatClient';
 import { createPortal } from 'react-dom';
+import { getUserDisplayName } from '../utils';
 
 const defaultReactionEmojiMap: Record<string, string> = {
   like: '👍',
@@ -75,7 +76,10 @@ export const MessageReactions: React.FC<MessageReactionsProps> = React.memo(({
         // Find users who reacted with this type for the tooltip
         const rawUserNames = latestReactions
           ?.filter((r) => r.type === type)
-          .map((r: any) => r.user?.name || r.user?.id || r.user_id || 'Someone');
+          .map((r: any) =>
+            getUserDisplayName(r.user, r.user?.id || r.user_id, client?.state?.users?.[r.user?.id || r.user_id]) ||
+            'Someone',
+          );
         
         const userNames = Array.from(new Set(rawUserNames || []))
           .map((n: any) => typeof n === 'string' ? n.replace(/&lrm;|\u200E/gi, '').trim() : n)

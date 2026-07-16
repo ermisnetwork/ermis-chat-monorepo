@@ -202,6 +202,10 @@ export type UserResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultG
     project_id?: string;
     email?: string;
     phone?: string;
+    display_name?: string | null;
+    avatar_url?: string | null;
+    status?: string;
+    services?: string[];
   };
 export type Contact = {
   project_id: string;
@@ -238,6 +242,20 @@ export type ChannelStateOptions = {
   skipInitialization?: string[];
 };
 
+export type RefreshTokenProvider = () => string | null | undefined | Promise<string | null | undefined>;
+export type RefreshTokenInput = string | null | undefined | RefreshTokenProvider;
+export type EndUserApiMode = 'legacy' | 'v1';
+export type ConnectUserOptions = {
+  externalAuth?: boolean;
+  refreshToken?: RefreshTokenInput;
+};
+export type TokenRefreshResult = APIResponse & {
+  token: string;
+  access_token?: string;
+  refresh_token?: string;
+  user_id?: string;
+};
+
 export type ErmisChatOptions = AxiosRequestConfig & {
   /**
    * Used to disable warnings that are triggered by using connectUser or connectAnonymousUser server-side.
@@ -245,11 +263,26 @@ export type ErmisChatOptions = AxiosRequestConfig & {
   allowServerSideConnect?: boolean;
   axiosRequestConfig?: AxiosRequestConfig;
   /**
-   * Base url for User BE API (uss/v1). Defaults to baseURL + '/uss/v1' if not provided.
+   * Base URL for ermis_end_user API. Root host, /v1, and /uss/v1 inputs normalize to /uss/v1.
    */
   userBaseURL?: string;
   browser?: boolean;
   enableInsights?: boolean;
+  /**
+   * Set to true for single-tenant self-hosted Bellboy deployments. In this mode apiKey and projectId
+   * are optional client configuration values and tenant scope is resolved from the user's JWT/license.
+   */
+  selfHosted?: boolean;
+  /** Selects the end-user API contract independently from the deployment mode. */
+  endUserApiMode?: EndUserApiMode;
+  /**
+   * Refresh token, or a function returning the latest refresh token. Used when the access token expires.
+   */
+  refreshToken?: RefreshTokenInput;
+  /**
+   * Called after the SDK refreshes an expired access token. Persist the returned tokens here.
+   */
+  onTokenRefresh?: (tokens: TokenRefreshResult) => void | Promise<void>;
   /** experimental feature, please contact support if you want this feature enabled for you */
   logger?: LoggerOption;
   /**
@@ -273,6 +306,36 @@ export type ErmisChatOptions = AxiosRequestConfig & {
   };
 };
 
+export type ErmisChatCloudConfig = ErmisChatOptions & {
+  apiKey: string;
+  projectId: string;
+  baseURL: string;
+  selfHosted?: false;
+};
+
+export type ErmisChatSelfHostedConfig = ErmisChatOptions & {
+  baseURL: string;
+  selfHosted: true;
+  apiKey?: string;
+  projectId?: string;
+};
+
+export type ErmisChatConfig = ErmisChatCloudConfig | ErmisChatSelfHostedConfig;
+
+export type ErmisAuthProviderCloudConfig = ErmisChatOptions & {
+  apiKey: string;
+  baseURL: string;
+  selfHosted?: false;
+};
+
+export type ErmisAuthProviderSelfHostedConfig = ErmisChatOptions & {
+  baseURL: string;
+  selfHosted: true;
+  apiKey?: string;
+};
+
+export type ErmisAuthProviderConfig = ErmisAuthProviderCloudConfig | ErmisAuthProviderSelfHostedConfig;
+
 /**
  * Event Types
  */
@@ -293,8 +356,13 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   online?: boolean;
   parent_id?: string;
   parent_cid?: string;
+  project_id?: string;
+  reason?: string;
   reaction?: ReactionResponse<ErmisChatGenerics>;
   received_at?: string | Date;
+  refresh_token?: string;
+  status?: number;
+  token?: string;
   unread_messages?: number;
   user?: UserResponse<ErmisChatGenerics>;
   user_id?: string;

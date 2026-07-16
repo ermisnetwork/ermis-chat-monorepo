@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
 import { useChatClient } from './useChatClient';
+import { getUserDisplayName } from '../utils';
 
 export type TypingUser = {
   id: string;
@@ -44,7 +45,7 @@ export function useTypingIndicator() {
       if (!userId || userId === currentUserId) return;
 
       typingMapRef.current.set(userId, {
-        user: { id: userId, name: event.user?.name },
+        user: { id: userId, name: getUserDisplayName(event.user, userId, client?.state?.users?.[userId]) },
         timestamp: Date.now(),
       });
       syncState();

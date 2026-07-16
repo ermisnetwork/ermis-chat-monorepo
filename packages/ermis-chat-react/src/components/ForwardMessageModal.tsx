@@ -6,6 +6,7 @@ import { useChatComponents } from '../context/ChatComponentsContext';
 import type { ForwardMessageModalProps, ForwardChannelItemProps } from '../types';
 import { isTopicChannel } from '../channelTypeUtils';
 import { useForwardMessage } from '../hooks/useForwardMessage';
+import { getMessageUserId, getUserDisplayName } from '../utils';
 
 export type { ForwardMessageModalProps, ForwardChannelItemProps } from '../types';
 
@@ -104,13 +105,16 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   
   if (previewText && message.mentioned_users && message.mentioned_users.length > 0) {
     message.mentioned_users.forEach((userId) => {
-      const name = client.state.users[userId]?.name || userId;
+      const name = getUserDisplayName(client.state.users[userId], userId);
       previewText = previewText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
     });
   }
 
   previewText = previewText.length > 120 ? previewText.slice(0, 120) + '…' : previewText;
   const attachmentCount = message.attachments?.length ?? 0;
+  const senderId = getMessageUserId(message);
+  const senderName =
+    getUserDisplayName(message.user, senderId, senderId ? client.state.users[senderId] : undefined) || 'Unknown';
 
   const footer = (
     <>
@@ -132,7 +136,7 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
       {/* Message preview */}
       <div className="ermis-forward-modal__preview">
         <div className="ermis-forward-modal__preview-sender">
-          {message.user?.name || message.user_id || 'Unknown'}
+          {senderName}
         </div>
         {previewText && (
           <div className="ermis-forward-modal__preview-text">{previewText}</div>

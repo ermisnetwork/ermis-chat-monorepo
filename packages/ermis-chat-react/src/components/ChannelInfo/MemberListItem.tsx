@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Dropdown } from '../Dropdown';
 import type { ChannelInfoMemberItemProps } from '../../types';
 import { CHANNEL_ROLES } from '../../channelRoleUtils';
+import { getUserDisplayName } from '../../utils';
 
 export const MemberListItem = React.memo(({
   member, AvatarComponent, 
@@ -17,12 +18,13 @@ export const MemberListItem = React.memo(({
   if (!member) return null;
   const role = member.channel_role || CHANNEL_ROLES.MEMBER;
   const hasActions = canRemove || canBan || canUnban || canPromote || canDemote;
+  const displayName = getUserDisplayName(member.user, member.user?.id || member.user_id);
 
   return (
     <div className="ermis-channel-info__member-item">
-      <AvatarComponent image={member.user?.avatar} name={member.user?.name || member.user?.id} size={36} />
+      <AvatarComponent image={member.user?.avatar} name={displayName} size={36} />
       <div className="ermis-channel-info__member-info">
-        <span className="ermis-channel-info__member-name">{member.user?.name || member.user?.id}</span>
+        <span className="ermis-channel-info__member-name">{displayName}</span>
         <span className={`ermis-channel-info__member-role ermis-channel-info__member-role--${role.toLowerCase()}`}>
           {role.charAt(0).toUpperCase() + role.slice(1)}
         </span>

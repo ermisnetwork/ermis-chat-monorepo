@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useTranslation } from 'react-i18next'
-import { useChatClient, useChatUser, useInviteCount, useContactCount, Avatar, useRecoveryPin } from '@ermis-network/ermis-chat-react'
+import { useChatClient, useChatUser, useInviteCount, useContactCount, Avatar, useRecoveryPin, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import { useUIStore } from '@/store/useUIStore'
 import { STORAGE_KEYS } from '@/utils/constants'
 import { ProfileModal } from '@/features/settings/ProfileModal'
@@ -38,6 +38,7 @@ export function SidebarHeader({
   const { t, i18n } = useTranslation()
   const { client, theme, setTheme, clearAllDrafts } = useChatClient()
   const { user } = useChatUser()
+  const userDisplayName = getUserDisplayName(user, user?.id)
   const { inviteCount } = useInviteCount()
   const { contactCount } = useContactCount()
   const { openCreateChannelModal } = useUIStore()
@@ -84,6 +85,7 @@ export function SidebarHeader({
       console.error('Logout error', err)
     } finally {
       localStorage.removeItem(STORAGE_KEYS.TOKEN)
+      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
       localStorage.removeItem(STORAGE_KEYS.USER_ID)
       localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID)
       window.location.href = '/login'
@@ -126,12 +128,12 @@ export function SidebarHeader({
             >
               <Avatar
                 image={user?.avatar}
-                name={user?.name || user?.id}
+                name={userDisplayName}
                 size={32}
               />
               <div className="flex flex-col overflow-hidden">
                 <span className="font-medium text-sm truncate">
-                  {user?.name || user?.id || t('chat.menu_profile_anonymous', 'Anonymous')}
+                  {userDisplayName || t('chat.menu_profile_anonymous', 'Anonymous')}
                 </span>
                 <span
                   className="text-[10px] text-zinc-500 truncate"

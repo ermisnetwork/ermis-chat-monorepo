@@ -4,160 +4,128 @@ sidebar_position: 3
 
 # The Client (ErmisChat)
 
-The `ErmisChat` class is the main entry point to the Core SDK. It manages instances, authentication, global web-socket connections, and HTTP REST logic.
+`ErmisChat` is the Core SDK entry point for WebSocket connection, channels, authenticated chat REST calls, and targeted end-user profile calls.
 
 ## Instantiation
-
-You should initialize the client as a global singleton via the `getInstance` factory.
 
 ```typescript
 import { ErmisChat } from '@ermis-network/ermis-chat-sdk';
 
-const chatClient = ErmisChat.getInstance(
-  'YOUR_API_KEY',
-  'YOUR_PROJECT_ID',
-  'https://api.your-baseURL.com', // Base URL for the Chat API
-  {
-    recoverStateOnReconnect: true,
-    logger: (level, message, extraData) => {
-      console.log(`[${level}]`, message, extraData);
-    },
-    // Allows setting a custom userBaseURL if your auth server is hosted elsewhere
-    // userBaseURL: 'https://auth.your-baseURL.com'
+const chatClient = ErmisChat.getInstance({
+  baseURL: 'https://chat.example.com',
+  userBaseURL: 'https://users.example.com/uss/v1',
+  selfHosted: true,
+  endUserApiMode: 'v1',
+  refreshToken: () => localStorage.getItem('refresh_token'),
+  onTokenRefresh: ({ token, refresh_token }) => {
+    localStorage.setItem('token', token);
+    if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
   },
-);
+  logger: (level, message, extraData) => {
+    console.log(`[${level}]`, message, extraData);
+  },
+});
 ```
+
+In both modes, `userBaseURL` may be a root host, `/v1`, or `/uss/v1`; the SDK normalizes it to `/uss/v1`.
 
 ### `ErmisChatOptions` Reference
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `recoverStateOnReconnect` | `boolean` | `true` | Re-fetch channel state after a WebSocket reconnection. |
-| `logger` | `(level, msg, data) => void` | no-op | Custom logging callback. `level` is `'info'` or `'error'`. |
-| `userBaseURL` | `string` | same as base URL | Separate auth server URL (for split API/auth deployments). |
-| `browser` | `boolean` | auto-detected | Force browser mode (enables EventSource, disables Node features). |
-| `warmUp` | `boolean` | `false` | Immediately open health-check connection on init. |
-| `withCredentials` | `boolean` | `false` | Set `withCredentials` on HTTP requests (for cookie-based auth). |
-| `httpsAgent` | `https.Agent` | — | Custom HTTPS agent (Node.js server-side only). |
-| `allowServerSideConnect` | `boolean` | `false` | Allow `connectUser` in a server (non-browser) environment. |
-| `wsConnection` | `StableWSConnection` | — | Inject a custom WebSocket connection instance. |
-
-:::tip
-Most applications only need `recoverStateOnReconnect` and `logger`. The other options are for advanced deployment scenarios like server-side rendering or split infrastructure.
-:::
+| Option                    | Type                         | Default              | Description                                                            |
+| ------------------------- | ---------------------------- | -------------------- | ---------------------------------------------------------------------- |
+| `recoverStateOnReconnect` | `boolean`                    | `true`               | Re-fetch channel state after a WebSocket reconnection.                 |
+| `logger`                  | `(level, msg, data) => void` | no-op                | Custom SDK logging callback.                                           |
+| `userBaseURL`             | `string`                     | normalized `baseURL` | End-user v1 auth/profile API URL.                                      |
+| `selfHosted`              | `boolean`                    | `false`              | Allows omitted API key/project ID for self-hosted Bellboy deployments. |
+| `endUserApiMode`          | `'legacy' \| 'v1'`           | `legacy`             | Selects the end-user API contract without probing the backend.         |
+| `refreshToken`            | `string` or function         | -                    | Refresh token, or provider returning the latest refresh token.         |
+| `onTokenRefresh`          | `(tokens) => void`           | -                    | Called after SDK refreshes access token; persist rotated tokens here.  |
+| `browser`                 | `boolean`                    | auto-detected        | Force browser mode.                                                    |
+| `warmUp`                  | `boolean`                    | `false`              | Immediately open health-check connection on init.                      |
+| `withCredentials`         | `boolean`                    | `false`              | Set `withCredentials` on HTTP requests.                                |
+| `httpsAgent`              | `https.Agent`                | -                    | Custom HTTPS agent for Node.js.                                        |
+| `allowServerSideConnect`  | `boolean`                    | `false`              | Allow `connectUser` outside the browser.                               |
+| `wsConnection`            | `StableWSConnection`         | -                    | Inject a custom WebSocket connection instance.                         |
 
 ## Connection
 
-Before creating channels or sending messages, you need to connect the user to establishing a WebSocket tunnel.
-
 ### `connectUser`
 
-Connects the user via JWT or using an external auth provider.
+Connect the user with a JWT/access token. The third argument is a single options object in SDK `2.1.0`.
 
 ```typescript
-const user = {
-  id: 'user-123',
-  name: 'Jane Doe',
-  avatar: 'https://bit.ly/dan-abramov',
-};
-
-// Standard JWT connection
-await chatClient.connectUser(user, 'USER_JWT_TOKEN');
+await chatClient.connectUser({ id: 'user-123', name: 'Jane Doe' }, 'ACCESS_TOKEN');
 ```
 
-#### External Authentication
-
-If your application relies on an external authentication system, you can set the `external_auth` flag to `true`. This instructs the SDK to exchange your external token for an Sub2s token by calling the `{userBaseURL}/get_token/external_auth` endpoint behind the scenes.
+If the auth response includes a `refresh_token`, pass it through the client option above or the connection options:
 
 ```typescript
-// Connect with external authentication
-// The SDK fetches an internal token from `userBaseURL` utilizing the external token as a Bearer authorization header.
-await chatClient.connectUser(user, 'EXTERNAL_OAUTH_TOKEN', true);
+await chatClient.connectUser({ id: user_id }, access_token, {
+  refreshToken: refresh_token,
+});
 ```
 
-> **Note**: When using `external_auth`, the `id` you provide in the `user` object acts as an initial reference but will be overwritten globally by the `user_id` returned from the external authentication server response.
+`connectUser()` opens the chat WebSocket, hydrates local user cache from IndexedDB in browsers, and asynchronously refreshes the current user's full profile with `queryUser(me)`. It does not open profile SSE and does not preload the full user list.
 
-> **Note**: Avoid calling `connectUser` multiple times without disconnecting first.
+Authenticated HTTP requests automatically refresh once on 401/token-expired responses and retry the original request. WebSocket reconnect refreshes before rebuilding the URL when the server reports an expired token.
+
+### External Authentication
+
+Legacy mode supports `connectUser(user, externalToken, { externalAuth: true })`. This is unsupported in v1; a trusted backend should call `/uss/v1/auth/external`, then the browser calls:
+
+```typescript
+await chatClient.connectUser({ id: user_id }, access_token);
+```
 
 ### `disconnectUser`
-
-Closes the websocket connection, tears down channel listener references, and clears the client state.
 
 ```typescript
 await chatClient.disconnectUser();
 ```
 
-
-## Event Listening
-
-The client exposes an `EventEmitter` interface to listen for global events (like connection drops, new invitations, or member additions).
-
-```typescript
-// Subscribe to a specific event
-const listener = chatClient.on('connection.recovered', (event) => {
-  console.log('Connection recovered!', event);
-});
-
-// Subscribe to all events
-chatClient.on('all', (event) => {
-  console.log(`SDK Event Fired: ${event.type}`);
-});
-
-// Remove listener
-listener.unsubscribe();
-// Alternatively:
-chatClient.off('connection.recovered', listenerFunction);
-```
-
-## Downloading Media
-
-The client exposes `downloadMedia` for fetching uploaded files as a `Blob`. This bypasses CORS restrictions and browser caching issues.
-
-```typescript
-const blob = await chatClient.downloadMedia('https://cdn.ermis.network/attachments/image123.png');
-
-// Save the file in the browser
-const url = URL.createObjectURL(blob);
-const a = document.createElement('a');
-a.href = url;
-a.download = 'image123.png';
-a.click();
-URL.revokeObjectURL(url);
-```
+Closes the WebSocket, clears active channel references, clears the in-memory client state, and resets the token manager.
 
 ## User Management
 
-### `queryUsers`
-
-Fetches a paginated list of all users in the project.
+### `queryUser`
 
 ```typescript
-const response = await chatClient.queryUsers(25, 1); // page_size, page
-console.log(response.data); // UserResponse[]
+const user = await chatClient.queryUser('user-123');
 ```
+
+Delegates to the selected adapter. V1 calls `GET /users/:id` and normalizes `display_name -> name` and `avatar_url -> avatar`; legacy keeps its existing project-scoped lookup contract.
+
+### `getBatchUsers`
+
+```typescript
+const users = await chatClient.getBatchUsers(['user-1', 'user-2']);
+```
+
+Delegates to the selected adapter. V1 calls `POST /users/batch` with `{ user_ids }`, removes duplicate IDs, and chunks requests at 100 IDs.
 
 ### `searchUsers`
 
-Search users by name with pagination.
-
 ```typescript
-const response = await chatClient.searchUsers(1, 25, 'Jane');
-console.log(response.data); // matching users
+const response = await chatClient.searchUsers('Jane', 25);
 ```
 
-### `updateProfile`
+The preferred overload is `searchUsers(query, limit)`. Both public overloads are normalized to one internal request; the selected adapter maps it to its contract. V1 caps `limit` at 100.
 
-Update the authenticated user's profile (name, avatar, etc.).
+### Unsupported Listing APIs
 
-```typescript
-await chatClient.updateProfile({ name: 'New Name' });
-```
+In v1 mode, `queryUsers()` and `syncUserCache()` throw `UnsupportedEndUserFeatureError` because unrestricted listing is unavailable. Legacy mode retains these APIs. Cache namespaces include `endUserApiMode`, preventing legacy/v1 data from being reused across modes.
 
-### `uploadAvatar`
-
-Upload a new profile picture for the current user.
+## Profile Updates
 
 ```typescript
-const fileInput = document.querySelector('input[type="file"]');
+await chatClient.updateProfile({ name: 'New Name', avatar: 'https://cdn.example.com/me.png' });
 await chatClient.uploadAvatar(fileInput.files[0]);
 ```
+
+`updateProfile()` calls `PATCH /users/me` and maps `name -> display_name`, `avatar -> avatar_url`. `about_me` is unsupported in v1 and throws.
+
+`uploadAvatar()` calls `POST /users/me/avatar` and normalizes the returned full user profile.
+
+## Profile SSE
+
+`connectToSSE()` is unsupported in v1. Profile cache updates happen through `queryUser`, `getBatchUsers`, `searchUsers`, message/member enrichment, `updateProfile`, and `uploadAvatar`.

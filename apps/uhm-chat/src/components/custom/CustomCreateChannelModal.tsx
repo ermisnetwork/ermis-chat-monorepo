@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { CreateChannelModal } from '@ermis-network/ermis-chat-react'
+import { CreateChannelModal, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -35,6 +35,7 @@ const CustomUserItemComponent = ({ user, selected, disabled, mode, onToggle, Ava
   }
 
   const detail = user.email || user.phone || ''
+  const displayName = getUserDisplayName(user, user.id)
 
   return (
     <div
@@ -47,10 +48,10 @@ const CustomUserItemComponent = ({ user, selected, disabled, mode, onToggle, Ava
         {selected && <Check className="w-3.5 h-3.5" strokeWidth={3} />}
       </div>
 
-      <AvatarComponent image={user.avatar} name={user.name || user.id} size={36} />
+      <AvatarComponent image={user.avatar} name={displayName} size={36} />
 
       <div className="flex flex-col overflow-hidden">
-        <span className="text-sm font-medium truncate text-zinc-900 dark:text-zinc-100">{user.name || user.id}</span>
+        <span className="text-sm font-medium truncate text-zinc-900 dark:text-zinc-100">{displayName}</span>
         {detail && <span className="text-xs truncate text-zinc-500 dark:text-zinc-400">{detail}</span>}
       </div>
     </div>
@@ -78,20 +79,23 @@ const CustomSelectedBoxComponent = ({ users, onRemove, AvatarComponent }: any) =
 
   return (
     <div className="flex flex-wrap gap-2 mb-4 p-2 bg-zinc-50 dark:bg-[#211f30]/50 rounded-lg border border-zinc-200 dark:border-[#3a3555] min-h-[48px] max-h-[120px] overflow-y-auto">
-      {users.map((u: any) => (
+      {users.map((u: any) => {
+        const displayName = getUserDisplayName(u, u.id)
+        return (
         <div key={u.id} className="flex items-center gap-1.5 bg-white dark:bg-[#2a2640] border border-zinc-200 dark:border-[#3a3555] rounded-full pl-1 pr-2 py-1 shadow-sm">
-          <AvatarComponent image={u.avatar} name={u.name || u.id} size={20} />
-          <span className="text-xs font-medium truncate max-w-[100px]">{u.name || u.id}</span>
+          <AvatarComponent image={u.avatar} name={displayName} size={20} />
+          <span className="text-xs font-medium truncate max-w-[100px]">{displayName}</span>
           <button
             type="button"
             className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-700 p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-primary"
             onClick={() => onRemove(u.id)}
-            title={`Remove ${u.name || u.id}`}
+            title={`Remove ${displayName}`}
           >
             <X className="w-3 h-3" />
           </button>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

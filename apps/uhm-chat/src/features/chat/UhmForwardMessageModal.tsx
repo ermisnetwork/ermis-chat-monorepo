@@ -17,6 +17,8 @@ import {
   isVideo,
   useForwardMessage,
   useChatClient,
+  getMessageUserId,
+  getUserDisplayName,
 } from '@ermis-network/ermis-chat-react'
 import type { ForwardMessageModalProps } from '@ermis-network/ermis-chat-react'
 
@@ -45,7 +47,7 @@ export function UhmForwardMessageModal({
   if (previewText && message.mentioned_users && message.mentioned_users.length > 0) {
     message.mentioned_users.forEach((userId) => {
       // In UI, we can try to find from client.state.users
-      const name = client.state.users[userId]?.name || userId;
+      const name = getUserDisplayName(client.state.users[userId], userId);
       previewText = previewText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
     });
   }
@@ -55,6 +57,8 @@ export function UhmForwardMessageModal({
   const firstImage = message.attachments?.find(isImage)
   const firstVideo = message.attachments?.find(isVideo)
   const previewImageUrl = stickerUrl || firstImage?.image_url || firstImage?.thumb_url || firstVideo?.thumb_url
+  const senderId = getMessageUserId(message)
+  const senderName = getUserDisplayName(message.user, senderId, senderId ? client.state.users[senderId] : undefined)
 
   return (
     <Dialog open onOpenChange={(open) => !open && onDismiss()}>
@@ -93,7 +97,7 @@ export function UhmForwardMessageModal({
             )}
             <div className="flex flex-col gap-1 flex-1 min-w-0">
               <span className="text-[11px] font-bold uppercase tracking-wider text-primary/70 truncate">
-                {message.user?.name || message.user_id}
+                {senderName}
               </span>
               {previewText ? (
                 <p className="text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2 leading-relaxed">

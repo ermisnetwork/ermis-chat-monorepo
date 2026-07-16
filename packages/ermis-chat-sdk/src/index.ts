@@ -10,6 +10,7 @@ export * from './ermis_call_node';
 export * from './auth';
 export * from './encryption';
 export * from './user_cache';
+export * from './end_user';
 export { chatCodes, logChatPromiseExecution, formatMessage, createForwardMessagePayload } from './utils';
 export { parseSystemMessage } from './system_message';
 export type { SystemMessageTranslations } from './system_message';

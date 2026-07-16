@@ -12,7 +12,7 @@ import {
   ShieldPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useChatClient, useRecoveryPin } from '@ermis-network/ermis-chat-react';
+import { useChatClient, useRecoveryPin, getUserDisplayName } from '@ermis-network/ermis-chat-react';
 import type { RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -69,9 +69,7 @@ const activeChannelName = (
 
   const members = channel?.state?.members ? Object.values(channel.state.members) : [];
   const otherMember = members.find((member) => typeof member.user?.id === 'string' && member.user.id !== currentUserId);
-  const otherName = [otherMember?.user?.name, otherMember?.user?.email, otherMember?.user?.id].find(
-    (value): value is string => typeof value === 'string' && value.trim().length > 0,
-  );
+  const otherName = getUserDisplayName(otherMember?.user, otherMember?.user?.id || (otherMember as any)?.user_id);
   if (otherName) return otherName.trim();
 
   return record.channel_id || record.cid;

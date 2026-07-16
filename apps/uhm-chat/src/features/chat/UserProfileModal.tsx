@@ -31,6 +31,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     }
   };
 
+  const getDisplayName = (user: any, fallbackId: string, fallbackUser?: any) => {
+    const localName = typeof user?.name === 'string' ? user.name.trim() : '';
+    if (localName && localName !== fallbackId) return localName;
+    const globalName = typeof fallbackUser?.name === 'string' ? fallbackUser.name.trim() : '';
+    if (globalName && globalName !== fallbackId) return globalName;
+    return user?.email || fallbackUser?.email || user?.phone || fallbackUser?.phone || fallbackId;
+  };
+
   // Look up user info from current channel members, or from all known channels
   const userInfo = useMemo(() => {
     if (!userId || !client) return null;
@@ -43,7 +51,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       if (member?.user) {
         return {
           id: userId,
-          name: member.user.name || userId,
+          name: getDisplayName(member.user, userId, globalUser),
           avatar: member.user.avatar,
           role: member.channel_role,
           online: member.user.online,
@@ -61,7 +69,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       if (member?.user) {
         return {
           id: userId,
-          name: member.user.name || userId,
+          name: getDisplayName(member.user, userId, globalUser),
           avatar: member.user.avatar,
           role: member.channel_role,
           online: member.user.online,
@@ -75,7 +83,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     // 3. Fallback
     return {
       id: userId,
-      name: globalUser?.name || userId,
+      name: getDisplayName(globalUser, userId),
       avatar: globalUser?.avatar,
       role: undefined,
       online: globalUser?.online,

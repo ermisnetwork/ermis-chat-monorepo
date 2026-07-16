@@ -4,76 +4,91 @@ sidebar_position: 2
 
 # Authentication
 
-If your application uses the default Ermis backend for user management or requires initial authentication flows independent of an existing application server, you can use the `ErmisAuthProvider`.
-
-## Instantiating Auth Provider
+`ErmisAuthProvider` supports legacy USS and End User v1 through the explicit `endUserApiMode` option. If omitted, it defaults to `legacy` for both self-host and cloud deployments.
 
 ```typescript
 import { ErmisAuthProvider } from '@ermis-network/ermis-chat-sdk';
 
-const authProvider = new ErmisAuthProvider('YOUR_API_KEY', 'https://api.baseURL.com');
+const authProvider = new ErmisAuthProvider({
+  baseURL: 'https://api.example.com/uss/v1',
+  selfHosted: true,
+  endUserApiMode: 'v1',
+});
 ```
 
 ## Passwordless OTP Login
-You can facilitate OTP logins through SMS, Voice, or Email methods.
+
+OTP supports SMS, Voice, and Email. The SDK keeps the public method names as `Sms`, `Voice`, and `Email`, then sends lowercase v1 request methods.
 
 ```typescript
-// 1. Send OTP via phone
-await authProvider.sendOtpToPhone('+1234567890', 'Sms'); // You can also pass 'Voice'
-
-// Or send OTP via email
+await authProvider.sendOtpToPhone('+1234567890', 'Sms');
 await authProvider.sendOtpToEmail('user@example.com');
 
-// 2. Have the user input the OTP
 const response = await authProvider.verifyOtp('123456');
 
 if (response.success) {
-    // Navigate to chat interface...
-    // Note: Use response.token to connect to client via client.connectUser()
+  await chatClient.connectUser({ id: response.user_id }, response.token, {
+    refreshToken: response.refresh_token,
+  });
 }
 ```
 
-## Google Integration
+V1 routes used by the provider:
+
+| Method | Route               | Body                                                           |
+| ------ | ------------------- | -------------------------------------------------------------- |
+| `POST` | `/auth/otp/request` | `{ identifier, method: 'sms' \| 'voice' \| 'email', language: 'vi' }` |
+| `POST` | `/auth/otp/verify`  | `{ identifier, otp }`                                          |
+
+The v1 response is adapted for older callers: `success` is set to `true`, `token` aliases `access_token`, and `user_id` is available at top level when returned or recoverable from the JWT payload.
+
+## Google Login
+
 ```typescript
-// Google OAuth Flow
 const response = await authProvider.loginWithGoogle('google-oauth-token');
 
 if (response.success) {
-   // Use response.token
+  await chatClient.connectUser({ id: response.user_id }, response.token);
 }
+```
+
+The provider calls `POST /auth/google` with `{ token }`.
+
+## External Authentication
+
+Client-side external authentication is available only in legacy mode through `connectUser(user, token, { externalAuth: true })`. In v1, exchange external identity from a trusted backend by calling `/uss/v1/auth/external`, then pass the returned `access_token` to the client:
+
+```typescript
+const { user_id, access_token } = await yourBackend.exchangeExternalToken(appToken);
+await chatClient.connectUser({ id: user_id }, access_token);
 ```
 
 ## Token Refresh
 
-When a user's JWT token expires, you can obtain a new one without requiring re-authentication using the refresh token returned from the initial login.
+`ErmisChat` can refresh automatically when authenticated HTTP calls return 401/token-expired responses. Configure a refresh token provider and persistence callback:
 
 ```typescript
-// The refresh_token is provided alongside the JWT during login
-const newTokenResponse = await chatClient.refreshNewToken('REFRESH_TOKEN');
+const chatClient = ErmisChat.getInstance({
+  baseURL,
+  selfHosted: true,
+  endUserApiMode: 'v1',
+  refreshToken: () => localStorage.getItem('refresh_token'),
+  onTokenRefresh: ({ token, refresh_token }) => {
+    localStorage.setItem('token', token);
+    if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
+  },
+});
 ```
 
-:::caution
-If you receive API error codes `40`–`43` (token expired / invalid), you **must** call `refreshNewToken` before retrying any failed requests. Simple retries will not resolve authentication errors. See [Error Handling](./error-handling.md) for the full error code reference.
-:::
+The SDK refreshes and retries an authenticated HTTP request once on 401, 403, or `TOKEN_EXPIRED`. WebSocket close `4001`/`JWT Expire` uses the same in-flight refresh, rebuilds the URL, reconnects, and recovers state.
 
-### Recommended Pattern
+Use `refreshNewToken(refresh_token)` for manual refresh. It calls `/refresh_token` in legacy mode or `/auth/refresh` in v1 without Bearer auth.
 
 ```typescript
-let token = initialToken;
-let refreshToken = initialRefreshToken;
-
-async function ensureValidToken() {
-  try {
-    await chatClient.connectUser(user, token);
-  } catch (err) {
-    if (err.code >= 40 && err.code <= 43) {
-      const response = await chatClient.refreshNewToken(refreshToken);
-      token = response.token;
-      refreshToken = response.refresh_token;
-      await chatClient.connectUser(user, token);
-    } else {
-      throw err;
-    }
-  }
-}
+const refreshed = await chatClient.refreshNewToken('REFRESH_TOKEN');
+await chatClient.connectUser({ id: refreshed.user_id }, refreshed.token);
 ```
+
+## Unsupported v1 Auth Flows
+
+Wallet and client-side external authentication are not exposed by v1. These calls throw `UnsupportedEndUserFeatureError` with code `END_USER_FEATURE_UNSUPPORTED` before SDK state changes or network requests.

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useCallContext } from '@ermis-network/ermis-chat-react'
+import { useCallContext, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import { CallStatus } from '@ermis-network/ermis-chat-sdk'
 import { toast } from 'sonner'
 import i18n from '../../i18n'
@@ -19,7 +19,7 @@ export function SafariCallGuard() {
   useEffect(() => {
     // Show a local-only toast when an incoming call is detected
     if (isIncoming && callStatus === CallStatus.RINGING) {
-      const callerName = callerInfo?.name || callerInfo?.id || ''
+      const callerName = getUserDisplayName(callerInfo, callerInfo?.id)
 
       toast.info(
         i18n.t('safari_call.incoming_rejected', {
@@ -29,7 +29,7 @@ export function SafariCallGuard() {
         { duration: 6000 }
       )
     }
-  }, [callStatus, isIncoming])
+  }, [callStatus, callerInfo, isIncoming])
 
   // Render nothing — no call UI on Safari
   return null
