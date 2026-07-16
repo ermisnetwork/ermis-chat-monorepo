@@ -629,13 +629,51 @@ export function ChatPage() {
     </Tooltip.Provider>
   )
 
+  const handleCallWithDeviceCheck = async (type: 'audio' | 'video', onClick: () => void) => {
+    try {
+      const isLinux = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
+      if (isLinux) {
+        alert(t('call.linux_coming_soon', 'Coming soon: Calls are not yet supported on Linux.'));
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        toast.error(t('call.unsupported', 'Your browser does not support media devices.'));
+        return;
+      }
+
+      // Try to acquire the media first to verify devices actually exist and permissions are granted
+      const constraints = type === 'video' ? { video: true, audio: true } : { audio: true };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      // Stop the tracks immediately, we just wanted to check availability
+      stream.getTracks().forEach(track => track.stop());
+
+      // If successful, proceed with the actual call
+      onClick();
+    } catch (error: any) {
+      console.error('Failed to check media devices:', error);
+      if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        if (type === 'video') {
+          toast.error(t('call.no_cam_mic', 'No camera or microphone found. Cannot start video call.'));
+        } else {
+          toast.error(t('call.no_mic', 'No microphone found.'));
+        }
+      } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        toast.error(t('call.permission_denied', 'Permission to access camera/microphone was denied.'));
+      } else {
+        toast.error(t('call.device_error', 'Could not access media devices.'));
+      }
+    }
+  };
+
   /** Audio call button injected into ChannelHeader */
   const renderAudioCallButton = useCallback(
     (onClick: () => void, disabled?: boolean) => {
       const btn = (
         <button
           className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
-          onClick={isSafari ? undefined : onClick}
+          onClick={isSafari ? undefined : () => handleCallWithDeviceCheck('audio', onClick)}
           disabled={isSafari || disabled}
           title={isSafari ? undefined : t('actions.audio_call', 'Audio Call')}
         >
@@ -653,7 +691,7 @@ export function ChatPage() {
       const btn = (
         <button
           className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
-          onClick={isSafari ? undefined : onClick}
+          onClick={isSafari ? undefined : () => handleCallWithDeviceCheck('video', onClick)}
           disabled={isSafari || disabled}
           title={isSafari ? undefined : t('actions.video_call', 'Video Call')}
         >

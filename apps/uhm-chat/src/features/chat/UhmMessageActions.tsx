@@ -44,6 +44,11 @@ export function UhmMessageActions({
 }: UhmMessageActionsProps) {
   const { t } = useTranslation();
   const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel, syncMessages } = useChatClient();
+  
+  if (message.type === 'signal') {
+    return null;
+  }
+
   const actions = useMessageActions(message, isOwnMessage);
   const canCancelPendingE2eeSend =
     isOwnMessage &&
@@ -172,140 +177,149 @@ export function UhmMessageActions({
 
   return (
     <>
-      <div className={`ermis-message-list__actions`}>
-        {/* Reply */}
-        {actions.canReply && (
-          <button
-            type="button"
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 hover:shadow-sm dark:hover:text-purple-400 dark:hover:bg-purple-500/15 transition-all duration-200 ease-out active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
-            onClick={handleReply}
-            title={t('message_actions.reply', 'Reply')}
-            disabled={!actions.hasCapReply}
-          >
-            <MessageSquareQuote className="w-[15px] h-[15px]" />
-          </button>
-        )}
+      <div className={`ermis-message-list__actions !bg-transparent !border-none !shadow-none !p-0 !gap-4 ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
+        
+        {/* Action Buttons Wrapper (mimicking the original .ermis-message-list__actions style) */}
+        <div className="flex items-center gap-0.5 bg-white dark:bg-[#202022] border border-zinc-200 dark:border-zinc-800 rounded-md p-0.5 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
+          {/* Reply */}
+          {actions.canReply && (
+            <button
+              type="button"
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 hover:shadow-sm dark:hover:text-purple-400 dark:hover:bg-purple-500/15 transition-all duration-200 ease-out active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
+              onClick={handleReply}
+              title={t('message_actions.reply', 'Reply')}
+              disabled={!actions.hasCapReply}
+            >
+              <MessageSquareQuote className="w-[15px] h-[15px]" />
+            </button>
+          )}
 
-        {/* Reaction */}
-        <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!actions.hasCapReact} />
+          {/* Reaction */}
+          <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!actions.hasCapReact} />
 
-        {/* Forward */}
-        {actions.canForward && (
-          <button
-            type="button"
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 hover:shadow-sm dark:hover:text-purple-400 dark:hover:bg-purple-500/15 transition-all duration-200 ease-out active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
-            onClick={handleForward}
-            title={t('message_actions.forward', 'Forward')}
-            disabled={!actions.hasCapQuote}
-          >
-            <Forward className="w-[15px] h-[15px]" />
-          </button>
-        )}
+          {/* Forward */}
+          {actions.canForward && (
+            <button
+              type="button"
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 hover:shadow-sm dark:hover:text-purple-400 dark:hover:bg-purple-500/15 transition-all duration-200 ease-out active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
+              onClick={handleForward}
+              title={t('message_actions.forward', 'Forward')}
+              disabled={!actions.hasCapQuote}
+            >
+              <Forward className="w-[15px] h-[15px]" />
+            </button>
+          )}
 
-        {/* More Actions Dropdown */}
-        {hasDropdownActions && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="inline-flex !bg-none items-center justify-center w-7 h-7 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 hover:shadow-sm dark:hover:text-purple-400 dark:hover:bg-purple-500/15 transition-all duration-200 ease-out active:scale-90"
-                title={t('message_actions.more', 'More')}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreHorizontal className="w-[15px] h-[15px]" />
-              </button>
-            </DropdownMenuTrigger>
-
-            <DropdownMenuContent align={isOwnMessage ? 'end' : 'start'} sideOffset={6} className="min-w-[180px] p-1">
-              {/* Cancel pending local E2EE send */}
-              {canCancelPendingE2eeSend && (
-                <DropdownMenuItem
-                  className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/30 transition-colors"
-                  onClick={handleCancelPendingSend}
+          {/* More Actions Dropdown */}
+          {hasDropdownActions && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex !bg-none items-center justify-center w-7 h-7 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 hover:shadow-sm dark:hover:text-purple-400 dark:hover:bg-purple-500/15 transition-all duration-200 ease-out active:scale-90"
+                  title={t('message_actions.more', 'More')}
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <XCircle className="w-4 h-4" />
-                  <span>{t('message_actions.cancel_send', 'Cancel send')}</span>
-                </DropdownMenuItem>
-              )}
+                  <MoreHorizontal className="w-[15px] h-[15px]" />
+                </button>
+              </DropdownMenuTrigger>
 
-              {canCancelPendingE2eeSend &&
-                (actions.canPin ||
-                  actions.canEdit ||
-                  actions.canCopy ||
-                  actions.canDelete ||
-                  actions.canDeleteForMe) && <DropdownMenuSeparator className="my-1" />}
+              <DropdownMenuContent align={isOwnMessage ? 'end' : 'start'} sideOffset={6} className="min-w-[180px] p-1">
+                {/* Cancel pending local E2EE send */}
+                {canCancelPendingE2eeSend && (
+                  <DropdownMenuItem
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/30 transition-colors"
+                    onClick={handleCancelPendingSend}
+                  >
+                    <XCircle className="w-4 h-4" />
+                    <span>{t('message_actions.cancel_send', 'Cancel send')}</span>
+                  </DropdownMenuItem>
+                )}
 
-              {/* Pin */}
-              {actions.canPin && (
-                <DropdownMenuItem
-                  className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer transition-colors"
-                  onClick={handlePinToggle}
-                  disabled={!actions.hasCapPin}
-                >
-                  {actions.isPinned ? (
-                    <PinOff className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
-                  ) : (
-                    <Pin className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
-                  )}
-                  <span>
-                    {actions.isPinned ? t('message_actions.unpin', 'Unpin') : t('message_actions.pin', 'Pin')}
-                  </span>
-                </DropdownMenuItem>
-              )}
+                {canCancelPendingE2eeSend &&
+                  (actions.canPin ||
+                    actions.canEdit ||
+                    actions.canCopy ||
+                    actions.canDelete ||
+                    actions.canDeleteForMe) && <DropdownMenuSeparator className="my-1" />}
 
-              {/* Edit */}
-              {actions.canEdit && (
-                <DropdownMenuItem
-                  className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer transition-colors"
-                  onClick={handleEdit}
-                  disabled={!actions.hasCapEdit}
-                >
-                  <Pencil className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
-                  <span>{t('message_actions.edit', 'Edit')}</span>
-                </DropdownMenuItem>
-              )}
+                {/* Pin */}
+                {actions.canPin && (
+                  <DropdownMenuItem
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer transition-colors"
+                    onClick={handlePinToggle}
+                    disabled={!actions.hasCapPin}
+                  >
+                    {actions.isPinned ? (
+                      <PinOff className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
+                    ) : (
+                      <Pin className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
+                    )}
+                    <span>
+                      {actions.isPinned ? t('message_actions.unpin', 'Unpin') : t('message_actions.pin', 'Pin')}
+                    </span>
+                  </DropdownMenuItem>
+                )}
 
-              {/* Copy */}
-              {actions.canCopy && (
-                <DropdownMenuItem
-                  className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer transition-colors"
-                  onClick={handleCopy}
-                >
-                  <Copy className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
-                  <span>{t('message_actions.copy', 'Copy')}</span>
-                </DropdownMenuItem>
-              )}
+                {/* Edit */}
+                {actions.canEdit && (
+                  <DropdownMenuItem
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer transition-colors"
+                    onClick={handleEdit}
+                    disabled={!actions.hasCapEdit}
+                  >
+                    <Pencil className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
+                    <span>{t('message_actions.edit', 'Edit')}</span>
+                  </DropdownMenuItem>
+                )}
 
-              {/* Separator before danger */}
-              {(actions.canPin || actions.canEdit || actions.canCopy) &&
-                (actions.canDelete || actions.canDeleteForMe) && <DropdownMenuSeparator className="my-1" />}
+                {/* Copy */}
+                {actions.canCopy && (
+                  <DropdownMenuItem
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer transition-colors"
+                    onClick={handleCopy}
+                  >
+                    <Copy className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
+                    <span>{t('message_actions.copy', 'Copy')}</span>
+                  </DropdownMenuItem>
+                )}
 
-              {/* Delete for me */}
-              {actions.canDeleteForMe && (
-                <DropdownMenuItem
-                  className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/30 transition-colors"
-                  onClick={handleDeleteForMe}
-                  disabled={!actions.hasCapDeleteForMe}
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>{t('message_actions.delete_for_me', 'Delete for me')}</span>
-                </DropdownMenuItem>
-              )}
+                {/* Separator before danger */}
+                {(actions.canPin || actions.canEdit || actions.canCopy) &&
+                  (actions.canDelete || actions.canDeleteForMe) && <DropdownMenuSeparator className="my-1" />}
 
-              {/* Delete for everyone */}
-              {actions.canDelete && (
-                <DropdownMenuItem
-                  className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/30 transition-colors"
-                  onClick={handleDeleteForEveryone}
-                  disabled={!actions.hasCapDelete}
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>{t('message_actions.delete_for_everyone', 'Delete for everyone')}</span>
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+                {/* Delete for me */}
+                {actions.canDeleteForMe && (
+                  <DropdownMenuItem
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/30 transition-colors"
+                    onClick={handleDeleteForMe}
+                    disabled={!actions.hasCapDeleteForMe}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>{t('message_actions.delete_for_me', 'Delete for me')}</span>
+                  </DropdownMenuItem>
+                )}
+
+                {/* Delete for everyone */}
+                {actions.canDelete && (
+                  <DropdownMenuItem
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/30 transition-colors"
+                    onClick={handleDeleteForEveryone}
+                    disabled={!actions.hasCapDelete}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>{t('message_actions.delete_for_everyone', 'Delete for everyone')}</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+
+        {/* Timestamp */}
+        <span className="text-[12px] text-zinc-400 font-medium select-none whitespace-nowrap">
+          {new Date(message.created_at || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
       </div>
 
       {/* Delete confirmation dialog */}
