@@ -21,6 +21,7 @@ interface LoginPageProps {
 function createAuthProvider() {
   return API_DEFAULTS.SELF_HOSTED
     ? new ErmisAuthProvider({
+        apiKey: API_DEFAULTS.API_KEY,
         baseURL: API_DEFAULTS.BASE_URL,
         ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
         selfHosted: true,

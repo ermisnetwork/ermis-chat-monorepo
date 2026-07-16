@@ -155,6 +155,18 @@ function BootstrapScreen({
 let lastToastTime = 0;
 const TOAST_THROTTLE_MS = 3000;
 
+// Intercept requests to fix duplicate query params from SDK
+chatClient.axiosInstance.interceptors.request.use((config) => {
+  if (config.url && config.url.includes('/users/batch?page=1&page_size=10000')) {
+    // Remove the redundant params from axios config to avoid duplication
+    if (config.params) {
+      delete config.params.page;
+      delete config.params.page_size;
+    }
+  }
+  return config;
+});
+
 chatClient.axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
