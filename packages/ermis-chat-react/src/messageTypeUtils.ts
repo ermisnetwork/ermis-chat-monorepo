@@ -80,6 +80,7 @@ export function isAudio(attachment: any): boolean {
 export const MESSAGE_DISPLAY_TYPES = {
   NORMAL: 'normal',
   DELETED: 'deleted',
+  UNAVAILABLE: 'unavailable',
 } as const;
 
 export type MessageDisplayType = (typeof MESSAGE_DISPLAY_TYPES)[keyof typeof MESSAGE_DISPLAY_TYPES] | string;
@@ -87,4 +88,9 @@ export type MessageDisplayType = (typeof MESSAGE_DISPLAY_TYPES)[keyof typeof MES
 /** Check if a message was deleted for current user (display_type === 'deleted') */
 export function isDeletedDisplayMessage(message: any): boolean {
   return message?.display_type === MESSAGE_DISPLAY_TYPES.DELETED;
+}
+
+/** Check if a message was completely deleted/withdrawn (display_type === 'unavailable') */
+export function isUnavailableDisplayMessage(message: any): boolean {
+  return message?.display_type === MESSAGE_DISPLAY_TYPES.UNAVAILABLE;
 }

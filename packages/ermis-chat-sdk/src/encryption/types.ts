@@ -6,14 +6,14 @@
  * `@ermis-network/ermis-chat-sdk/encryption` without coupling to internals.
  */
 
-import type { APIResponse, E2eeRecoveryPolicy } from '../types';
+import type { APIResponse, E2eeRecoveryPolicy, SyncStateRecord } from '../types';
 import type { E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
 
 // ============================================================
 // Storage Adapter Interface
 // ============================================================
 
-export interface E2eeStoredMessage {
+export interface StoredMessage {
   // Core identity
   id: string;
   cid: string;
@@ -51,6 +51,16 @@ export interface E2eeStoredMessage {
   pinned_at?: string;
   reaction_counts?: Record<string, number>;
   latest_reactions?: unknown[];
+
+  // Event Sourcing (offline pagination & sync)
+  /** Message position in channel (only increments on new messages) */
+  msg_seq?: number;
+  /** Last event_seq that affected this message (for idempotency) */
+  last_event_seq?: number;
+  /** Soft-delete timestamp */
+  deleted_at?: string;
+  /** Display classification from server query */
+  display_type?: 'normal' | 'deleted' | 'unavailable';
 
   // Catch-all for future fields
   [key: string]: unknown;
@@ -257,13 +267,21 @@ export interface EncryptionStorageAdapter {
   saveIdentity(userId: string, deviceId: string, identityBytes: Uint8Array): Promise<void>;
   loadIdentity(userId: string, deviceId: string): Promise<Uint8Array | null>;
 
-  // ---- E2EE Messages ----
-  saveE2eeMessage(message: E2eeStoredMessage): Promise<void>;
-  loadE2eeMessage(messageId: string): Promise<E2eeStoredMessage | null>;
-  loadE2eeMessages?(messageIds: string[]): Promise<Map<string, E2eeStoredMessage>>;
-  deleteE2eeMessage(messageId: string): Promise<void>;
-  getE2eeMessages(cid: string, limit?: number): Promise<E2eeStoredMessage[]>;
-  clearE2eeMessages(cid: string): Promise<void>;
+  // ---- Messages ----
+  saveMessage(message: StoredMessage): Promise<void>;
+  loadMessage(messageId: string): Promise<StoredMessage | null>;
+  loadMessages?(messageIds: string[]): Promise<Map<string, StoredMessage>>;
+  deleteMessage(messageId: string): Promise<void>;
+  deleteMessagesBefore(cid: string, seqThreshold: number): Promise<void>;
+  getMessages(cid: string, limit?: number): Promise<StoredMessage[]>;
+  clearMessages(cid: string): Promise<void>;
+
+  // ---- Sync State (Offline-First Event Sourcing) ----
+  saveSyncStateBatch(records: SyncStateRecord[]): Promise<void>;
+  loadSyncState(cid: string): Promise<SyncStateRecord | null>;
+  loadAllSyncStates(): Promise<SyncStateRecord[]>;
+  deleteSyncState(cid: string): Promise<void>;
+  clearAllSyncState(): Promise<void>;
 
   // ---- Pending E2EE Sends ----
   savePendingE2eeSend(record: PendingE2eeSendRecord): Promise<void>;
@@ -271,11 +289,11 @@ export interface EncryptionStorageAdapter {
   listPendingE2eeSends(statuses?: string[]): Promise<PendingE2eeSendRecord[]>;
   deletePendingE2eeSend(messageId: string): Promise<void>;
 
-  // ---- E2EE Message Search ----
-  /** Search all E2EE messages across all channels by text content. */
-  searchE2eeMessages(searchTerm: string, limit?: number): Promise<E2eeStoredMessage[]>;
-  /** Search E2EE messages within a specific channel by text content. */
-  searchE2eeMessagesByCid(cid: string, searchTerm: string, limit?: number): Promise<E2eeStoredMessage[]>;
+  // ---- Message Search ----
+  /** Search all messages across all channels by text content. */
+  searchMessages(searchTerm: string, limit?: number): Promise<StoredMessage[]>;
+  /** Search messages within a specific channel by text content. */
+  searchMessagesByCid(cid: string, searchTerm: string, limit?: number): Promise<StoredMessage[]>;
 
   // ---- Group State ----
   saveGroupState(cid: string, marker: unknown): Promise<void>;
@@ -1122,7 +1140,7 @@ export interface DecryptResult {
 }
 
 export interface WaterfallResult {
-  decrypted: E2eeStoredMessage[];
+  decrypted: StoredMessage[];
   buffered: unknown[];
 }
 

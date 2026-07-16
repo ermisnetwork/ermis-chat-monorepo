@@ -235,6 +235,14 @@ export type ChannelQueryOptions = {
     id_around?: string;
     include_hidden_messages?: boolean;
   };
+  messages_seq?: {
+    seq?: number;
+    anchor_seq?: number;
+    before?: number;
+    after?: number;
+    limit?: number;
+    include_hidden_messages?: boolean;
+  };
 };
 
 export type ChannelStateOptions = {
@@ -729,4 +737,68 @@ export enum FRAME_TYPE {
   REQUEST_KEY_FRAME = 9,
   END_CALL = 10,
   HEALTH_CALL = 11,
+}
+
+export type ChannelSyncParams = {
+  since_seq?: number;
+  since?: string;
+  limit?: number;
+};
+
+export type EventSyncResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
+  events: Event<ErmisChatGenerics>[];
+  has_more: boolean;
+  next_cursor?: string | { created_at: string; event_id?: string };
+  hidden_message_seqs?: number[];
+  hidden_event_seqs?: number[];
+  last_msg_seq_before_chat_deleted?: number | null;
+};
+
+export type GlobalSyncRequest = {
+  project_id?: string;
+  cursors: Record<string, number | { created_at: string; event_id?: string }>;
+  removed_cursor?: {
+    removed_at: string;
+    event_id: string;
+  };
+  limit?: number;
+};
+
+export type RemovedChannelEvent = {
+  event_id: string;
+  cid: string;
+  channel_id: string;
+  channel_type: string;
+  parent_cid?: string | null;
+  removed_at: string;
+  removal_type?: string;
+};
+
+export type GlobalSyncResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = 
+  Record<string, EventSyncResponse<ErmisChatGenerics>> & {
+    removed_channels?: {
+      events: RemovedChannelEvent[];
+      next_cursor?: { removed_at: string; event_id: string };
+    };
+  };
+
+export type ChannelQuerySeqOptions = {
+  messages_seq?: {
+    seq?: number;
+    anchor_seq?: number;
+    before?: number;
+    after?: number;
+    limit?: number;
+  };
+};
+
+export interface SyncStateRecord {
+  cid: string;
+  lastSyncedEventSeq: number;
+  lastSyncedAt: string | null;
+  hiddenEventSeqs: number[];
+  hiddenMessageSeqs: number[];
+  lastMsgSeqBeforeChatDeleted: number | null;
+  removedSyncCursor?: { removed_at: string; event_id: string };
+  updatedAt: string;
 }

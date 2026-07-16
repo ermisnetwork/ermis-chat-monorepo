@@ -27,7 +27,7 @@ import type {
   E2eeBootstrapProgress,
   E2eeBootstrapStatus,
   E2eePayload,
-  E2eeStoredMessage,
+  StoredMessage,
   E2eeSyncState,
   E2eeSyncStatus,
   EncryptedChannelRepairMode,
@@ -282,7 +282,7 @@ interface ChannelProcessResult {
   processedEventCursor?: EventCursor;
   processedEvents: number;
   bufferedMessages: number;
-  decrypted: E2eeStoredMessage[];
+  decrypted: StoredMessage[];
   maxObservedEpoch?: number;
 }
 
@@ -533,8 +533,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     //    only query the count endpoint when no health.check count is cached.
     await this.ensureKeyPackagesFromCachedHealthOrServer();
 
-    // 5. Sync encryption events for E2EE channels (restore groups from server)
-    await this._syncAndRestoreGroups();
+    // 5. Restore groups from Provider storage
+    await this._restoreGroupsLocally();
 
     // 6. Persist Provider snapshot after sync (groups modify the key store)
     await this._persistProvider();
@@ -2946,7 +2946,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           const envelope = this._buildArchiveMessageEnvelope(routeCid, ciphertext, activeEnvelope, {
             epoch: BigInt(epoch),
           });
-          const existingMessage = await this.storage.loadE2eeMessage(ciphertext.message_id);
+          const existingMessage = await this.storage.loadMessage(ciphertext.message_id);
           if (existingMessage && this._storedMessageCoversVersion(existingMessage, envelope)) {
             progress = this._clearRepairIssueInProgress(progress, envelope);
             restored.push({
@@ -3006,7 +3006,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               restoredAt: Date.now(),
               restoredEpoch: epoch,
             };
-            await this.storage.saveE2eeMessage(storedMessage);
+            await this.storage.saveMessage(storedMessage);
             this._decryptedMsgIds.add(this._messageVersionKey(decryptedEnvelope));
             progress = this._clearRepairIssueInProgress(progress, decryptedEnvelope);
 
@@ -3620,10 +3620,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     return Array.from(routeCids);
   }
 
-  private _publishDecryptedMessages(decryptedMessages: E2eeStoredMessage[]): void {
+  private _publishDecryptedMessages(decryptedMessages: StoredMessage[]): void {
     if (decryptedMessages.length === 0) return;
 
-    const decryptedByCid = new Map<string, E2eeStoredMessage[]>();
+    const decryptedByCid = new Map<string, StoredMessage[]>();
     for (const message of decryptedMessages) {
       const existing = decryptedByCid.get(message.cid) || [];
       existing.push(message);
@@ -3683,7 +3683,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private async _flushPendingSnapshotsForScope(
     scopeCid: string,
-  ): Promise<{ decrypted: E2eeStoredMessage[]; pending: PendingE2eeSnapshot[] }> {
+  ): Promise<{ decrypted: StoredMessage[]; pending: PendingE2eeSnapshot[] }> {
     if (
       typeof (this.storage as any)?.loadPendingE2eeSnapshots !== 'function' ||
       typeof (this.storage as any)?.savePendingE2eeSnapshots !== 'function'
@@ -3731,7 +3731,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private async _flushPendingE2eeSnapshots(
     cid: string,
-  ): Promise<{ decrypted: E2eeStoredMessage[]; pending: PendingE2eeSnapshot[] }> {
+  ): Promise<{ decrypted: StoredMessage[]; pending: PendingE2eeSnapshot[] }> {
     const pending = this._dedupePendingSnapshots(await this.storage.loadPendingE2eeSnapshots(cid));
     if (pending.length === 0) return { decrypted: [], pending: [] };
 
@@ -3800,40 +3800,44 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this._startSyncGate();
   }
 
+  private async _restoreGroupsLocally(): Promise<void> {
+    // Step 1: Restore groups from Provider storage using saved CID list
+    const savedCids = await this.storage.listGroupCids();
+    if (savedCids.length > 0) {
+      sdkLog('info', `[Encryption] Restoring ${savedCids.length} group(s) from Provider...`);
+      for (const cid of savedCids) {
+        if (this.groups.has(cid)) continue;
+        try {
+          const group = wasmModule.Group.load(this.provider, cid);
+          this.groups.set(cid, group);
+          sdkLog('info', '[Encryption] Restored group:', cid);
+        } catch (err) {
+          sdkLog('warn', '[Encryption] Failed to restore group:', cid, err);
+        }
+      }
+    }
+
+    // Load persisted pending evictions from previous session.
+    // These survive reconnects even after the sync cursor has advanced past
+    // the SystemMessage type 12 that originally triggered them.
+    try {
+      const persisted = await this.storage.loadPendingEvictions();
+      for (const [cid, userIds] of Object.entries(persisted)) {
+        const existing = this._pendingEvictions.get(cid) ?? new Set<string>();
+        for (const uid of userIds) existing.add(uid);
+        this._pendingEvictions.set(cid, existing);
+      }
+      if (Object.keys(persisted).length > 0) {
+        sdkLog('info', '[Encryption] Restored pending evictions from storage:', persisted);
+      }
+    } catch (err) {
+      sdkLog('warn', '[Encryption] Failed to load persisted evictions:', err);
+    }
+  }
+
   private async _syncAndRestoreGroups(): Promise<void> {
     try {
-      // Step 1: Restore groups from Provider storage using saved CID list
-      const savedCids = await this.storage.listGroupCids();
-      if (savedCids.length > 0) {
-        sdkLog('info', `[Encryption] Restoring ${savedCids.length} group(s) from Provider...`);
-        for (const cid of savedCids) {
-          if (this.groups.has(cid)) continue;
-          try {
-            const group = wasmModule.Group.load(this.provider, cid);
-            this.groups.set(cid, group);
-            sdkLog('info', '[Encryption] Restored group:', cid);
-          } catch (err) {
-            sdkLog('warn', '[Encryption] Failed to restore group:', cid, err);
-          }
-        }
-      }
-
-      // Load persisted pending evictions from previous session.
-      // These survive reconnects even after the sync cursor has advanced past
-      // the SystemMessage type 12 that originally triggered them.
-      try {
-        const persisted = await this.storage.loadPendingEvictions();
-        for (const [cid, userIds] of Object.entries(persisted)) {
-          const existing = this._pendingEvictions.get(cid) ?? new Set<string>();
-          for (const uid of userIds) existing.add(uid);
-          this._pendingEvictions.set(cid, existing);
-        }
-        if (Object.keys(persisted).length > 0) {
-          sdkLog('info', '[Encryption] Restored pending evictions from storage:', persisted);
-        }
-      } catch (err) {
-        sdkLog('warn', '[Encryption] Failed to load persisted evictions:', err);
-      }
+      await this._restoreGroupsLocally();
 
       // Step 2: Sync all encryption scopes via scope_sync.
       const savedCursors = await this._loadAllScopeSyncCursors();
@@ -4033,7 +4037,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     startedCursor: EventCursor = this._nowEventCursor(),
   ): Promise<ChannelProcessResult> {
     const scopeCid = cid;
-    const decryptedMessages: E2eeStoredMessage[] = [];
+    const decryptedMessages: StoredMessage[] = [];
     const pendingEncryptionMessages: PendingE2eeSnapshot[] = [];
     let processedEvents = 0;
     let lastSafeEventCursor = startedCursor;
@@ -4195,7 +4199,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             }
           } else {
             // Standard/system message — save directly, no decryption needed
-            await this.storage.saveE2eeMessage({
+            await this.storage.saveMessage({
               id: msg.id,
               cid: routeCid,
               content_type: 'standard',
@@ -4385,9 +4389,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
           // 2. Update local storage — merge reaction fields only
           try {
-            const existingMsg = await this.storage.loadE2eeMessage(messageId);
+            const existingMsg = await this.storage.loadMessage(messageId);
             if (existingMsg) {
-              await this.storage.saveE2eeMessage({
+              await this.storage.saveMessage({
                 ...existingMsg,
                 latest_reactions: reactionData.latest_reactions ?? existingMsg.latest_reactions,
                 reaction_counts: reactionData.reaction_counts ?? existingMsg.reaction_counts,
@@ -4418,7 +4422,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
           // 2. Remove from local IndexedDB storage
           try {
-            await this.storage.deleteE2eeMessage(deletedMessageId);
+            await this.storage.deleteMessage(deletedMessageId);
           } catch (err) {
             sdkLog('warn', '[Encryption] Failed to delete message from storage during sync:', deletedMessageId, err);
           }
@@ -4478,9 +4482,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
                 messageForState = await this._buildFullMessageWithQuoted(decrypted[0], updatedMessage);
               }
             } else {
-              const existingMsg = await this.storage.loadE2eeMessage(updatedMessage.id);
+              const existingMsg = await this.storage.loadMessage(updatedMessage.id);
               if (existingMsg) {
-                await this.storage.saveE2eeMessage({
+                await this.storage.saveMessage({
                   ...existingMsg,
                   text: updatedMessage.text ?? existingMsg.text,
                   updated_at: updateData.created_at,
@@ -6309,7 +6313,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   private _storedMessageCoversVersion(
-    stored: E2eeStoredMessage,
+    stored: StoredMessage,
     message: { created_at?: string; updated_at?: string; [key: string]: unknown },
   ): boolean {
     const incomingUpdatedAt = message.updated_at;
@@ -6395,8 +6399,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     cid: string,
     payload: E2eePayload,
     envelope: { id: string; user?: { id: string }; created_at?: string; updated_at?: string; [key: string]: unknown },
-    fallback?: E2eeStoredMessage | null,
-  ): E2eeStoredMessage {
+    fallback?: StoredMessage | null,
+  ): StoredMessage {
     const userId = envelope.user?.id || fallback?.user_id || '';
     const stateUser = userId ? this.client?.state?.users?.[userId] : undefined;
     const user = pickUserWithDisplayName(
@@ -6499,7 +6503,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (this._isRenderableQuotedMessage(active)) return active;
 
     try {
-      const stored = await this.storage.loadE2eeMessage(quotedMessageId);
+      const stored = await this.storage.loadMessage(quotedMessageId);
       const storedQuotedMessage = this._normalizeQuotedMessagePreview(stored);
       if (this._isRenderableQuotedMessage(storedQuotedMessage)) return storedQuotedMessage;
       return explicit;
@@ -6635,7 +6639,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       } catch (_) {
         // Repair gate always resolves; fall through if a custom gate rejects.
       }
-      const existing = await this.storage.loadE2eeMessage(message.id);
+      const existing = await this.storage.loadMessage(message.id);
       if (existing && this._storedMessageCoversVersion(existing, message)) {
         this._decryptedMsgIds.add(versionKey);
         await this._clearRepairIssue(routeCid, message);
@@ -6659,14 +6663,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       // Re-check dedup after sync: sync may have already decrypted this message
       if (this._decryptedMsgIds.has(versionKey)) {
         sdkLog('info', '[Encryption] processE2eeMessage: decrypted by sync (post-wait), returning cached:', versionKey);
-        const cached = await this.storage.loadE2eeMessage(message.id);
+        const cached = await this.storage.loadMessage(message.id);
         if (cached && this._storedMessageCoversVersion(cached, message)) {
           await this._clearRepairIssue(routeCid, message);
           return await this._buildFullMessageWithQuoted(cached, message);
         }
         return null;
       }
-      const existing = await this.storage.loadE2eeMessage(message.id);
+      const existing = await this.storage.loadMessage(message.id);
       if (existing && this._storedMessageCoversVersion(existing, message)) {
         this._decryptedMsgIds.add(versionKey);
         await this._clearRepairIssue(routeCid, message);
@@ -6686,7 +6690,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // 2. IndexedDB lookup — catches messages decrypted in a previous session.
     if (this._decryptedMsgIds.has(versionKey)) {
       sdkLog('info', '[Encryption] processE2eeMessage: already decrypted (in-memory), skipping:', versionKey);
-      const cached = await this.storage.loadE2eeMessage(message.id);
+      const cached = await this.storage.loadMessage(message.id);
       if (cached && this._storedMessageCoversVersion(cached, message)) {
         await this._clearRepairIssue(routeCid, message);
         return await this._buildFullMessageWithQuoted(cached, message);
@@ -6695,7 +6699,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       // but the plaintext IS saved and will appear on next channel load.
       return null;
     }
-    const existing = await this.storage.loadE2eeMessage(message.id);
+    const existing = await this.storage.loadMessage(message.id);
     if (existing && this._storedMessageCoversVersion(existing, message)) {
       sdkLog('info', '[Encryption] processE2eeMessage: already decrypted (IndexedDB), skipping:', versionKey);
       this._decryptedMsgIds.add(versionKey);
@@ -6733,10 +6737,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       this._decryptedMsgIds.add(versionKey);
 
       if (messageType === 0) {
-        const existingMessage = await this.storage.loadE2eeMessage(message.id);
+        const existingMessage = await this.storage.loadMessage(message.id);
         const storedMsg = this._storedFromPayload(routeCid, payload, message, existingMessage);
 
-        await this.storage.saveE2eeMessage(storedMsg);
+        await this.storage.saveMessage(storedMsg);
         await this._clearRepairIssue(routeCid, message);
 
         // CRITICAL: persist snapshot after decrypt — the ratchet key was
@@ -6797,13 +6801,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   /**
-   * Build a full Message object from decrypted E2eeStoredMessage + envelope metadata.
+   * Build a full Message object from decrypted StoredMessage + envelope metadata.
    *
    * The result has `content_type: 'standard'` and contains all Standard fields,
    * so it can be directly merged into channel messages state like a normal message.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private _buildFullMessage(stored: E2eeStoredMessage, envelope: Record<string, any>): Record<string, any> {
+  private _buildFullMessage(stored: StoredMessage, envelope: Record<string, any>): Record<string, any> {
     const userId = stored.user_id || (stored.user as any)?.id || envelope.user?.id || envelope.user_id || '';
     const stateUser = userId ? this.client?.state?.users?.[userId] : undefined;
     const user = pickUserWithDisplayName(
@@ -6853,7 +6857,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   private async _buildFullMessageWithQuoted(
-    stored: E2eeStoredMessage,
+    stored: StoredMessage,
     envelope: Record<string, any>,
   ): Promise<Record<string, any>> {
     const message = this._buildFullMessage(stored, envelope);
@@ -7158,12 +7162,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (!this.e2eeClient) throw new Error('[Encryption] E2EE client is not initialized');
     const response = await this.e2eeClient.queryE2eeAttachments(channelType, channelId, options);
     const messageIds = response.attachments.map((item) => item.message_id);
-    const storedMessages = this.storage.loadE2eeMessages
-      ? await this.storage.loadE2eeMessages(messageIds)
-      : new Map<string, E2eeStoredMessage>();
-    if (!this.storage.loadE2eeMessages) {
+    const storedMessages = this.storage.loadMessages
+      ? await this.storage.loadMessages(messageIds)
+      : new Map<string, StoredMessage>();
+    if (!this.storage.loadMessages) {
       for (const messageId of messageIds) {
-        const stored = await this.storage.loadE2eeMessage(messageId);
+        const stored = await this.storage.loadMessage(messageId);
         if (stored) storedMessages.set(messageId, stored);
       }
     }
@@ -7180,7 +7184,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private _mapE2eeAttachmentProjectionToDisplayItem(
     projection: QueryE2eeAttachmentProjection,
-    stored?: E2eeStoredMessage,
+    stored?: StoredMessage,
   ): Record<string, unknown> {
     const manifests = Array.isArray(stored?.attachments) ? stored?.attachments : [];
     const manifest = manifests.find((attachment): attachment is E2eeAttachmentManifest => {
@@ -7720,7 +7724,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     // Save to local DB with full decrypted Standard content
     const now = new Date().toISOString();
-    const storedMsg: E2eeStoredMessage = {
+    const storedMsg: StoredMessage = {
       id: messageId,
       cid,
       content_type: 'standard',
@@ -7746,7 +7750,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       forward_parent_cid: options.forward_parent_cid,
       e2ee_attachment_ids: e2eeAttachmentIds,
     };
-    await this.storage.saveE2eeMessage(storedMsg);
+    await this.storage.saveMessage(storedMsg);
 
     // CRITICAL: Persist Provider to IndexedDB after successful send.
     // create_message() advanced the encryption ratchet generation in-memory
@@ -7792,7 +7796,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       cid,
       message_id: messageId,
     });
-    const existingForPayload = await this.storage.loadE2eeMessage(messageId);
+    const existingForPayload = await this.storage.loadMessage(messageId);
     const oldTexts = existingForPayload
       ? [
           ...(existingForPayload.old_texts || []),
@@ -7866,9 +7870,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     // Update local plaintext cache for own-device edits (encryption cannot decrypt self-sent).
     try {
-      const existing = existingForPayload || (await this.storage.loadE2eeMessage(messageId));
+      const existing = existingForPayload || (await this.storage.loadMessage(messageId));
       if (existing) {
-        await this.storage.saveE2eeMessage({
+        await this.storage.saveMessage({
           ...existing,
           content_type: 'standard',
           text,
@@ -7884,7 +7888,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           mentioned_all: options.mentioned_all !== undefined ? options.mentioned_all : existing.mentioned_all,
         });
       } else {
-        await this.storage.saveE2eeMessage({
+        await this.storage.saveMessage({
           id: messageId,
           cid,
           content_type: 'standard',
@@ -7941,7 +7945,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }>,
     e2eeGroupId?: string,
   ): Promise<WaterfallResult> {
-    const decrypted: E2eeStoredMessage[] = [];
+    const decrypted: StoredMessage[] = [];
     const buffered: unknown[] = [];
     let expectedRecoveryFailures = 0;
     let decryptFailures = 0;
@@ -7974,7 +7978,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
       // Skip messages already decrypted & stored for this version (encryption forward secrecy:
       // keys are consumed after first use, re-decrypting would fail)
-      const existing = await this.storage.loadE2eeMessage(msg.id);
+      const existing = await this.storage.loadMessage(msg.id);
       if (existing && this._storedMessageCoversVersion(existing, msg)) {
         decrypted.push(existing);
         await this._clearRepairIssue(routeCid, msg);
@@ -7986,13 +7990,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
         // Mark as decrypted IMMEDIATELY after process_message succeeds —
         // before async IndexedDB write. This prevents the race where WS
-        // message.new arrives before saveE2eeMessage() flushes to IndexedDB.
+        // message.new arrives before saveMessage() flushes to IndexedDB.
         this._decryptedMsgIds.add(this._messageVersionKey(msg));
 
         if (messageType === 0) {
-          const fallback = await this.storage.loadE2eeMessage(msg.id);
+          const fallback = await this.storage.loadMessage(msg.id);
           const decryptedMsg = this._storedFromPayload(routeCid, payload, msg, fallback);
-          await this.storage.saveE2eeMessage(decryptedMsg);
+          await this.storage.saveMessage(decryptedMsg);
           await this._clearRepairIssue(routeCid, msg);
           decrypted.push(decryptedMsg);
         }

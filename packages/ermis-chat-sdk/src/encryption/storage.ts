@@ -15,7 +15,7 @@
 
 import { normalizeRequiredBytes } from './encoding';
 import { randomId } from '../utils';
-import type { Logger } from '../types';
+import type { Logger, SyncStateRecord } from '../types';
 import { setSdkLogger, sdkLog } from '../logger';
 import MiniSearch from 'minisearch';
 
@@ -24,7 +24,7 @@ import type {
   ArchiveScope,
   ChannelRepairState,
   EpochArchiveCheckpoint,
-  E2eeStoredMessage,
+  StoredMessage,
   EventCursor,
   EncryptionStorageAdapter,
   EncryptionSyncCheckpoint,
@@ -41,10 +41,10 @@ import type {
 // IndexedDB Implementation (Browser Default)
 // ============================================================
 
-const DB_NAME_PREFIX = 'ermis_mls';
+const DB_NAME_PREFIX = 'ermis_data';
 /** Global DB (no userId) — only used for migrating legacy device_id */
 const DB_NAME_LEGACY = 'ermis_mls';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 const STORE_IDENTITY = 'identity';
 const STORE_MESSAGES = 'messages';
@@ -218,6 +218,15 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           restoreStore.createIndex('device_id', 'device_id', { unique: false });
           restoreStore.createIndex('device_status', ['device_id', 'status'], { unique: false });
         }
+
+        // DB version 7: Add cid_msg_seq index for offline pagination by msg_seq
+        if (event.oldVersion < 7 && db.objectStoreNames.contains(STORE_MESSAGES)) {
+          const tx = (event.target as IDBOpenDBRequest).transaction!;
+          const msgStore = tx.objectStore(STORE_MESSAGES);
+          if (!msgStore.indexNames.contains('cid_msg_seq')) {
+            msgStore.createIndex('cid_msg_seq', ['cid', 'msg_seq'], { unique: false });
+          }
+        }
       };
 
       request.onsuccess = () => resolve(request.result);
@@ -228,6 +237,22 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
 
     return this.dbPromise;
+  }
+
+  /**
+   * Close the database connection to release locks.
+   */
+  async close(): Promise<void> {
+    if (this.dbPromise) {
+      try {
+        const db = await this.dbPromise;
+        db.close();
+      } catch (err) {
+        // Ignore errors if the database failed to open
+      } finally {
+        this.dbPromise = null;
+      }
+    }
   }
 
   // ---- Device ID (global, per-browser via localStorage) ----
@@ -369,14 +394,47 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
-  // ---- E2EE Messages ----
+  // ---- Messages ----
 
-  async saveE2eeMessage(message: E2eeStoredMessage): Promise<void> {
+  async saveMessage(message: StoredMessage): Promise<void> {
+    try {
+      await this._saveMessageInternal(message);
+    } catch (err: any) {
+      // If storage is full, evict old messages and retry once
+      if (err?.name === 'QuotaExceededError') {
+        sdkLog('warn', '[Storage] Quota exceeded, evicting old messages...');
+        await this.evictOldMessages(message.cid, 200);
+        await this._saveMessageInternal(message);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  private async _saveMessageInternal(message: StoredMessage): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readwrite');
       const store = tx.objectStore(STORE_MESSAGES);
-      store.put(message);
+
+      // Idempotency check (Section 5.6): only overwrite if the incoming
+      // message has a newer (or equal) last_event_seq than the stored copy.
+      const getReq = store.get(message.id);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as StoredMessage | undefined;
+        if (
+          existing &&
+          typeof existing.last_event_seq === 'number' &&
+          typeof message.last_event_seq === 'number' &&
+          message.last_event_seq < existing.last_event_seq
+        ) {
+          // Incoming data is older — skip write
+          resolve();
+          return;
+        }
+        store.put(message);
+      };
+
       tx.oncomplete = () => {
         // Incrementally update MiniSearch index
         this._indexMessage(message);
@@ -386,32 +444,123 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
-  async loadE2eeMessage(messageId: string): Promise<E2eeStoredMessage | null> {
+  /**
+   * Evict the oldest messages for a channel to free IndexedDB storage.
+   * Keeps the newest `keepCount` messages, deletes the rest.
+   * Called automatically on QuotaExceededError, can also be called manually.
+   *
+   * @param cid - Channel ID to evict from. If empty, evicts across all channels.
+   * @param keepCount - Number of newest messages to keep per channel (default: 500)
+   */
+  async evictOldMessages(cid?: string, keepCount = 500): Promise<number> {
     const db = await this.openDB();
-    return new Promise<E2eeStoredMessage | null>((resolve, reject) => {
+    return new Promise<number>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readwrite');
+      const store = tx.objectStore(STORE_MESSAGES);
+      let deletedCount = 0;
+
+      if (cid) {
+        // Evict from specific channel
+        const index = store.index('cid_created');
+        const range = IDBKeyRange.bound([cid], [cid, []]);
+        const request = index.openCursor(range);
+        const toDelete: string[] = [];
+        const allKeys: { id: string; created_at: string }[] = [];
+
+        request.onsuccess = (event: Event) => {
+          const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+          if (cursor) {
+            const msg = cursor.value as StoredMessage;
+            allKeys.push({ id: msg.id, created_at: msg.created_at });
+            cursor.continue();
+          } else {
+            // Sort oldest first, mark excess for deletion
+            allKeys.sort((a, b) =>
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+            );
+            const excess = allKeys.length - keepCount;
+            if (excess > 0) {
+              for (let i = 0; i < excess; i++) {
+                toDelete.push(allKeys[i].id);
+              }
+              for (const id of toDelete) {
+                store.delete(id);
+                deletedCount++;
+              }
+            }
+          }
+        };
+      } else {
+        // Evict across all channels: group by cid, keep newest per channel
+        const allMsgs: StoredMessage[] = [];
+        const request = store.openCursor();
+
+        request.onsuccess = (event: Event) => {
+          const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+          if (cursor) {
+            allMsgs.push(cursor.value as StoredMessage);
+            cursor.continue();
+          } else {
+            // Group by cid
+            const byCid = new Map<string, StoredMessage[]>();
+            for (const msg of allMsgs) {
+              const list = byCid.get(msg.cid) || [];
+              list.push(msg);
+              byCid.set(msg.cid, list);
+            }
+            // Delete oldest per channel
+            for (const [, msgs] of byCid) {
+              msgs.sort((a, b) =>
+                new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+              );
+              const excess = msgs.length - keepCount;
+              if (excess > 0) {
+                for (let i = 0; i < excess; i++) {
+                  store.delete(msgs[i].id);
+                  deletedCount++;
+                }
+              }
+            }
+          }
+        };
+      }
+
+      tx.oncomplete = () => {
+        if (deletedCount > 0) {
+          sdkLog('info', `[Storage] Evicted ${deletedCount} old messages to free space`);
+        }
+        resolve(deletedCount);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadMessage(messageId: string): Promise<StoredMessage | null> {
+    const db = await this.openDB();
+    return new Promise<StoredMessage | null>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readonly');
       const store = tx.objectStore(STORE_MESSAGES);
       const request = store.get(messageId);
-      request.onsuccess = () => resolve((request.result as E2eeStoredMessage) || null);
+      request.onsuccess = () => resolve((request.result as StoredMessage) || null);
       request.onerror = () => reject(request.error);
     });
   }
 
-  async loadE2eeMessages(messageIds: string[]): Promise<Map<string, E2eeStoredMessage>> {
+  async loadMessages(messageIds: string[]): Promise<Map<string, StoredMessage>> {
     const ids = Array.from(new Set(messageIds.filter(Boolean)));
     if (ids.length === 0) return new Map();
 
     const db = await this.openDB();
-    return new Promise<Map<string, E2eeStoredMessage>>((resolve, reject) => {
+    return new Promise<Map<string, StoredMessage>>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readonly');
       const store = tx.objectStore(STORE_MESSAGES);
-      const results = new Map<string, E2eeStoredMessage>();
+      const results = new Map<string, StoredMessage>();
 
       for (const id of ids) {
         const request = store.get(id);
         request.onsuccess = () => {
           if (request.result) {
-            results.set(id, request.result as E2eeStoredMessage);
+            results.set(id, request.result as StoredMessage);
           }
         };
         request.onerror = () => reject(request.error);
@@ -422,7 +571,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
-  async deleteE2eeMessage(messageId: string): Promise<void> {
+  async deleteMessage(messageId: string): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readwrite');
@@ -443,15 +592,15 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
-  async getE2eeMessages(cid: string, limit = 50): Promise<E2eeStoredMessage[]> {
+  async getMessages(cid: string, limit = 50): Promise<StoredMessage[]> {
     const db = await this.openDB();
-    return new Promise<E2eeStoredMessage[]>((resolve, reject) => {
+    return new Promise<StoredMessage[]>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readonly');
       const store = tx.objectStore(STORE_MESSAGES);
       const index = store.index('cid');
       const request = index.getAll(cid);
       request.onsuccess = () => {
-        const msgs = (request.result as E2eeStoredMessage[]) || [];
+        const msgs = (request.result as StoredMessage[]) || [];
         // Sort by created_at descending, take limit
         msgs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         resolve(msgs.slice(0, limit));
@@ -460,7 +609,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
-  async clearE2eeMessages(cid: string): Promise<void> {
+  async clearMessages(cid: string): Promise<void> {
     const db = await this.openDB();
 
     // Collect message IDs for this channel to purge from search index
@@ -474,7 +623,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onsuccess = (event: Event) => {
         const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
         if (cursor) {
-          msgIds.push((cursor.value as E2eeStoredMessage).id);
+          msgIds.push((cursor.value as StoredMessage).id);
           cursor.delete();
           cursor.continue();
         }
@@ -493,6 +642,81 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         }
         resolve();
       };
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // ---- Offline Pagination & Truncation ----
+
+  /**
+   * Get messages for a channel within a msg_seq range, sorted ascending.
+   * Used for offline pagination (scroll up / scroll down).
+   */
+  async getMessagesBySeqRange(
+    cid: string,
+    anchorSeq: number,
+    before = 0,
+    after = 0,
+  ): Promise<StoredMessage[]> {
+    const db = await this.openDB();
+    return new Promise<StoredMessage[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readonly');
+      const store = tx.objectStore(STORE_MESSAGES);
+
+      // Use the cid_msg_seq compound index
+      if (store.indexNames.contains('cid_msg_seq')) {
+        const index = store.index('cid_msg_seq');
+        const lowerSeq = Math.max(1, anchorSeq - before);
+        const upperSeq = anchorSeq + after;
+        const range = IDBKeyRange.bound([cid, lowerSeq], [cid, upperSeq]);
+        const request = index.getAll(range);
+        request.onsuccess = () => {
+          const msgs = (request.result as StoredMessage[]) || [];
+          msgs.sort((a, b) => (a.msg_seq ?? 0) - (b.msg_seq ?? 0));
+          resolve(msgs);
+        };
+        request.onerror = () => reject(request.error);
+      } else {
+        // Fallback: filter by cid and msg_seq manually
+        const index = store.index('cid');
+        const request = index.getAll(cid);
+        request.onsuccess = () => {
+          const all = (request.result as StoredMessage[]) || [];
+          const lowerSeq = Math.max(1, anchorSeq - before);
+          const upperSeq = anchorSeq + after;
+          const filtered = all.filter(
+            (m) => typeof m.msg_seq === 'number' && m.msg_seq >= lowerSeq && m.msg_seq <= upperSeq,
+          );
+          filtered.sort((a, b) => (a.msg_seq ?? 0) - (b.msg_seq ?? 0));
+          resolve(filtered);
+        };
+        request.onerror = () => reject(request.error);
+      }
+    });
+  }
+
+  /**
+   * Delete all messages in a channel with msg_seq <= threshold.
+   * Used when server returns `last_msg_seq_before_chat_deleted`.
+   */
+  async deleteMessagesBefore(cid: string, seqThreshold: number): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readwrite');
+      const store = tx.objectStore(STORE_MESSAGES);
+      const index = store.index('cid');
+      const request = index.openCursor(cid);
+      request.onsuccess = (event: Event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+        if (cursor) {
+          const msg = cursor.value as StoredMessage;
+          if (typeof msg.msg_seq === 'number' && msg.msg_seq <= seqThreshold) {
+            cursor.delete();
+          }
+          cursor.continue();
+        }
+      };
+      tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }
@@ -556,7 +780,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   // ---- E2EE Message Search (MiniSearch-powered) ----
 
   /** MiniSearch instance — lazily initialized on first search. */
-  private _searchIndex: MiniSearch<E2eeStoredMessage> | null = null;
+  private _searchIndex: MiniSearch<StoredMessage> | null = null;
   /** Set of indexed message IDs — for dedup on incremental add. */
   private _indexedIds: Set<string> = new Set();
   /** Whether the full index has been built from IndexedDB. */
@@ -567,8 +791,8 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   /**
    * Create a fresh MiniSearch instance with fields tuned for chat messages.
    */
-  private _createSearchIndex(): MiniSearch<E2eeStoredMessage> {
-    return new MiniSearch<E2eeStoredMessage>({
+  private _createSearchIndex(): MiniSearch<StoredMessage> {
+    return new MiniSearch<StoredMessage>({
       fields: ['text'],
       storeFields: [
         'id',
@@ -630,11 +854,11 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
 
     this._indexBuildPromise = (async () => {
       const db = await this.openDB();
-      const allMsgs = await new Promise<E2eeStoredMessage[]>((resolve, reject) => {
+      const allMsgs = await new Promise<StoredMessage[]>((resolve, reject) => {
         const tx = db.transaction(STORE_MESSAGES, 'readonly');
         const store = tx.objectStore(STORE_MESSAGES);
         const request = store.getAll();
-        request.onsuccess = () => resolve((request.result as E2eeStoredMessage[]) || []);
+        request.onsuccess = () => resolve((request.result as StoredMessage[]) || []);
         request.onerror = () => reject(request.error);
       });
 
@@ -660,9 +884,9 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
 
   /**
    * Incrementally add/update a single message in the search index.
-   * Called from saveE2eeMessage() after successful IndexedDB write.
+   * Called from saveMessage() after successful IndexedDB write.
    */
-  private _indexMessage(message: E2eeStoredMessage): void {
+  private _indexMessage(message: StoredMessage): void {
     if (!this._searchIndex || !this._indexReady) return;
     if (!message.text || message.text.length === 0) return;
 
@@ -678,7 +902,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     }
   }
 
-  async searchE2eeMessages(searchTerm: string, limit = 25): Promise<E2eeStoredMessage[]> {
+  async searchMessages(searchTerm: string, limit = 25): Promise<StoredMessage[]> {
     await this._ensureIndex();
     if (!this._searchIndex) return [];
 
@@ -689,10 +913,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       .sort((a, b) => new Date((b as any).created_at).getTime() - new Date((a as any).created_at).getTime())
       .slice(0, limit);
 
-    return sorted as unknown as E2eeStoredMessage[];
+    return sorted as unknown as StoredMessage[];
   }
 
-  async searchE2eeMessagesByCid(cid: string, searchTerm: string, limit = 25): Promise<E2eeStoredMessage[]> {
+  async searchMessagesByCid(cid: string, searchTerm: string, limit = 25): Promise<StoredMessage[]> {
     await this._ensureIndex();
     if (!this._searchIndex) return [];
 
@@ -704,7 +928,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       .sort((a, b) => new Date((b as any).created_at).getTime() - new Date((a as any).created_at).getTime())
       .slice(0, limit);
 
-    return sorted as unknown as E2eeStoredMessage[];
+    return sorted as unknown as StoredMessage[];
   }
 
   // ---- Group State ----
@@ -1318,6 +1542,85 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');
       tx.objectStore(STORE_META).delete(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // ---- Sync State (Offline-First Event Sourcing) ----
+
+  async saveSyncStateBatch(records: SyncStateRecord[]): Promise<void> {
+    if (records.length === 0) return;
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      for (const record of records) {
+        store.put(record, `sync_state:${record.cid}`);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async loadSyncState(cid: string): Promise<SyncStateRecord | null> {
+    const db = await this.openDB();
+    return new Promise<SyncStateRecord | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const request = store.get(`sync_state:${cid}`);
+      request.onsuccess = () => resolve((request.result as SyncStateRecord) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async loadAllSyncStates(): Promise<SyncStateRecord[]> {
+    const db = await this.openDB();
+    return new Promise<SyncStateRecord[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const records: SyncStateRecord[] = [];
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(records);
+          return;
+        }
+        if (String(cursor.key).startsWith('sync_state:')) {
+          records.push(cursor.value as SyncStateRecord);
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteSyncState(cid: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.delete(`sync_state:${cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async clearAllSyncState(): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        if (String(cursor.key).startsWith('sync_state:')) {
+          cursor.delete();
+        }
+        cursor.continue();
+      };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

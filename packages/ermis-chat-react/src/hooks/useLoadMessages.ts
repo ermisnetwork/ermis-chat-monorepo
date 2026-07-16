@@ -91,7 +91,16 @@ export function useLoadMessages({
 
     loadingMoreRef.current = true;
     try {
-      const olderRaw = await activeChannel.queryMessagesLessThanId(oldestMessage.id, loadMoreLimit);
+      let olderRaw: any[] = [];
+      const msgSeq = (oldestMessage as any).msg_seq;
+      if (typeof msgSeq === 'number' && msgSeq > 0) {
+        const response = await activeChannel.queryMessagesBySeq({
+          messages_seq: { anchor_seq: msgSeq, before: loadMoreLimit }
+        });
+        olderRaw = response.messages || [];
+      } else {
+        olderRaw = await activeChannel.queryMessagesLessThanId(oldestMessage.id, loadMoreLimit);
+      }
 
       if (olderRaw.length === 0) {
         setHasMore(false);
@@ -123,7 +132,16 @@ export function useLoadMessages({
 
     loadingNewerRef.current = true;
     try {
-      const newerRaw = await activeChannel.queryMessagesGreaterThanId(newestMessage.id, loadMoreLimit);
+      let newerRaw: any[] = [];
+      const msgSeq = (newestMessage as any).msg_seq;
+      if (typeof msgSeq === 'number' && msgSeq > 0) {
+        const response = await activeChannel.queryMessagesBySeq({
+          messages_seq: { anchor_seq: msgSeq, after: loadMoreLimit }
+        });
+        newerRaw = response.messages || [];
+      } else {
+        newerRaw = await activeChannel.queryMessagesGreaterThanId(newestMessage.id, loadMoreLimit);
+      }
 
       if (newerRaw.length === 0) {
         setHasNewer(false);

@@ -27,8 +27,21 @@ export const useDownloadHandler = () => {
         window.URL.revokeObjectURL(urlBlob);
       }, 1000);
     } catch (err) {
-      console.warn('Download failed, falling back to new tab:', err);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      console.warn('Download via blob failed, falling back to direct link:', err);
+      // Fallback: use an <a> tag with download attribute instead of window.open
+      // This triggers a file download rather than navigating to a new tab
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename || 'file';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) {
+          document.body.removeChild(a);
+        }
+      }, 1000);
     }
   }, [client]);
 

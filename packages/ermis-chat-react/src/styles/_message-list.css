@@ -557,3 +557,13 @@
 .ermis-message-list__pending-invitee-content svg {
   color: var(--ermis-accent);
 }
+
+/* Gap Indicator */
+.ermis-message-list__gap-indicator {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: var(--ermis-spacing-sm, 8px) 0;
+  margin: var(--ermis-spacing-sm, 8px) 0;
+}

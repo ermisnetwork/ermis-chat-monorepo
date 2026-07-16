@@ -54,4 +54,10 @@ export const EVENT_MAP = {
   'e2ee.message_decrypted': true,
   'e2ee.local_messages_loaded': true,
   'e2ee.restore_progress': true,
+  'sync.started': true,
+  'sync.completed': true,
+  'sync.failed': true,
+  'sync.gap_detected': true,
+  'channel.truncated': true,
+  'channel.hidden_messages_cleared': true,
 };
