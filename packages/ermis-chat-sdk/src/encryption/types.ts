@@ -951,6 +951,16 @@ export type E2eeSyncEvent =
       };
     }
   | {
+      type: 'message_deleted';
+      /** Message tombstone emitted while catching up events missed offline. */
+      data: {
+        event_seq: number;
+        message_id: string;
+        sender?: { id: string; [key: string]: unknown };
+        created_at: string;
+      };
+    }
+  | {
       type: 'member_removed';
       /** Member removal metadata from event:{cid}; used to recover self-leave eviction after offline sync. */
       data: {

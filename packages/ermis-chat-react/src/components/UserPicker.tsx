@@ -9,7 +9,7 @@ import { getUserDisplayName, removeAccents } from '../utils';
 
 /* ---------- Constants ---------- */
 const DEFAULT_PAGE_SIZE = 30;
-const SEARCH_DEBOUNCE_MS = 500;
+const SEARCH_DEBOUNCE_MS = 200;
 
 /* ---------- Static styles ---------- */
 const LIST_STYLE: React.CSSProperties = { height: '100%' };
@@ -163,6 +163,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [isPendingFilter, startTransition] = useTransition();
+  const [isDebouncing, setIsDebouncing] = useState(false);
 
   const [selectedMap, setSelectedMap] = useState<Map<string, UserPickerUser>>(() => {
     const map = new Map<string, UserPickerUser>();
@@ -181,14 +182,23 @@ export const UserPicker: React.FC<UserPickerProps> = ({
   /* ---------- Search handler ---------- */
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = e.target.value;
-      setSearchInput(val);
-      startTransition(() => {
-        setSearch(val);
-      });
+      setSearchInput(e.target.value);
+      setIsDebouncing(true);
     },
-    [startTransition],
+    [],
   );
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      startTransition(() => {
+        setSearch(searchInput);
+      });
+      // We don't set isDebouncing(false) here immediately because if search requires 
+      // a remote fetch, the remote useEffect will handle it. But if it's purely local,
+      // we need to turn it off. Actually, let's just use `isTyping` state.
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   /* ---------- 1. Seed initial list from local SDK state ---------- */
   useEffect(() => {
@@ -245,12 +255,16 @@ export const UserPicker: React.FC<UserPickerProps> = ({
     if (!search.trim() || localFilteredUsers.length > 0 || friendsOnly) {
       setRemoteUsers([]);
       setIsSearching(false);
+      setIsDebouncing(false);
       return;
     }
 
+    setIsDebouncing(true);
     let cancelled = false;
     const timer = setTimeout(async () => {
+      if (cancelled) return;
       setIsSearching(true);
+      setIsDebouncing(false);
       try {
         const response = await client.searchUsers(search.trim(), pageSize);
         if (!cancelled && response.data) {
@@ -267,7 +281,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [search, localFilteredUsers.length, client, pageSize]);
+  }, [search, localFilteredUsers.length, client, pageSize, friendsOnly]);
 
   /* ---------- 4. Derived display list ---------- */
   const usersToDisplay = useMemo(() => {
@@ -275,7 +289,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
     return list.filter((u) => !excludeSet.has(u.id));
   }, [search, localFilteredUsers, remoteUsers, excludeSet]);
 
-  const isListLoading = loading || isSearching || isPendingFilter;
+  const isListLoading = loading || isSearching || isPendingFilter || isDebouncing;
 
   /* ---------- 5. Selection handlers ---------- */
   const handleToggle = useCallback(

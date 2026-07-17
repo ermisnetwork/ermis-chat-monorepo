@@ -4,6 +4,7 @@ export const MESSAGE_TYPES = {
   STICKER: 'sticker',
   SIGNAL: 'signal',
   ERROR: 'error',
+  DELETED: 'deleted',
 } as const;
 
 export const ATTACHMENT_TYPES = {
@@ -88,6 +89,15 @@ export type MessageDisplayType = (typeof MESSAGE_DISPLAY_TYPES)[keyof typeof MES
 /** Check if a message was deleted for current user (display_type === 'deleted') */
 export function isDeletedDisplayMessage(message: any): boolean {
   return message?.display_type === MESSAGE_DISPLAY_TYPES.DELETED;
+}
+
+/** Check every SDK tombstone representation, including offline sync records. */
+export function isDeletedMessage(message: any): boolean {
+  return Boolean(
+    isDeletedDisplayMessage(message) ||
+      message?.type === MESSAGE_TYPES.DELETED ||
+      message?.deleted_at,
+  );
 }
 
 /** Check if a message was completely deleted/withdrawn (display_type === 'unavailable') */

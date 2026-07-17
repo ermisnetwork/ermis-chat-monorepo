@@ -3,6 +3,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   useChatClient,
   Avatar,
+  isDirectChannel,
   isGroupChannel,
   isTopicChannel,
   isPendingMember,
@@ -48,14 +49,22 @@ export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChann
   // Counter to force re-render when topic messages arrive
   const [, setUpdateTick] = useState(0)
 
-  // Query channels exactly like the main ChannelList on initial load
+  // Reuse the channels already queried by the main ChannelList. This sidebar
+  // must not issue a second /channels request during chat bootstrap.
   useEffect(() => {
     if (!client) return
-    client.queryChannels(
-      { type: ['messaging', 'team'], include_hidden_messages: true } as any,
-      [],
-      { message_limit: 1 }
-    ).then(setChannels).catch(console.error)
+
+    const hydrateFromClient = () => {
+      setChannels(
+        Object.values(client.activeChannels).filter(
+          (channel): channel is Channel => isDirectChannel(channel) || isGroupChannel(channel),
+        ),
+      )
+    }
+
+    hydrateFromClient()
+    const subscription = client.on('channels.queried', hydrateFromClient)
+    return () => subscription.unsubscribe()
   }, [client])
 
   // Use the exact same hook as the main ChannelList to keep the array sorted identically

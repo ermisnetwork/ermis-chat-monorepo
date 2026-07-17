@@ -67,6 +67,10 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
     mls_epoch?: number;
     e2ee_group_id?: string;
     e2ee_recovery_policy?: E2eeRecoveryPolicy;
+    latest_event_seq?: number;
+    last_msg_seq_before_chat_deleted?: number | null;
+    last_msg_seq_before_truncate?: number | null;
+    user_clear_seq?: number | null;
   };
 
 export type QueryChannelsAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = APIResponse & {
@@ -87,6 +91,7 @@ export type ChannelAPIResponse<ErmisChatGenerics extends ExtendableGenerics = De
   watcher_count?: number;
   watchers?: UserResponse<ErmisChatGenerics>[];
   is_pinned?: boolean;
+  last_msg_seq_before_chat_deleted?: number | null;
 };
 
 export type ChannelMemberResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
@@ -123,7 +128,7 @@ export type FormatMessageResponse<ErmisChatGenerics extends ExtendableGenerics =
     updated_at: Date;
   };
 
-export type MessageDisplayType = 'normal' | 'deleted';
+export type MessageDisplayType = 'normal' | 'deleted' | 'unavailable';
 
 export type MessageResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   MessageResponseBase<ErmisChatGenerics> & {
@@ -233,7 +238,6 @@ export type ChannelQueryOptions = {
     id_lt?: string;
     id_gt?: string;
     id_around?: string;
-    include_hidden_messages?: boolean;
   };
   messages_seq?: {
     seq?: number;
@@ -241,7 +245,6 @@ export type ChannelQueryOptions = {
     before?: number;
     after?: number;
     limit?: number;
-    include_hidden_messages?: boolean;
   };
 };
 
@@ -419,7 +422,6 @@ export type ChannelFilters = {
   parent_cid?: string;
   parent_id?: string;
   include_parent?: boolean;
-  include_hidden_messages?: boolean;
   include_quoted_messages?: boolean;
 };
 
@@ -745,10 +747,48 @@ export type ChannelSyncParams = {
   limit?: number;
 };
 
+/** Raw event names returned by the message sync APIs before SDK normalization. */
+export const SYNC_EVENT_TYPES = {
+  MESSAGE_NEW: 'message_new',
+  MESSAGE_UPDATED: 'message_updated',
+  MESSAGE_DELETED: 'message_deleted',
+  REACTION: 'reaction',
+} as const;
+
+export type SyncEventType = (typeof SYNC_EVENT_TYPES)[keyof typeof SYNC_EVENT_TYPES];
+
+/** Canonical realtime event emitted after a raw sync event is applied. */
+export const SYNC_EVENT_TYPE_MAP = {
+  [SYNC_EVENT_TYPES.MESSAGE_NEW]: 'message.new',
+  [SYNC_EVENT_TYPES.MESSAGE_UPDATED]: 'message.updated',
+  [SYNC_EVENT_TYPES.MESSAGE_DELETED]: 'message.deleted',
+  [SYNC_EVENT_TYPES.REACTION]: 'reaction.new',
+} as const satisfies Record<SyncEventType, Exclude<EventTypes, 'all'>>;
+
+export type EventSyncEnvelope<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
+  Omit<Event<ErmisChatGenerics>, 'type'> & {
+    type: EventTypes | SyncEventType;
+    event_seq?: number;
+    message_id?: string;
+    sender?: UserResponse<ErmisChatGenerics>;
+    action?: 'reaction.new' | 'reaction.updated' | 'reaction.deleted';
+    data?: {
+      event_seq?: number;
+      message_id?: string;
+      message?: MessageResponse<ErmisChatGenerics>;
+      sender?: UserResponse<ErmisChatGenerics>;
+      created_at?: string;
+      action?: 'reaction.new' | 'reaction.updated' | 'reaction.deleted';
+      latest_reactions?: ReactionResponse<ErmisChatGenerics>[];
+      reaction_counts?: Record<string, number>;
+      [key: string]: unknown;
+    };
+  };
+
 export type EventSyncResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
-  events: Event<ErmisChatGenerics>[];
+  events: EventSyncEnvelope<ErmisChatGenerics>[];
   has_more: boolean;
-  next_cursor?: string | { created_at: string; event_id?: string };
+  next_cursor?: number | string | { created_at: string; event_id?: string };
   hidden_message_seqs?: number[];
   hidden_event_seqs?: number[];
   last_msg_seq_before_chat_deleted?: number | null;
@@ -756,7 +796,7 @@ export type EventSyncResponse<ErmisChatGenerics extends ExtendableGenerics = Def
 
 export type GlobalSyncRequest = {
   project_id?: string;
-  cursors: Record<string, number | { created_at: string; event_id?: string }>;
+  cursors: Record<string, number>;
   removed_cursor?: {
     removed_at: string;
     event_id: string;
@@ -774,13 +814,25 @@ export type RemovedChannelEvent = {
   removal_type?: string;
 };
 
-export type GlobalSyncResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = 
-  Record<string, EventSyncResponse<ErmisChatGenerics>> & {
-    removed_channels?: {
-      events: RemovedChannelEvent[];
-      next_cursor?: { removed_at: string; event_id: string };
-    };
-  };
+export type RemovedChannelsSyncResponse = {
+  events: RemovedChannelEvent[];
+  has_more?: boolean;
+  next_cursor?: { removed_at: string; event_id: string };
+};
+
+export type GlobalSyncChannelResults<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
+  Record<string, EventSyncResponse<ErmisChatGenerics>>;
+
+/** Supports both the guide's flat response and the API's `{ channels: ... }` envelope. */
+export type GlobalSyncResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = {
+  channels?: GlobalSyncChannelResults<ErmisChatGenerics>;
+  removed_channels?: RemovedChannelsSyncResponse;
+  [key: string]:
+    | EventSyncResponse<ErmisChatGenerics>
+    | GlobalSyncChannelResults<ErmisChatGenerics>
+    | RemovedChannelsSyncResponse
+    | undefined;
+};
 
 export type ChannelQuerySeqOptions = {
   messages_seq?: {
@@ -793,6 +845,7 @@ export type ChannelQuerySeqOptions = {
 };
 
 export interface SyncStateRecord {
+  version?: number;
   cid: string;
   lastSyncedEventSeq: number;
   lastSyncedAt: string | null;

@@ -176,7 +176,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         const response = (await createdChannel.create()) as any;
         if (response?.channel?.id) {
           createdChannel = client.channel('messaging', response.channel.id);
-          await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
+          await createdChannel.watch({ messages: { limit: 25 } });
           markChannelAsFullyQueried(createdChannel.cid);
           if (e2eeEnabled && client.encryptionManager?.initialized && createdChannel.id) {
             client.encryptionManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
@@ -225,7 +225,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         const response = (await createdChannel.create()) as any;
         if (response?.channel?.id) {
           createdChannel = client.channel('team', response.channel.id);
-          await createdChannel.watch({ messages: { limit: 25, include_hidden_messages: true } });
+          await createdChannel.watch({ messages: { limit: 25 } });
           markChannelAsFullyQueried(createdChannel.cid);
           if (e2eeEnabled && client.encryptionManager?.initialized && createdChannel.id) {
             client.encryptionManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)

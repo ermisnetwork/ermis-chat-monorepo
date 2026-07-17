@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, AlertCircle } from 'lucide-react'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
+import { GAP_BACKFILL_BATCH_SIZE } from './constants'
 
 
 interface MessageGapIndicatorProps {
@@ -40,7 +41,7 @@ export function MessageGapIndicator({
     setError(false)
     try {
       // Step 0: Check if this gap was already resolved in a previous session
-      const client = channel.getClient() as any
+      const client = channel.getClient()
       if (channel.cid) {
         const saved = await client.messageStorage?.loadSyncState(channel.cid)
         if (saved) {
@@ -72,28 +73,36 @@ export function MessageGapIndicator({
         }
       }
 
-      // Step 1: Call API to fill the gap
-      const result = await channel.queryMessagesBySeq({
-        messages_seq: {
-          anchor_seq: gapSeqRange[0],
-          after: gapSeqRange[1] - gapSeqRange[0] + 1,
-          limit: 50,
-        },
-      })
+      // Step 1: Query exactly the missing range. A single missing sequence uses
+      // `seq`; larger gaps are chunked so we never mark an unqueried sequence hidden.
+      const returnedSeqs = new Set<number>()
+      for (
+        let chunkStart = gapSeqRange[0];
+        chunkStart <= gapSeqRange[1];
+        chunkStart += GAP_BACKFILL_BATCH_SIZE
+      ) {
+        const chunkEnd = Math.min(
+          chunkStart + GAP_BACKFILL_BATCH_SIZE - 1,
+          gapSeqRange[1],
+        )
+        const chunkSize = chunkEnd - chunkStart + 1
+        const messagesSeq = chunkSize === 1
+          ? { seq: chunkStart }
+          : {
+              anchor_seq: chunkStart,
+              after: chunkSize - 1,
+              limit: chunkSize,
+            }
+        const result = await channel.queryMessagesBySeq({ messages_seq: messagesSeq })
 
-      // Step 2: Add returned messages to channel state
-      if (result.messages?.length) {
-        for (const msg of result.messages) {
-          channel.state.addMessageSorted(msg)
+        for (const message of result.messages || []) {
+          const messageSeq = Number(message.msg_seq)
+          if (Number.isFinite(messageSeq)) returnedSeqs.add(messageSeq)
+          channel.state.addMessageSorted(message)
         }
       }
 
-      // Step 3: Mark unreturned seqs as hidden
-      const returnedSeqs = new Set(
-        (result.messages || [])
-          .map((m: any) => m.msg_seq as number | undefined)
-          .filter((s): s is number => typeof s === 'number'),
-      )
+      // Step 2: Mark only queried-but-unreturned seqs as hidden.
 
       const missingSeqs: number[] = []
       for (let seq = gapSeqRange[0]; seq <= gapSeqRange[1]; seq++) {
@@ -106,18 +115,9 @@ export function MessageGapIndicator({
         channel.state.mergeHiddenSequences([], missingSeqs)
       }
 
-      // Step 4: Persist directly to IndexedDB
-      if (channel.cid) {
-        void client.messageStorage?.saveSyncStateBatch([{
-          cid: channel.cid,
-          lastSyncedEventSeq: channel.state.lastSyncedEventSeq || 0,
-          lastSyncedAt: channel.state.lastSyncedAt || null,
-          hiddenEventSeqs: Array.from(channel.state.hiddenEventSeqs),
-          hiddenMessageSeqs: Array.from(channel.state.hiddenMessageSeqs),
-          lastMsgSeqBeforeChatDeleted: channel.state.lastMsgSeqBeforeChatDeleted || null,
-          updatedAt: new Date().toISOString()
-        }]).catch(() => {})
-      }
+      // Step 3: Persist through the SDK so the complete, versioned sync-state
+      // record survives refresh without overwriting other cursor metadata.
+      await client.persistSyncState()
 
       _resolvedGaps.add(key)
       setResolved(true)

@@ -421,7 +421,7 @@ ChannelRow.displayName = 'ChannelRow';
 
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
-  filters = { type: ['messaging', 'team', 'meeting'], include_hidden_messages: true } as unknown as ChannelFilters,
+  filters = { type: ['messaging', 'team', 'meeting'] } as unknown as ChannelFilters,
   sort = [],
   options = { message_limit: 1 } as unknown as ChannelListProps['options'],
   renderChannel,

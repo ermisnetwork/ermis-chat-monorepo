@@ -4403,7 +4403,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           break;
         }
         case 'message_deleted': {
-          // Message deleted event from offline sync — remove message from local state
+          // Keep only the deleted msg_seq in sync meta; unavailable message rows
+          // must not remain in the IndexedDB message store.
           const deleteData = event.data;
           const deletedMessageId = deleteData?.message_id;
           if (!deletedMessageId) {
@@ -4411,28 +4412,63 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             continue;
           }
 
-          // 1. Remove from in-memory channel state
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const activeChannel = (this.client as any)?.activeChannels?.[routeCid];
-          if (activeChannel?.state) {
-            activeChannel.state.removeMessage({ id: deletedMessageId });
-            // Also remove from pinned messages if applicable
-            activeChannel.state.removePinnedMessage({ id: deletedMessageId });
+          const activeMessage = activeChannel?.state?.findMessage?.(deletedMessageId);
+          const storedMessage = await this.storage.loadMessage(deletedMessageId).catch(() => null);
+          const eventSeq = Number(deleteData?.event_seq) || 0;
+          const lastEventSeq = Math.max(
+            Number((activeMessage as any)?.last_event_seq) || 0,
+            Number(storedMessage?.last_event_seq) || 0,
+          );
+
+          if (eventSeq > 0 && eventSeq <= lastEventSeq) {
+            break;
           }
 
-          // 2. Remove from local IndexedDB storage
+          const deletedAt = deleteData?.created_at || eventCreatedAt || new Date().toISOString();
+          const baseMessage = storedMessage || activeMessage || {};
+          const messageSeq = Number((baseMessage as any).msg_seq) || 0;
+          const tombstone = {
+            ...baseMessage,
+            id: deletedMessageId,
+            cid: routeCid,
+            content_type: (baseMessage as any).content_type || 'standard',
+            type: 'deleted',
+            display_type: 'unavailable',
+            text: '',
+            deleted_at: deletedAt,
+            updated_at: deletedAt,
+            last_event_seq: eventSeq || lastEventSeq,
+            pinned: false,
+            pinned_at: undefined,
+          };
+
+          if (activeChannel?.state) {
+            if (messageSeq > 0) activeChannel.state.hiddenMessageSeqs.add(messageSeq);
+            activeChannel.state.unavailableMessageIds.add(deletedMessageId);
+            if (activeMessage) {
+              activeChannel.state.removeMessage({ id: deletedMessageId }, { persist: false });
+              activeChannel.state.removePinnedMessage({ id: deletedMessageId });
+            }
+          }
+
           try {
             await this.storage.deleteMessage(deletedMessageId);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (this.client as any)?.persistSyncState?.();
           } catch (err) {
-            sdkLog('warn', '[Encryption] Failed to delete message from storage during sync:', deletedMessageId, err);
+            sdkLog('warn', '[Encryption] Failed to delete unavailable message during sync:', deletedMessageId, err);
           }
 
-          // 3. Dispatch event for UI re-render
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (this.client as any)?.dispatchEvent?.({
             type: 'message.deleted' as any,
-            message: { id: deletedMessageId },
+            message: tombstone,
             cid: routeCid,
+            event_seq: eventSeq || undefined,
+            created_at: deletedAt,
+            hard_delete: true,
           });
 
           sdkLog('info', '[Encryption] Sync: message deleted:', deletedMessageId);

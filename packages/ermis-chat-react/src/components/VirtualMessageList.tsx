@@ -13,7 +13,7 @@ import { usePendingState } from '../hooks/usePendingState';
 import { useScrollToMessage } from '../hooks/useScrollToMessage';
 import { isStickerMessage, isUnavailableDisplayMessage } from '../messageTypeUtils';
 import type { MessageListProps } from '../types';
-import { formatDateLabel, getDateKey, getMessageUserId } from '../utils';
+import { formatDateLabel, getDateKey, getMessageUserId, getUserDisplayName } from '../utils';
 import { Avatar } from './Avatar';
 import { BannedOverlay } from './BannedOverlay';
 import { ClosedTopicOverlay } from './ClosedTopicOverlay';

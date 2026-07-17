@@ -69,6 +69,8 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   hiddenEventSeqs: Set<number>;
   /** Set of msg_seq values that are hidden/deleted-for-me. Used for fake gap detection on UI pagination. */
   hiddenMessageSeqs: Set<number>;
+  /** Message IDs permanently withdrawn for everyone; blocks query/cache resurrection. */
+  unavailableMessageIds: Set<string>;
   /** Lower bound msg_seq for truncated/cleared history. Messages at or below this seq are deleted. */
   lastMsgSeqBeforeChatDeleted: number | null;
   constructor(channel: Channel<ErmisChatGenerics>) {
@@ -90,6 +92,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     this.hasMoreSyncEvents = false;
     this.hiddenEventSeqs = new Set();
     this.hiddenMessageSeqs = new Set();
+    this.unavailableMessageIds = new Set();
     this.lastMsgSeqBeforeChatDeleted = null;
   }
 
@@ -166,6 +169,10 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     for (let i = 0; i < messagesToAdd.length; i += 1) {
       const rawMsg = messagesToAdd[i] as any;
 
+      if (rawMsg.id && this.unavailableMessageIds.has(rawMsg.id)) {
+        continue;
+      }
+
       // Filter out messages that were deleted in a clear history / truncate action
       if (
         this.lastMsgSeqBeforeChatDeleted !== null &&
@@ -175,27 +182,32 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
         continue;
       }
 
-      // Filter out hidden individual messages
-      if (rawMsg.msg_seq && this.hiddenMessageSeqs.has(rawMsg.msg_seq)) {
-        continue;
-      }
-
       // Handle display_type from server query responses (Section 5.1)
       // 'unavailable' messages: don't add to UI state. 
       // Gap tracking is handled globally by `hiddenMessageSeqs` which is persisted to `sync_state` meta store.
       if (rawMsg.display_type === 'unavailable') {
+        if (rawMsg.id) this.unavailableMessageIds.add(rawMsg.id);
         if (rawMsg.msg_seq && this._channel?.cid) {
           this.hiddenMessageSeqs.add(rawMsg.msg_seq);
         }
         continue; // Don't add to UI state
       }
 
+      const isDeletedTombstone = rawMsg.display_type === 'deleted' || rawMsg.type === 'deleted';
+
       // 'deleted' messages: keep in state with type 'deleted' so the UI can
       // render "This message was deleted" placeholders. Without this, deleted
       // messages only survive in React state via the IndexedDB cache overlay
       // and vanish whenever syncMessages() replaces state from latestMessages.
-      if (rawMsg.display_type === 'deleted') {
+      if (isDeletedTombstone) {
+        rawMsg.display_type = 'deleted';
         rawMsg.type = 'deleted';
+      }
+
+      // hiddenMessageSeqs prevents deleted-for-me plaintext from resurfacing.
+      // An explicit deleted tombstone is safe metadata and must remain visible.
+      if (rawMsg.msg_seq && this.hiddenMessageSeqs.has(rawMsg.msg_seq) && !isDeletedTombstone) {
+        continue;
       }
 
       // If message is already formatted we can skip the tasks below
@@ -278,6 +290,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
             attachments: msgAny.attachments,
             msg_seq: msgAny.msg_seq,
             last_event_seq: msgAny.last_event_seq,
+            display_type: msgAny.display_type,
             deleted_at: msgAny.deleted_at instanceof Date
               ? msgAny.deleted_at.toISOString()
               : msgAny.deleted_at || undefined,
@@ -508,20 +521,26 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     return addToMessageList(messages, message, timestampChanged, sortBy, addIfDoesNotExist);
   }
 
-  removeMessage(messageToRemove: { id: string; messageSetIndex?: number; parent_id?: string }) {
+  removeMessage(
+    messageToRemove: { id: string; messageSetIndex?: number; parent_id?: string },
+    options: { persist?: boolean } = {},
+  ) {
+    const { persist = true } = options;
     let isRemoved = false;
-    const messageSetIndex = messageToRemove.messageSetIndex ?? this.findMessageSetIndex(messageToRemove);
-    if (messageSetIndex !== -1) {
+    const messageSetIndices = messageToRemove.messageSetIndex !== undefined
+      ? [messageToRemove.messageSetIndex]
+      : this.messageSets.map((_, index) => index);
+    for (const messageSetIndex of messageSetIndices) {
       const { removed, result: messages } = this.removeMessageFromArray(
         this.messageSets[messageSetIndex].messages,
         messageToRemove,
       );
       this.messageSets[messageSetIndex].messages = messages;
-      isRemoved = removed;
+      isRemoved = removed || isRemoved;
     }
 
     // Also remove from IndexedDB (fire-and-forget)
-    if (isRemoved && messageToRemove.id && this._channel) {
+    if (persist && isRemoved && messageToRemove.id && this._channel) {
       const client = this._channel.getClient() as any;
       const storage = client?.messageStorage || client?.encryptionManager?.storage;
       if (storage?.deleteMessage) {
@@ -792,7 +811,8 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
    * Used for truncate/clear-history operations.
    * @see intergration-guide.md Section 5.5, Rule 1
    */
-  truncateMessagesBySeq(maxSeq: number) {
+  truncateMessagesBySeq(maxSeq: number, options: { persist?: boolean } = {}): Promise<void> {
+    const { persist = true } = options;
     this.lastMsgSeqBeforeChatDeleted = maxSeq;
     this.messageSets.forEach((set) => {
       set.messages = set.messages.filter(
@@ -801,13 +821,15 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     });
 
     // Also delete from IndexedDB (Section 5.5, Rule 1)
-    if (this._channel?.cid) {
+    if (persist && this._channel?.cid) {
       const client = this._channel.getClient() as any;
       const storage = client?.messageStorage || client?.encryptionManager?.storage;
       if (storage?.deleteMessagesBefore) {
-        void storage.deleteMessagesBefore(this._channel.cid, maxSeq).catch(() => {});
+        return storage.deleteMessagesBefore(this._channel.cid, maxSeq).catch(() => {});
       }
     }
+
+    return Promise.resolve();
   }
 
   /**
@@ -818,17 +840,28 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   removeHiddenMessages(hiddenMsgSeqs: number[]) {
     if (hiddenMsgSeqs.length === 0) return;
     const seqSet = new Set(hiddenMsgSeqs);
+    const isDeletedTombstone = (message: any) =>
+      message?.display_type === 'deleted' || message?.type === 'deleted';
 
-    // Collect message IDs to delete from DB before filtering
+    // Remove hidden plaintext, but preserve the content-free deleted tombstone
+    // returned by query/realtime so refresh still renders the placeholder.
     const idsToDelete: string[] = [];
     this.messageSets.forEach((set) => {
       set.messages.forEach((msg) => {
-        if ((msg as any).msg_seq && seqSet.has((msg as any).msg_seq) && msg.id) {
+        if (
+          (msg as any).msg_seq &&
+          seqSet.has((msg as any).msg_seq) &&
+          !isDeletedTombstone(msg) &&
+          msg.id
+        ) {
           idsToDelete.push(msg.id);
         }
       });
       set.messages = set.messages.filter(
-        (msg) => !(msg as any).msg_seq || !seqSet.has((msg as any).msg_seq),
+        (msg) =>
+          !(msg as any).msg_seq ||
+          !seqSet.has((msg as any).msg_seq) ||
+          isDeletedTombstone(msg),
       );
     });
 
@@ -901,10 +934,11 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   }
 
   /**
-   * Memory optimization: prune hidden sequence entries that are too far behind
-   * the current sync cursor. Entries below (lastSyncedEventSeq - buffer) will
-   * never be referenced again for gap detection.
-   * @param buffer Number of recent seqs to keep (default 1000)
+   * Prune hidden event sequences that are too far behind the event cursor.
+   * Hidden message sequences must survive changes to the in-memory pagination
+   * window because older IndexedDB messages can still reference those gaps.
+   * They are safe to prune only when the clear-history boundary covers them.
+   * @param buffer Number of recent event seqs to keep (default 1000)
    */
   cleanupHiddenSequences(buffer = 1000) {
     const eventThreshold = this.lastSyncedEventSeq - buffer;
@@ -916,20 +950,10 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       }
     }
 
-    // For message seqs, use the lowest msg_seq in the current message list as the threshold
-    const lowestMsgSeq = this.messageSets.reduce((min, set) => {
-      for (const msg of set.messages) {
-        const seq = (msg as any).msg_seq;
-        if (typeof seq === 'number' && (min === 0 || seq < min)) {
-          min = seq;
-        }
-      }
-      return min;
-    }, 0);
-
-    if (lowestMsgSeq > 0) {
+    const clearedThroughSeq = this.lastMsgSeqBeforeChatDeleted || 0;
+    if (clearedThroughSeq > 0) {
       for (const seq of this.hiddenMessageSeqs) {
-        if (seq < lowestMsgSeq) {
+        if (seq <= clearedThroughSeq) {
           this.hiddenMessageSeqs.delete(seq);
         }
       }

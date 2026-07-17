@@ -50,6 +50,13 @@ export function useSyncStatus(client: ErmisChat | null): SyncState {
       }));
     };
 
+    const handleSyncFailed = () => {
+      setState((prev) => ({
+        ...prev,
+        status: 'error',
+      }));
+    };
+
     const handleRecovered = () => {
       setState((prev) => ({
         ...prev,
@@ -61,12 +68,14 @@ export function useSyncStatus(client: ErmisChat | null): SyncState {
     client.on('sync.started', handleSyncStarted);
     client.on('sync.completed', handleSyncCompleted);
     client.on('sync.gap_detected', handleGapDetected);
+    client.on('sync.failed', handleSyncFailed);
     client.on('connection.recovered', handleRecovered);
 
     return () => {
       client.off('sync.started', handleSyncStarted);
       client.off('sync.completed', handleSyncCompleted);
       client.off('sync.gap_detected', handleGapDetected);
+      client.off('sync.failed', handleSyncFailed);
       client.off('connection.recovered', handleRecovered);
     };
   }, [client]);

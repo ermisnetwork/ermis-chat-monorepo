@@ -72,32 +72,52 @@ export function ChatPage() {
   useNotification(activeChannel)
   const syncState = useSyncStatus(client)
 
-  // Event Sourcing: Cold start sync + background→foreground sync
+  // Event Sourcing: cold start + offline→online sync only.
   useEffect(() => {
     if (!client) return
 
-    // Cold start: restore persisted sync state then sync (Section 4.1)
-    client.restoreSyncState()
-      .then(() => client.performSync())
-      .catch((err: unknown) => {
-        console.warn('[Sync] Initial sync failed:', err)
-      })
+    let didSyncAfterChannelHydration = false
+    let wasOffline = false
 
-    // Background → Foreground sync (Section 4.3)
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        client.performSync().catch((err: unknown) => {
-          console.warn('[Sync] Visibility change sync failed:', err)
+    const runSync = (label: string, force = false) => {
+      client.restoreSyncState()
+        .then(() => client.performSync(force))
+        .catch((err: unknown) => {
+          console.warn(`[Sync] ${label} failed:`, err)
         })
-      }
     }
 
-    document.addEventListener('visibilitychange', handleVisibilityChange)
+    const runHydratedColdStartSync = () => {
+      if (didSyncAfterChannelHydration) return
+      didSyncAfterChannelHydration = true
+      runSync('Cold start hydrated sync', true)
+    }
+
+    const channelsQueriedSub = client.on('channels.queried', runHydratedColdStartSync)
+
+    const connectionSub = client.on('connection.changed', (event: any) => {
+      if (event.online) {
+        if (wasOffline) {
+          wasOffline = false
+          runSync('Offline recovery sync')
+        }
+      } else {
+        wasOffline = true
+      }
+    })
+
+    // If channels were hydrated before this effect mounted, run immediately.
+    // Otherwise wait for the first channels.queried event so cold start sends
+    // exactly one sync request with real cursors.
+    if (Object.keys(client.activeChannels || {}).length > 0) {
+      runHydratedColdStartSync()
+    }
+
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      channelsQueriedSub.unsubscribe()
+      connectionSub.unsubscribe()
     }
   }, [client])
-
   // Directly update browser tab title with unread count (more reliable than Helmet)
   useEffect(() => {
     document.title = totalUnreadCount > 0
@@ -223,7 +243,7 @@ export function ChatPage() {
       resolved = true
       sub.unsubscribe()
       const fallback = client.channel(channelType, channelId)
-      fallback.watch({ messages: { limit: 25, include_hidden_messages: true } })
+      fallback.watch({ messages: { limit: 25 } })
         .then(() => applyChannel(fallback))
         .catch((e) => {
           console.error("Failed to restore channel from URL:", e)
@@ -908,7 +928,7 @@ export function ChatPage() {
               {/* ChannelList — always visible; clipped at 66px shows only avatars */}
               <div className="flex-1 overflow-hidden relative">
                 <ChannelList
-                  filters={{ type: ['messaging', 'team'], include_hidden_messages: true } as any}
+                  filters={{ type: ['messaging', 'team'] } as any}
                   showPendingInvites={false}
                   onTopicDrillDown={handleTopicDrillDown}
                   onAddTopic={openCreateTopicModal}

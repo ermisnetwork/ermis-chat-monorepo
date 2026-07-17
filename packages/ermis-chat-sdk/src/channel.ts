@@ -43,7 +43,11 @@ import {
   E2EEAddMembersOptions,
   E2EERemoveMembersOptions,
   ChannelSyncParams,
+  EventSyncEnvelope,
   EventSyncResponse,
+  SYNC_EVENT_TYPES,
+  SYNC_EVENT_TYPE_MAP,
+  SyncEventType,
   ChannelQuerySeqOptions,
 } from './types';
 /**
@@ -869,24 +873,34 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async truncate(options?: { for_me?: boolean }) {
-    // for_me: always DELETE /truncate?for_me=true
-    // DM (messaging): DELETE /chat
-    // Group (team): DELETE /truncate
-    let path: string;
-    if (options?.for_me) {
-      path = '/truncate?for_me=true';
-    } else if (this.type === 'messaging') {
-      path = '/chat';
-    } else {
-      path = '/truncate';
-    }
-    const response = await this.getClient().delete(this._channelURL() + path);
+    // Direct-message history is cleared through /chat. Group/admin history
+    // continues to use /truncate. Keep the public method compatible while
+    // routing `for_me` as an actual query parameter.
+    const path = this.type === 'messaging' ? '/chat' : '/truncate';
+    const params = options?.for_me ? { for_me: true } : undefined;
+    const response = await this.getClient().delete(this._channelURL() + path, params);
 
     // Dispatch local event so UI clears immediately
     const truncateDate = (response as any)?.channel?.truncated_at || new Date().toISOString();
 
-    // Unconditionally clear local state
-    this.state.clearMessages();
+    const rawDeletedSeq =
+      (response as any)?.last_msg_seq_before_chat_deleted ??
+      (response as any)?.channel?.last_msg_seq_before_chat_deleted ??
+      (response as any)?.channel?.last_msg_seq_before_truncate ??
+      (response as any)?.channel?.user_clear_seq;
+    const deletedSeq = typeof rawDeletedSeq === 'number' ? rawDeletedSeq : Number(rawDeletedSeq);
+
+    if (Number.isFinite(deletedSeq) && deletedSeq > 0) {
+      await this.state.truncateMessagesBySeq(deletedSeq);
+    } else {
+      this.state.clearMessages();
+      if (this.cid) {
+        const storage = this.getClient().messageStorage || this.getClient().encryptionManager?.storage;
+        void storage?.clearMessages?.(this.cid).catch(() => {});
+      }
+    }
+    void this.getClient().persistSyncState?.().catch(() => {});
+
     if (this.data) {
       (this.data as any).truncated_at = truncateDate;
     }
@@ -1452,6 +1466,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       queryURL + '/query',
       this._encodeE2eeChannelPayload(payload),
     );
+    await this._applyQueryHistoryBoundary(state);
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
     const users = Object.values(this.getClient().state.users);
@@ -1544,6 +1559,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       queryURL + '/query',
       this._encodeE2eeChannelPayload(payload),
     );
+    await this._applyQueryHistoryBoundary(state);
 
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
@@ -1954,9 +1970,21 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           { tags: ['sync', 'gap'] },
         );
         // Async sync to fill the gap (don't block current event processing)
-        this.syncUntilCaughtUp().catch((err) => {
-          this._client.logger('error', 'channel:gap_sync_failed', { err, tags: ['sync', 'gap'] });
-        });
+        this.syncUntilCaughtUp()
+          .then(() => {
+            this._client.persistSyncState();
+            // Signal UI that gap sync is complete (mirrors sync.completed from performSync)
+            this._client.dispatchEvent({
+              type: 'sync.completed',
+            } as Event<ErmisChatGenerics>);
+          })
+          .catch((err) => {
+            this._client.logger('error', 'channel:gap_sync_failed', { err, tags: ['sync', 'gap'] });
+            this._client.dispatchEvent({
+              type: 'sync.failed',
+              error: err,
+            } as Event<ErmisChatGenerics>);
+          });
         this._client.dispatchEvent({
           type: 'sync.gap_detected',
           cid: this.cid,
@@ -2017,35 +2045,68 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       case 'message.deleted':
         if (event.message) {
           this._extendEventWithOwnReactions(event);
-          if (event.message.deleted_at || (event.message as any).type === 'deleted' || event.message.display_type === 'deleted') {
+          const existing = channelState.findMessage(event.message.id);
+          const isUnavailable = event.hard_delete === true || event.message.display_type === 'unavailable';
+
+          if (isUnavailable) {
+            const unavailableMessage = {
+              ...(existing || {}),
+              ...event.message,
+              display_type: 'unavailable',
+              type: 'deleted',
+              text: '',
+              deleted_at: event.message.deleted_at || event.created_at || new Date().toISOString(),
+              last_event_seq: (event as any).event_seq || (existing as any)?.last_event_seq,
+              pinned: false,
+              pinned_at: null,
+            } as MessageResponse<ErmisChatGenerics>;
+
+            event.message = unavailableMessage;
+            channelState.unavailableMessageIds.add(unavailableMessage.id);
+            const messageSeq = Number(unavailableMessage.msg_seq) || 0;
+            if (messageSeq > 0) channelState.hiddenMessageSeqs.add(messageSeq);
+            channelState.removeMessage({ id: unavailableMessage.id }, { persist: false });
+
+            const encryptionManager = this.getClient().encryptionManager;
+            const storage = this._isEffectiveE2ee()
+              ? encryptionManager?.storage
+              : this._client.messageStorage;
+            if (storage?.deleteMessage) {
+              void storage.deleteMessage(unavailableMessage.id).catch(() => {});
+            }
+            void this.getClient().persistSyncState().catch(() => {});
+          } else if (event.message.deleted_at || (event.message as any).type === 'deleted' || event.message.display_type === 'deleted') {
             // Soft delete: update the message in state so UI shows "This message was deleted"
-            event.message.display_type = 'deleted';
-            
-            const existing = channelState.findMessage(event.message.id);
+            const deletedMessage = {
+              ...(existing || {}),
+              ...event.message,
+              display_type: 'deleted',
+              type: 'deleted',
+              text: '',
+              deleted_at: event.message.deleted_at || event.created_at || new Date().toISOString(),
+              status: 'received',
+              pinned: false,
+              pinned_at: null,
+              updated_at: null,
+              user: { ...existing?.user, ...event.message.user },
+              user_id: event.message.user_id || existing?.user_id,
+            } as MessageResponse<ErmisChatGenerics>;
+
+            event.message = deletedMessage;
             if (existing) {
-              channelState.updateMessageById(event.message.id, (msg) => ({
-                ...msg,
-                ...event.message,
-                display_type: 'deleted',
-                type: 'deleted',
-                status: 'received',
-                pinned_at: null,
-                updated_at: null,
-                user: { ...msg.user, ...event.message?.user },
-                user_id: (event.message as any)?.user_id || msg.user_id,
-              }));
+              channelState.updateMessageById(event.message.id, () => deletedMessage as any);
             } else {
-              channelState.addMessageSorted(event.message);
+              channelState.addMessageSorted(deletedMessage);
             }
 
             const encryptionMgrDel = this.getClient().encryptionManager;
             const isE2ee = this._isEffectiveE2ee();
             if (isE2ee && encryptionMgrDel?.initialized && event.message.id) {
-              encryptionMgrDel.storage.saveMessage(existing ? { ...existing, display_type: 'deleted', type: 'deleted' } as any : event.message).catch(() => {});
+              encryptionMgrDel.storage.saveMessage(deletedMessage as any).catch(() => {});
             } else {
               const storage = this._client?.messageStorage;
               if (storage?.saveMessage) {
-                storage.saveMessage(existing ? { ...existing, display_type: 'deleted', type: 'deleted' } as any : event.message).catch(() => {});
+                storage.saveMessage(deletedMessage as any).catch(() => {});
               }
             }
           } else {
@@ -2123,34 +2184,46 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           delete event.message.user;
           delete (event.message as any).user_id;
 
-          event.message.display_type = 'deleted';
-          event.message.pinned_at = null;
-          (event.message as any).updated_at = null;
-          event.message.status = 'received';
-          
           const existing = channelState.findMessage(event.message.id);
+          const deletedAt = event.message.deleted_at || event.created_at || new Date().toISOString();
+          const deletedMessage = {
+            ...(existing || {}),
+            ...event.message,
+            type: 'deleted',
+            display_type: 'deleted',
+            text: '',
+            html: '',
+            attachments: [],
+            sticker_url: undefined,
+            quoted_message: undefined,
+            quoted_message_id: undefined,
+            old_texts: undefined,
+            mls_ciphertext: undefined,
+            deleted_at: deletedAt,
+            status: 'received',
+            pinned: false,
+            pinned_at: null,
+            updated_at: null,
+            user: existing?.user,
+            user_id: existing?.user_id,
+          } as MessageResponse<ErmisChatGenerics>;
+
+          event.message = deletedMessage;
           if (existing) {
-            channelState.updateMessageById(event.message.id, (msg) => ({
-              ...msg,
-              display_type: 'deleted',
-              status: 'received',
-              pinned_at: null,
-              updated_at: new Date(),
-              user: msg.user, // Giữ nguyên user cũ
-              user_id: msg.user_id, // Giữ nguyên user_id cũ
-            }));
+            channelState.updateMessageById(event.message.id, () => deletedMessage as any);
+          } else {
+            channelState.addMessageSorted(deletedMessage);
           }
 
           // Also save it to DB so it persists across reloads
           const encryptionMgrDel = this.getClient().encryptionManager;
           const isE2ee = this._isEffectiveE2ee();
-          const msgToSave = existing ? { ...existing, display_type: 'deleted' } : event.message;
           if (isE2ee && encryptionMgrDel?.initialized && event.message.id) {
-            encryptionMgrDel.storage.saveMessage(msgToSave as any).catch(() => {});
+            encryptionMgrDel.storage.saveMessage(deletedMessage as any).catch(() => {});
           } else {
             const storage = this._client?.messageStorage;
             if (storage?.saveMessage) {
-              storage.saveMessage(msgToSave).catch(() => {});
+              storage.saveMessage(deletedMessage as any).catch(() => {});
             }
           }
 
@@ -3162,6 +3235,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     updateUserIds?: (id: string) => void,
   ) {
     const { state: clientState, user, userID } = this.getClient();
+    // Query responses are authoritative snapshots. Apply the clear-history
+    // boundary before any returned/cache message can enter ChannelState.
+    void this._applyQueryHistoryBoundary(state, false);
     // add the Users
     if (state.channel.members) {
       for (const member of state.channel.members) {
@@ -3197,8 +3273,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const messages = uniqueMessages || [];
 
-    // Extract the highest last_event_seq from the queried messages to seed the sync cursor.
-    // This allows the channel to be included in future global syncs after its initial query.
+    // Seed from messages actually present in the query snapshot. Do not use
+    // channel.latest_event_seq: a partial query may not yet reflect an event at
+    // that sequence (for example message_deleted), which would skip it forever.
     let maxEventSeq = 0;
     for (const msg of messages) {
       if (typeof (msg as any).last_event_seq === 'number') {
@@ -3279,6 +3356,67 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     };
   }
 
+  /**
+   * Apply the history boundary included in channel query responses.
+   * The server can return unavailable placeholders for sequence continuity;
+   * they must never be hydrated into RAM or persisted back into IndexedDB.
+   */
+  async _applyQueryHistoryBoundary(
+    state: ChannelAPIResponse<ErmisChatGenerics>,
+    persist = true,
+  ): Promise<number> {
+    const rawBoundary =
+      state.last_msg_seq_before_chat_deleted ??
+      state.channel.last_msg_seq_before_chat_deleted ??
+      state.channel.last_msg_seq_before_truncate ??
+      state.channel.user_clear_seq;
+    const parsedBoundary = typeof rawBoundary === 'number' ? rawBoundary : Number(rawBoundary);
+    const responseBoundary = Number.isFinite(parsedBoundary) && parsedBoundary > 0 ? parsedBoundary : 0;
+    const currentBoundary = this.state.lastMsgSeqBeforeChatDeleted || 0;
+    const boundary = Math.max(responseBoundary, currentBoundary);
+    let hiddenMessagesChanged = false;
+    const unavailableMessageIdsToDelete: string[] = [];
+    const shouldKeepMessage = (message: MessageResponse<ErmisChatGenerics>) => {
+      if (message.display_type === 'unavailable') {
+        if (message.id) {
+          this.state.unavailableMessageIds.add(message.id);
+          unavailableMessageIdsToDelete.push(message.id);
+        }
+        const messageSeq = Number(message.msg_seq) || 0;
+        if (messageSeq > 0 && !this.state.hiddenMessageSeqs.has(messageSeq)) {
+          this.state.hiddenMessageSeqs.add(messageSeq);
+          hiddenMessagesChanged = true;
+        }
+        return false;
+      }
+      const messageSeq = Number(message.msg_seq) || 0;
+      return boundary <= 0 || messageSeq <= 0 || messageSeq > boundary;
+    };
+
+    state.messages = (state.messages || []).filter(shouldKeepMessage);
+    state.pinned_messages = (state.pinned_messages || []).filter(shouldKeepMessage);
+
+    if (unavailableMessageIdsToDelete.length > 0) {
+      const storage = state.channel.mls_enabled
+        ? this.getClient().encryptionManager?.storage
+        : this.getClient().messageStorage;
+      if (storage?.deleteMessage) {
+        await Promise.all(
+          unavailableMessageIdsToDelete.map((messageId) => storage.deleteMessage(messageId).catch(() => {})),
+        );
+      }
+    }
+
+    if (hiddenMessagesChanged && persist) await this.getClient().persistSyncState();
+
+    if (boundary <= 0) return 0;
+
+    state.last_msg_seq_before_chat_deleted = boundary;
+    state.channel.last_msg_seq_before_chat_deleted = boundary;
+    await this.state.truncateMessagesBySeq(boundary, { persist });
+    return boundary;
+  }
+
   _extendEventWithOwnReactions(event: Event<ErmisChatGenerics>) {
     if (!event.message) {
       return;
@@ -3317,6 +3455,52 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     );
   }
 
+  private _getSyncEventSeq(event: EventSyncEnvelope<ErmisChatGenerics>): number {
+    const rawSeq =
+      event?.event_seq ??
+      event?.data?.event_seq ??
+      event?.message?.last_event_seq ??
+      event?.data?.message?.last_event_seq;
+    const seq = typeof rawSeq === 'number' ? rawSeq : Number(rawSeq);
+    return Number.isFinite(seq) && seq > 0 ? seq : 0;
+  }
+
+  private _normalizeSyncEvent(event: EventSyncEnvelope<ErmisChatGenerics>): Event<ErmisChatGenerics> & {
+    event_seq?: number;
+    message_id?: string;
+    sender?: UserResponse<ErmisChatGenerics>;
+    latest_reactions?: unknown;
+    reaction_counts?: unknown;
+  } {
+    const data = event?.data || {};
+    const message = event?.message || data.message;
+    const sender = event?.sender || data.sender;
+    const defaultType = SYNC_EVENT_TYPE_MAP[event.type as SyncEventType] as EventTypes | undefined;
+    const reactionAction =
+      event.type === SYNC_EVENT_TYPES.REACTION
+        ? data.action || event.action
+        : undefined;
+    const normalizedType = reactionAction || defaultType || event.type;
+
+    return {
+      ...event,
+      ...data,
+      type: normalizedType as EventTypes,
+      event_seq: this._getSyncEventSeq(event),
+      message,
+      message_id: event?.message_id || data.message_id || message?.id,
+      sender,
+      user: event?.user || data.user || sender,
+      created_at: event?.created_at || data.created_at,
+      hard_delete: event.hard_delete ?? event.type === SYNC_EVENT_TYPES.MESSAGE_DELETED,
+    } as Event<ErmisChatGenerics> & {
+      event_seq?: number;
+      message_id?: string;
+      sender?: UserResponse<ErmisChatGenerics>;
+      latest_reactions?: unknown;
+      reaction_counts?: unknown;
+    };
+  }
   /**
    * Apply a sync result (from Channel Sync or Global Sync) to this channel's local state.
    * Processes events with idempotency checks, merges hidden sequences,
@@ -3327,17 +3511,22 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const channelState = this.state;
 
     // 1. Merge hidden sequences (Section 6.1)
+    const hiddenEventCountBeforeMerge = channelState.hiddenEventSeqs.size;
+    const hiddenMessageCountBeforeMerge = channelState.hiddenMessageSeqs.size;
     channelState.mergeHiddenSequences(
       syncResult.hidden_event_seqs || [],
       syncResult.hidden_message_seqs || [],
     );
+    let syncMetadataChanged =
+      channelState.hiddenEventSeqs.size !== hiddenEventCountBeforeMerge ||
+      channelState.hiddenMessageSeqs.size !== hiddenMessageCountBeforeMerge;
 
     // 2. Process truncate/clear history (Section 5.5, Rule 1)
     if (
       syncResult.last_msg_seq_before_chat_deleted &&
       syncResult.last_msg_seq_before_chat_deleted > 0
     ) {
-      channelState.truncateMessagesBySeq(syncResult.last_msg_seq_before_chat_deleted);
+      await channelState.truncateMessagesBySeq(syncResult.last_msg_seq_before_chat_deleted);
       this._client.dispatchEvent({
         type: 'channel.truncated',
         cid: this.cid,
@@ -3358,20 +3547,31 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     // 4. Apply events with idempotency check (Section 5.6)
     let maxEventSeq = channelState.lastSyncedEventSeq;
 
-    for (const event of syncResult.events) {
-      const eventSeq = (event as any).event_seq || 0;
+    for (const rawEvent of syncResult.events || []) {
+      const event = this._normalizeSyncEvent(rawEvent);
+      const eventSeq = event.event_seq || 0;
 
       switch (event.type as string) {
         case 'message.new':
           if (event.message) {
-            // Skip unavailable messages
-            if ((event.message as any).display_type === 'unavailable') break;
+            if ((event.message as any).display_type === 'unavailable') {
+              const messageSeq = Number((event.message as any).msg_seq) || 0;
+              if (messageSeq > 0 && !channelState.hiddenMessageSeqs.has(messageSeq)) {
+                channelState.hiddenMessageSeqs.add(messageSeq);
+                syncMetadataChanged = true;
+              }
+              if (event.message.id) {
+                channelState.unavailableMessageIds.add(event.message.id);
+                await this._client.messageStorage?.deleteMessage(event.message.id).catch(() => {});
+              }
+              break;
+            }
             
             // Map sender to message.user for UI to render Avatar correctly
             event.message.user = event.message.user || (event as any).sender || event.user;
             
             const existing = channelState.findMessage(event.message.id);
-            if (!existing) {
+            if (!existing || ((existing as any).last_event_seq ?? 0) < eventSeq) {
               channelState.addMessageSorted(event.message as any);
             }
           }
@@ -3436,16 +3636,41 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         }
 
         case 'message.deleted':
-        case 'message.deleted_for_me':
+        case 'message.deleted_for_me': {
           const msgId = event.message?.id || (event as any).message_id;
           if (msgId) {
             const msg = channelState.findMessage(msgId);
+            const isUnavailable = event.type === 'message.deleted' && event.hard_delete === true;
+
+            if (isUnavailable) {
+              const storage = this._client.messageStorage || this._client.encryptionManager?.storage;
+              const storedMsg = msg || (storage?.loadMessage
+                ? await storage.loadMessage(msgId).catch(() => null)
+                : null);
+              const lastEventSeq = Number((storedMsg as any)?.last_event_seq) || 0;
+
+              if (eventSeq > 0 && eventSeq < lastEventSeq) break;
+
+              const messageSeq = Number((msg as any)?.msg_seq ?? (storedMsg as any)?.msg_seq) || 0;
+              if (messageSeq > 0 && !channelState.hiddenMessageSeqs.has(messageSeq)) {
+                channelState.hiddenMessageSeqs.add(messageSeq);
+                syncMetadataChanged = true;
+              }
+              channelState.unavailableMessageIds.add(msgId);
+              channelState.removeMessage({ id: msgId }, { persist: false });
+              channelState.removePinnedMessage({ id: msgId } as MessageResponse<ErmisChatGenerics>);
+
+              if (storage?.deleteMessage) await storage.deleteMessage(msgId).catch(() => {});
+              break;
+            }
+
             if (msg && ((msg as any).last_event_seq ?? 0) < eventSeq) {
               let updatedMsg: any;
               channelState.updateMessageById(msgId, (m) => {
                 updatedMsg = {
                   ...m,
                   type: 'deleted',
+                  display_type: 'deleted',
                   updated_at: event.created_at || new Date().toISOString(),
                   deleted_at: event.created_at || new Date().toISOString(),
                   text: '',
@@ -3465,6 +3690,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                   const updatedMsg = {
                     ...storedMsg,
                     type: 'deleted',
+                    display_type: 'deleted',
                     updated_at: event.created_at || new Date().toISOString(),
                     deleted_at: event.created_at || new Date().toISOString(),
                     text: '',
@@ -3476,6 +3702,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             }
           }
           break;
+        }
 
         case 'reaction.new':
         case 'reaction.updated':
@@ -3530,6 +3757,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     // 6. Cleanup old hidden sequences to prevent memory growth (#10)
     channelState.cleanupHiddenSequences();
+    if (syncMetadataChanged) await this._client.persistSyncState().catch(() => {});
   }
 
   /**

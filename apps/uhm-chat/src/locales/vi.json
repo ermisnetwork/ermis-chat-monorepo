@@ -62,6 +62,7 @@
     "create_channel_group_public": "Kênh công khai",
     "create_channel_search": "Tìm kiếm người dùng...",
     "create_channel_search_friends": "Tìm kiếm bạn bè...",
+    "create_channel_exact_search_hint": "Nhập chính xác tên, email hoặc số điện thoại để tìm người lạ.",
     "create_channel_cancel": "Hủy",
     "create_channel_create": "Tạo",
     "create_channel_creating": "Đang tạo...",

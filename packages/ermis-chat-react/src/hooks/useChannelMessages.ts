@@ -3,6 +3,12 @@ import type { Event } from '@ermis-network/ermis-chat-sdk';
 import type { VListHandle } from 'virtua';
 import { useChatClient } from './useChatClient';
 import { isPendingMember } from '../channelRoleUtils';
+import {
+  isDeletedMessage,
+  isUnavailableDisplayMessage,
+  MESSAGE_DISPLAY_TYPES,
+  MESSAGE_TYPES,
+} from '../messageTypeUtils';
 
 export type UseChannelMessagesOptions = {
   scrollToBottom: (smooth: boolean) => void;
@@ -15,7 +21,7 @@ export type UseChannelMessagesOptions = {
   isAtBottomRef: React.MutableRefObject<boolean>;
   /** Called to reset load-more state when channel switches */
   onChannelSwitch?: () => void;
-  /** Whether to include hidden (deleted) messages in the initial channel query */
+  /** Whether to run the initial seq-based channel query */
   includeHiddenMessages?: boolean;
   /** Ref to the message list container for smooth opacity transitions */
   containerRef?: React.RefObject<HTMLDivElement>;
@@ -23,8 +29,9 @@ export type UseChannelMessagesOptions = {
   vlistRef?: React.RefObject<VListHandle | null>;
 };
 
-// Track channels that have already been queried with include_hidden_messages globally for the session
+// Track channels that have already run the initial seq-based query globally for the session
 const fullyQueriedChannels = new Set<string>();
+const queryingChannels = new Set<string>();
 export const markChannelAsFullyQueried = (cid: string) => fullyQueriedChannels.add(cid);
 
 const isInactiveInviteRole = (role?: string) => isPendingMember(role) || role === 'rejected' || role === 'skipped';
@@ -171,12 +178,30 @@ export function useChannelMessages({
     };
 
     const normalizeDecryptedMessage = (message: any) => {
+      if (isDeletedMessage(message)) {
+        return {
+          ...message,
+          type: MESSAGE_TYPES.DELETED,
+          display_type: MESSAGE_DISPLAY_TYPES.DELETED,
+          text: '',
+        };
+      }
       if (!isDecryptedPlaintextMessage(message)) return message;
       return {
         ...message,
         content_type: 'standard',
         type: message.sticker_url ? 'sticker' : message.type,
       };
+    };
+
+    const isHiddenPlaintextMessage = (message: any) => {
+      const messageSeq = Number(message?.msg_seq);
+      return (
+        Number.isFinite(messageSeq) &&
+        messageSeq > 0 &&
+        activeChannel.state.hiddenMessageSeqs.has(messageSeq) &&
+        !isDeletedMessage(message)
+      );
     };
 
     const getMessageAndQuoteIds = (messages: any[]) =>
@@ -210,13 +235,23 @@ export function useChannelMessages({
       options: { includeMissing?: boolean } = {},
     ) => {
       const includeMissing = options.includeMissing ?? true;
-      const byId = new Map(baseMessages.map((msg: any) => [msg.id, msg]));
+      const byId = new Map(
+        baseMessages
+          .filter(
+            (message: any) =>
+              !isUnavailableDisplayMessage(message) && !isHiddenPlaintextMessage(message),
+          )
+          .map((message: any) => [message.id, message]),
+      );
       for (const decrypted of decryptedMessages) {
-        if (decrypted.display_type === 'unavailable') continue;
+        if (isUnavailableDisplayMessage(decrypted) || isHiddenPlaintextMessage(decrypted)) continue;
 
         const normalized = normalizeDecryptedMessage(decrypted);
         const hasPlaintext = isDecryptedPlaintextMessage(normalized);
         const current: any = byId.get(decrypted.id);
+        // A cache read can resolve after message_deleted was applied. Never let
+        // that older plaintext replace the tombstone already present in state.
+        if (isDeletedMessage(current) && !isDeletedMessage(normalized)) continue;
         if (!includeMissing && !current) continue;
         byId.set(decrypted.id, {
           ...(current || {}),
@@ -282,11 +317,19 @@ export function useChannelMessages({
               const byId = new Map(prev.map((msg: any) => [msg.id, msg]));
               for (const stored of storedMessages) {
                 // Filter out 'unavailable' messages used for gap tracking
-                if (stored.display_type === 'unavailable') continue;
-                
+                if (stored.display_type === 'unavailable' || isHiddenPlaintextMessage(stored)) continue;
+
                 if (!byId.has(stored.id)) {
+                  const normalizedStored = isDeletedMessage(stored)
+                    ? {
+                        ...stored,
+                        type: MESSAGE_TYPES.DELETED,
+                        display_type: MESSAGE_DISPLAY_TYPES.DELETED,
+                        text: '',
+                      }
+                    : stored;
                   byId.set(stored.id, {
-                    ...stored,
+                    ...normalizedStored,
                     created_at: stored.created_at ? new Date(stored.created_at) : new Date(),
                     updated_at: stored.updated_at ? new Date(stored.updated_at) : null,
                     status: stored.status || 'received',
@@ -326,10 +369,11 @@ export function useChannelMessages({
         .catch((err: any) => console.warn('[E2EE] Failed to ensure channel ready', err));
     };
 
-    // Fetch hidden messages if not already done for this channel
+    // Run the initial seq-based query if not already done for this channel
     const cid = activeChannel.cid;
     if (includeHiddenMessages && cid && !fullyQueriedChannels.has(cid)) {
       syncMessagesWithCache({ includeStoredWindow: true });
+      queryingChannels.add(cid);
       activeChannel
         .query({
           messages_seq: { limit: 25 },
@@ -357,7 +401,8 @@ export function useChannelMessages({
           setTimeout(() => {
             jumpingRef.current = false;
           }, 100);
-        });
+        })
+        .finally(() => queryingChannels.delete(cid));
     } else {
       // Already queried: sync cache immediately for instant UI, scroll and fade in quickly
       syncMessagesWithCache({ includeStoredWindow: true });
@@ -508,6 +553,7 @@ export function useChannelMessages({
     };
 
     const handleRecovery = () => {
+      if (activeChannel.cid && queryingChannels.has(activeChannel.cid)) return;
       // recoverState() only fetches channels with message_limit: 1 (for sidebar previews).
       // Re-query the active channel with a proper limit to load all missed messages.
       activeChannel
@@ -567,6 +613,9 @@ export function useChannelMessages({
     const sub17 = eventClient.on('e2ee.post_join_sync' as any, handleE2eeRefresh);
     const sub18 = eventClient.on('e2ee.channel_ready' as any, handleE2eeRefresh);
     const sub19 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
+    const sub20 = eventClient.on('sync.completed', () => {
+      syncMessagesWithCache({ includeStoredWindow: true });
+    });
 
     return () => {
       sub1.unsubscribe();
@@ -589,6 +638,7 @@ export function useChannelMessages({
       sub17.unsubscribe();
       sub18.unsubscribe();
       sub19.unsubscribe();
+      sub20.unsubscribe();
     };
   }, [activeChannel, client, scrollToBottom, scheduleScrollToBottom, shouldAutoScroll, snapToBottomAfterCommit, syncMessages, setMessages, onChannelSwitch, setReadState, holdScrollLoadLock]);
 }

@@ -74,6 +74,8 @@ function isString(x: unknown): x is string {
   return typeof x === 'string' || x instanceof String;
 }
 
+const SYNC_STATE_VERSION = 2;
+
 type ResolvedErmisChatConfig = {
   apiKey: string;
   projectId: string;
@@ -1304,7 +1306,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     if ((event.type === 'channel.deleted' || event.type === 'notification.channel_deleted') && event.cid) {
       client.state.deleteAllChannelReference(event.cid);
+      this.activeChannels[event.cid]?.state.clearMessages();
+      this.activeChannels[event.cid]?.state.resetSyncState();
       this.activeChannels[event.cid]?._disconnect();
+      this._clearChannelLocalStorage(event.cid).catch((err) => {
+        this.logger('warn', 'client:_handleClientEvent() - Failed to clear deleted channel storage', { err, cid: event.cid });
+      });
 
       postListenerCallbacks.push(() => {
         if (!event.cid) return;
@@ -1334,7 +1341,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         }
 
         client.state.deleteAllChannelReference(event.cid);
+        this.activeChannels[event.cid]?.state.clearMessages();
+        this.activeChannels[event.cid]?.state.resetSyncState();
         this.activeChannels[event.cid]?._disconnect();
+        this._clearChannelLocalStorage(event.cid).catch((err) => {
+          this.logger('warn', 'client:_handleClientEvent() - Failed to clear rejected channel storage', { err, cid: event.cid });
+        });
 
         postListenerCallbacks.push(() => {
           if (!event.cid) return;
@@ -1858,6 +1870,14 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     // so that lastMsgSeqBeforeChatDeleted is available for filtering messages below.
     await this.restoreSyncState();
 
+    // A query snapshot can carry a newer clear-history boundary than IndexedDB.
+    // Apply it and finish deleting stale local messages before hydration/events.
+    const applyHistoryBoundary = async (channelState: ChannelAPIResponse<ErmisChatGenerics>): Promise<void> => {
+      await this.channel(channelState.channel.type, channelState.channel.id)._applyQueryHistoryBoundary(channelState);
+      await Promise.all((channelState.topics || []).map(applyHistoryBoundary));
+    };
+    await Promise.all(data.channels.map(applyHistoryBoundary));
+
     // Hydrate E2EE messages from local cache BEFORE initializing state.
     // Without this, encrypted API messages overwrite decrypted local messages,
     // causing the UI to show "encrypted message" until the user switches channels.
@@ -1886,6 +1906,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const { channels, userIds } = this.hydrateChannels(data.channels, stateOptions);
     //   await this.getBatchUsers(userIds);
     // }
+
+    await this._persistSyncState();
 
     this.dispatchEvent({
       type: 'channels.queried',
@@ -2027,11 +2049,55 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return this._syncPromise;
   }
 
+  private async _clearChannelLocalStorage(cid: string): Promise<void> {
+    const storages = Array.from(
+      new Set([this.messageStorage, this.encryptionManager?.storage].filter(Boolean)),
+    );
+    await Promise.allSettled(
+      storages.flatMap((storage: any) => [
+        storage.clearMessages?.(cid),
+        storage.deleteSyncState?.(cid),
+        storage.deleteChannelRepairState?.(cid),
+      ].filter(Boolean)),
+    );
+  }
+
+  private async _removeChannelLocally(
+    cid: string,
+    removedEvent?: { channel_id?: string; channel_type?: string; removal_type?: string },
+  ): Promise<void> {
+    const channel = this.activeChannels[cid];
+    const [fallbackType, fallbackId] = cid.split(':');
+    const channelType = removedEvent?.channel_type || channel?.type || fallbackType;
+    const channelId = removedEvent?.channel_id || channel?.id || fallbackId;
+
+    this.logger('info', `client:removeChannelLocally() - Removing channel ${cid}`, {
+      tags: ['sync'],
+      removal_type: removedEvent?.removal_type,
+    });
+
+    this.state.deleteAllChannelReference(cid);
+    if (channel) {
+      channel.state.clearMessages();
+      channel.state.resetSyncState();
+      channel._disconnect();
+    }
+    await this._clearChannelLocalStorage(cid);
+    delete this.activeChannels[cid];
+
+    this.dispatchEvent({
+      type: 'channel.deleted',
+      cid,
+      channel_id: channelId,
+      channel_type: channelType,
+    } as Event<ErmisChatGenerics>);
+  }
+
   /**
    * Internal sync implementation. Should only be called via performSync().
    */
   private async _performSyncInternal(): Promise<void> {
-    const cursors: Record<string, number | { created_at: string; event_id?: string }> = {};
+    const cursors: Record<string, number> = {};
 
     // Build cursors map from active channels (skip uninitialized and E2EE channels)
     for (const [cid, channel] of Object.entries(this.activeChannels)) {
@@ -2043,13 +2109,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       if (channel.state.lastSyncedEventSeq > 0) {
         cursors[cid] = channel.state.lastSyncedEventSeq;
       }
-      // Channels without a saved event_seq are skipped from global sync.
-      // They will get their messages via normal channel query instead.
-      // NEVER use created_at timestamp as a sync cursor.
+      // NEVER use created_at timestamp as a sync cursor. Channels without seq
+      // are omitted here; the active-channel query owns their initial hydration.
     }
 
     const totalChannels = Object.keys(cursors).length;
-    if (totalChannels === 0) return;
+    if (totalChannels === 0 && !this._removedSyncCursor) return;
 
     this.logger('info', `client:performSync() - Syncing ${totalChannels} channels`, {
       tags: ['sync'],
@@ -2061,7 +2126,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       total_channels: totalChannels,
     } as Event<ErmisChatGenerics>);
 
-    if (totalChannels > 0) {
+    if (totalChannels > 0 || this._removedSyncCursor) {
       const syncRequest: GlobalSyncRequest = {
         project_id: this.projectId,
         cursors,
@@ -2097,10 +2162,21 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
       // Collect user info for enrichment from all synced messages
       const users = Object.values(this.state.users);
+      // Production APIs can wrap per-channel results in `channels`, while the
+      // integration guide and older deployments return CIDs directly at root.
+      const channelResults = response.channels ?? response;
 
       // Process each channel's sync result
-      for (const [cid, syncResult] of Object.entries(response)) {
-        if (cid === 'removed_channels') continue;
+      for (const [cid, syncResult] of Object.entries(channelResults)) {
+        if (cid === 'channels' || cid === 'removed_channels') continue;
+
+        const typedResult = syncResult as EventSyncResponse<ErmisChatGenerics>;
+        if (!Array.isArray(typedResult?.events)) {
+          this.logger('warn', `client:performSync() - Invalid sync payload for ${cid}, skipping`, {
+            tags: ['sync'],
+          });
+          continue;
+        }
 
         const channel = this.activeChannels[cid];
         if (!channel) {
@@ -2110,14 +2186,15 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
           continue;
         }
 
-        const typedResult = syncResult as EventSyncResponse<ErmisChatGenerics>;
-
         // Enrich messages in sync events with user info (#7)
         if (typedResult.events && users.length > 0) {
           for (const event of typedResult.events) {
-            if (event.message) {
-              const enriched = enrichWithUserInfo([event.message as any], users);
-              event.message = enriched[0];
+            const eventAny = event as any;
+            const message = event.message || eventAny.data?.message;
+            if (message) {
+              const enriched = enrichWithUserInfo([message as any], users)[0];
+              event.message = enriched;
+              if (eventAny.data?.message) eventAny.data.message = enriched;
             }
           }
         }
@@ -2140,29 +2217,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       // Process removed channels (user kicked/left/removed)
       if (response.removed_channels?.events?.length) {
         for (const removedEvent of response.removed_channels.events) {
-          const channel = this.activeChannels[removedEvent.cid];
-          if (channel) {
-            this.logger('info', `client:performSync() - Removing channel ${removedEvent.cid}`, {
-              tags: ['sync'],
-              removal_type: removedEvent.removal_type,
-            });
-            channel.state.clearMessages();
-            channel.state.resetSyncState();
-            delete this.activeChannels[removedEvent.cid];
-
-            this.dispatchEvent({
-              type: 'channel.deleted',
-              cid: removedEvent.cid,
-              channel_id: removedEvent.channel_id,
-              channel_type: removedEvent.channel_type,
-            } as Event<ErmisChatGenerics>);
-          }
+          await this._removeChannelLocally(removedEvent.cid, removedEvent);
         }
+      }
 
-        // Persist removed cursor for next sync (#2)
-        if (response.removed_channels.next_cursor) {
-          this._removedSyncCursor = response.removed_channels.next_cursor;
-        }
+      // Persist removed cursor for next sync (#2)
+      if (response.removed_channels?.next_cursor) {
+        this._removedSyncCursor = response.removed_channels.next_cursor;
       }
     }
 
@@ -2193,9 +2254,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       if (
         channel.state.lastSyncedEventSeq === 0 &&
         channel.state.hiddenMessageSeqs.size === 0 &&
-        channel.state.hiddenEventSeqs.size === 0
+        channel.state.hiddenEventSeqs.size === 0 &&
+        !channel.state.lastMsgSeqBeforeChatDeleted
       ) continue;
       records.push({
+        version: SYNC_STATE_VERSION,
         cid,
         lastSyncedEventSeq: channel.state.lastSyncedEventSeq,
         lastSyncedAt: channel.state.lastSyncedAt,
@@ -2208,6 +2271,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     }
     if (records.length > 0) {
       await this.messageStorage?.saveSyncStateBatch(records);
+    }
+    if (this._removedSyncCursor) {
+      await this.messageStorage?.saveRemovedSyncCursor?.(this._removedSyncCursor);
     }
   }
 
@@ -2229,6 +2295,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   async restoreSyncState(): Promise<void> {
     try {
       const records = (await this.messageStorage?.loadAllSyncStates()) || [];
+      const removedCursor = await this.messageStorage?.loadRemovedSyncCursor?.();
+      if (removedCursor) {
+        this._removedSyncCursor = removedCursor;
+      }
       if (records.length === 0) return;
 
       this.logger('info', `client:restoreSyncState() - Restoring sync state for ${records.length} channels`, {
@@ -2238,8 +2308,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       for (const record of records) {
         const channel = this.activeChannels[record.cid];
         if (channel?.state) {
-          channel.state.lastSyncedEventSeq = record.lastSyncedEventSeq;
-          channel.state.lastSyncedAt = record.lastSyncedAt;
+          const isCurrentVersion = record.version === SYNC_STATE_VERSION;
+          // Version 1 could persist channel.latest_event_seq from a partial
+          // query and skip an event at that exact sequence. Replay once from
+          // the queried message cursor; event application is idempotent.
+          channel.state.lastSyncedEventSeq = isCurrentVersion ? record.lastSyncedEventSeq : 0;
+          channel.state.lastSyncedAt = isCurrentVersion ? record.lastSyncedAt : null;
           channel.state.hiddenEventSeqs = new Set(record.hiddenEventSeqs || []);
           channel.state.hiddenMessageSeqs = new Set(record.hiddenMessageSeqs || []);
           channel.state.lastMsgSeqBeforeChatDeleted = record.lastMsgSeqBeforeChatDeleted;

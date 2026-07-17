@@ -62,6 +62,7 @@
     "create_channel_group_public": "Public Channel",
     "create_channel_search": "Search users...",
     "create_channel_search_friends": "Search friends...",
+    "create_channel_exact_search_hint": "Enter exact email, phone or name to find strangers.",
     "create_channel_cancel": "Cancel",
     "create_channel_create": "Create",
     "create_channel_creating": "Creating...",

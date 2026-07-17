@@ -59,17 +59,23 @@ const CustomUserItemComponent = ({ user, selected, disabled, mode, onToggle, Ava
 }
 
 const CustomSearchInputComponent = ({ value, onChange, placeholder }: any) => {
+  const { t } = useTranslation();
   return (
-    <div className="relative">
-      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-      <Input
-        type="text"
-        placeholder={placeholder}
-        value={value}
-        onChange={onChange}
-        autoFocus
-        className="pl-9 h-10 bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner rounded-lg focus-visible:ring-1 focus-visible:ring-primary/50"
-      />
+    <div className="flex flex-col gap-1.5 mb-2">
+      <div className="relative">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+        <Input
+          type="text"
+          placeholder={placeholder}
+          value={value}
+          onChange={onChange}
+          autoFocus
+          className="pl-9 h-10 bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner rounded-lg focus-visible:ring-1 focus-visible:ring-primary/50"
+        />
+      </div>
+      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 px-1">
+        {t('chat.create_channel_exact_search_hint', 'Enter exact email, phone or name to find strangers.')}
+      </p>
     </div>
   )
 }

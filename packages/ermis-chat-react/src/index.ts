@@ -138,6 +138,7 @@ export {
   isVideo,
   MESSAGE_DISPLAY_TYPES,
   isDeletedDisplayMessage,
+  isDeletedMessage,
 } from './messageTypeUtils';
 export type { MessageType, AttachmentType, MessageDisplayType } from './messageTypeUtils';
 
