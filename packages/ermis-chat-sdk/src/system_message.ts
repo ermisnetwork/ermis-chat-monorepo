@@ -45,6 +45,8 @@ export interface SystemMessageTranslations {
   '18'?: string;
   '19'?: string;
   '20'?: string;
+  '22'?: string;
+  '23'?: string;
 
   // Semantic aliases
   changeName?: string;         // 1
@@ -68,6 +70,8 @@ export interface SystemMessageTranslations {
   adminTransfer?: string;      // 18
   pinned?: string;             // 19
   unpinned?: string;           // 20
+  pollCreated?: string;        // 22
+  pollClosed?: string;         // 23
 
   public?: string;
   private?: string;
@@ -251,6 +255,32 @@ export function parseSystemMessage(
       const template = translations?.['20'] ?? translations?.unpinned;
       if (template) return template.replace('{{user}}', userName);
       return `${userName} unpinned a message.`;
+    }
+
+    // 22: userName created a poll: question
+    case '22': {
+      let question = parts.slice(2).join(' ');
+      if (question.length > 30) {
+        question = question.substring(0, 30) + '...';
+      }
+      const template = translations?.['22'] ?? translations?.pollCreated;
+      if (template) {
+        return template.replace('{{user}}', userName).replace('{{question}}', question);
+      }
+      return `${userName} created a poll: "${question}"`;
+    }
+
+    // 23: userName closed a poll: question
+    case '23': {
+      let question = parts.slice(2).join(' ');
+      if (question.length > 30) {
+        question = question.substring(0, 30) + '...';
+      }
+      const template = translations?.['23'] ?? translations?.pollClosed;
+      if (template) {
+        return template.replace('{{user}}', userName).replace('{{question}}', question);
+      }
+      return `${userName} closed the poll: "${question}"`;
     }
 
     default:

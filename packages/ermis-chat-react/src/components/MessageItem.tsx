@@ -6,7 +6,7 @@ import { MessageReactions } from './MessageReactions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
 import { useChatClient } from '../hooks/useChatClient';
 import { formatTime, getMessageUserId, getUserDisplayName } from '../utils';
-import { isSystemMessage, isDeletedDisplayMessage, isStickerMessage, isSignalMessage } from '../messageTypeUtils';
+import { isSystemMessage, isDeletedDisplayMessage, isStickerMessage, isSignalMessage, isPollMessage } from '../messageTypeUtils';
 
 export type { MessageItemProps, SystemMessageItemProps } from '../types';
 
@@ -162,6 +162,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   }, [message.created_at]);
 
   const isSticker = React.useMemo(() => isStickerMessage(message), [message]);
+  const isPoll = React.useMemo(() => isPollMessage(message), [message]);
 
   const itemClass = [
     'ermis-message-list__item',
@@ -174,6 +175,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
     isNewMessage ? 'ermis-message-list__item--new' : '',
     isDeletedDisplay ? 'ermis-message-list__item--deleted-display' : '',
     isSticker ? 'ermis-message-list__item--sticker' : '',
+    isPoll ? 'ermis-message-list__item--poll' : '',
     isSignalMessage(message) ? 'ermis-message-list__item--signal' : '',
     statusClass,
   ].filter(Boolean).join(' ');

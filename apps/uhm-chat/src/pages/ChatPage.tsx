@@ -35,6 +35,7 @@ import { UhmMemberItem } from '@/features/chat/UhmMemberItem'
 import { UhmTabEmptyState } from '@/features/chat/UhmTabEmptyState'
 import { UhmTabLoadingState } from '@/features/chat/UhmTabLoadingState'
 import { UhmSignalMessage } from '@/features/chat/UhmSignalMessage'
+import { UhmPollMessage } from '@/features/chat/UhmPollMessage'
 import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
 import { SyncStatusBanner } from '@/features/chat/SyncStatusBanner'
@@ -438,6 +439,8 @@ export function ChatPage() {
     adminTransfer: t('system_messages.adminTransfer'),
     pinned: t('system_messages.pinned'),
     unpinned: t('system_messages.unpinned'),
+    pollCreated: t('system_messages.pollCreated'),
+    pollClosed: t('system_messages.pollClosed'),
     public: t('system_messages.public'),
     private: t('system_messages.private'),
     userFallback: t('system_messages.user_fallback'),
@@ -1079,7 +1082,7 @@ export function ChatPage() {
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
-            messageRenderers={{ signal: UhmSignalMessage }}
+            messageRenderers={{ signal: UhmSignalMessage, poll: UhmPollMessage }}
             dateLocale={i18n.language}
             bannedOverlayTitle={t('overlays.bannedTitle', 'You are banned')}
             bannedOverlaySubtitle={t('overlays.bannedSubtitle', 'You have been banned from this channel and cannot send or receive messages.')}

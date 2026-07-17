@@ -7613,6 +7613,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       poll_type?: string;
       /** Poll choices — encrypted inside E2EE payload */
       poll_choice_counts?: Record<string, number>;
+      allow_change_choice?: boolean;
+      poll_closed?: boolean;
     },
     e2eeGroupId: string,
   ): Promise<any> {
@@ -7630,9 +7632,23 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (options.poll_choice_counts) {
       payload.poll_choice_counts = options.poll_choice_counts;
     }
+    if (options.allow_change_choice !== undefined) {
+      payload.allow_change_choice = options.allow_change_choice;
+    }
+    if (options.poll_closed !== undefined) {
+      payload.poll_closed = options.poll_closed;
+    }
 
     // Strip encrypted fields — only envelope metadata goes to server
-    const { attachments: _a, sticker_url: _s, poll_type: _pt, poll_choice_counts: _pc, ...envelopeOptions } = options;
+    const {
+      attachments: _a,
+      sticker_url: _s,
+      poll_type: _pt,
+      poll_choice_counts: _pc,
+      allow_change_choice: _acc,
+      poll_closed: _pcl,
+      ...envelopeOptions
+    } = options;
 
     if (!this.getGroup(e2eeGroupId)) {
       const groupParts = channelPartsFromCid(e2eeGroupId);
@@ -7826,6 +7842,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       sticker_url?: string;
       poll_type?: string;
       poll_choice_counts?: Record<string, number>;
+      allow_change_choice?: boolean;
+      poll_closed?: boolean;
     } = {},
   ): Promise<any> {
     sdkLog('info', '[Encryption] updateMessage: encrypting edit', {
@@ -7858,8 +7876,22 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (options.poll_choice_counts) {
       payload.poll_choice_counts = options.poll_choice_counts;
     }
+    if (options.allow_change_choice !== undefined) {
+      payload.allow_change_choice = options.allow_change_choice;
+    }
+    if (options.poll_closed !== undefined) {
+      payload.poll_closed = options.poll_closed;
+    }
 
-    const { attachments: _a, sticker_url: _s, poll_type: _pt, poll_choice_counts: _pc, ...envelopeOptions } = options;
+    const {
+      attachments: _a,
+      sticker_url: _s,
+      poll_type: _pt,
+      poll_choice_counts: _pc,
+      allow_change_choice: _acc,
+      poll_closed: _pcl,
+      ...envelopeOptions
+    } = options;
 
     const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
     if (!this.getGroup(e2eeGroupId)) {

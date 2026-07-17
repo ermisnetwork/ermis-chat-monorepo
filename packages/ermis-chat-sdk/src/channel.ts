@@ -205,6 +205,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           attachments: message.attachments,
           sticker_url: message.sticker_url,
           poll_type: message.poll_type,
+          allow_change_choice: message.allow_change_choice,
+          poll_closed: message.poll_closed,
         });
         if (response?.message) {
           const responseUserId =
@@ -509,6 +511,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async createPoll(pollMessage: PollMessage) {
+    // TODO: Support E2EE polls once server is updated to track metadata on plaintext envelope for MLS content_type
+    if (this._isEffectiveE2ee()) {
+      throw new Error('Polls are not supported in E2EE channels yet');
+    }
     const id = randomId();
     pollMessage = { ...pollMessage, id };
 
@@ -518,12 +524,56 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async votePoll(messageID: string, pollChoice: string) {
+    // TODO: Support E2EE polls once server is updated to track metadata on plaintext envelope for MLS content_type
+    if (this._isEffectiveE2ee()) {
+      throw new Error('Polls are not supported in E2EE channels yet');
+    }
     if (!messageID) {
       throw Error(`Message id is missing`);
     }
-    return await this.getClient().post<APIResponse>(
-      this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageID}/poll/${pollChoice}`,
+    const response = await this.getClient().post<any>(
+      this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageID}/poll`,
+      { choices: [pollChoice] },
     );
+    if (response?.message) {
+      this.state.addMessageSorted(response.message, false, false);
+    }
+    return response;
+  }
+
+  async votePollChoices(messageID: string, choices: string[]) {
+    // TODO: Support E2EE polls once server is updated to track metadata on plaintext envelope for MLS content_type
+    if (this._isEffectiveE2ee()) {
+      throw new Error('Polls are not supported in E2EE channels yet');
+    }
+    if (!messageID) {
+      throw Error(`Message id is missing`);
+    }
+    const response = await this.getClient().post<any>(
+      this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageID}/poll`,
+      { choices },
+    );
+    if (response?.message) {
+      this.state.addMessageSorted(response.message, false, false);
+    }
+    return response;
+  }
+
+  async closePoll(messageID: string) {
+    if (this._isEffectiveE2ee()) {
+      throw new Error('Polls are not supported in E2EE channels yet');
+    }
+    if (!messageID) {
+      throw Error(`Message id is missing`);
+    }
+    const response = await this.getClient().post<any>(
+      this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageID}/poll/close`,
+      {},
+    );
+    if (response?.message) {
+      this.state.addMessageSorted(response.message, false, false);
+    }
+    return response;
   }
 
   async forwardMessage(message: ForwardMessage<ErmisChatGenerics>, channel: { type: string; channelID: string }) {
@@ -2595,6 +2645,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         }
         break;
       case 'pollchoice.new':
+      case 'pollchoice.delete':
+      case 'pollchoices.updated':
         if (event.message) {
           const user = getUserInfo(event.message.user?.id || '', users);
           event.message.user = user;

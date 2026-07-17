@@ -20,13 +20,14 @@ import {
   usePendingState,
   usePreviewState,
 } from '@ermis-network/ermis-chat-react';
-import { Cat, Mic, Plus, SendHorizonal, Smile, Trash2 } from 'lucide-react';
+import { Cat, Mic, Plus, SendHorizonal, Smile, Trash2, BarChart2 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MultiRecorder } from 'react-ts-audio-recorder';
 import pcmWorkletUrl from 'react-ts-audio-recorder/assets/pcm-worklet.js?url';
 
 import { UhmDragAndDropOverlay } from './UhmDragAndDropOverlay';
+import { UhmCreatePollModal } from './UhmCreatePollModal';
 
 export type UhmMessageInputProps = {
   dragAndDropLabel?: string;
@@ -76,6 +77,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
   const recorderRef = useRef<MultiRecorder | null>(null);
   const timerRef = useRef<number | null>(null);
+
+  // Poll creation modal state
+  const [isPollOpen, setIsPollOpen] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -724,6 +728,16 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                   >
                     <Cat className="w-5 h-5" />
                   </button>
+
+                  <button
+                    type="button"
+                    disabled={disabledInput || !!editingMessage || !!quotedMessage}
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => setIsPollOpen(true)}
+                    title={t('chat.create_poll_title', 'Create Poll')}
+                  >
+                    <BarChart2 className="w-5 h-5" />
+                  </button>
                 </div>
 
                 {/* Main input area */}
@@ -781,6 +795,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
           dragAndDropLabel={dragAndDropLabel || t('chat.dragAndDrop', 'Thả file vào đây để gửi')}
         />
       )}
+
+      {/* Modal Tạo Poll */}
+      <UhmCreatePollModal isOpen={isPollOpen} onClose={() => setIsPollOpen(false)} />
     </div>
   );
 };

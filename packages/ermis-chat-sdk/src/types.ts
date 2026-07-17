@@ -555,6 +555,7 @@ export type Message<ErmisChatGenerics extends ExtendableGenerics = DefaultGeneri
   poll_type?: string; // single | multiple
   poll_choices?: string[];
   sticker_url?: string;
+  allow_change_choice?: boolean;
 };
 
 export type EditMessage = {
@@ -580,6 +581,7 @@ export type PollMessage = {
   text: string;
   poll_type: string; // single | multiple
   poll_choices: string[];
+  allow_change_choice?: boolean;
 };
 
 export type MessageBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
@@ -595,6 +597,8 @@ export type MessageBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     text?: string;
     user?: UserResponse | null;
     user_id?: string;
+    allow_change_choice?: boolean;
+    poll_closed?: boolean;
   };
 
 export type MessageLabel = 'regular' | 'system' | 'signal' | 'poll' | 'sticker' | 'error';

@@ -616,6 +616,9 @@ export function useChannelMessages({
     const sub20 = eventClient.on('sync.completed', () => {
       syncMessagesWithCache({ includeStoredWindow: true });
     });
+    const sub21 = activeChannel.on('pollchoice.new' as any, handleMessageChange);
+    const sub22 = activeChannel.on('pollchoice.delete' as any, handleMessageChange);
+    const sub23 = activeChannel.on('pollchoices.updated' as any, handleMessageChange);
 
     return () => {
       sub1.unsubscribe();
@@ -639,6 +642,9 @@ export function useChannelMessages({
       sub18.unsubscribe();
       sub19.unsubscribe();
       sub20.unsubscribe();
+      sub21.unsubscribe();
+      sub22.unsubscribe();
+      sub23.unsubscribe();
     };
   }, [activeChannel, client, scrollToBottom, scheduleScrollToBottom, shouldAutoScroll, snapToBottomAfterCommit, syncMessages, setMessages, onChannelSwitch, setReadState, holdScrollLoadLock]);
 }

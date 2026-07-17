@@ -3,6 +3,7 @@ export const MESSAGE_TYPES = {
   SYSTEM: 'system',
   STICKER: 'sticker',
   SIGNAL: 'signal',
+  POLL: 'poll',
   ERROR: 'error',
   DELETED: 'deleted',
 } as const;
@@ -34,6 +35,10 @@ export function isRegularMessage(message: any): boolean {
 
 export function isSignalMessage(message: any): boolean {
   return message?.type === MESSAGE_TYPES.SIGNAL;
+}
+
+export function isPollMessage(message: any): boolean {
+  return message?.type === MESSAGE_TYPES.POLL || Boolean(message?.poll_choices || message?.poll_choice_counts);
 }
 
 // Helpers cho attachment

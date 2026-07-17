@@ -1197,6 +1197,81 @@
   font-size: var(--ermis-font-size-sm);
 }
 
+/* --- Poll Message Overrides — center-aligned like Messenger --- */
+
+/* Override the group wrapper to center when it contains a poll */
+.ermis-message-group:has(.ermis-message-list__item--poll) {
+  flex-direction: column !important;
+  align-items: center !important;
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
+}
+
+/* Hide avatar column in poll groups */
+.ermis-message-group:has(.ermis-message-list__item--poll) .ermis-message-group__avatar-col {
+  display: none;
+}
+
+/* Allow messages column to be wider and centered */
+.ermis-message-group:has(.ermis-message-list__item--poll) .ermis-message-group__messages-col {
+  max-width: 420px;
+  align-items: center;
+}
+
+/* Center the poll item itself */
+.ermis-message-list__item--poll {
+  align-self: center !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  margin-top: 6px !important;
+  margin-bottom: 6px !important;
+}
+
+/* Hide avatar column for poll messages */
+.ermis-message-list__item--poll .ermis-message-list__item-avatar {
+  display: none;
+}
+
+/* Hide username above poll */
+.ermis-message-list__item--poll .ermis-message-list__item-user {
+  display: none;
+}
+
+/* Center the content column */
+.ermis-message-list__item--poll .ermis-message-list__item-content {
+  align-items: center !important;
+}
+
+/* Center the bubble wrapper */
+.ermis-message-list__item--poll .ermis-message-list__bubble-wrapper {
+  align-items: center !important;
+}
+
+/* Strip bubble styling */
+.ermis-message-list__item--poll .ermis-message-bubble {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0;
+}
+
+/* No tail on poll messages */
+.ermis-message-list__item--poll .ermis-message-bubble::after {
+  display: none;
+}
+
+/* Hide inline timestamp (poll has its own footer) */
+.ermis-message-list__item--poll .ermis-message-list__item-time {
+  display: none;
+}
+
+/* Hide reactions inside poll bubble */
+.ermis-message-list__item--poll .ermis-message-reactions-break,
+.ermis-message-list__item--poll .ermis-reactions-row {
+  display: none;
+}
+
 /* --- Sticker message --- */
 .ermis-message-sticker-wrapper {
   position: relative;
