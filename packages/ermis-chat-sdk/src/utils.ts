@@ -302,6 +302,14 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
       messageArr[left - 1] = mergeMessage(messageArr[left - 1], message);
       return [...messageArr];
     }
+
+    // Fallback: linear scan when binary search position doesn't match
+    // (handles timestamp collisions or precision differences)
+    const existingIdx = messageArr.findIndex((m) => m.id === message.id);
+    if (existingIdx >= 0) {
+      messageArr[existingIdx] = mergeMessage(messageArr[existingIdx], message);
+      return [...messageArr];
+    }
   }
 
   // Do not add updated or deleted messages to the list if they do not already exist

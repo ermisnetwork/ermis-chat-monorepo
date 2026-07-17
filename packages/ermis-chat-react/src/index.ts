@@ -128,6 +128,7 @@ export {
   ATTACHMENT_TYPES,
   isSystemMessage,
   isStickerMessage,
+  isPollMessage,
   isRegularMessage,
   isSignalMessage,
   isImageAttachment,

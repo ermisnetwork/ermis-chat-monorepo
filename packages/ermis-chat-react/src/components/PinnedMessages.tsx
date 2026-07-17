@@ -41,14 +41,20 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   let previewText = message.text || '';
   const isSticker = isStickerMessage(message);
 
+  const isPoll = !!(message as any).poll_choices || !!(message as any).poll_type;
+  const pollClosed = (message as any).poll_closed === true;
+
   const isUnavailable =
+    !isPoll &&
     !previewText &&
     ((message as any).content_type === 'mls' ||
       Boolean((message as any).mls_ciphertext) ||
       (message as any).e2ee_status === 'failed' ||
       (message as any).e2ee_status === 'decrypting');
 
-  if (isUnavailable) {
+  if (isPoll) {
+    previewText = message.text || 'Poll';
+  } else if (isUnavailable) {
     previewText = unavailableMessageLabel;
   } else if (!previewText && hasAttachments) {
     const firstAttach = message.attachments![0];
@@ -62,13 +68,31 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   }
 
   // Convert @userId → @UserName in preview text
-  if (previewText) {
+  if (previewText && !isPoll) {
     previewText = replaceMentionsForPreview(previewText, message, userMap);
   }
 
   // Attachment icon prefix
-  let attachIcon = '';
-  if (!isUnavailable && hasAttachments) {
+  let attachIcon: React.ReactNode = null;
+  if (isPoll) {
+    attachIcon = (
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ display: 'inline-block', marginRight: '4px', verticalAlign: 'middle', color: '#3b82f6' }}
+      >
+        <line x1="18" y1="20" x2="18" y2="10" />
+        <line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+      </svg>
+    );
+  } else if (!isUnavailable && hasAttachments) {
     const firstAttach = message.attachments![0];
     if (isImageAttachment(firstAttach)) attachIcon = '📷 ';
     else if (isVideoAttachment(firstAttach)) attachIcon = '🎥 ';
@@ -82,14 +106,21 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
 
   return (
     <div
-      className={`ermis-pinned-messages__item ${isOwnMessage ? 'ermis-pinned-messages__item--own' : ''}`}
+      className={`ermis-pinned-messages__item ${isOwnMessage ? 'ermis-pinned-messages__item--own' : ''} ${isPoll ? 'ermis-pinned-messages__item--poll' : ''}`}
       onClick={() => onClickMessage?.(message.id)}
       role="button"
       tabIndex={0}
     >
       <AvatarComponent image={userAvatar} name={userName} size={38} />
       <div className="ermis-pinned-messages__item-content">
-        <span className="ermis-pinned-messages__item-user">{userName}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="ermis-pinned-messages__item-user">{userName}</span>
+          {isPoll && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${pollClosed ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'}`}>
+              {pollClosed ? 'Closed' : 'Poll'}
+            </span>
+          )}
+        </div>
         <span className="ermis-pinned-messages__item-text">{attachIcon}{previewText || unavailableMessageLabel}</span>
       </div>
       <button

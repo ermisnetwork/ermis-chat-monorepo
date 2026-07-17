@@ -34,6 +34,8 @@ export interface E2eeStoredMessage {
   poll_type?: string;
   poll_choice_counts?: Record<string, number>;
   latest_poll_choices?: unknown[];
+  allow_change_choice?: boolean;
+  poll_closed?: boolean;
   is_edited?: boolean;
   old_texts?: Array<{ text: string; created_at: string }>;
 
@@ -1108,6 +1110,10 @@ export interface E2eePayload {
   poll_choice_counts?: Record<string, number>;
   /** Latest poll choices */
   latest_poll_choices?: unknown[];
+  /** Whether changing choices is allowed */
+  allow_change_choice?: boolean;
+  /** Whether the poll is closed */
+  poll_closed?: boolean;
   /** E2EE edit history, encrypted inside the latest message snapshot */
   old_texts?: Array<{ text: string; created_at: string }>;
 }

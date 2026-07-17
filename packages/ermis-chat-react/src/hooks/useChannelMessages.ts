@@ -481,6 +481,9 @@ export function useChannelMessages({
     const sub17 = eventClient.on('e2ee.post_join_sync' as any, handleE2eeRefresh);
     const sub18 = eventClient.on('e2ee.channel_ready' as any, handleE2eeRefresh);
     const sub19 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
+    const sub20 = activeChannel.on('pollchoice.new' as any, handleMessageChange);
+    const sub21 = activeChannel.on('pollchoice.delete' as any, handleMessageChange);
+    const sub22 = activeChannel.on('pollchoices.updated' as any, handleMessageChange);
 
     return () => {
       sub1.unsubscribe();
@@ -502,6 +505,9 @@ export function useChannelMessages({
       sub17.unsubscribe();
       sub18.unsubscribe();
       sub19.unsubscribe();
+      sub20.unsubscribe();
+      sub21.unsubscribe();
+      sub22.unsubscribe();
     };
   }, [activeChannel, client, scrollToBottom, scheduleScrollToBottom, shouldAutoScroll, snapToBottomAfterCommit, syncMessages, setMessages, onChannelSwitch, setReadState, holdScrollLoadLock]);
 }

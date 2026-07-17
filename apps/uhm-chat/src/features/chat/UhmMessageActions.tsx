@@ -50,6 +50,14 @@ export function UhmMessageActions({
   }
 
   const actions = useMessageActions(message, isOwnMessage);
+  const isPollMessage = !!(message as any).poll_choices || !!(message as any).poll_type;
+
+  if (isPollMessage) {
+    actions.canReply = false;
+    actions.canForward = false;
+    actions.canEdit = false;
+    actions.canCopy = false;
+  }
   const canCancelPendingE2eeSend =
     isOwnMessage &&
     message.status === 'sending' &&
@@ -121,17 +129,27 @@ export function UhmMessageActions({
 
   /* --- Actual delete logic (called after confirm) --- */
   const executeDeleteForEveryone = useCallback(async () => {
-    if (onDeleteProp) {
-      onDeleteProp(message);
-      return;
-    }
     if (!activeChannel) return;
     try {
-      await activeChannel.deleteMessage(message.id!);
+      if (onDeleteProp) {
+        onDeleteProp(message);
+      } else {
+        await activeChannel.deleteMessage(message.id!);
+      }
+
+      if (isPollMessage) {
+        let question = message.text || t('chat.poll', 'Poll');
+        if (question.length > 30) {
+          question = question.substring(0, 30) + '...';
+        }
+        await activeChannel.sendMessage({
+          text: t('chat.poll_deleted_notification', 'deleted the poll: "{{question}}"', { question }),
+        } as any);
+      }
     } catch (err) {
       console.error('Failed to delete message', err);
     }
-  }, [message, onDeleteProp, activeChannel]);
+  }, [message, onDeleteProp, activeChannel, isPollMessage, t]);
 
   const executeDeleteForMe = useCallback(async () => {
     if (onDeleteForMeProp) {
@@ -195,7 +213,9 @@ export function UhmMessageActions({
           )}
 
           {/* Reaction */}
-          <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!actions.hasCapReact} />
+          {!isPollMessage && (
+            <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!actions.hasCapReact} />
+          )}
 
           {/* Forward */}
           {actions.canForward && (

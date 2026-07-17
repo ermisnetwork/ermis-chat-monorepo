@@ -30,6 +30,8 @@ export const EVENT_MAP = {
   'notification.invite_messaging_rejected': true,
   'notification.invite_messaging_skipped': true,
   'pollchoice.new': true,
+  'pollchoice.delete': true,
+  'pollchoices.updated': true,
   'reaction.deleted': true,
   'reaction.new': true,
   'typing.start': true,
