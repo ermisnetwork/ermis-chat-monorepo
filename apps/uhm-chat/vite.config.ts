@@ -56,6 +56,9 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['@ermis-network/ermis-chat-react', '@ermis-network/ermis-chat-sdk'],
+    // The SDK intentionally keeps these CommonJS/UMD dependencies external.
+    // Prebundle them so Vite dev provides correct ESM interop.
+    include: ['event-source-polyfill', 'form-data', 'isomorphic-ws'],
   },
   css: { devSourcemap: false },
   server: {
