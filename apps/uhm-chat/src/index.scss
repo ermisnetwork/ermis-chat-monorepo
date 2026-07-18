@@ -26,7 +26,7 @@
     --radius: 0.75rem;
 
     /* Chat Pattern Variables - Light (Subtle Waves) */
-    --chat-pattern-opacity: 0.05;
+    --chat-pattern-opacity: 0.025;
     --chat-pattern-image: url("data:image/svg+xml,%3Csvg width='52' height='26' viewBox='0 0 52 26' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%237949ec' fill-opacity='1'%3E%3Cpath d='M10 10c0-2.21-1.79-4-4-4-3.314 0-6-2.686-6-6h2c0 2.21 1.79 4 4 4 3.314 0 6 2.686 6 6 0 2.21 1.79 4 4 4 3.314 0 6 2.686 6 6 0 2.21 1.79 4 4 4v2c-3.314 0-6-2.686-6-6 0-2.21-1.79-4-4-4-3.314 0-6-2.686-6-6zm25.464-1.95l8.486 8.486-1.414 1.414-8.486-8.486 1.414-1.414z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
 
@@ -166,14 +166,14 @@
   /* Backgrounds – pure white */
   --ermis-bg-primary: #ffffff;
   --ermis-bg-secondary: #ffffff;
-  --ermis-bg-hover: rgba(121, 73, 236, 0.05);
-  --ermis-border: rgba(80, 39, 177, 0.08);
+  --ermis-bg-hover: rgba(121, 73, 236, 0.1);
+  --ermis-border: rgba(80, 39, 177, 0.18);
 
   /* Bubbles */
   --ermis-bubble-other-bg: #ffffff;
   --ermis-bubble-other-text: #111827;
-  --ermis-bubble-own-bg: #e5efff;
-  --ermis-bubble-own-text: #111827;
+  --ermis-bubble-own-bg: #e7ddff;
+  --ermis-bubble-own-text: #21113f;
 
   /* Quotes */
   --ermis-quote-other-bg: rgba(121, 73, 236, 0.08);
@@ -182,6 +182,28 @@
   /* Call UI */
   --ermis-call-bg: linear-gradient(135deg, #ffffff 0%, #f9fafb 50%, #f3f4f6 100%);
   --ermis-call-pulse: rgba(121, 73, 236, 0.3);
+}
+
+/* Light own-message bubbles use a dark foreground, so status metadata must
+   not inherit the SDK's white-on-accent defaults. */
+.ermis-chat--light .ermis-message-bubble--own .ermis-message-list__item-time {
+  color: #4c2a85;
+  opacity: 0.82;
+}
+
+.ermis-chat--light .ermis-message-bubble--own .ermis-message-status-icon--sent,
+.ermis-chat--light .ermis-message-bubble--own .ermis-message-status-icon--sending {
+  color: #5b21b6;
+  opacity: 0.85;
+}
+
+.ermis-chat--light .ermis-message-list__actions {
+  border-color: rgba(80, 39, 177, 0.2);
+  box-shadow: 0 4px 14px rgba(46, 22, 96, 0.14);
+}
+
+.ermis-chat--light .ermis-message-list__actions-trigger {
+  color: #4b3d63;
 }
 
 /* ============================================================

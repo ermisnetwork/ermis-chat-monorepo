@@ -16,7 +16,7 @@ Allowed status: `TODO | IN_PROGRESS | BLOCKED | DEFERRED | DONE`. Only one Codex
 | FE-002 | Remove PIN/archive UI and pin exact SDK versions | DONE | Codex | SDK-005 | Exact versions set; workspace and tarball-backed app builds passed |
 | FE-003 | Smoke test with package tarballs outside monorepo | DONE | Codex | SDK-005 | `/private/tmp/uhm-chat-external-smoke`; tarball install and production build passed |
 | FE-004 | Install registry packages and create final lockfile | DONE | Codex | SDK-006 | `yarn.lock` resolves both exact versions from the public registry; no workspace/file/link dependency |
-| FE-005 | Build, lint, E2EE smoke test, and clean initial commit | IN_PROGRESS | Codex | FE-004 | Registry build/browser boot passed; Vite prebundles SDK CommonJS dependencies; app explicitly imports React SDK CSS so virtualized channel lists have layout; old E2EE channels without GroupInfo cannot external-join; new-channel connected smoke and final initial commit pending |
+| FE-005 | Build, lint, E2EE smoke test, and clean initial commit | DONE | Codex | FE-004 | Registry/Vite build and lint passed; React SDK CSS is imported; user-confirmed live E2EE channel/message smoke passed; light message contrast adjusted; standalone `main` is delivered as one root commit |
 | DOC-001 | Update SDK/app docs, release guide, licensing, and research progress log | DONE | Codex | FE-005 | SDK/React/app README, `EXTERNAL_RELEASE.md`, license boundary, and 2026-07-15 research entry |
 | WASM-001 | Build WASM without epoch archive and replace artifact | DEFERRED | User | FE-005 | Current WASM checksum/size must remain unchanged |
 | BE-001 | Analyze attachment/base64 contract for `bellboy-external` | BLOCKED | Later phase | FE-005 | Backend scope intentionally unchanged |
@@ -32,3 +32,14 @@ Allowed status: `TODO | IN_PROGRESS | BLOCKED | DEFERRED | DONE`. Only one Codex
 - Startup and live MLS flows make zero requests to recovery/archive endpoints.
 - The standalone app resolves exact registry versions with no workspace/file/link dependency and builds without a parent monorepo.
 - The outsource repository contains one clean initial commit on `main`; secrets, build output, dependency folders, and development PWA output are not tracked.
+
+## Progress log
+
+### 2026-07-18 — FE live smoke and contrast pass
+
+- Mode: production delivery verification.
+- User-confirmed live login, channel listing, new E2EE channel creation, and encrypted message send all passed against the local Bellboy stack.
+- Imported React SDK CSS fixed the zero-height virtualized channel list.
+- Light-theme message tokens now use a coherent dark foreground on lavender own-message bubbles; timestamp, delivery status, hover actions, borders, and background pattern were adjusted for clearer visual separation.
+- No backend/API, database, event, SQL, or Postman contract changed.
+- Final gate passed: standalone build/lint succeeded, local-only runtime artifacts were excluded, and the repository was prepared as a single root commit on `main`.
