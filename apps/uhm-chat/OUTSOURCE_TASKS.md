@@ -19,8 +19,9 @@ Allowed status: `TODO | IN_PROGRESS | BLOCKED | DEFERRED | DONE`. Only one Codex
 | FE-005 | Build, lint, E2EE smoke test, and clean initial commit | DONE | Codex | FE-004 | Registry/Vite build and lint passed; React SDK CSS is imported; user-confirmed live E2EE channel/message smoke passed; light message contrast adjusted; standalone `main` is delivered as one root commit |
 | DOC-001 | Update SDK/app docs, release guide, licensing, and research progress log | DONE | Codex | FE-005 | SDK/React/app README, `EXTERNAL_RELEASE.md`, license boundary, and 2026-07-15 research entry |
 | WASM-001 | Build WASM without epoch archive and replace artifact | DEFERRED | User | FE-005 | Current WASM checksum/size must remain unchanged |
-| BE-001 | Analyze attachment/base64 contract for `bellboy-external` | BLOCKED | Later phase | FE-005 | Backend scope intentionally unchanged |
-| BE-002 | Implement and test backend attachment/base64 | BLOCKED | Later phase | BE-001 | Backend scope intentionally unchanged |
+| BE-001 | Analyze attachment/base64 contract for `bellboy-external` | DONE | Codex | FE-005 | Canonical base64 applies only to JSON MLS byte fields; encrypted assets use direct presigned PUT/multipart and a separate opaque lifecycle control plane |
+| BE-002 | Implement and test backend attachment/base64 | DONE | Codex | BE-001 | Branch `feat/e2ee-attachment-base64`: 43 Rust tests pass; live single-PUT init/upload/complete/bind/query/grant/download/delete/R2-cleanup passed on port 8889 |
+| OPS-001 | Rotate Firebase service-account credential exposed by legacy `gauth` startup logging | TODO | User | BE-002 | Private-key logging removed via vendored security patch; rotate the local/shared credential and replace `firebase_config.json` in every environment using it |
 
 ## Release acceptance
 
@@ -43,3 +44,22 @@ Allowed status: `TODO | IN_PROGRESS | BLOCKED | DEFERRED | DONE`. Only one Codex
 - Light-theme message tokens now use a coherent dark foreground on lavender own-message bubbles; timestamp, delivery status, hover actions, borders, and background pattern were adjusted for clearer visual separation.
 - No backend/API, database, event, SQL, or Postman contract changed.
 - Final gate passed: standalone build/lint succeeded, local-only runtime artifacts were excluded, and the repository was prepared as a single root commit on `main`.
+
+### 2026-07-18 — Backend attachment/base64 design gate
+
+- Mode: production implementation design.
+- Verified `bellboy-external` supports only legacy plaintext multipart attachments and JSON `number[]` MLS bytes; SDK `2.1.0-external.1` requires canonical padded base64 byte fields plus the E2EE attachment V1 init/query/complete/grant/cancel contract.
+- Chosen boundary: Bellboy never receives plaintext attachment bodies or base64 file bodies. Clients encrypt locally and upload ciphertext directly to object storage; Bellboy stores opaque object keys, lifecycle, channel authorization, message binding, and cleanup state.
+- Base64 encode/decode is O(n) time/O(n) temporary memory with 4/3 wire size and adds no database/network round trip. It is restricted to small MLS protocol fields; JSON byte arrays are not retained on the external lane.
+- Attachment init is O(assets + multipart parts) time/memory and response size, bounded by two V1 assets and configured max parts. File transfer bypasses Bellboy. Complete uses object-store complete/HEAD plus bounded DB state transitions; query is indexed O(limit), and grant authorization is one indexed projection read plus one presign operation.
+- Production gates: exact SDK request/response fixtures, 2 GiB/256-part config bounds, R2 `ETag` CORS, incomplete multipart lifecycle cleanup, idempotent complete/cancel, attachment-ID/MLS-manifest agreement, authorization/hidden-message tests, and no PIN/archive API introduction.
+
+### 2026-07-18 — Backend attachment/base64 implementation pass
+
+- Mode: production implementation; live infrastructure gate remains open.
+- Added canonical padded base64 for public MLS JSON byte fields. Public byte arrays and non-canonical base64 are rejected, while already-persisted Concierge byte arrays remain read-compatible and are emitted as base64.
+- Added encrypted attachment init/query/complete/download-grant/cancel routes, single-PUT and multipart presigning, object HEAD validation, message binding/confirmation, authorization filters, idempotency, cleanup leases/retries, and abandoned-upload cleanup.
+- Added additive PostgreSQL schema/migration, complete sample config, external API guide, README rollout notes, and a Postman collection. No PIN, vault, epoch-archive, restore, or archive-repair API/table was introduced.
+- Verification: `cargo test` passes 43 tests total (34 unit + 4 external contract + 5 existing key-package integration); `cargo clippy --all-targets` completes with pre-existing repository warnings only plus the existing deprecated timeout warning.
+- Live single-PUT gate passed on a separate Bellboy process at port `8889`: init, direct R2 ciphertext upload, complete, message bind, query, download grant, exact 64-byte download verification, message delete, and R2 cleanup all succeeded. Multipart stays disabled until R2/S3 CORS exposes `ETag` and incomplete multipart lifecycle cleanup is configured.
+- Startup smoke exposed a transitive `gauth` statement that printed the Firebase service-account private key. `bellboy-external` now vendors the exact dependency revision with that statement removed, pins it through Cargo `[patch]`, and includes a regression gate. The exposed credential must still be rotated by the environment owner (`OPS-001`).
