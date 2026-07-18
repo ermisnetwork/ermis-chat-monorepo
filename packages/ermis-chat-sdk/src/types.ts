@@ -598,6 +598,9 @@ export type MessageBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     user?: UserResponse | null;
     user_id?: string;
     allow_change_choice?: boolean;
+    poll_type?: string;
+    poll_choice_counts?: Record<string, number>;
+    latest_poll_choices?: unknown[];
     poll_closed?: boolean;
   };
 
@@ -757,6 +760,7 @@ export const SYNC_EVENT_TYPES = {
   MESSAGE_UPDATED: 'message_updated',
   MESSAGE_DELETED: 'message_deleted',
   REACTION: 'reaction',
+  POLL_CHOICES_UPDATED: 'poll_choices_updated',
 } as const;
 
 export type SyncEventType = (typeof SYNC_EVENT_TYPES)[keyof typeof SYNC_EVENT_TYPES];
@@ -767,6 +771,7 @@ export const SYNC_EVENT_TYPE_MAP = {
   [SYNC_EVENT_TYPES.MESSAGE_UPDATED]: 'message.updated',
   [SYNC_EVENT_TYPES.MESSAGE_DELETED]: 'message.deleted',
   [SYNC_EVENT_TYPES.REACTION]: 'reaction.new',
+  [SYNC_EVENT_TYPES.POLL_CHOICES_UPDATED]: 'pollchoices.updated',
 } as const satisfies Record<SyncEventType, Exclude<EventTypes, 'all'>>;
 
 export type EventSyncEnvelope<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
@@ -785,6 +790,8 @@ export type EventSyncEnvelope<ErmisChatGenerics extends ExtendableGenerics = Def
       action?: 'reaction.new' | 'reaction.updated' | 'reaction.deleted';
       latest_reactions?: ReactionResponse<ErmisChatGenerics>[];
       reaction_counts?: Record<string, number>;
+      added_poll_choices?: unknown[];
+      deleted_poll_choices?: unknown[];
       [key: string]: unknown;
     };
   };

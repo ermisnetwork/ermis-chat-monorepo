@@ -65,9 +65,9 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const canEdit = !isPreviewMode && !isSystem && !isSignal && !isSticker && isOwnMessage && !isDeleted;
 
     // Delete for everyone:
-    // + Team channel: only the owner can perform this action natively.
+    // + Team channel: owner can delete any message, members can delete their own messages.
     // + Messaging channel: only own messages can be deleted
-    const canDeleteForEveryoneTeam = isTeam && isOwner;
+    const canDeleteForEveryoneTeam = isTeam && (isOwner || isOwnMessage);
     const canDeleteForEveryoneMessaging = !isTeam && isOwnMessage;
 
     const canDelete = !isPreviewMode && !isSystem && (canDeleteForEveryoneTeam || canDeleteForEveryoneMessaging) && !isDeleted;

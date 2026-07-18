@@ -70,6 +70,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   lastTypingEvent: Date | null;
   isTyping: boolean;
   disconnected: boolean;
+  /** Timer handle for debounced IndexedDB persist of sync cursor on WS events */
+  private _persistSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 
   /**
    * Initializes a new Channel class instance.
@@ -2019,9 +2022,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           `channel:gap_detected - Real gap on ${this.cid}, expected ${channelState.lastSyncedEventSeq + 1} got ${eventSeq}`,
           { tags: ['sync', 'gap'] },
         );
-        // Async sync to fill the gap (don't block current event processing)
+        // Do NOT advance cursor here — syncUntilCaughtUp() needs the old
+        // cursor to fetch the missed events between lastSyncedEventSeq and eventSeq.
+        // The cursor will be advanced by applySyncResult() during sync.
+        const wsEventSeq = eventSeq;
         this.syncUntilCaughtUp()
           .then(() => {
+            // After sync completes, ensure cursor includes the triggering WS event
+            if (wsEventSeq > channelState.lastSyncedEventSeq) {
+              channelState.lastSyncedEventSeq = wsEventSeq;
+            }
             this._client.persistSyncState();
             // Signal UI that gap sync is complete (mirrors sync.completed from performSync)
             this._client.dispatchEvent({
@@ -2045,11 +2055,17 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           `channel:fake_gap - All missing seqs are hidden on ${this.cid}`,
           { tags: ['sync', 'gap'] },
         );
-      }
-
-      // Update cursor
-      if (eventSeq > channelState.lastSyncedEventSeq) {
-        channelState.lastSyncedEventSeq = eventSeq;
+        // Fake gap: safe to advance cursor + persist to IndexedDB
+        if (eventSeq > channelState.lastSyncedEventSeq) {
+          channelState.lastSyncedEventSeq = eventSeq;
+          this._debouncedPersistSyncState();
+        }
+      } else {
+        // 'ok': sequential event — advance cursor + persist to IndexedDB
+        if (eventSeq > channelState.lastSyncedEventSeq) {
+          channelState.lastSyncedEventSeq = eventSeq;
+          this._debouncedPersistSyncState();
+        }
       }
     }
     // ─── End Gap Detection ───────────────────────────────────────────────
@@ -3828,6 +3844,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
       if (!result.has_more) break;
     }
+  }
+
+  /**
+   * Debounced persist of sync state to IndexedDB.
+   * Keeps IndexedDB cursor up-to-date while online so F5 doesn't
+   * sync from a stale cold-start cursor. 2s debounce batches rapid WS events.
+   */
+  private _debouncedPersistSyncState() {
+    if (this._persistSyncDebounceTimer) clearTimeout(this._persistSyncDebounceTimer);
+    this._persistSyncDebounceTimer = setTimeout(() => {
+      this._persistSyncDebounceTimer = null;
+      this._client.persistSyncState().catch(() => {});
+    }, 2000);
   }
 
   /**

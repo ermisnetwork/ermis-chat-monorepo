@@ -298,6 +298,11 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
             quoted_message_id: msgAny.quoted_message_id,
             reaction_counts: msgAny.reaction_counts,
             latest_reactions: msgAny.latest_reactions,
+            poll_type: msgAny.poll_type,
+            poll_choice_counts: msgAny.poll_choice_counts,
+            latest_poll_choices: msgAny.latest_poll_choices,
+            allow_change_choice: msgAny.allow_change_choice,
+            poll_closed: msgAny.poll_closed,
             pinned: msgAny.pinned,
             pinned_at: msgAny.pinned_at instanceof Date
               ? msgAny.pinned_at.toISOString()

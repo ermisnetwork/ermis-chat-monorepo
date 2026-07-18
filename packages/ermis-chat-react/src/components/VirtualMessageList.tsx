@@ -612,10 +612,12 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         const timeGap = Math.abs(
           getTimestamp(nextEntry.message.created_at) - getTimestamp(prevEntry.message.created_at)
         );
-        // Break group if: different user, system message, date separator, or time gap
+        // Break group if: different user, system/poll message, date separator, or time gap
         if (
           nextEntry.showDateSeparator ||
           nextEntry.messageType === 'system' ||
+          nextEntry.messageType === 'poll' ||
+          entry.messageType === 'poll' ||
           getMessageUserId(nextEntry.message) !== getMessageUserId(entry.message) ||
           timeGap > TIME_GAP_THRESHOLD_MS
         ) {
