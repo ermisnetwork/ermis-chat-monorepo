@@ -1,0 +1,78 @@
+ERMIS NETWORK EXTERNAL SDK LICENSE
+Version 1.0 - July 18, 2026
+
+Copyright (c) 2026 Ermis Network. All rights reserved.
+
+This license governs the compiled software, declarations, documentation, and
+runtime assets distributed in the @ermis-network/ermis-chat-react package (the
+"Software"). The Software is proprietary and is not open-source software.
+
+1. Authorized Application
+
+"Authorized Application" means an application developed, operated, or
+distributed by a licensee under a separate written agreement with Ermis
+Network, including a branded or modified application derived from
+uhm-chat-external.
+
+2. License Grant
+
+Subject to this license and the applicable written agreement, Ermis Network
+grants the licensee a limited, non-exclusive, non-transferable license to:
+
+- install and use the compiled Software to develop, test, self-host, and
+  operate an Authorized Application;
+- integrate the compiled Software with the licensee's own or customized
+  backend services through the Software's public interfaces; and
+- reproduce and distribute the compiled Software solely as an embedded
+  dependency of a built or packaged Authorized Application to that
+  application's end users.
+
+An end user may use the Software only as part of the Authorized Application
+and receives no right to use or distribute the Software separately.
+
+3. Restrictions
+
+Except where expressly permitted by the applicable written agreement or by
+law, the licensee may not:
+
+- publish, sell, sublicense, transfer, or distribute the Software as a
+  standalone SDK, library, package, archive, or registry artifact;
+- provide the Software, package tarballs, registry credentials, or access
+  tokens to an unauthorized third party;
+- reverse engineer, decompile, disassemble, or attempt to derive source code
+  from the Software;
+- remove or alter copyright, license, trademark, or proprietary notices; or
+- use the Software outside an Authorized Application.
+
+4. Ownership
+
+The Software is licensed, not sold. Ermis Network retains all right, title,
+and interest in the Software and all associated intellectual property. No
+source-code rights are granted by this license.
+
+5. Third-Party Software
+
+Third-party components remain subject to their respective license terms and
+notices. This license does not reduce rights granted directly under a
+third-party license.
+
+6. Term and Termination
+
+This license lasts only while the applicable written agreement remains in
+effect. Upon termination, the licensee must stop developing and distributing
+new copies that contain the Software and must delete standalone copies of the
+Software, except as otherwise required by the written agreement or law.
+
+7. Disclaimer
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE SOFTWARE IS PROVIDED "AS IS"
+WITHOUT WARRANTIES OF ANY KIND, EXCEPT FOR WARRANTIES EXPRESSLY PROVIDED IN
+THE APPLICABLE WRITTEN AGREEMENT. ERMIS NETWORK WILL NOT BE LIABLE UNDER THIS
+LICENSE FOR INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE
+DAMAGES.
+
+8. Separate Agreement
+
+If this license conflicts with a separate written agreement signed by Ermis
+Network and the licensee, the signed agreement controls. No license is granted
+to a person or entity that is not authorized under such an agreement.

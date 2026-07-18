@@ -1,0 +1,89 @@
+ERMIS NETWORK EXTERNAL APPLICATION LICENSE
+Version 1.0 - July 18, 2026
+
+Copyright (c) 2026 Ermis Network. All rights reserved.
+
+This license governs the application source code, documentation, and assets
+owned by Ermis Network and distributed in the uhm-chat-external repository
+(the "Application Source"). The Application Source is proprietary and is not
+open-source software.
+
+1. Authorized Partner and Application
+
+"Authorized Partner" means a person or entity authorized under a separate
+written agreement with Ermis Network.
+
+"Authorized Application" means a branded, modified, self-hosted, or otherwise
+customized application created by an Authorized Partner from the Application
+Source under that agreement.
+
+2. License Grant
+
+Subject to this license and the applicable written agreement, Ermis Network
+grants the Authorized Partner a limited, non-exclusive, non-transferable
+license to:
+
+- access, copy, and modify the Application Source;
+- create branded and customized Authorized Applications;
+- connect an Authorized Application to the partner's own, self-hosted, or
+  customized backend services;
+- build, host, operate, market, and commercially exploit an Authorized
+  Application; and
+- distribute built or packaged Authorized Applications to end users.
+
+The Authorized Partner may allow employees and contractors to access the
+Application Source only when they need that access to develop or operate an
+Authorized Application and are bound by confidentiality and use restrictions
+at least as protective as this license.
+
+3. Restrictions
+
+Except where expressly permitted by the applicable written agreement or by
+law, the Authorized Partner may not:
+
+- publish the Application Source in a public repository;
+- sell, sublicense, transfer, or distribute the Application Source as a
+  standalone source product, template, starter kit, or development service;
+- provide the Application Source to an unauthorized third party;
+- use the Application Source to create a general-purpose competing chat
+  application template or SDK for distribution to third parties;
+- remove or alter copyright, license, trademark, or proprietary notices; or
+- represent that Ermis Network endorses a modified application without written
+  permission.
+
+4. SDK and Third-Party Components
+
+This license does not apply to @ermis-network/ermis-chat-sdk,
+@ermis-network/ermis-chat-react, or other third-party dependencies. The Ermis
+SDK packages are governed by their own proprietary license. Other third-party
+components remain subject to their respective license terms and notices.
+
+5. Ownership
+
+The Application Source is licensed, not sold. Ermis Network retains all right,
+title, and interest in the original Application Source and associated
+intellectual property. Ownership of partner-authored modifications is governed
+by the applicable written agreement; no ownership of the original Application
+Source transfers under this license.
+
+6. Term and Termination
+
+This license lasts only while the applicable written agreement remains in
+effect. Upon termination, the Authorized Partner must stop creating and
+distributing new copies of Authorized Applications and delete the Application
+Source, except as otherwise required by the written agreement or law.
+
+7. Disclaimer
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE APPLICATION SOURCE IS PROVIDED
+"AS IS" WITHOUT WARRANTIES OF ANY KIND, EXCEPT FOR WARRANTIES EXPRESSLY
+PROVIDED IN THE APPLICABLE WRITTEN AGREEMENT. ERMIS NETWORK WILL NOT BE LIABLE
+UNDER THIS LICENSE FOR INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR
+PUNITIVE DAMAGES.
+
+8. Separate Agreement
+
+If this license conflicts with a separate written agreement signed by Ermis
+Network and the Authorized Partner, the signed agreement controls. No license
+is granted to a person or entity that is not authorized under such an
+agreement.

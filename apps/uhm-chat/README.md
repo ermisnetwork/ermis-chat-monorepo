@@ -29,4 +29,8 @@ Copy `.env.example` and supply deployment-specific values. Never commit `.env.lo
 
 Outsource consumers receive this repository and compiled npm packages only. The SDK monorepo and SDK TypeScript source are not part of the handoff.
 
+## License
+
+The application source is proprietary under the included customer-specific `LICENSE`. An authorized partner may fork, rebrand, self-host, customize, commercialize, and distribute its built application, but may not publish or resell the source as a standalone template. `@ermis-network/ermis-chat-sdk` and `@ermis-network/ermis-chat-react` are separately licensed, publicly downloadable proprietary npm packages and may be redistributed only when embedded in an authorized built or packaged application.
+
 See [OUTSOURCE_TASKS.md](./OUTSOURCE_TASKS.md) for release status and evidence.

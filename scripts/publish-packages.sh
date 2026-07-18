@@ -7,7 +7,8 @@ REACT_DIR="$ROOT_DIR/packages/ermis-chat-react"
 SDK_NAME="@ermis-network/ermis-chat-sdk"
 REACT_NAME="@ermis-network/ermis-chat-react"
 
-TAG="${NPM_TAG:-latest}"
+TAG="${NPM_TAG:-external}"
+ACCESS="public"
 OTP="${NPM_OTP:-}"
 SDK_OTP="${NPM_SDK_OTP:-}"
 REACT_OTP="${NPM_REACT_OTP:-}"
@@ -40,7 +41,7 @@ For npm web-based 2FA, do not pass --otp. npm publish will pause, ask you to
 press ENTER to open the browser, and continue after browser verification.
 
 Options:
-  --tag <tag>          npm dist-tag to publish with. Default: latest
+  --tag <tag>          npm dist-tag. This external release requires: external
   --otp <code>         npm 2FA one-time password for both packages. Also accepts NPM_OTP
   --otp-sdk <code>     npm 2FA one-time password for SDK. Also accepts NPM_SDK_OTP
   --otp-react <code>   npm 2FA one-time password for React. Also accepts NPM_REACT_OTP
@@ -56,7 +57,7 @@ Options:
 Examples:
   scripts/publish-packages.sh --dry-run
   scripts/publish-packages.sh --yes
-  scripts/publish-packages.sh --tag beta --yes
+  scripts/publish-packages.sh --tag external --yes
   scripts/publish-packages.sh --otp-sdk 111111 --otp-react 222222 --yes
   scripts/publish-packages.sh --registry https://registry.npmjs.org --yes
 USAGE
@@ -85,6 +86,14 @@ pkg_version() {
 
 react_sdk_dependency() {
   node -e "console.log(require(process.argv[1]).dependencies['$SDK_NAME'] || '')" "$REACT_DIR/package.json"
+}
+
+pkg_publish_access() {
+  node -e "console.log(require(process.argv[1]).publishConfig?.access || '')" "$1/package.json"
+}
+
+pkg_publish_tag() {
+  node -e "console.log(require(process.argv[1]).publishConfig?.tag || '')" "$1/package.json"
 }
 
 version_exists() {
@@ -135,7 +144,7 @@ publish_one() {
   local package_dir="$1"
   local package_name="$2"
   local otp_code="$3"
-  local publish_args=(--tag "$TAG" --access public)
+  local publish_args=(--tag "$TAG" --access "$ACCESS")
 
   if [[ "$DRY_RUN" == "1" ]]; then
     publish_args+=(--dry-run)
@@ -227,16 +236,26 @@ REACT_PKG_NAME="$(pkg_name "$REACT_DIR")"
 SDK_VERSION="$(pkg_version "$SDK_DIR")"
 REACT_VERSION="$(pkg_version "$REACT_DIR")"
 REACT_SDK_DEP="$(react_sdk_dependency)"
+SDK_PUBLISH_ACCESS="$(pkg_publish_access "$SDK_DIR")"
+REACT_PUBLISH_ACCESS="$(pkg_publish_access "$REACT_DIR")"
+SDK_PUBLISH_TAG="$(pkg_publish_tag "$SDK_DIR")"
+REACT_PUBLISH_TAG="$(pkg_publish_tag "$REACT_DIR")"
 
 [[ "$SDK_PKG_NAME" == "$SDK_NAME" ]] || fail "SDK package name is $SDK_PKG_NAME, expected $SDK_NAME"
 [[ "$REACT_PKG_NAME" == "$REACT_NAME" ]] || fail "React package name is $REACT_PKG_NAME, expected $REACT_NAME"
 [[ "$SDK_VERSION" == "$REACT_VERSION" ]] || fail "version mismatch: $SDK_NAME@$SDK_VERSION vs $REACT_NAME@$REACT_VERSION"
 [[ "$REACT_SDK_DEP" == "$SDK_VERSION" ]] || fail "$REACT_NAME dependency on $SDK_NAME is $REACT_SDK_DEP, expected $SDK_VERSION"
+[[ "$TAG" == "external" ]] || fail "external packages must use npm dist-tag external, got $TAG"
+[[ "$SDK_PUBLISH_ACCESS" == "$ACCESS" ]] || fail "$SDK_NAME publishConfig.access is $SDK_PUBLISH_ACCESS, expected $ACCESS"
+[[ "$REACT_PUBLISH_ACCESS" == "$ACCESS" ]] || fail "$REACT_NAME publishConfig.access is $REACT_PUBLISH_ACCESS, expected $ACCESS"
+[[ "$SDK_PUBLISH_TAG" == "$TAG" ]] || fail "$SDK_NAME publishConfig.tag is $SDK_PUBLISH_TAG, expected $TAG"
+[[ "$REACT_PUBLISH_TAG" == "$TAG" ]] || fail "$REACT_NAME publishConfig.tag is $REACT_PUBLISH_TAG, expected $TAG"
 
 log "Packages"
 printf '%s@%s\n' "$SDK_NAME" "$SDK_VERSION"
 printf '%s@%s\n' "$REACT_NAME" "$REACT_VERSION"
 printf 'dist-tag: %s\n' "$TAG"
+printf 'access: %s\n' "$ACCESS"
 printf 'registry: %s\n' "$NPM_REGISTRY"
 
 SDK_EXISTS=0

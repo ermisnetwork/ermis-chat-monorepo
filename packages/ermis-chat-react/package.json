@@ -4,6 +4,11 @@
   "description": "React UI components for Ermis Chat",
   "author": "Ermis",
   "homepage": "https://ermis.network/",
+  "license": "SEE LICENSE IN LICENSE",
+  "publishConfig": {
+    "access": "public",
+    "tag": "external"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -16,7 +21,9 @@
     "./dist/index.css": "./dist/index.css"
   },
   "files": [
-    "/dist"
+    "/dist",
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
     "@ermis-network/ermis-chat-sdk": "2.1.0-external.1",

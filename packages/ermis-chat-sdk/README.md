@@ -30,4 +30,8 @@ Copy `dist/wasm_worker.worker.mjs` for call-worker support.
 
 ## Publishing
 
-This package is released in lockstep with `@ermis-network/ermis-chat-react` using the exact version `2.1.0-external.1` and npm dist-tag `external`. Source TypeScript, tests, build configuration, and source maps are intentionally excluded from the package.
+This package is released in lockstep with `@ermis-network/ermis-chat-react` using the exact version `2.1.0-external.1`, npm dist-tag `external`, and public npm access. Source TypeScript, tests, build configuration, and source maps are intentionally excluded from the package.
+
+## License
+
+This is proprietary software under the included `LICENSE`. Public npm availability does not grant open-source rights. An authorized licensee may integrate the compiled SDK with a self-hosted or customized backend and distribute it only as an embedded dependency of an authorized built or packaged application. The package may not be republished or distributed as a standalone SDK.

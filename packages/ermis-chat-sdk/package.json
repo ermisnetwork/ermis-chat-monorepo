@@ -41,6 +41,10 @@
   },
   "jsdelivr": "./dist/index.browser.full-bundle.min.js",
   "license": "SEE LICENSE IN LICENSE",
+  "publishConfig": {
+    "access": "public",
+    "tag": "external"
+  },
   "keywords": [
     "chat",
     "messaging",
@@ -52,8 +56,7 @@
   "files": [
     "/dist",
     "README.md",
-    "readme.md",
-    "license",
+    "LICENSE",
     "/bin",
     "/public"
   ],
