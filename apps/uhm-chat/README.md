@@ -12,6 +12,8 @@ yarn dev
 
 The app pins both Ermis packages to `2.1.0-external.1`. The `external` npm dist-tag is only for release discovery; do not use it in `package.json`.
 
+The application entrypoint imports `@ermis-network/ermis-chat-react/dist/index.css` explicitly. The package ships CSS as a separate public export, so importing JavaScript components alone is not enough for list/virtualized layout styles.
+
 ## E2EE runtime
 
 - Startup stays ordered as `connectUser → initialize E2EE → mount chat`.
