@@ -409,6 +409,19 @@
   border-bottom-right-radius: 0;
 }
 
+/* --- Suppress tail & restore radius when a signal (call) message follows --- */
+.ermis-message-list__item--before-signal .ermis-message-bubble::after {
+  display: none;
+}
+
+.ermis-message-list__item--other.ermis-message-list__item--before-signal .ermis-message-bubble {
+  border-bottom-left-radius: var(--ermis-radius-lg);
+}
+
+.ermis-message-list__item--own.ermis-message-list__item--before-signal .ermis-message-bubble {
+  border-bottom-right-radius: var(--ermis-radius-lg);
+}
+
 /* --- System messages --- */
 .ermis-message-list__system {
   display: flex;

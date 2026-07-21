@@ -839,6 +839,8 @@ export type MessageItemProps = {
   isOwnMessage: boolean;
   isFirstInGroup: boolean;
   isLastInGroup: boolean;
+  /** When true, the next message in the group is a signal (call) from the same user — suppresses pointed tail */
+  nextIsSignal?: boolean;
   isHighlighted: boolean;
   AvatarComponent: React.ComponentType<AvatarProps>;
   MessageBubble: React.ComponentType<MessageBubbleProps>;

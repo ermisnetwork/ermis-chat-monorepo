@@ -278,6 +278,27 @@ export function useChannelListUpdates(
       setChannels((prev) => [...prev]);
     };
 
+    // --- sync.completed: force channel list refresh so unread badges update ---
+    // applySyncResult() mutates channel.state directly without dispatching events,
+    // so React.memo'd ChannelRow components won't re-render. This ensures they do.
+    const handleSyncCompleted = () => {
+      const active = activeChannelRef.current;
+      if (active) {
+        const chState = active.state as unknown as Record<string, unknown> | undefined;
+        const isBannedInActive = Boolean(active.state?.membership?.banned);
+        const isBlockedInActive = isDirectChannel(active) && Boolean(active.state?.membership?.blocked);
+        const isPendingActive = isPendingMember(active.state?.membership?.channel_role as string);
+
+        if (!isBannedInActive && !isBlockedInActive && !isPendingActive) {
+          if ((chState?.unreadCount as number) > 0) {
+            active.markRead().catch(() => {});
+            if (chState) chState.unreadCount = 0;
+          }
+        }
+      }
+      setChannels((prev) => [...prev]);
+    };
+
     const sub1 = client.on('message.new', handleNewMessage);
     const sub2 = client.on('channel.deleted', handleChannelDeleted);
     const sub3 = client.on('member.removed', handleMemberRemoved);
@@ -298,6 +319,7 @@ export function useChannelListUpdates(
     // When a user joins a public channel (action='join'), the server sends member.joined
     // instead of notification.invite_accepted — handle it to re-group the channel list
     const sub15 = client.on('member.joined', handleMemberUpdated);
+    const sub16 = client.on('sync.completed', handleSyncCompleted);
 
     return () => {
       sub1.unsubscribe();
@@ -315,6 +337,7 @@ export function useChannelListUpdates(
       sub13.unsubscribe();
       sub14.unsubscribe();
       sub15.unsubscribe();
+      sub16.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }

@@ -61,7 +61,7 @@ const chatClientOptions: ErmisChatOptions = {
       window.localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refresh_token);
     }
   },
-  logger: ['info', 'warn', 'error'],
+  logger: import.meta.env.DEV ? ['info', 'warn', 'error'] : [],
 }
 
 const chatClient = ErmisChat.getInstance(

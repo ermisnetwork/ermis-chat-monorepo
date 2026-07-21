@@ -1,5 +1,5 @@
 import type { MessageLabel } from '@ermis-network/ermis-chat-sdk';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { VList as _VList, type VListHandle } from 'virtua';
 import { canManageChannel, isPendingMember, isSkippedMember } from '../channelRoleUtils';
 import { isDirectChannel, isPublicGroupChannel } from '../channelTypeUtils';
@@ -347,6 +347,24 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     loadMoreLimit,
   });
 
+  // Track whether user has scrolled up from the bottom
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const wrappedHandleScroll = useCallback(
+    (offset: number) => {
+      handleScroll(offset);
+      const handle = vlistRef.current;
+      if (!handle) return;
+      const { scrollSize, viewportSize } = handle;
+      if (scrollSize <= viewportSize) {
+        setIsScrolledUp(false);
+        return;
+      }
+      const distFromBottom = scrollSize - (offset + viewportSize);
+      setIsScrolledUp(distFromBottom > 200);
+    },
+    [handleScroll],
+  );
+
   const isNearBottom = useCallback(() => {
     const handle = vlistRef.current;
     if (!handle) return isAtBottomRef.current;
@@ -472,6 +490,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       showDateSeparator: boolean;
       isFirstInGroup: boolean;
       isLastInGroup: boolean;
+      nextIsSignal: boolean;
       validReaders: Array<{ id: string; name?: string; avatar?: string; last_read?: Date | string }>;
       hasReaders: boolean;
     };
@@ -529,7 +548,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         nextType === 'signal' ||
         getMessageUserId(nextMsg) !== getMessageUserId(message) ||
         nextTimeGap;
-      return { message, index, isOwnMessage, messageType, showDateSeparator, isFirstInGroup, isLastInGroup, validReaders, hasReaders };
+      // Flag: next message is a signal from the same user — used to suppress pointed tail
+      const nextIsSignal = nextType === 'signal' && !!nextMsg && getMessageUserId(nextMsg) === getMessageUserId(message);
+      return { message, index, isOwnMessage, messageType, showDateSeparator, isFirstInGroup, isLastInGroup, nextIsSignal, validReaders, hasReaders };
     });
 
     // Build groups: consecutive regular messages from same user
@@ -685,6 +706,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
                       isOwnMessage={ge.isOwnMessage}
                       isFirstInGroup={ge.isFirstInGroup}
                       isLastInGroup={ge.isLastInGroup}
+                      nextIsSignal={ge.nextIsSignal}
                       isHighlighted={highlightedId === ge.message.id}
                       AvatarComponent={AvatarComponent}
                       MessageBubble={MessageBubble}
@@ -872,17 +894,17 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
           key={activeChannel?.cid || 'empty'}
           ref={vlistRef}
           shift={shiftMode}
-          onScroll={handleScroll}
+          onScroll={wrappedHandleScroll}
           className="ermis-message-list__vlist"
         >
           {messageElements}
         </VList>
 
         {/* Jump to latest button */}
-        {hasNewer && (
+        {(hasNewer || isScrolledUp) && (
           JumpToLatestButton === DefaultJumpToLatest
-            ? <DefaultJumpToLatest onClick={jumpToLatest} label={jumpToLatestLabel} />
-            : <JumpToLatestButton onClick={jumpToLatest} />
+            ? <DefaultJumpToLatest onClick={hasNewer ? jumpToLatest : () => { scrollToBottom(true); setIsScrolledUp(false); }} label={jumpToLatestLabel} />
+            : <JumpToLatestButton onClick={hasNewer ? jumpToLatest : () => { scrollToBottom(true); setIsScrolledUp(false); }} />
         )}
       </div>
 
