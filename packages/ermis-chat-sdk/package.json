@@ -1,12 +1,21 @@
 {
   "name": "@ermis-network/ermis-chat-sdk",
-  "version": "2.1.0-external.1",
+  "version": "2.1.0-external.2",
   "description": "Ermis Chat SDK",
   "author": "Ermis",
   "homepage": "https://ermis.network/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ermisnetwork/ermis-chat-monorepo.git"
+  },
+  "openmlsBuild": {
+    "commit": "ce0ed8fde928db16f1c4709c30d18f2aaa4507c2",
+    "cargoLockSha256": "3c11a94c7f97bcb1056853fc43268400a0cfb49302d2a5cc5a3f6e6d49798377",
+    "wasmPack": "wasm-pack 0.13.1",
+    "cargo": "cargo 1.94.1 (29ea6fb6a 2026-03-24)",
+    "rustc": "rustc 1.94.1 (e408947bf 2026-03-25)",
+    "wasmSha256": "a54a975e52a267c98884e18656078c21b16f05bf5aec5657ae9631dd59899889",
+    "wasmSize": 1667354
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",

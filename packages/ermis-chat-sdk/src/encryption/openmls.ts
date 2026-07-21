@@ -1,12 +1,8 @@
 /**
  * Public, live-MLS-only view of the bundled OpenMLS module.
- *
- * The current binary temporarily contains additional internal exports. They are
- * intentionally not part of the external SDK contract and will be removed when
- * the replacement WASM artifact is available.
  */
 export interface OpenMlsWasmModule {
-  default(moduleOrPath?: string | URL | Request): Promise<unknown>;
+  default(options?: { module_or_path: string | URL | Request }): Promise<unknown>;
   init(): void;
   Provider: unknown;
   Identity: unknown;
@@ -27,7 +23,7 @@ export async function loadOpenMlsWasm(wasmPath = '/openmls_wasm_bg.wasm'): Promi
   if (!promise) {
     promise = (async () => {
       const wasmModule = (await import('./wasm/openmls_wasm.js')) as unknown as OpenMlsWasmModule;
-      await wasmModule.default(wasmPath);
+      await wasmModule.default({ module_or_path: wasmPath });
       wasmModule.init();
       return wasmModule;
     })();

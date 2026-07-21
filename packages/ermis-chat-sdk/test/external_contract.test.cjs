@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -38,6 +39,36 @@ test('public declarations omit encrypted-history contracts', () => {
     assert.equal(forbidden.test(source), false, `${relative} exposes an encrypted-history contract`);
     assert.equal(source.includes('sourcesContent'), false, `${relative} contains sourcesContent`);
   }
+});
+
+test('pinned OpenMLS artifact is live-only and matches package provenance', () => {
+  const manifest = require('../package.json');
+  const build = manifest.openmlsBuild;
+  const generatedFiles = [
+    'src/encryption/wasm/openmls_wasm.js',
+    'src/encryption/wasm/openmls_wasm.d.ts',
+    'src/encryption/wasm/openmls_wasm_bg.wasm.d.ts',
+  ];
+  const forbidden = /epoch[-_ ]?archive|\b(?:recovery|vault|pin)\b/i;
+
+  for (const relative of generatedFiles) {
+    const source = fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
+    assert.equal(forbidden.test(source), false, `${relative} contains an encrypted-history contract`);
+  }
+
+  assert.equal(
+    fs.existsSync(path.join(__dirname, '../src/encryption/wasm/openmls_wasm_bg.js')),
+    false,
+    'stale split WASM glue must not be retained',
+  );
+
+  const sourceWasm = fs.readFileSync(path.join(__dirname, '../src/encryption/wasm/openmls_wasm_bg.wasm'));
+  const publicWasm = fs.readFileSync(path.join(__dirname, '../public/openmls_wasm_bg.wasm'));
+  const digest = crypto.createHash('sha256').update(sourceWasm).digest('hex');
+
+  assert.equal(digest, build.wasmSha256);
+  assert.equal(sourceWasm.byteLength, build.wasmSize);
+  assert.deepEqual(publicWasm, sourceWasm);
 });
 
 test('external runtime has no encrypted-history endpoint strings', () => {

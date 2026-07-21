@@ -12,13 +12,14 @@ Allowed status: `TODO | IN_PROGRESS | BLOCKED | DEFERRED | DONE`. Only one Codex
 | SDK-004A | Add the approved proprietary embedded-distribution license to both tarballs | DONE | Codex + user | SDK-004 | Approved 2026-07-18; `LICENSE` included in both package tarballs |
 | SDK-005 | Build, test, and audit both package tarballs | DONE | Codex | SDK-004A | Builds/tests passed; dry-run reports tag `external`, access `restricted`, SDK 25 files and React 8 files with no source/map |
 | SDK-006 | Publish both public proprietary packages with npm dist-tag `external` | DONE | Codex | SDK-005 | Registry verified: both `external` tags resolve to `2.1.0-external.1`; `latest` remains `2.1.0`; React pins exact core version |
+| SDK-007 | Publish live-only OpenMLS packages as `2.1.0-external.2` | IN_PROGRESS | Codex + User | WASM-001 | User approved publish; all local gates pass, but npm authentication must be refreshed after `npm whoami` returned 401 |
 | FE-001 | Create sanitized standalone app and `.env.example` | DONE | Codex | PLAN-001 | Standalone source created at `/Users/khoakheu/Ermis-workspace/chat/uhm-chat-external` |
 | FE-002 | Remove PIN/archive UI and pin exact SDK versions | DONE | Codex | SDK-005 | Exact versions set; workspace and tarball-backed app builds passed |
 | FE-003 | Smoke test with package tarballs outside monorepo | DONE | Codex | SDK-005 | `/private/tmp/uhm-chat-external-smoke`; tarball install and production build passed |
 | FE-004 | Install registry packages and create final lockfile | DONE | Codex | SDK-006 | `yarn.lock` resolves both exact versions from the public registry; no workspace/file/link dependency |
 | FE-005 | Build, lint, E2EE smoke test, and clean initial commit | DONE | Codex | FE-004 | Registry/Vite build and lint passed; React SDK CSS is imported; user-confirmed live E2EE channel/message smoke passed; light message contrast adjusted; standalone `main` is delivered as one root commit |
 | DOC-001 | Update SDK/app docs, release guide, licensing, and research progress log | DONE | Codex | FE-005 | SDK/React/app README, `EXTERNAL_RELEASE.md`, license boundary, and 2026-07-15 research entry |
-| WASM-001 | Build WASM without epoch archive and replace artifact | DEFERRED | User | FE-005 | Current WASM checksum/size must remain unchanged |
+| WASM-001 | Build WASM without epoch archive and replace artifact | DONE | Codex + User | FE-005 | OpenMLS `main` pinned at `ce0ed8fde`; Core/React/Uhm builds, 8 external tests, and both package dry-runs pass |
 | BE-001 | Analyze attachment/base64 contract for `bellboy-external` | DONE | Codex | FE-005 | Canonical base64 applies only to JSON MLS byte fields; encrypted assets use direct presigned PUT/multipart and a separate opaque lifecycle control plane |
 | BE-002 | Implement and test backend attachment/base64 | DONE | Codex | BE-001 | Branch `feat/e2ee-attachment-base64`: 43 Rust tests pass; live single-PUT init/upload/complete/bind/query/grant/download/delete/R2-cleanup passed on port 8889 |
 | OPS-001 | Rotate Firebase service-account credential exposed by legacy `gauth` startup logging | TODO | User | BE-002 | Private-key logging removed via vendored security patch; rotate the local/shared credential and replace `firebase_config.json` in every environment using it |
@@ -35,6 +36,17 @@ Allowed status: `TODO | IN_PROGRESS | BLOCKED | DEFERRED | DONE`. Only one Codex
 - The outsource repository contains one clean initial commit on `main`; secrets, build output, dependency folders, and development PWA output are not tracked.
 
 ## Progress log
+
+### 2026-07-21 — OpenMLS live-only artifact release gates
+
+- Mode: production release; user approved real npm publish, with npm authentication refresh required before registry mutation.
+- Replaced the temporary epoch-archive-capable OpenMLS artifact with a live-only build from pinned OpenMLS `main` commit `ce0ed8fde928db16f1c4709c30d18f2aaa4507c2`.
+- Stored the exact Cargo lock and toolchain provenance beside the SDK. The lock pins `hpke-rs` at `6e30f233daf51ec63d982c60ff1ecd83f90c1139` so a clean build does not resolve the incompatible upstream `0.6.1` HEAD.
+- The new WASM is 1,667,354 bytes with SHA-256 `a54a975e52a267c98884e18656078c21b16f05bf5aec5657ae9631dd59899889`; generated glue/declarations expose the same live MLS surface while removing PIN, recovery-vault, and epoch-archive APIs.
+- Core and React package metadata plus the monorepo consumer are prepared for `2.1.0-external.2`. Existing published `2.1.0-external.1` artifacts remain immutable.
+- User approved the remaining local gates. Core and React SDK builds passed, followed by all 8 `test:external` cases, including the pinned WASM provenance/live-only contract and Base64 migration coverage. The Uhm Chat production build passed with only the existing runtime-WASM URL, bundle-size, and ineffective-dynamic-import warnings.
+- Corrected the stale root `dev:uhm` and `build:uhm` workspace aliases from `uhm-chat` to the actual `uhm-chat-external` package name.
+- Package dry-run passed for public access and the `external` tag: Core contains 25 files (3.1 MB packed, 10.6 MB unpacked) and React contains 8 files (296.2 kB packed, 1.6 MB unpacked), with no source trees or source maps. The first sandboxed attempt hit the machine's root-owned npm cache; rerunning with a temporary npm cache passed without publishing.
 
 ### 2026-07-18 — FE live smoke and contrast pass
 

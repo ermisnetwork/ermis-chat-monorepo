@@ -3,7 +3,7 @@
 Compiled core SDK for the standalone `uhm-chat-external` application.
 
 ```bash
-yarn add @ermis-network/ermis-chat-sdk@2.1.0-external.1
+yarn add @ermis-network/ermis-chat-sdk@2.1.0-external.2
 ```
 
 ## Supported E2EE scope
@@ -15,7 +15,7 @@ yarn add @ermis-network/ermis-chat-sdk@2.1.0-external.1
 
 Account PIN, remote encrypted-history backup, and historical-message restoration are not part of this distribution. The client does not send an encrypted-history policy during channel creation or upgrade and does not call encrypted-history storage endpoints.
 
-The current OpenMLS binary is a temporary compatibility artifact. It contains internal code outside the external JavaScript/TypeScript contract; the app cannot access that code through `loadOpenMlsWasm()` types, and the external runtime manager does not invoke it. A replacement binary is tracked separately as `WASM-001`.
+The bundled OpenMLS artifact is built from pinned live-only `main` commit `ce0ed8fde928db16f1c4709c30d18f2aaa4507c2`. Build provenance is published in the package manifest and recorded internally in `wasm-build/BUILD_INFO.md`. Its generated JavaScript, declarations, and WASM binary do not contain the PIN, recovery-vault, or epoch-archive feature set.
 
 ## Runtime assets
 
@@ -30,7 +30,7 @@ Copy `dist/wasm_worker.worker.mjs` for call-worker support.
 
 ## Publishing
 
-This package is released in lockstep with `@ermis-network/ermis-chat-react` using the exact version `2.1.0-external.1`, npm dist-tag `external`, and public npm access. Source TypeScript, tests, build configuration, and source maps are intentionally excluded from the package.
+This package is released in lockstep with `@ermis-network/ermis-chat-react` using the exact version `2.1.0-external.2`, npm dist-tag `external`, and public npm access. Source TypeScript, tests, build configuration, and source maps are intentionally excluded from the package.
 
 ## License
 

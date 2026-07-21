@@ -8,6 +8,7 @@ Both package names already have public npm releases, and npm visibility applies 
 
 ```bash
 yarn workspace @ermis-network/ermis-chat-sdk build
+yarn workspace @ermis-network/ermis-chat-sdk test:external
 yarn workspace @ermis-network/ermis-chat-react build
 bash scripts/publish-packages.sh --dry-run
 ```
@@ -17,9 +18,11 @@ Audit both tarballs before publishing:
 - the proprietary `LICENSE` file is present in both packages;
 - package metadata and publish output both report `access: public` and dist-tag `external`;
 - no `/src`, test/config files, `.map`, or `sourcesContent`;
-- no high-level encrypted-history API/UI/endpoint strings outside the documented temporary WASM binary/glue exception;
+- no encrypted-history API/UI/endpoint strings or generated WASM/glue exports;
+- SDK package metadata records the pinned OpenMLS commit, Cargo lock checksum, WASM checksum, size, and toolchain;
+- SDK source/public and consumer-app OpenMLS binaries have the same recorded checksum;
 - React package depends on the exact matching core version;
-- public declarations do not expose the temporary WASM-only history exports.
+- public declarations expose only the supported live MLS contract.
 
 ## Publish
 
