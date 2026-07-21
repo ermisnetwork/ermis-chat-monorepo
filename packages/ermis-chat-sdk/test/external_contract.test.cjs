@@ -88,3 +88,53 @@ test('external websocket bundle carries the Base64 selector', () => {
     assert.equal(source.includes('X-Ermis-E2EE-Bytes'), true, `${relative} omits the HTTP selector`);
   }
 });
+
+test('external scope sync normalizes nested Base64 and legacy arrays without changing metadata', async () => {
+  const client = {
+    baseURL: 'https://bellboy.example',
+    deviceId: 'web-nested-test',
+    async doAxiosRequest() {
+      return {
+        channels: {
+          'team:test': {
+            events: [
+              { type: 'application', data: { mls_ciphertext: 'AQID', mls_epoch: 3, label: 'base64' } },
+              { type: 'protocol', data: { proposal: [4, 5, 6], epoch: 4 } },
+              { type: 'message_updated', data: { message: { mls_ciphertext: [7, 8, 9], mls_epoch: 5 } } },
+              { type: 'member_removed', data: { user_id: 'unchanged' } },
+            ],
+            has_more: false,
+            next_cursor: null,
+          },
+        },
+        removed_channels: { events: [], has_more: false, next_cursor: null },
+      };
+    },
+  };
+  const api = new encryption.EncryptionApiClient(client);
+  const response = await api.scopeSync({}, 10);
+  const events = response.channels['team:test'].events;
+  assert.deepEqual(Array.from(events[0].data.mls_ciphertext), [1, 2, 3]);
+  assert.deepEqual(Array.from(events[1].data.proposal), [4, 5, 6]);
+  assert.deepEqual(Array.from(events[2].data.message.mls_ciphertext), [7, 8, 9]);
+  assert.equal(events[3].data.user_id, 'unchanged');
+  assert.equal(events[0].data.label, 'base64');
+});
+
+test('external decoder rejects noncanonical Base64 and accepts omitted optional fields', async () => {
+  let response = { group_info: 'AQIDBA', epoch: 7 };
+  const client = {
+    baseURL: 'https://bellboy.example',
+    deviceId: 'web-strict-test',
+    async doAxiosRequest() {
+      return response;
+    },
+  };
+  const api = new encryption.EncryptionApiClient(client);
+  await assert.rejects(() => api.getGroupInfo('team', 'invalid-base64'), /base64/i);
+
+  response = { group_info: [1, 2, 3], epoch: 8 };
+  const decoded = await api.getGroupInfo('team', 'legacy-array');
+  assert.deepEqual(Array.from(decoded.group_info), [1, 2, 3]);
+  assert.equal(decoded.ratchet_tree, undefined);
+});
