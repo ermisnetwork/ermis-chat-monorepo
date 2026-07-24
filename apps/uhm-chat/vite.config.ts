@@ -15,6 +15,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'prompt',
       workbox: {
+        // Keep E2EE range playback in the app worker. Registering a second
+        // root-scoped worker from the SDK would replace this PWA worker and
+        // make vite-plugin-pwa report a false app update.
+        importScripts: ['/e2ee-media-stream-worker.js?v=20260723-4'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // Tăng giới hạn lên 5MB
         runtimeCaching: [
           {

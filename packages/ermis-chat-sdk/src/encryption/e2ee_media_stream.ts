@@ -39,7 +39,7 @@ type PageSession = {
   safetyMarginMs: number;
 };
 
-const DEFAULT_WORKER_URL = '/e2ee-media-stream-worker.js?v=20260702-3';
+const DEFAULT_WORKER_URL = '/e2ee-media-stream-worker.js?v=20260723-4';
 const DEFAULT_WORKER_SCOPE = '/';
 const DEFAULT_GRANT_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_SAFETY_MARGIN_MS = 30 * 1000;
@@ -159,6 +159,16 @@ function postToWorker<T = unknown>(message: Record<string, unknown>, timeoutMs =
   });
 }
 
+async function currentWorkerSupportsE2eeMedia(): Promise<boolean> {
+  if (!navigator.serviceWorker.controller) return false;
+  try {
+    await postToWorker({ type: 'ERMIS_E2EE_MEDIA_STREAM_PING' }, 1000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function attachMessageListener(): void {
   if (messageListenerAttached || typeof navigator === 'undefined' || !navigator.serviceWorker) return;
   messageListenerAttached = true;
@@ -223,6 +233,22 @@ async function registerWorker(options: E2eeMediaStreamWorkerOptions = {}): Promi
   attachMessageListener();
   const workerUrl = options.workerUrl || DEFAULT_WORKER_URL;
   const scope = options.scope || DEFAULT_WORKER_SCOPE;
+
+  // A scope can only have one Service Worker registration. Prefer an existing
+  // app worker when it imports the E2EE media handlers, and never replace an
+  // unrelated PWA worker: replacing it is interpreted as an app update and can
+  // trigger a controller-change reload. Apps that cannot integrate the handler
+  // into their worker safely fall back to whole-blob playback.
+  const existingRegistration = await navigator.serviceWorker.getRegistration(scope);
+  if (existingRegistration || navigator.serviceWorker.controller) {
+    if (!navigator.serviceWorker.controller) await waitForController();
+    if (await currentWorkerSupportsE2eeMedia()) {
+      return existingRegistration || (await navigator.serviceWorker.ready);
+    }
+    logMediaStreamFallback('the existing app Service Worker does not include E2EE media streaming support');
+    return null;
+  }
+
   const registration = await navigator.serviceWorker.register(workerUrl, { scope });
   await navigator.serviceWorker.ready;
   if (!navigator.serviceWorker.controller) {

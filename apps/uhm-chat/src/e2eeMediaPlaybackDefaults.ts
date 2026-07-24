@@ -1,5 +1,5 @@
 const E2EE_MEDIA_WORKER_MARKER = '/e2ee-media-stream-worker.js';
-const E2EE_MEDIA_WORKER_VERSION = '20260702-3';
+const E2EE_MEDIA_WORKER_VERSION = '20260723-4';
 
 function envEnabled(value: unknown, defaultValue: boolean): boolean {
   if (value === undefined || value === null || value === '') return defaultValue;
@@ -25,9 +25,13 @@ export function configureE2eeMediaPlaybackDefaults(): void {
 
   const streamingEnabled = envEnabled(import.meta.env.VITE_E2EE_MEDIA_STREAMING, true);
   const debugEnabled = envEnabled(import.meta.env.VITE_E2EE_MEDIA_PLAYBACK_DEBUG, true);
+  const playbackGlobals = globalThis as typeof globalThis & {
+    __ERMIS_E2EE_MEDIA_STREAMING_ENABLED__?: boolean;
+    __ERMIS_E2EE_MEDIA_PLAYBACK_DEBUG__?: boolean;
+  };
 
-  (globalThis as any).__ERMIS_E2EE_MEDIA_STREAMING_ENABLED__ = streamingEnabled;
-  (globalThis as any).__ERMIS_E2EE_MEDIA_PLAYBACK_DEBUG__ = debugEnabled;
+  playbackGlobals.__ERMIS_E2EE_MEDIA_STREAMING_ENABLED__ = streamingEnabled;
+  playbackGlobals.__ERMIS_E2EE_MEDIA_PLAYBACK_DEBUG__ = debugEnabled;
 
   try {
     if (streamingEnabled) {
