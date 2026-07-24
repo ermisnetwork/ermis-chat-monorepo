@@ -7781,6 +7781,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       cid,
       content_type: 'standard',
       text,
+      status: 'received',
       attachments: payload.attachments,
       sticker_url: payload.sticker_url,
       poll_type: payload.poll_type,

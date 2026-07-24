@@ -359,6 +359,10 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         setIsScrolledUp(false);
         return;
       }
+      if (scrollLoadLockRef.current || jumpingRef.current) {
+        setIsScrolledUp(false);
+        return;
+      }
       const distFromBottom = scrollSize - (offset + viewportSize);
       setIsScrolledUp(distFromBottom > 200);
     },
@@ -431,9 +435,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     isAtBottomRef.current = true;
     holdScrollLoadLock(750);
 
-    // Single call — scrollToBottom already retries via rAF (up to 10 times)
-    // if VList hasn't measured its viewport yet.
     scrollToBottom(false);
+    setTimeout(() => scrollToBottom(false), 80);
+    setTimeout(() => scrollToBottom(false), 250);
   }, [activeChannel?.cid, currentUserId, messages, scrollToBottom, isNearBottom, holdScrollLoadLock]);
 
   const hasOverlay = Boolean(isClosedTopic || isPending || isBanned || isBlocked || isSkipped);

@@ -278,11 +278,15 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
     return messageArr.concat(message);
   }
 
-  // Prefer msg_seq for ordering (created_at can be "1970-01-01T00:00:00Z" which
-  // is invalid for sorting). Fall back to created_at only when msg_seq is missing.
   const getSortValue = (msg: any): number => {
+    if (!msg) return 0;
+    const val = msg[sortBy] || msg.created_at || msg.updated_at;
+    if (val) {
+      const t = val instanceof Date ? val.getTime() : new Date(val).getTime();
+      if (Number.isFinite(t) && t > 0) return t;
+    }
     if (typeof msg.msg_seq === 'number' && msg.msg_seq > 0) return msg.msg_seq;
-    return msg[sortBy] instanceof Date ? (msg[sortBy] as Date).getTime() : new Date(msg[sortBy] || 0).getTime();
+    return 0;
   };
 
   const messageSort = getSortValue(message);

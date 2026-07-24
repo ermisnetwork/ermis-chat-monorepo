@@ -46,7 +46,7 @@ const isE2eeChannel = (channel: any, client: any) => {
  * Single delayed scroll-to-bottom fallback. Must complete BEFORE
  * fadeListIn makes the list visible (~200ms delay).
  */
-const SCROLL_DELAYS = [100];
+const SCROLL_DELAYS = [50, 150, 300, 500];
 
 /**
  * Subscribes to channel message events and handles:
@@ -264,10 +264,24 @@ export function useChannelMessages({
       }
 
       return Array.from(byId.values()).sort((a: any, b: any) => {
+        const getTimestamp = (msg: any) => {
+          if (!msg) return 0;
+          const val = msg.created_at || msg.updated_at;
+          if (!val) return 0;
+          const t = val instanceof Date ? val.getTime() : new Date(val).getTime();
+          return Number.isFinite(t) ? t : 0;
+        };
+
+        const aTime = getTimestamp(a);
+        const bTime = getTimestamp(b);
         const aSeq = typeof a.msg_seq === 'number' && a.msg_seq > 0 ? a.msg_seq : null;
         const bSeq = typeof b.msg_seq === 'number' && b.msg_seq > 0 ? b.msg_seq : null;
+
         if (aSeq !== null && bSeq !== null) return aSeq - bSeq;
-        return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+        if (aTime > 0 && bTime > 0) return aTime - bTime;
+        if (aSeq !== null) return -1;
+        if (bSeq !== null) return 1;
+        return aTime - bTime;
       });
     };
 
@@ -287,7 +301,6 @@ export function useChannelMessages({
       // For E2EE channels: merge with decrypted cache
       if (isE2eeChannel(activeChannel, client) && storage && activeChannel.cid) {
         const baseMessages = [...activeChannel.state.latestMessages];
-        setMessages(mergeAndFilterE2eeMessages(baseMessages, []));
 
         const loadStoredMessages = options.includeStoredWindow
           ? storage.getMessages(activeChannel.cid, 100)
@@ -301,7 +314,10 @@ export function useChannelMessages({
               }),
             );
           })
-          .catch((err: any) => console.warn('[Cache] Failed to load message cache', err));
+          .catch((err: any) => {
+            console.warn('[Cache] Failed to load message cache', err);
+            setMessages(mergeAndFilterE2eeMessages(baseMessages, []));
+          });
         return;
       }
 

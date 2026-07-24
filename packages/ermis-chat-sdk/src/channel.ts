@@ -211,23 +211,31 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           allow_change_choice: message.allow_change_choice,
           poll_closed: message.poll_closed,
         });
-        if (response?.message) {
+        const resMsg = response?.message || (response as any);
+        if (resMsg && (resMsg.id || resMsg.text)) {
           const responseUserId =
-            response.message.user?.id || (response.message as any).user_id || this.getClient().userID || '';
-          this.state.addMessageSorted(
-            {
-              ...response.message,
-              status: 'received',
-              user: pickUserWithDisplayName(
-                responseUserId,
-                response.message.user,
-                this.getClient().state.users[responseUserId],
-                this.getClient().user,
-              ),
-            } as MessageResponse<ErmisChatGenerics>,
-            true,
-            false,
-          );
+            resMsg.user?.id || (resMsg as any).user_id || this.getClient().userID || '';
+          const confirmedMessage = {
+            ...resMsg,
+            status: 'received',
+            user: pickUserWithDisplayName(
+              responseUserId,
+              resMsg.user,
+              this.getClient().state.users[responseUserId],
+              this.getClient().user,
+            ),
+          } as MessageResponse<ErmisChatGenerics>;
+          if (resMsg.id && resMsg.id !== messageId) {
+            this._removeLocalMessageById(messageId);
+          }
+          this.state.addMessageSorted(confirmedMessage, true, true, 'current');
+          this._dispatchLocalMessageStateEvent('message.updated', confirmedMessage);
+        } else {
+          this.state.updateMessageStatus(messageId, 'received');
+          const updatedMsg = this.state.latestMessages.find((m) => m.id === messageId);
+          if (updatedMsg) {
+            this._dispatchLocalMessageStateEvent('message.updated', updatedMsg as any);
+          }
         }
         return response;
       } catch (error: any) {
@@ -241,11 +249,40 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       }
     }
 
-    // 3. Call API — don't update status on success (WS message.new will handle it)
+    // 3. Call API — update status and state with confirmed message on success
     try {
-      return await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(this._channelURL() + '/message', {
-        message: { ...message },
-      });
+      const response = await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(
+        this._channelURL() + '/message',
+        { message: { ...message } },
+      );
+      const resMsg = response?.message || (response as any);
+      if (resMsg && (resMsg.id || resMsg.text)) {
+        const responseUserId =
+          resMsg.user?.id || (resMsg as any).user_id || this.getClient().userID || '';
+        const confirmedMessage = {
+          ...resMsg,
+          status: 'received',
+          user: pickUserWithDisplayName(
+            responseUserId,
+            resMsg.user,
+            this.getClient().state.users[responseUserId],
+            this.getClient().user,
+          ),
+        } as MessageResponse<ErmisChatGenerics>;
+
+        if (resMsg.id && resMsg.id !== messageId) {
+          this._removeLocalMessageById(messageId);
+        }
+        this.state.addMessageSorted(confirmedMessage, true, true, 'current');
+        this._dispatchLocalMessageStateEvent('message.updated', confirmedMessage);
+      } else {
+        this.state.updateMessageStatus(messageId, 'received');
+        const updatedLocalMsg = this.state.latestMessages.find((m) => m.id === messageId);
+        if (updatedLocalMsg) {
+          this._dispatchLocalMessageStateEvent('message.updated', updatedLocalMsg as any);
+        }
+      }
+      return response;
     } catch (error: any) {
       // 4. On error: check if it's an offline/network error
       const isOfflineError =
@@ -2303,7 +2340,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       case 'message.new':
         if (event.message) {
           /* if message belongs to current user, always assume timestamp is changed to filter it out and add again to avoid duplication */
-          const ownMessage = event.user?.id === this.getClient().user?.id;
+          const eventUserId = event.user?.id || event.message?.user?.id || (event.message as any)?.user_id;
+          const clientUserId = this.getClient().user?.id || this.getClient().userID;
+          const ownMessage =
+            !!eventUserId && !!clientUserId && eventUserId.toLowerCase() === clientUserId.toLowerCase();
           const isThreadMessage = !!event.message.parent_id;
 
           const existUser = users.find((user) => user.id === event.user?.id);
@@ -2339,11 +2379,43 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const encryptionMgr = this.getClient().encryptionManager;
           const isEncryptionMessage = event.message.content_type === 'mls' && !!event.message.mls_ciphertext;
           const isOwnDeviceMessage =
-            ownMessage && (!encryptionMgr?.deviceId || event.message.device_id === encryptionMgr.deviceId);
+            ownMessage && (!encryptionMgr?.deviceId || !event.message.device_id || event.message.device_id === encryptionMgr.deviceId);
 
           if (this.state.isUpToDate || isThreadMessage) {
             if (!(isEncryptionMessage && isOwnDeviceMessage)) {
               channelState.addMessageSorted(event.message, ownMessage);
+            } else {
+              let existingLocalMsg = channelState.findMessage(event.message.id);
+              if (!existingLocalMsg) {
+                existingLocalMsg = channelState.latestMessages.find(
+                  (m) =>
+                    (m.status === 'sending' || m.status === 'received') &&
+                    (m.user?.id?.toLowerCase() === clientUserId.toLowerCase() || (m as any).user_id?.toLowerCase() === clientUserId.toLowerCase()),
+                );
+                if (existingLocalMsg?.id) {
+                  this._removeLocalMessageById(existingLocalMsg.id);
+                }
+              }
+              if (existingLocalMsg) {
+                const updatedMsg = {
+                  ...existingLocalMsg,
+                  id: event.message.id,
+                  msg_seq: event.message.msg_seq ?? (existingLocalMsg as any).msg_seq,
+                  status: 'received',
+                };
+                channelState.addMessageSorted(updatedMsg as any, true, true);
+                if (encryptionMgr?.storage?.saveMessage && this.cid) {
+                  void encryptionMgr.storage.saveMessage({
+                    ...updatedMsg,
+                    cid: this.cid,
+                    content_type: 'standard',
+                    text: updatedMsg.text || '',
+                    user_id: clientUserId,
+                    created_at: typeof updatedMsg.created_at === 'string' ? updatedMsg.created_at : new Date(updatedMsg.created_at || Date.now()).toISOString(),
+                  }).catch(() => {});
+                }
+                this._dispatchLocalMessageStateEvent('message.updated', updatedMsg as any);
+              }
             }
           }
 
