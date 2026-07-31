@@ -101,7 +101,7 @@ export function UhmForwardMessageModal({
                 {senderName}
               </span>
               {previewText ? (
-                <p className="text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2 leading-relaxed break-words overflow-hidden">
+                <p className="text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2 leading-relaxed break-all">
                   {previewText}
                 </p>
               ) : isSticker ? (
