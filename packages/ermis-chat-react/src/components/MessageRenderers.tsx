@@ -6,6 +6,7 @@ import type {
 } from '@ermis-network/ermis-chat-sdk';
 import { CallType, parseSignalMessage, parseSystemMessage } from '@ermis-network/ermis-chat-sdk';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { useChatCore } from '../hooks/useChatCore';
 import { useDownloadHandler } from '../hooks/useDownloadHandler';
 import {
@@ -527,7 +528,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
             <video
               className={`ermis-attachment ermis-attachment--video${loaded ? ' ermis-attachment--loaded' : ''}`}
               src={src}
-              preload="metadata"
+              preload="none"
               onLoadedData={() => setLoaded(true)}
             />
           )}
@@ -566,7 +567,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
           src={src}
           poster={posterSrc}
           controls
-          preload="metadata"
+          preload={posterSrc ? 'none' : 'metadata'}
           onLoadedData={() => {
             if (!posterSrc) setLoaded(true);
           }}
@@ -583,6 +584,125 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
 );
 (VideoAttachment as any).displayName = 'VideoAttachment';
 
+const PdfViewerOverlay: React.FC<{
+  url: string;
+  name: string;
+  onClose: () => void;
+  onDownload: (e: React.MouseEvent) => void;
+}> = ({ url, name, onClose, onDownload }) => {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return ReactDOM.createPortal(
+    <div
+      className="ermis-pdf-overlay"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 10000,
+        background: 'rgba(0, 0, 0, 0.85)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 12,
+          right: 16,
+          display: 'flex',
+          gap: 8,
+          zIndex: 10001,
+        }}
+      >
+        <button
+          onClick={onDownload}
+          title="Download"
+          type="button"
+          style={{
+            background: 'rgba(255,255,255,0.15)',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 14px',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Download
+        </button>
+        <button
+          onClick={onClose}
+          title="Close"
+          type="button"
+          style={{
+            background: 'rgba(255,255,255,0.15)',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 12px',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: 16,
+            lineHeight: 1,
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          ✕
+        </button>
+      </div>
+      <div
+        style={{
+          width: '90vw',
+          height: '90vh',
+          maxWidth: 1200,
+          borderRadius: 12,
+          overflow: 'hidden',
+          background: '#fff',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+        }}
+      >
+        <iframe
+          src={url}
+          title={name}
+          style={{ width: '100%', height: '100%', border: 'none' }}
+        />
+      </div>
+      <div
+        style={{
+          color: 'rgba(255,255,255,0.7)',
+          fontSize: 13,
+          marginTop: 8,
+          textAlign: 'center',
+        }}
+      >
+        {name}
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 const FileAttachment: React.FC<AttachmentProps> = React.memo(
   ({ attachment }) => {
     const url = attachment.url || attachment.asset_url;
@@ -590,8 +710,12 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(
     const size = attachment.file_size;
     const mimeType = attachment.mime_type || attachment.type || '';
     const ext = name.split('.').pop()?.toUpperCase() || 'FILE';
+    const isPdf =
+      mimeType.includes('pdf') || name.toLowerCase().endsWith('.pdf');
 
-    const { downloadFile } = useDownloadHandler();
+    const [showPdf, setShowPdf] = useState(false);
+    const { downloadFile, activeDownloads, cancelDownload } = useDownloadHandler();
+    const downloadProgress = url ? activeDownloads.get(url) : undefined;
 
     const handleDownload = useCallback(
       async (e: React.MouseEvent) => {
@@ -602,38 +726,119 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(
       [downloadFile, url, name],
     );
 
+    const handleCancelDownload = useCallback(
+      (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (url) cancelDownload(url);
+      },
+      [cancelDownload, url],
+    );
+
+    const handleClick = useCallback(() => {
+      if (isPdf && url) setShowPdf(true);
+    }, [isPdf, url]);
+
     return (
-      <div className="ermis-attachment ermis-attachment--file">
-        <span className="ermis-attachment__file-icon">
-          {getFileIcon(mimeType, name)}
-          <span className="ermis-attachment__file-ext">{ext}</span>
-        </span>
-        <span className="ermis-attachment__file-info">
-          <span className="ermis-attachment__file-name">{name}</span>
-          {size && (
-            <span className="ermis-attachment__file-size">
-              {typeof size === 'number' ? `${(size / 1024).toFixed(1)} KB` : size}
-              {getLocalUploadProgress(attachment) !== undefined ? ` · ${getLocalUploadProgress(attachment)}%` : ''}
+      <>
+        <div
+          className={`ermis-attachment ermis-attachment--file${isPdf ? ' ermis-attachment--pdf' : ''}`}
+          onClick={handleClick}
+          style={isPdf ? { cursor: 'pointer' } : undefined}
+          title={isPdf ? 'Click to preview PDF' : undefined}
+        >
+          <span className="ermis-attachment__file-icon">
+            {getFileIcon(mimeType, name)}
+            <span className="ermis-attachment__file-ext">{ext}</span>
+          </span>
+          <span className="ermis-attachment__file-info">
+            <span className="ermis-attachment__file-name">{name}</span>
+            {size && (
+              <span className="ermis-attachment__file-size">
+                {typeof size === 'number' ? `${(size / 1024).toFixed(1)} KB` : size}
+                {getLocalUploadProgress(attachment) !== undefined ? ` · ${getLocalUploadProgress(attachment)}%` : ''}
+              </span>
+            )}
+          </span>
+          {isPdf && (
+            <span
+              className="ermis-attachment__file-preview-badge"
+              style={{
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.8)',
+                marginRight: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              View
             </span>
           )}
-        </span>
-        <button className="ermis-attachment__file-download" onClick={handleDownload} title="Download" type="button">
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-        </button>
-      </div>
+          <button className="ermis-attachment__file-download" onClick={downloadProgress?.active ? handleCancelDownload : handleDownload} title={downloadProgress?.active ? 'Cancel' : 'Download'} type="button">
+            {downloadProgress?.active ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              </svg>
+            ) : (
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            )}
+          </button>
+          {downloadProgress?.active && (
+            <div
+              className="ermis-attachment__download-progress"
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                background: 'rgba(255,255,255,0.15)',
+                borderRadius: '0 0 8px 8px',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: downloadProgress.percent >= 0 ? `${downloadProgress.percent}%` : '50%',
+                  background: 'rgba(255,255,255,0.7)',
+                  borderRadius: '0 0 8px 8px',
+                  transition: 'width 0.2s ease',
+                  ...(downloadProgress.percent < 0 ? {
+                    animation: 'ermis-progress-indeterminate 1.5s ease-in-out infinite',
+                  } : {}),
+                }}
+              />
+            </div>
+          )}
+        </div>
+        {showPdf && url && (
+          <PdfViewerOverlay
+            url={url}
+            name={name}
+            onClose={() => setShowPdf(false)}
+            onDownload={handleDownload}
+          />
+        )}
+      </>
     );
   },
   (prev, next) => {

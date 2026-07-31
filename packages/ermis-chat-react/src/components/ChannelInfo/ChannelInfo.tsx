@@ -1,29 +1,29 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Virtualizer as _Virtualizer } from 'virtua';
-const Virtualizer = _Virtualizer as any;
-import { useChatCore } from '../../hooks/useChatCore';
+import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
+import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
 import { useBannedState } from '../../hooks/useBannedState';
 import { useBlockedState } from '../../hooks/useBlockedState';
-import { usePreviewState } from '../../hooks/usePreviewState';
-import { Avatar } from '../Avatar';
-import { DefaultChannelInfoTabHeader } from './ChannelInfoTabs';
-import { useChannelInfoTabs } from './useChannelInfoTabs';
-import { AddMemberModal } from './AddMemberModal';
-import { EditChannelModal } from './EditChannelModal';
-import { TopicModal } from '../TopicModal';
-import { MessageSearchPanel } from './MessageSearchPanel';
-import { ChannelSettingsPanel } from './ChannelSettingsPanel';
-import { MediaLightbox } from '../MediaLightbox';
-import { PENDING_STYLE, READY_STYLE } from './utils';
-import type {
-  ChannelInfoProps,
-  ChannelInfoHeaderProps,
-  ChannelInfoCoverProps,
-  ChannelInfoActionsProps,
-} from '../../types';
 import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData';
-import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
-import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
+import { useChatCore } from '../../hooks/useChatCore';
+import { usePreviewState } from '../../hooks/usePreviewState';
+import type {
+  ChannelInfoActionsProps,
+  ChannelInfoCoverProps,
+  ChannelInfoHeaderProps,
+  ChannelInfoProps,
+} from '../../types';
+import { Avatar } from '../Avatar';
+import { MediaLightbox } from '../MediaLightbox';
+import { TopicModal } from '../TopicModal';
+import { AddMemberModal } from './AddMemberModal';
+import { DefaultChannelInfoTabHeader } from './ChannelInfoTabs';
+import { ChannelSettingsPanel } from './ChannelSettingsPanel';
+import { EditChannelModal } from './EditChannelModal';
+import { MessageSearchPanel } from './MessageSearchPanel';
+import { useChannelInfoTabs } from './useChannelInfoTabs';
+import { PENDING_STYLE, READY_STYLE } from './utils';
+const Virtualizer = _Virtualizer as any;
 
 const MemoizedVirtualizer = React.memo(({ scrollRef, startMargin, data, renderItem, overscan = 10 }: any) => (
   <Virtualizer scrollRef={scrollRef} startMargin={startMargin} data={data} overscan={overscan}>
@@ -319,7 +319,11 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const { isPreviewMode } = usePreviewState(channel, client?.userID);
 
   const currentUserId = client?.userID;
-  const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
+  const currentUserRole = currentUserId
+    ? (channel?.state?.members?.[currentUserId]?.channel_role ||
+       channel?.state?.membership?.channel_role ||
+       ((channel?.data as any)?.created_by_id === currentUserId || (channel?.data as any)?.created_by?.id === currentUserId ? CHANNEL_ROLES.OWNER : undefined))
+    : undefined;
   const isTeamChannel = isGroupChannel(channel);
   const isTopic = isTopicChannel(channel);
   const isClosedTopic = channel?.data?.is_closed_topic === true;
@@ -430,7 +434,17 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   }, [client, e2eeChannel?.cid, parentCid]);
 
   const handleEnableE2ee = useCallback(async () => {
-    if (!channel?.id || !channel?.cid || !client?.encryptionManager?.initialized || parentCid || isE2ee) return;
+    if (!channel?.id || !channel?.cid || parentCid || isE2ee) return;
+    if (!client?.encryptionManager?.initialized) {
+      const msg = 'Encryption manager is not initialized';
+      try {
+        const { toast } = await import('sonner');
+        toast.error(msg);
+      } catch {
+        alert(msg);
+      }
+      return;
+    }
     try {
       setIsEnablingE2ee(true);
       const memberUserIds = Object.keys(channel.state?.members || {});
@@ -458,8 +472,15 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
         channel: channel.data,
         user: channel.getClient().user,
       } as any);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error enabling E2EE', e);
+      const backendMessage = e?.response?.data?.message || e?.response?.data?.error || e?.message || String(e);
+      try {
+        const { toast } = await import('sonner');
+        toast.error(backendMessage);
+      } catch {
+        alert(backendMessage);
+      }
     } finally {
       setIsEnablingE2ee(false);
     }
@@ -641,7 +662,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 encryptionEpoch={encryptionEpoch}
                 onRotateKey={!isTopic && isE2ee && canManageChannel(currentUserRole) ? handleRotateKey : undefined}
                 rotateKeyDisabled={isRotatingKey || isBlocked || isClosedTopic}
-                onEnableE2ee={!isTopic && !isE2ee && currentUserRole === CHANNEL_ROLES.OWNER ? handleEnableE2ee : undefined}
+                onEnableE2ee={!isTopic && !isE2ee && (currentUserRole === CHANNEL_ROLES.OWNER || canManageChannel(currentUserRole) || (channel?.data as any)?.created_by_id === currentUserId) ? handleEnableE2ee : undefined}
                 enableE2eeDisabled={isEnablingE2ee || isBlocked || isClosedTopic || !client?.encryptionManager?.initialized}
                 searchLabel={actionsSearchLabel}
                 settingsLabel={actionsSettingsLabel}

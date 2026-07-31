@@ -774,6 +774,8 @@
   text-decoration: none;
   color: var(--ermis-text-primary);
   transition: background-color var(--ermis-transition);
+  position: relative;
+  overflow: hidden;
 }
 
 .ermis-attachment--file:hover {
