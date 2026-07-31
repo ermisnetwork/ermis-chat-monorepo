@@ -73,7 +73,7 @@ export const useDownloadHandler = () => {
         updateProgress(url, { loaded, total: contentLength, percent });
       }
 
-      return new Blob(chunks, { type: contentType });
+      return new Blob(chunks as BlobPart[], { type: contentType });
     },
     [updateProgress],
   );
