@@ -44,7 +44,7 @@ const BlockIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="n
 export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.memo(({ title, onClose }) => {
   return (
     <div className="ermis-channel-info__header">
-      <h3 className="ermis-channel-info__title">{title}</h3>
+      <h3 className="ermis-channel-info__title" title={title}>{title}</h3>
       {onClose && (
         <button className="ermis-channel-info__close" onClick={onClose} aria-label="Close">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -74,7 +74,7 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
     <div className="ermis-channel-info__cover">
       {renderAvatar()}
       <div className="ermis-channel-info__name-row">
-        <h2 className="ermis-channel-info__name">{channelName}</h2>
+        <h2 className="ermis-channel-info__name" title={channelName}>{channelName}</h2>
         {canEdit && onEditClick && (
           <button className="ermis-channel-info__cover-edit-btn" onClick={onEditClick} aria-label="Edit channel">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

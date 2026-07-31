@@ -366,11 +366,12 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
             this.onError('call_network_error');
           }
         } else {
-          if (error.response.data.ermis_code === 20) {
+          if (error.response?.data?.ermis_code === 20) {
             this.onError('call_recipient_busy');
           } else {
-            const errMsg = error.response.data?.message ? error.response.data?.message : 'call_failed';
-            this.onError(errMsg);
+            // Never surface raw server error messages (e.g. "Internal server error")
+            // to the UI — always use a generic, translatable error code.
+            this.onError('call_failed');
           }
         }
       }

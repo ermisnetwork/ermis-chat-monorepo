@@ -444,15 +444,27 @@
   align-items: center;
   justify-content: center;
   gap: var(--ermis-spacing-sm);
-  padding: var(--ermis-spacing-sm) 0;
+  padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
   margin: var(--ermis-spacing-xs) 0;
   align-self: center;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .ermis-message-list__system-text {
   font-size: var(--ermis-font-size-xs);
   color: var(--ermis-text-muted);
   font-style: italic;
+  text-align: center;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 /* --- Signal messages (call events) --- */

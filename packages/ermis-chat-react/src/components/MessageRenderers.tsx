@@ -1,32 +1,31 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { preloadImage, isImagePreloaded, formatTime } from '../utils';
 import type {
-  FormatMessageResponse,
   Attachment,
-  MessageLabel,
   E2eeAttachmentManifest,
+  FormatMessageResponse,
+  MessageLabel,
 } from '@ermis-network/ermis-chat-sdk';
-import { parseSystemMessage, parseSignalMessage, CallType } from '@ermis-network/ermis-chat-sdk';
+import { CallType, parseSignalMessage, parseSystemMessage } from '@ermis-network/ermis-chat-sdk';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChatCore } from '../hooks/useChatCore';
 import { useDownloadHandler } from '../hooks/useDownloadHandler';
 import {
   scheduleE2eePreviewLoad,
   useE2eeAttachmentRenderer,
 } from '../hooks/useE2eeAttachmentRenderer';
-import { buildUserMap } from '../utils';
-import { MediaLightbox } from './MediaLightbox';
-import { getFileIcon } from './ChannelInfo/utils';
-import type { AttachmentProps, MessageRendererProps, MessageBubbleProps, MediaLightboxItem } from '../types';
-
-export type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
 import {
-  isVoiceRecordingAttachment,
-  isLinkPreviewAttachment,
+  isAudio,
   isE2eeAttachmentManifest,
   isImage,
-  isVideo,
-  isAudio,
+  isLinkPreviewAttachment,
+  isVideo
 } from '../messageTypeUtils';
+import type { AttachmentProps, MediaLightboxItem, MessageRendererProps } from '../types';
+import { buildUserMap, formatTime, isImagePreloaded, preloadImage } from '../utils';
+import { getFileIcon } from './ChannelInfo/utils';
+import { MediaLightbox } from './MediaLightbox';
+import { StickerImage } from './TgsStickerPlayer';
+
+export type { AttachmentProps, MessageBubbleProps, MessageRendererProps } from '../types';
 
 /* ----------------------------------------------------------
    Attachment renderers
@@ -1198,7 +1197,13 @@ export const SystemMessage: React.FC<MessageRendererProps> = ({ message, systemM
     [message.text, userMap, systemMessageTranslations],
   );
 
-  return <span className="ermis-message-list__system-text">{parsedText || message.text}</span>;
+  const displayText = parsedText || message.text || '';
+
+  return (
+    <span className="ermis-message-list__system-text" title={displayText}>
+      {displayText}
+    </span>
+  );
 };
 
 /** Signal message: call events */
@@ -1287,12 +1292,10 @@ export const StickerMessage: React.FC<MessageRendererProps> = ({ message }) => {
     return (
       <div className="ermis-message-sticker-wrapper">
         {!loaded && <div className="ermis-attachment-shimmer" />}
-        <img
-          ref={imgRef}
+        <StickerImage
           className={`ermis-message-sticker${loaded ? ' ermis-attachment--loaded' : ''}`}
           src={stickerUrl}
           alt="sticker"
-          loading="lazy"
           onLoad={() => setLoaded(true)}
         />
       </div>

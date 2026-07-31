@@ -9,6 +9,7 @@ import {
 } from '../messageTypeUtils';
 import type { ReplyPreviewProps } from '../types';
 import { E2eeAttachmentThumbnail } from './E2eeAttachmentThumbnail';
+import { StickerImage } from './TgsStickerPlayer';
 
 const MAX_PREVIEW_LENGTH = 120;
 
@@ -123,11 +124,10 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
         {previewContent}
       </div>
       {thumbnailUrl && (
-        <img
+        <StickerImage
           className="ermis-message-input__reply-preview-thumb"
           src={thumbnailUrl}
           alt=""
-          loading="lazy"
           draggable={false}
         />
       )}
@@ -152,4 +152,3 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
 });
 
 ReplyPreview.displayName = 'ReplyPreview';
-

@@ -23,7 +23,8 @@
     "@ermis-network/ermis-chat-sdk": "2.1.0",
     "react-ts-audio-recorder": "^1.1.4",
     "virtua": "^0.48.8",
-    "frimousse": "^0.3.0"
+    "frimousse": "^0.3.0",
+    "lottie-web": "^5.13.0"
   },
   "peerDependencies": {
     "react": ">=18.0.0",

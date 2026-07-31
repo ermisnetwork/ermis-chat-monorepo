@@ -183,7 +183,7 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
       <div className="ermis-channel-list__item-content">
         {/* Row 1: name + pinned + timestamp */}
         <div className="ermis-channel-list__item-top-row">
-          <div className="ermis-channel-list__item-name">{name}</div>
+          <div className="ermis-channel-list__item-name" title={name}>{name}</div>
           {isPinned && PinnedIconComponent && (
             <span className="ermis-channel-list__pinned-icon" title="Pinned">
               <PinnedIconComponent />

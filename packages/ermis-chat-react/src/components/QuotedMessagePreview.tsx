@@ -13,6 +13,7 @@ import {
 } from '../messageTypeUtils';
 import { isDeletedDisplayMessage } from '../messageTypeUtils';
 import { E2eeAttachmentThumbnail } from './E2eeAttachmentThumbnail';
+import { StickerImage } from './TgsStickerPlayer';
 
 export type { QuotedMessagePreviewProps } from '../types';
 
@@ -181,11 +182,10 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
         <span className="ermis-quoted-message__text">{preview.text}</span>
       </div>
       {thumbnailUrl && (
-        <img
+        <StickerImage
           className="ermis-quoted-message__thumb"
           src={thumbnailUrl}
           alt=""
-          loading="lazy"
           draggable={false}
         />
       )}

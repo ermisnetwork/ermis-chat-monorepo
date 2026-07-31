@@ -186,7 +186,7 @@ export const EditChannelModal: React.FC<EditChannelModalProps> = React.memo(({
         {/* Avatar section */}
         <div className="ermis-channel-info__edit-avatar-section">
           <div className="ermis-channel-info__edit-avatar-wrap" onClick={handleAvatarClick}>
-            <AvatarComponent image={displayImage} name={name || originalName} size={80} />
+            <AvatarComponent image={displayImage} name={originalName || name} size={80} />
             <div className="ermis-channel-info__edit-avatar-overlay">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />

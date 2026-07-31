@@ -221,9 +221,15 @@ export const UhmCallUI: React.FC = () => {
                     <button
                       onClick={acceptCall}
                       disabled={isAccepting}
-                      className="w-14 h-14 bg-emerald-500 hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40 transition-all hover:scale-110 active:scale-90 disabled:opacity-70 disabled:cursor-not-allowed"
+                      className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-90 disabled:cursor-not-allowed ${
+                        isAccepting && !localStream
+                          ? 'bg-amber-500 shadow-amber-500/40 opacity-90'
+                          : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/40 disabled:opacity-70'
+                      }`}
                     >
-                      {isAccepting ? (
+                      {isAccepting && !localStream ? (
+                        <AlertCircle className="w-6 h-6 text-white" />
+                      ) : isAccepting ? (
                         <Loader2 className="w-6 h-6 text-white animate-spin" />
                       ) : isVideo ? (
                         <VideoIcon className="w-6 h-6 text-white" />
@@ -231,7 +237,11 @@ export const UhmCallUI: React.FC = () => {
                         <Phone className="w-6 h-6 text-white" />
                       )}
                     </button>
-                    <span className="text-xs font-medium text-zinc-400">{t('actions.call.accept')}</span>
+                    <span className="text-xs font-medium text-zinc-400">
+                      {isAccepting && !localStream
+                        ? t('actions.call.allow_permission', 'Allow mic')
+                        : t('actions.call.accept')}
+                    </span>
                   </div>
                 </>
               ) : (

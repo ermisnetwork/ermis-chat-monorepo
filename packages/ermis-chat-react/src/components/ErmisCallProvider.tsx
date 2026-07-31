@@ -102,8 +102,13 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     };
 
     node.onError = (error: string) => {
-      setIsAccepting(false);
       const keepIncomingCallRinging = node.callStatus === CallStatus.RINGING && isRetryableCallError(error);
+      // For PERMISSION_DENIED while ringing: keep isAccepting=true so the accept
+      // button stays disabled. The user cannot retry until they grant permission
+      // in browser settings. isAccepting will reset when the call ends (callStatus='').
+      if (!keepIncomingCallRinging) {
+        setIsAccepting(false);
+      }
       setErrorMessage(keepIncomingCallRinging ? null : error);
       // C1: Lifecycle callback - error
       onCallError?.(error);
@@ -197,7 +202,16 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
       setReceiverInfo(callNode.receiverInfo);
 
       setCallStatus(CallStatus.PREPARING);
-      await callNode.createCall(type, cid);
+      try {
+        await callNode.createCall(type, cid);
+      } catch (err) {
+        // Server rejected the call (e.g. invitation not yet accepted, internal error).
+        // Reset call status so the UI returns to idle — do NOT show the raw server
+        // message which could expose "Internal server error" to the user.
+        setCallStatus('');
+        onCallError?.(CALL_ERROR_CODES.CONNECTION_FAILED);
+        return;
+      }
       // C1: Lifecycle callback — call started
       onCallStart?.(type, cid);
     },
@@ -212,11 +226,18 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
       onCallAccepted?.();
     } catch (error) {
       const errorCode = error instanceof Error ? error.message : 'call_connection_failed';
-      if (errorCode !== CALL_ERROR_CODES.CANCELLED && !isRetryableCallError(errorCode)) {
+      if (errorCode === CALL_ERROR_CODES.CANCELLED) {
+        // Call was cancelled while we were waiting — reset accepting state.
+        setIsAccepting(false);
+      } else if (isRetryableCallError(errorCode)) {
+        // PERMISSION_DENIED: keep button disabled so user cannot spam-click
+        // while the browser permission prompt is open. The button will
+        // re-enable once the call ends (status reset in the callStatus effect).
+        // Do NOT call setIsAccepting(false) here.
+      } else {
         setErrorMessage((current) => current || errorCode);
+        setIsAccepting(false);
       }
-    } finally {
-      setIsAccepting(false);
     }
   }, [callNode, isAccepting, onCallAccepted]);
 

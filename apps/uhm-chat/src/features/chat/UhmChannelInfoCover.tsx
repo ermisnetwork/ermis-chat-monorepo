@@ -84,8 +84,8 @@ export const UhmChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.memo((
       </div>
 
       {/* Main Info Area */}
-      <div className="mt-4 flex flex-col items-center text-center z-10 w-full px-4">
-        <h2 className="text-base font-bold text-zinc-900 dark:text-white leading-snug line-clamp-2">
+      <div className="mt-4 flex flex-col items-center text-center z-10 w-full px-4 min-w-0 max-w-full">
+        <h2 className="text-base font-bold text-zinc-900 dark:text-white leading-snug truncate w-full max-w-full" title={channelName}>
           {channelName}
         </h2>
 

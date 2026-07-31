@@ -151,7 +151,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
       </div>
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-top-row">
-          <div className="ermis-channel-list__item-name">{name}</div>
+          <div className="ermis-channel-list__item-name" title={name}>{name}</div>
           {channel.data?.is_pinned === true && !isClosedTopic && PinnedIconComponent && (
             <span className="ermis-channel-list__pinned-icon" title="Pinned">
               <PinnedIconComponent />

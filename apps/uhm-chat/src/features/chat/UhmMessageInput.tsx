@@ -594,7 +594,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                     <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary shadow-sm shrink-0">
                       <Mic className="w-3.5 h-3.5" />
                     </div>
-                    <audio src={recordedUrl} controls className="h-7 w-full outline-none" />
+                    <audio src={recordedUrl} controls controlsList="nodownload" className="h-7 w-full outline-none" />
                   </div>
                 ) : null}
 

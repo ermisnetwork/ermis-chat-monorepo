@@ -307,3 +307,6 @@ export type {
   ErmisCallErrorProps,
   ErmisCallControlsBarProps,
 } from './types';
+
+export { TgsStickerPlayer, StickerImage, isTgsUrl } from './components/TgsStickerPlayer';
+export type { TgsStickerPlayerProps } from './components/TgsStickerPlayer';
