@@ -19,6 +19,7 @@ import {
   useChatCore,
   getMessageUserId,
   getUserDisplayName,
+  StickerImage,
 } from '@ermis-network/ermis-chat-react'
 import type { ForwardMessageModalProps } from '@ermis-network/ermis-chat-react'
 
@@ -74,11 +75,19 @@ export function UhmForwardMessageModal({
           <div className="flex gap-3 p-3 rounded-xl bg-white dark:bg-[#1a1828] border border-zinc-200/50 dark:border-white/5 shadow-sm overflow-hidden min-w-0">
             {previewImageUrl && (
               <div className="relative w-14 h-14 shrink-0 rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-                <img
-                  src={previewImageUrl}
-                  alt="Preview"
-                  className="w-full h-full object-cover"
-                />
+                {isSticker ? (
+                  <StickerImage
+                    src={previewImageUrl}
+                    className="w-full h-full object-cover"
+                    alt="Sticker"
+                  />
+                ) : (
+                  <img
+                    src={previewImageUrl}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                  />
+                )}
                 {isSticker && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/5">
                     <span className="text-[8px] font-bold text-white bg-black/40 px-1 rounded uppercase tracking-tighter">

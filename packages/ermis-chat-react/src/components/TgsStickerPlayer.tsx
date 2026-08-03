@@ -6,8 +6,22 @@ import lottie from 'lottie-web';
  */
 export function isTgsUrl(url: string | undefined | null): boolean {
   if (!url || typeof url !== 'string') return false;
-  const cleanUrl = url.split('?')[0].toLowerCase();
+  const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
   return cleanUrl.endsWith('.tgs') || cleanUrl.includes('.tgs');
+}
+
+/**
+ * Check if a given URL is a WebM or video sticker file (.webm, .mp4).
+ */
+export function isWebmStickerUrl(url: string | undefined | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
+  return (
+    cleanUrl.endsWith('.webm') ||
+    cleanUrl.includes('.webm') ||
+    cleanUrl.endsWith('.mp4') ||
+    cleanUrl.includes('.mp4')
+  );
 }
 
 export interface TgsStickerPlayerProps {
@@ -108,7 +122,7 @@ export const TgsStickerPlayer: React.FC<TgsStickerPlayerProps> = ({
 
 /**
  * Universal sticker renderer: renders TgsStickerPlayer for .tgs URLs,
- * and <img> for webp/png/gif/jpg URLs.
+ * <video> for webm/mp4 video sticker URLs, and <img> for webp/png/gif/jpg URLs.
  */
 export const StickerImage: React.FC<TgsStickerPlayerProps> = ({
   src,
@@ -125,6 +139,23 @@ export const StickerImage: React.FC<TgsStickerPlayerProps> = ({
         className={className}
         alt={alt}
         onLoad={onLoad}
+        style={style}
+      />
+    );
+  }
+
+  if (isWebmStickerUrl(src)) {
+    return (
+      <video
+        className={className}
+        src={src}
+        autoPlay
+        loop
+        muted
+        playsInline
+        onLoadedData={onLoad}
+        onCanPlay={onLoad}
+        onPlay={onLoad}
         style={style}
       />
     );

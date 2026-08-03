@@ -133,22 +133,20 @@ export function useLoadMessages({
         return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       });
 
-      if (olderRaw.length < loadMoreLimit) {
-        setHasMore(false);
-      }
-
       const olderFormatted = olderRaw.map((msg: any) => formatMessage(msg));
       setShiftMode(true);
       setMessages((prev) => {
         if (!isCurrentRequest()) return prev;
         const unique = dedupMessages(olderFormatted, prev);
-        if (unique.length === 0 && olderRaw.length < loadMoreLimit) {
-          setHasMore(false);
-        }
         return [...unique, ...prev];
       });
     } catch (err) {
-      if (isCurrentRequest()) console.error('Failed to load more messages:', err);
+      if (isCurrentRequest()) {
+        // A transient failure must not lock this anchor permanently. Let the
+        // next scroll event retry it.
+        lastRequestedAnchorRef.current = null;
+        console.error('Failed to load more messages:', err);
+      }
     } finally {
       if (isCurrentRequest()) {
         loadingMoreRef.current = false;
@@ -204,21 +202,18 @@ export function useLoadMessages({
         return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       });
 
-      if (newerRaw.length < loadMoreLimit) {
-        setHasNewer(false);
-      }
-
       const newerFormatted = newerRaw.map((msg: any) => formatMessage(msg));
       setMessages((prev) => {
         if (!isCurrentRequest()) return prev;
         const unique = dedupMessages(newerFormatted, prev);
-        if (unique.length === 0 && newerRaw.length < loadMoreLimit) {
-          setHasNewer(false);
-        }
         return [...prev, ...unique];
       });
     } catch (err) {
-      if (isCurrentRequest()) console.error('Failed to load newer messages:', err);
+      if (isCurrentRequest()) {
+        // Keep newer pagination retryable after transient request failures.
+        lastRequestedNewerAnchorRef.current = null;
+        console.error('Failed to load newer messages:', err);
+      }
     } finally {
       if (isCurrentRequest()) {
         loadingNewerRef.current = false;
@@ -246,10 +241,11 @@ export function useLoadMessages({
       const isBottom = Math.ceil(offset + viewportSize) >= scrollSize - 20;
       isAtBottomRef.current = isBottom;
 
-      // Skip if content doesn't fill the viewport
+      // A short page may not fill the viewport, so there is nothing for the
+      // user to scroll yet. Keep loading from the top until content overflows
+      // or the server returns an empty page.
       if (scrollSize <= viewportSize) {
         isAtBottomRef.current = true;
-        return;
       }
 
       if (offset <= LOAD_MORE_THRESHOLD && hasMoreRef.current) {

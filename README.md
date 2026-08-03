@@ -1176,9 +1176,9 @@ await channel.sendMessage({
 
 **1.5 Send sticker message**
 
-- You can send stickers in a message by integrating the sticker domain `https://sticker.ermis.network` using an iframe.
+- You can send stickers in a message by integrating the sticker domain `https://sticker2.ermis.network` using an iframe.
 - When a user selects a sticker, listen for the `message` event from the iframe.
-- The selected sticker will be sent as a URL in the following format: `https://sticker.ermis.network/${sticker}`.
+- The selected sticker will be sent as a URL in the following format: `https://sticker2.ermis.network/${sticker}`.
 
 **Example integration:**
 
@@ -1186,17 +1186,17 @@ await channel.sendMessage({
 // Embed the sticker picker iframe
 <iframe
   id="sticker-picker"
-  src="https://sticker.ermis.network"
+  src="https://sticker2.ermis.network"
   style="width: 350px; height: 400px; border: none;"
 ></iframe>;
 
 // Listen for sticker selection
 window.addEventListener('message', async (event) => {
   // Ensure the event is from the sticker domain
-  if (event.origin === 'https://sticker.ermis.network') {
+  if (event.origin === 'https://sticker2.ermis.network') {
     const sticker = event.data.sticker; // sticker identifier from the picker
     if (sticker) {
-      const stickerUrl = `https://sticker.ermis.network/${sticker}`;
+      const stickerUrl = `https://sticker2.ermis.network/${sticker}`;
       await channel.sendMessage({
         sticker_url: stickerUrl,
       });
@@ -1221,7 +1221,7 @@ window.addEventListener('message', async (event) => {
     "id": "0xc95dfd46d70aba666b96428271d05257a6fc88d8"
   },
   "created_at": "2025-07-05T08:01:06.125523416Z",
-  "sticker_url": "https://sticker.ermis.network/packs/thumbnails/6165846546102355085.webp"
+  "sticker_url": "https://sticker2.ermis.network/packs/thumbnails/6165846546102355085.webp"
 }
 ```
 

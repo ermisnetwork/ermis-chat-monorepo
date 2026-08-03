@@ -1037,7 +1037,7 @@ export type MessageInputProps = {
 
   /** Disable stickers entirely */
   disableStickers?: boolean;
-  /** URL for the sticker picker iframe (default: https://sticker.ermis.network) */
+  /** URL for the sticker picker iframe (default: https://sticker2.ermis.network) */
   stickerIframeUrl?: string;
   /** Custom sticker picker component */
   StickerPickerComponent?: React.ComponentType<{ stickerIframeUrl: string; onClose: () => void }>;
@@ -1941,7 +1941,7 @@ export type TopicModalProps = {
   onClose: () => void;
   onSuccess?: (channel: Channel) => void;
   /** Inject external emoji picker component */
-  EmojiPickerComponent?: React.ComponentType<{ onSelect: (emoji: any) => void; [key: string]: any }>;
+  EmojiPickerComponent?: React.ComponentType<{ onSelect: (emoji: any) => void;[key: string]: any }>;
   /** Parent team channel to create topic under, will use activeChannel if not provided */
   parentChannel?: Channel;
 
