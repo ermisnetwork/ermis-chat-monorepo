@@ -130,7 +130,7 @@ export const UhmPollVoteModal: React.FC<UhmPollVoteModalProps> = ({
   ) : (
     <div className="flex items-start gap-2 min-w-0">
       <BarChart2 className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
-      <span className="break-all min-w-0 leading-normal py-0.5">{message.text || t('chat.poll', 'Poll')}</span>
+      <span className="break-words min-w-0 leading-normal py-0.5 max-h-[120px] overflow-y-auto block pr-1">{message.text || t('chat.poll', 'Poll')}</span>
     </div>
   );
 

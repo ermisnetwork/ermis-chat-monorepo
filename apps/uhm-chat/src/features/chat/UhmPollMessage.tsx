@@ -147,13 +147,13 @@ export const UhmPollMessage: React.FC<MessageRendererProps> = ({ message }) => {
 
   return (
     <>
-      <div className="flex flex-col min-w-[280px] max-w-[400px] bg-slate-50 dark:bg-zinc-800 rounded-2xl border border-slate-200 dark:border-zinc-700 overflow-hidden select-none shadow-sm">
+      <div className="flex flex-col min-w-[280px] max-w-[400px] max-h-[480px] bg-slate-50 dark:bg-zinc-800 rounded-2xl border border-slate-200 dark:border-zinc-700 overflow-y-auto select-none shadow-sm">
 
         {/* Header */}
         <div className="px-4 pt-3.5 pb-2.5">
-          <div className="flex items-center gap-2">
-            <BarChart2 className="w-[18px] h-[18px] text-blue-500 dark:text-blue-400 shrink-0" />
-            <h4 className="font-semibold text-[15px] text-zinc-900 dark:text-zinc-100 leading-snug break-all flex-1 min-w-0">
+          <div className="flex items-start gap-2">
+            <BarChart2 className="w-[18px] h-[18px] text-blue-500 dark:text-blue-400 shrink-0 mt-0.5" />
+            <h4 className="font-semibold text-[15px] text-zinc-900 dark:text-zinc-100 leading-snug break-words flex-1 min-w-0 max-h-[140px] overflow-y-auto pr-1">
               {message.text || t('chat.poll', 'Poll')}
             </h4>
             {pollClosed && (

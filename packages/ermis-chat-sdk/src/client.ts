@@ -1791,6 +1791,20 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       ? contactResponse.project_id_user_ids[this.projectId]
       : Object.values(contactResponse.project_id_user_ids).flat();
     const userIds = contactGroups || [];
+
+    // Fetch fresh user profiles from the server to ensure names/avatars are up-to-date.
+    // The contacts API only returns user IDs, so we must resolve full profiles separately.
+    // getBatchUsers() also upserts into state.users, the IndexedDB cache, and updates
+    // all active channel member/watcher references via _updateMemberWatcherReferences().
+    const contactUserIds = userIds.map((c: Contact) => c.other_id);
+    if (contactUserIds.length > 0) {
+      try {
+        await this.getBatchUsers(contactUserIds);
+      } catch (err) {
+        this.logger('warn', 'client:queryContacts() - failed to refresh contact user profiles', { err });
+      }
+    }
+
     const contact_users: UserResponse<ErmisChatGenerics>[] = [];
     const block_users: UserResponse<ErmisChatGenerics>[] = [];
 

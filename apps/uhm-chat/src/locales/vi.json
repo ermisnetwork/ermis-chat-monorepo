@@ -76,7 +76,7 @@
     "no_contacts": "Không có liên hệ nào.",
     "no_contacts_found": "Không tìm thấy liên hệ nào.",
     "no_invites": "Không có lời mời nào.",
-    "topics_general": "chung",
+    "topics_general": "Chủ đề chung",
     "topics_count": "{{count}} chủ đề",
     "member_count": "{{count}} thành viên",
     "topics_create": "Tạo chủ đề",
@@ -358,6 +358,7 @@
       "digits_only": "PIN chỉ được chứa chữ số.",
       "min_digits": "PIN phải có ít nhất {{count}} chữ số.",
       "pin_mismatch": "PIN xác nhận không khớp.",
+      "wrong_pin": "Mã PIN không chính xác. Vui lòng thử lại.",
       "invalid_epoch": "{{label}} phải là số nguyên không âm."
     },
     "gap_reason": {

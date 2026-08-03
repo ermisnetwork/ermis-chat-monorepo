@@ -981,6 +981,7 @@ export function ChatPage() {
                   encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
                   systemMessageTranslations={systemMessageTranslations}
                   signalMessageTranslations={signalMessageTranslations}
+                  generalTopicLabel={t('chat.topics_general', 'Chủ đề chung')}
                 />
 
                 {/* SearchPanel overlay */}
@@ -1092,7 +1093,7 @@ export function ChatPage() {
 
         <Channel EmptyStateIndicator={ChannelEmptyState}>
           <ChannelHeader
-            title={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? t('chat.topics_general', 'general') : undefined}
+            title={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? t('chat.topics_general', 'Chủ đề chung') : undefined}
             AvatarComponent={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? () => (
               <div className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-[#2a2640]">
                 <Hash className="w-6 h-6" />

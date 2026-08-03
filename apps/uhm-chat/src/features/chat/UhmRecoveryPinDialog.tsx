@@ -48,7 +48,20 @@ type ActiveChannelLookup = Record<
 
 const DIGITS_ONLY = /^\d+$/;
 
-const toErrorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+const sanitizePinError = (err: unknown, translateFn: any): string => {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  if (
+    msg.includes('AeadDecryptionError') ||
+    msg.includes('unwrap recovery key') ||
+    msg.includes('DecryptionError') ||
+    msg.toLowerCase().includes('unwrap') ||
+    msg.toLowerCase().includes('wrong pin') ||
+    msg.toLowerCase().includes('invalid pin')
+  ) {
+    return translateFn('recovery_pin.errors.wrong_pin', 'Mã PIN không chính xác. Vui lòng thử lại.');
+  }
+  return msg;
+};
 
 const formatEpochs = (epochs: number[]): string => epochs.slice(0, 8).join(', ');
 
@@ -196,11 +209,11 @@ export function UhmRecoveryPinDialog({
     try {
       await action();
     } catch (err) {
-      const message = toErrorMessage(err);
+      const message = sanitizePinError(err, t);
       setLocalError(message);
       toast.error(message);
     }
-  }, []);
+  }, [t]);
 
   const finishUnlock = () => {
     setPin('');
@@ -471,7 +484,7 @@ export function UhmRecoveryPinDialog({
             </form>
           )}
 
-          {(localError || recovery.error) && <ErrorText>{localError || recovery.error?.message}</ErrorText>}
+          {(localError || recovery.error) && <ErrorText>{localError || sanitizePinError(recovery.error, t)}</ErrorText>}
         </div>
       </DialogContent>
     </Dialog>

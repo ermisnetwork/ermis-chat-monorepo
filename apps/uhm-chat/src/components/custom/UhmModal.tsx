@@ -6,9 +6,15 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import type { ModalProps } from '@ermis-network/ermis-chat-react';
-
-interface UhmModalProps extends ModalProps {
+export interface UhmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title?: React.ReactNode;
+  children?: React.ReactNode;
+  footer?: React.ReactNode;
+  maxWidth?: string;
+  hideCloseButton?: boolean;
+  closeOnOutsideClick?: boolean;
   centerTitle?: boolean;
 }
 
