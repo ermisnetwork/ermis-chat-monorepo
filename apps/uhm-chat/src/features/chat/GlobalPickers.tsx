@@ -156,7 +156,7 @@ export const GlobalPickers: React.FC = () => {
               src={stickerIframeUrl}
               className="w-full h-full border-none bg-white dark:bg-[#1a1828]"
               title="Global Sticker Picker"
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"
             />
           )}
         </div>
