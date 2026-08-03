@@ -61,12 +61,16 @@ export function useLoadMessages({
   const [shiftMode, setShiftMode] = useState(false);
   const loadingMoreRef = useRef(false);
   const loadingNewerRef = useRef(false);
+  const lastRequestedAnchorRef = useRef<number | string | null>(null);
+  const lastRequestedNewerAnchorRef = useRef<number | string | null>(null);
 
   // Reset shiftMode on channel switch so initial load isn't treated as a prepend
   useEffect(() => {
     channelGenerationRef.current += 1;
     loadingMoreRef.current = false;
     loadingNewerRef.current = false;
+    lastRequestedAnchorRef.current = null;
+    lastRequestedNewerAnchorRef.current = null;
     setShiftMode(false);
   }, [activeChannel?.cid]);
 
@@ -96,10 +100,14 @@ export function useLoadMessages({
     const isCurrentRequest = () =>
       channelGenerationRef.current === requestGeneration && activeChannelCidRef.current === requestCid;
     const currentMessages = messagesRef.current;
-    const oldestMessage = currentMessages[0];
+    const oldestMessage = currentMessages.find((m) => Boolean(m?.id));
     if (!oldestMessage?.id) return;
 
+    const anchorKey = (oldestMessage as any).msg_seq ?? oldestMessage.id;
+    if (lastRequestedAnchorRef.current === anchorKey) return;
+
     loadingMoreRef.current = true;
+    lastRequestedAnchorRef.current = anchorKey;
     try {
       let olderRaw: any[] = [];
       const msgSeq = (oldestMessage as any).msg_seq;
@@ -118,12 +126,23 @@ export function useLoadMessages({
         return;
       }
 
+      olderRaw.sort((a: any, b: any) => {
+        const seqA = a.msg_seq ?? 0;
+        const seqB = b.msg_seq ?? 0;
+        if (seqA !== seqB) return seqA - seqB;
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
+
+      if (olderRaw.length < loadMoreLimit) {
+        setHasMore(false);
+      }
+
       const olderFormatted = olderRaw.map((msg: any) => formatMessage(msg));
       setShiftMode(true);
       setMessages((prev) => {
         if (!isCurrentRequest()) return prev;
         const unique = dedupMessages(olderFormatted, prev);
-        if (unique.length === 0) {
+        if (unique.length === 0 && olderRaw.length < loadMoreLimit) {
           setHasMore(false);
         }
         return [...unique, ...prev];
@@ -131,9 +150,18 @@ export function useLoadMessages({
     } catch (err) {
       if (isCurrentRequest()) console.error('Failed to load more messages:', err);
     } finally {
-      if (isCurrentRequest()) loadingMoreRef.current = false;
+      if (isCurrentRequest()) {
+        loadingMoreRef.current = false;
+        requestAnimationFrame(() => {
+          if (jumpingRef.current || scrollLoadLockRef?.current) return;
+          const handle = vlistRef.current;
+          if (handle && handle.scrollOffset <= LOAD_MORE_THRESHOLD && hasMoreRef.current && !loadingMoreRef.current) {
+            loadMore();
+          }
+        });
+      }
     }
-  }, [activeChannel, loadMoreLimit, setMessages]);
+  }, [activeChannel, loadMoreLimit, setMessages, jumpingRef, scrollLoadLockRef, vlistRef]);
 
   const loadNewer = useCallback(async () => {
     if (!activeChannel || loadingNewerRef.current) return;
@@ -143,10 +171,14 @@ export function useLoadMessages({
     const isCurrentRequest = () =>
       channelGenerationRef.current === requestGeneration && activeChannelCidRef.current === requestCid;
     const currentMessages = messagesRef.current;
-    const newestMessage = currentMessages[currentMessages.length - 1];
+    const newestMessage = [...currentMessages].reverse().find((m) => Boolean(m?.id));
     if (!newestMessage?.id) return;
 
+    const anchorKey = (newestMessage as any).msg_seq ?? newestMessage.id;
+    if (lastRequestedNewerAnchorRef.current === anchorKey) return;
+
     loadingNewerRef.current = true;
+    lastRequestedNewerAnchorRef.current = anchorKey;
     try {
       let newerRaw: any[] = [];
       const msgSeq = (newestMessage as any).msg_seq;
@@ -165,11 +197,22 @@ export function useLoadMessages({
         return;
       }
 
+      newerRaw.sort((a: any, b: any) => {
+        const seqA = a.msg_seq ?? 0;
+        const seqB = b.msg_seq ?? 0;
+        if (seqA !== seqB) return seqA - seqB;
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
+
+      if (newerRaw.length < loadMoreLimit) {
+        setHasNewer(false);
+      }
+
       const newerFormatted = newerRaw.map((msg: any) => formatMessage(msg));
       setMessages((prev) => {
         if (!isCurrentRequest()) return prev;
         const unique = dedupMessages(newerFormatted, prev);
-        if (unique.length === 0) {
+        if (unique.length === 0 && newerRaw.length < loadMoreLimit) {
           setHasNewer(false);
         }
         return [...prev, ...unique];
@@ -177,9 +220,21 @@ export function useLoadMessages({
     } catch (err) {
       if (isCurrentRequest()) console.error('Failed to load newer messages:', err);
     } finally {
-      if (isCurrentRequest()) loadingNewerRef.current = false;
+      if (isCurrentRequest()) {
+        loadingNewerRef.current = false;
+        requestAnimationFrame(() => {
+          if (jumpingRef.current || scrollLoadLockRef?.current) return;
+          const handle = vlistRef.current;
+          if (handle) {
+            const { scrollOffset, scrollSize, viewportSize } = handle;
+            if (scrollOffset + viewportSize >= scrollSize - LOAD_MORE_THRESHOLD && hasNewerRef.current && !loadingNewerRef.current) {
+              loadNewer();
+            }
+          }
+        });
+      }
     }
-  }, [activeChannel, loadMoreLimit, setMessages]);
+  }, [activeChannel, loadMoreLimit, setMessages, jumpingRef, scrollLoadLockRef, vlistRef]);
 
   const handleScroll = useCallback(
     (offset: number) => {
@@ -205,7 +260,7 @@ export function useLoadMessages({
         loadNewer();
       }
     },
-    [loadMore, loadNewer, scrollLoadLockRef],
+    [loadMore, loadNewer, scrollLoadLockRef, jumpingRef, vlistRef],
   );
 
   return {

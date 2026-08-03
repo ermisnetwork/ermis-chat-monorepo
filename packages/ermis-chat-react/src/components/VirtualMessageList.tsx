@@ -538,20 +538,24 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       validReaders: Array<{ id: string; name?: string; avatar?: string; last_read?: Date | string }>;
       hasReaders: boolean;
     };
-    // Helpers to find adjacent renderable messages (skipping 'unavailable' placeholders)
-    const getPrevValidMessage = (currentIndex: number) => {
-      for (let i = currentIndex - 1; i >= 0; i--) {
-        if (!isUnavailableDisplayMessage(messages[i])) return messages[i];
+    // Pre-compute adjacent valid messages in O(N) linear time instead of O(N^2) nested scans
+    const prevValidMap = new Array<typeof messages[0] | null>(messages.length);
+    let lastValid: typeof messages[0] | null = null;
+    for (let idx = 0; idx < messages.length; idx++) {
+      prevValidMap[idx] = lastValid;
+      if (!isUnavailableDisplayMessage(messages[idx])) {
+        lastValid = messages[idx];
       }
-      return null;
-    };
+    }
 
-    const getNextValidMessage = (currentIndex: number) => {
-      for (let i = currentIndex + 1; i < messages.length; i++) {
-        if (!isUnavailableDisplayMessage(messages[i])) return messages[i];
+    const nextValidMap = new Array<typeof messages[0] | null>(messages.length);
+    let nextValid: typeof messages[0] | null = null;
+    for (let idx = messages.length - 1; idx >= 0; idx--) {
+      nextValidMap[idx] = nextValid;
+      if (!isUnavailableDisplayMessage(messages[idx])) {
+        nextValid = messages[idx];
       }
-      return null;
-    };
+    }
 
     const entries: MsgEntry[] = messages.map((message, index) => {
       const isOwnMessage =
@@ -560,8 +564,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         isStickerMessage(message) ? 'sticker' : (message.type || 'regular')
       ) as MessageLabel;
 
-      // Find previous valid message (skip unavailable)
-      const prevMsg = getPrevValidMessage(index);
+      // Find previous valid message (skip unavailable) in O(1)
+      const prevMsg = prevValidMap[index];
       const showDateSeparator =
         !prevMsg || getDateKey(message.created_at) !== getDateKey(prevMsg.created_at);
       const prevType = (prevMsg?.type || 'regular') as MessageLabel;
@@ -575,7 +579,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
         prevType === 'signal' ||
         getMessageUserId(prevMsg) !== getMessageUserId(message) ||
         prevTimeGap;
-      const nextMsg = getNextValidMessage(index);
+      const nextMsg = nextValidMap[index];
       const nextType = (nextMsg?.type || 'regular') as MessageLabel;
       const nextShowDateSeparator = nextMsg
         ? getDateKey(nextMsg.created_at) !== getDateKey(message.created_at)

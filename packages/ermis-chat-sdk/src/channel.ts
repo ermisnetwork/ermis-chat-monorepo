@@ -5056,7 +5056,77 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    * @see intergration-guide.md Section 3.3
    */
   async queryMessagesBySeq(options: ChannelQuerySeqOptions): Promise<QueryChannelAPIResponse<ErmisChatGenerics>> {
+    await this.getClient().wsPromise;
+    const seqOptions = options?.messages_seq as any;
+    const anchorSeq = seqOptions?.anchor_seq;
+    const before = seqOptions?.before || 0;
+    const after = seqOptions?.after || 0;
+    const storage = this.getClient().messageStorage || (this.getClient().encryptionManager?.storage as any);
+
+    // 1. Check IndexedDB local cache first if anchorSeq is valid
+    if (storage && typeof anchorSeq === 'number' && this.cid && typeof storage.getMessagesBySeqRange === 'function') {
+      try {
+        const rawCached: any[] = await storage.getMessagesBySeqRange(this.cid, anchorSeq, before, after);
+        const cached = (rawCached || []).filter((m: any) =>
+          m && m.status !== 'error' && m.status !== 'failed' && m.status !== 'failed_offline' && m.type !== 'error'
+        );
+        const expectedCount = before > 0 ? before : after;
+        if (cached && cached.length > 0 && (cached.length >= expectedCount || anchorSeq - cached[0].msg_seq >= before)) {
+          const stateUsers = Object.values(this.getClient().state.users);
+          let messages = enrichWithUserInfo(cached, stateUsers);
+          messages = await this._hydrateE2eeMessagesFromLocalCache(messages);
+          messages = messages.filter((m: any) =>
+            m && m.status !== 'error' && m.status !== 'failed' && m.status !== 'failed_offline' && m.type !== 'error'
+          );
+          messages.sort((a: any, b: any) => (a.msg_seq ?? 0) - (b.msg_seq ?? 0));
+          this.state.addMessagesSorted(messages, false, true, true, 'current');
+          return { messages } as any;
+        }
+      } catch (err) {
+        // Fallback to API query on cache read error
+      }
+    }
+
+    // 2. Fetch from HTTP API if not found in IndexedDB
     const queryURL = `${this.getClient().baseURL}/channels/${this.type}/${this.id}/query`;
-    return await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL, options);
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL, options);
+
+    if (state.messages) {
+      state.messages = state.messages.filter((m: any) =>
+        m && m.status !== 'error' && m.status !== 'failed' && m.status !== 'failed_offline' && m.type !== 'error'
+      );
+    }
+
+    const messageMemberStubs = (state.messages || [])
+      .filter((m: any) => m.user_id || m.user?.id)
+      .map((m: any) => ({ user: { id: m.user?.id || m.user_id } }));
+    await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubs);
+    const users = Object.values(this.getClient().state.users);
+    state.messages = enrichWithUserInfo(state.messages, users);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
+    if (state.messages && state.messages.length > 0) {
+      for (const msg of state.messages) {
+        if (!msg.pinned) {
+          const pm = this.state.pinnedMessages?.find((p) => p.id === msg.id);
+          if (pm) {
+            msg.pinned = true;
+            const pmDate = pm.pinned_at || new Date();
+            msg.pinned_at = typeof pmDate === 'string' ? pmDate : pmDate.toISOString();
+          }
+        }
+        // Persist fetched message to IndexedDB cache for future visits
+        if (storage?.saveMessage && this.cid) {
+          storage.saveMessage({ ...msg, cid: this.cid }).catch(() => {});
+        }
+      }
+      state.messages.sort((a: any, b: any) => {
+        const seqA = a.msg_seq ?? 0;
+        const seqB = b.msg_seq ?? 0;
+        if (seqA !== seqB) return seqA - seqB;
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
+      this.state.addMessagesSorted(state.messages, false, true, true, 'current');
+    }
+    return state;
   }
 }

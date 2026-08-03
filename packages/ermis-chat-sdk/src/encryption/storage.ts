@@ -412,6 +412,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   // ---- Messages ----
 
   async saveMessage(message: StoredMessage): Promise<void> {
+    if (message && ((message as any).status === 'error' || (message as any).status === 'failed' || (message as any).status === 'failed_offline' || (message as any).type === 'error')) {
+      if (message.id) await this.deleteMessage(message.id).catch(() => {});
+      return;
+    }
     try {
       await this._saveMessageInternal(message);
     } catch (err: any) {
@@ -683,8 +687,11 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         const request = index.getAll(range);
         request.onsuccess = () => {
           const msgs = (request.result as StoredMessage[]) || [];
-          msgs.sort((a, b) => (a.msg_seq ?? 0) - (b.msg_seq ?? 0));
-          resolve(msgs);
+          const valid = msgs.filter((m: any) =>
+            m && m.status !== 'error' && m.status !== 'failed' && m.status !== 'failed_offline' && m.type !== 'error'
+          );
+          valid.sort((a, b) => (a.msg_seq ?? 0) - (b.msg_seq ?? 0));
+          resolve(valid);
         };
         request.onerror = () => reject(request.error);
       } else {
@@ -696,7 +703,14 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           const lowerSeq = Math.max(1, anchorSeq - before);
           const upperSeq = anchorSeq + after;
           const filtered = all.filter(
-            (m) => typeof m.msg_seq === 'number' && m.msg_seq >= lowerSeq && m.msg_seq <= upperSeq,
+            (m) =>
+              typeof m.msg_seq === 'number' &&
+              m.msg_seq >= lowerSeq &&
+              m.msg_seq <= upperSeq &&
+              (m as any).status !== 'error' &&
+              (m as any).status !== 'failed' &&
+              (m as any).status !== 'failed_offline' &&
+              (m as any).type !== 'error',
           );
           filtered.sort((a, b) => (a.msg_seq ?? 0) - (b.msg_seq ?? 0));
           resolve(filtered);
