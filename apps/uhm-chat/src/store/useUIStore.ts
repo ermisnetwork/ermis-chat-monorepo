@@ -15,13 +15,14 @@ interface UIState {
 
   // Global Pickers State
   pickerAction: { 
-    type: 'emoji' | 'sticker' | null; 
+    type: 'emoji' | 'sticker' | 'giphy' | null; 
     anchorRect: DOMRect | null;
     onSelect?: (data: any) => void;
     layoutId?: string;
   };
   openEmojiPicker: (anchorRect: DOMRect, onSelect: (emoji: any) => void, layoutId?: string) => void;
   openStickerPicker: (anchorRect: DOMRect, onSelect: (sticker: any) => void, layoutId?: string) => void;
+  openGiphyPicker: (anchorRect: DOMRect, onSelect: (gifUrl: any) => void, layoutId?: string) => void;
   closePickers: () => void;
 }
 
@@ -39,5 +40,6 @@ export const useUIStore = create<UIState>((set) => ({
   pickerAction: { type: null, anchorRect: null },
   openEmojiPicker: (anchorRect, onSelect, layoutId) => set({ pickerAction: { type: 'emoji', anchorRect, onSelect, layoutId } }),
   openStickerPicker: (anchorRect, onSelect, layoutId) => set({ pickerAction: { type: 'sticker', anchorRect, onSelect, layoutId } }),
+  openGiphyPicker: (anchorRect, onSelect, layoutId) => set({ pickerAction: { type: 'giphy', anchorRect, onSelect, layoutId } }),
   closePickers: () => set({ pickerAction: { type: null, anchorRect: null } }),
 }));

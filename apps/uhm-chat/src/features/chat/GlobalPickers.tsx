@@ -3,6 +3,7 @@ import { EmojiPicker } from 'frimousse';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { useUIStore } from '@/store/useUIStore';
+import { GiphyPicker } from './GiphyPicker';
 
 export const GlobalPickers: React.FC = () => {
   const { pickerAction, closePickers } = useUIStore();
@@ -55,7 +56,7 @@ export const GlobalPickers: React.FC = () => {
   }, [closePickers]);
 
   const [savedRect, setSavedRect] = React.useState<DOMRect | null>(null);
-  const lastType = useRef<'emoji' | 'sticker'>('emoji');
+  const lastType = useRef<'emoji' | 'sticker' | 'giphy'>('emoji');
   const [hasOpenedSticker, setHasOpenedSticker] = React.useState(false);
 
   useEffect(() => {
@@ -73,7 +74,7 @@ export const GlobalPickers: React.FC = () => {
   const isOpen = !!pickerAction.type;
   const activeRect = pickerAction.anchorRect || savedRect;
   const currentType = pickerAction.type || lastType.current;
-  const pickerHeight = currentType === 'sticker' ? 400 : 368;
+  const pickerHeight = currentType === 'giphy' ? 420 : currentType === 'sticker' ? 400 : 368;
 
   const style: React.CSSProperties = {
     position: 'fixed',
@@ -158,6 +159,18 @@ export const GlobalPickers: React.FC = () => {
                 sandbox="allow-scripts allow-same-origin"
               />
             )}
+          </div>
+
+          {/* Giphy Picker */}
+          <div style={{ display: currentType === 'giphy' ? 'block' : 'none' }}>
+            <GiphyPicker
+              onSelect={(gifUrl) => {
+                if (pickerAction.onSelect) {
+                  pickerAction.onSelect(gifUrl);
+                }
+                closePickers();
+              }}
+            />
           </div>
         </motion.div>
     </>

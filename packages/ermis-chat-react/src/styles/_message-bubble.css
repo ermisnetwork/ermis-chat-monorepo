@@ -1324,6 +1324,15 @@
   border-radius: 10px;
 }
 
+.ermis-message-sticker-wrapper--gif {
+  width: auto;
+  height: auto;
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 14px;
+  display: inline-block;
+}
+
 .ermis-message-sticker {
   position: absolute;
   top: 0;
@@ -1333,6 +1342,16 @@
   object-fit: contain;
   opacity: 0;
   transition: opacity 0.3s ease;
+}
+
+.ermis-message-sticker-wrapper--gif .ermis-message-sticker {
+  position: relative;
+  width: auto;
+  height: auto;
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 14px;
+  display: block;
 }
 
 .ermis-message-sticker.ermis-attachment--loaded {

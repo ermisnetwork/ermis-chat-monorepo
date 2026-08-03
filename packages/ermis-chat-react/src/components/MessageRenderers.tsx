@@ -1477,7 +1477,19 @@ export const PollMessage: React.FC<MessageRendererProps> = ({ message }) => (
 
 /** Sticker message */
 export const StickerMessage: React.FC<MessageRendererProps> = ({ message }) => {
-  const stickerUrl = (message as any).sticker_url;
+  const stickerUrl =
+    (message as any).sticker_url ||
+    (message.attachments &&
+      (message.attachments[0]?.image_url ||
+        message.attachments[0]?.asset_url ||
+        message.attachments[0]?.url));
+
+  const isGif = Boolean(
+    stickerUrl &&
+      (/\.gif($|#|\?)/i.test(stickerUrl) ||
+        stickerUrl.includes('giphy.com') ||
+        stickerUrl.includes('.gif')),
+  );
 
   const alreadyCached = stickerUrl ? isImagePreloaded(stickerUrl) : false;
   const [loaded, setLoaded] = useState(alreadyCached);
@@ -1495,7 +1507,11 @@ export const StickerMessage: React.FC<MessageRendererProps> = ({ message }) => {
 
   if (stickerUrl) {
     return (
-      <div className="ermis-message-sticker-wrapper">
+      <div
+        className={`ermis-message-sticker-wrapper${
+          isGif ? ' ermis-message-sticker-wrapper--gif' : ''
+        }`}
+      >
         {!loaded && <div className="ermis-attachment-shimmer" />}
         <StickerImage
           className={`ermis-message-sticker${loaded ? ' ermis-attachment--loaded' : ''}`}

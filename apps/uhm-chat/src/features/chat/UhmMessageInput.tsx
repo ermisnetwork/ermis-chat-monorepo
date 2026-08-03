@@ -21,7 +21,7 @@ import {
   usePendingState,
   usePreviewState,
 } from '@ermis-network/ermis-chat-react';
-import { Cat, Mic, Plus, SendHorizonal, Smile, Trash2, BarChart2 } from 'lucide-react';
+import { Cat, Mic, Plus, SendHorizonal, Smile, Trash2, BarChart2, Film } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MultiRecorder } from 'react-ts-audio-recorder';
@@ -383,7 +383,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     [handleInput],
   );
 
-  const { openEmojiPicker, openStickerPicker, closePickers, pickerAction } = useUIStore();
+  const { openEmojiPicker, openStickerPicker, openGiphyPicker, closePickers, pickerAction } = useUIStore();
 
   useEffect(() => {
     if (activeChannel && editableRef.current) {
@@ -709,6 +709,40 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                     title={t('chat.addSticker', 'Add Sticker')}
                   >
                     <Cat className="w-5 h-5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={disabledInput || !!editingMessage || !!quotedMessage}
+                    className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      pickerAction.type === 'giphy'
+                        ? 'text-primary bg-primary/10'
+                        : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700'
+                    }`}
+                    onClick={(e) => {
+                      if (pickerAction.type === 'giphy') {
+                        closePickers();
+                      } else {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        openGiphyPicker(rect, (gifUrl) => {
+                          if (activeChannel) {
+                            const uuid = typeof crypto !== 'undefined' && crypto.randomUUID 
+                              ? crypto.randomUUID() 
+                              : '2a393ce3-70ee-4ee8-97c3-c498625e1e04';
+                            const formattedStickerUrl = gifUrl.includes('#') ? gifUrl : `${gifUrl}#${uuid}.gif`;
+
+                            activeChannel.sendMessage({
+                              text: '',
+                              attachments: [],
+                              sticker_url: formattedStickerUrl,
+                            });
+                          }
+                        });
+                      }
+                    }}
+                    title={t('chat.addGiphy', 'Add GIF')}
+                  >
+                    <Film className="w-5 h-5" />
                   </button>
 
                   <button
