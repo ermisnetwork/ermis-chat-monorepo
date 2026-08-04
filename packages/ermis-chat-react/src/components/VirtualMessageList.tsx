@@ -189,6 +189,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   onAddReactionClick,
   GapIndicatorComponent,
   gapIndicatorLabel,
+  onReady,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatCore();
   const { messages, readState, e2eeRepairingChannelCids } = useChatMessages();
@@ -460,6 +461,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     includeHiddenMessages,
     containerRef,
     vlistRef,
+    onReady,
   });
 
   const lastAutoScrollKeyRef = useRef<string | null>(null);

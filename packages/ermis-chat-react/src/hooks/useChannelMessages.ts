@@ -28,6 +28,8 @@ export type UseChannelMessagesOptions = {
   containerRef?: React.RefObject<HTMLDivElement>;
   /** Ref to VList handle — used to save/restore scroll position on message deletion */
   vlistRef?: React.RefObject<VListHandle | null>;
+  /** Called once when the message list has completed initial loading and is ready to display */
+  onReady?: () => void;
 };
 
 // Track channels that have already run the initial seq-based query globally for the session
@@ -96,10 +98,15 @@ export function useChannelMessages({
   includeHiddenMessages = true,
   containerRef,
   vlistRef,
+  onReady,
 }: UseChannelMessagesOptions): void {
   const { client, activeChannel } = useChatCore();
   const { syncMessages, setMessages, setReadState, setChannelE2eeRepairing } = useChatMessages();
   const inviteRefreshInFlightRef = useRef<Set<string>>(new Set());
+
+  // Stable ref so fadeListIn can call the latest onReady without re-subscribing
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   const shouldAutoScroll = useCallback(
     () => isAtBottomRef.current || Boolean(isNearBottom?.()),
@@ -135,8 +142,7 @@ export function useChannelMessages({
   // runs too late to block it. useLayoutEffect runs before paint/scroll events.
   //
   // CRITICAL: Also hide the list (opacity=0) BEFORE the browser paints.
-  // Previously opacity was set in useEffect (after paint), which let the browser
-  // briefly render old messages at opacity=1, causing a visible flash/jitter.
+  // This prevents briefly showing stale messages while scroll adjusts.
   useLayoutEffect(() => {
     if (!activeChannel) return;
     jumpingRef.current = true;
@@ -166,15 +172,39 @@ export function useChannelMessages({
     let e2eeCacheSyncVersion = 0;
 
     const activeE2eeRepairIds = new Set<string>();
+    // Track when the initial load is fully settled. During the settling period
+    // (first ~2s after fadeListIn), syncMessagesPreservingViewport should always
+    // scroll to bottom instead of trying to restore a potentially stale offset.
+    let initialLoadSettled = false;
     const fadeListIn = () => {
       if (!el) return;
       // Wait until all scheduled scrollToBottom calls have fired and VList has
       // settled BEFORE making the list visible. Showing the list too early while
       // scroll is still adjusting causes visible jitter.
+      // IMPORTANT: delay must be > max(SCROLL_DELAYS) (currently 500ms) so ALL
+      // scroll operations complete before the list becomes visible.
       setTimeout(() => {
-        el.style.transition = 'opacity 0.15s ease-out';
-        el.style.opacity = '1';
-      }, 200);
+        // Guard: if the channel switched while we were waiting, don't fade in
+        // stale content. The new channel's effect will handle its own fadeListIn.
+        // This prevents the "double flash" on cold start when activeChannel
+        // changes rapidly (e.g. team channel → topic auto-selection).
+        if (!isCurrentEffect()) return;
+        // Final scroll-to-bottom to ensure the list is at the correct position
+        // right before becoming visible. This catches any late layout shifts.
+        scrollToBottom(false);
+        requestAnimationFrame(() => {
+          if (!isCurrentEffect()) return;
+          el.style.transition = 'opacity 0.15s ease-out';
+          el.style.opacity = '1';
+          // Signal to consumers (e.g. ChatPage skeleton overlay) that messages
+          // are loaded and the list is ready to be revealed.
+          onReadyRef.current?.();
+          // Give VList time to fully settle before allowing viewport preservation.
+          // Without this delay, sync.completed firing during settle restores a
+          // stale scroll offset, causing the list to jump away from the bottom.
+          setTimeout(() => { initialLoadSettled = true; }, 1500);
+        });
+      }, 600);
     };
 
     const isDecryptedPlaintextMessage = (message: any) => {
@@ -399,6 +429,13 @@ export function useChannelMessages({
     };
 
     const syncMessagesPreservingViewport = (options: { includeStoredWindow?: boolean } = {}) => {
+      // During initial load settling, always scroll to bottom — the scroll
+      // position hasn't stabilised yet so savedOffset would be wrong.
+      if (!initialLoadSettled) {
+        syncMessagesWithCache(options);
+        followBottomAfterRender(true);
+        return;
+      }
       const wasAtBottom = shouldAutoScroll();
       const handle = vlistRef?.current;
       const savedOffset = wasAtBottom ? undefined : handle?.scrollOffset;

@@ -471,6 +471,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   systemMessageTranslations,
   signalMessageTranslations,
   showTopicPills = false,
+  waitForSync = false,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatCore();
   const { ChannelListErrorIndicator } = useChatComponents();
@@ -478,6 +479,27 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<any>(null);
+
+  // When waitForSync is enabled, keep the skeleton visible until sync completes.
+  // This prevents flickering on cold start (F5) when sync updates channels.
+  const [syncReady, setSyncReady] = useState(!waitForSync);
+
+  useEffect(() => {
+    if (!waitForSync || syncReady) return;
+
+    const handleSyncDone = () => setSyncReady(true);
+    const sub1 = client.on('sync.completed', handleSyncDone);
+    const sub2 = client.on('connection.recovered', handleSyncDone);
+
+    // Safety net: drop skeleton after 5s even if sync never fires
+    const safetyTimer = setTimeout(() => setSyncReady(true), 5000);
+
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+      clearTimeout(safetyTimer);
+    };
+  }, [client, waitForSync, syncReady]);
 
   const ActualErrorIndicator = ErrorIndicator || ChannelListErrorIndicator || DefaultError;
   const [isPendingExpanded, setIsPendingExpanded] = useState(true);
@@ -640,7 +662,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
     [setActiveChannel, onChannelSelect, setChannels],
   );
 
-  if (loading) return <LoadingIndicator text={loadingLabel} />;
+  if (loading || (waitForSync && !syncReady)) return <LoadingIndicator text={loadingLabel} />;
   if (error) return <ActualErrorIndicator text={errorLabel} onRetry={loadChannels} />;
 
   const isEmpty = showPendingInvites

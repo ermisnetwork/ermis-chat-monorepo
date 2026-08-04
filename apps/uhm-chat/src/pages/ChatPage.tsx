@@ -161,6 +161,9 @@ export function ChatPage() {
   // Track if we are currently restoring from URL
   const isRestoringRef = useRef(false)
   const [hasAttemptedRestore, setHasAttemptedRestore] = useState(false)
+  // Skeleton stays until the message list signals it has loaded and scrolled.
+  // This prevents the "double flash" gap between skeleton unmount and fadeListIn.
+  const [isMessageListReady, setIsMessageListReady] = useState(false)
 
   // 1. Restore active channel from URL on mount
   // Instead of calling ch.watch() (which duplicates the queryChannels call from
@@ -855,78 +858,30 @@ export function ChatPage() {
     return isTopic ? t('chat.info_title_topic') : t('chat.info_title_channel')
   }, [infoChannel, activeChannel, t])
 
-  // Show full-page loading when restoring a channel from URL (prevents empty/welcome flash)
-  const isRestoringFromUrl = !hasAttemptedRestore && !!searchParams.get('channel')
+  // Show full-page skeleton overlay while the app is bootstrapping.
+  // The overlay stays visible until ALL THREE conditions are met:
+  // 1. URL restore has completed (activeChannel is set)
+  // 2. Sync is not actively running (no visible scroll jumping from sync)
+  // 3. The message list has loaded and scrolled to the correct position
+  // This ensures the user never sees intermediate scroll jumps or blank states.
+  const hasUrlChannel = !!searchParams.get('channel')
+  const isSyncing = syncState.status === 'syncing'
+  const isRestoringFromUrl = hasUrlChannel && (!hasAttemptedRestore || isSyncing || !isMessageListReady)
 
   const CustomMemberItem = useCallback((props: any) => (
     <UhmMemberItem {...props} onUserClick={setProfileUserId} />
   ), []);
 
+  // Signal from VirtualMessageList that it has finished loading messages and is visible.
+  // This lets the skeleton overlay stay until the actual content is ready.
+  const handleMessageListReady = useCallback(() => {
+    setIsMessageListReady(true)
+  }, [])
+
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <SEO title={totalUnreadCount > 0 ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) Uhm Chat` : 'Uhm Chat'} />
 
-      {/* Full-page loading overlay while restoring channel from URL */}
-      {isRestoringFromUrl && (
-        <div className="absolute inset-0 z-[100] flex bg-white dark:bg-[#13111c]">
-          {/* Sidebar skeleton */}
-          <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 shrink-0 flex flex-col">
-            {/* Header skeleton */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50">
-              <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse" />
-              <div className="h-4 w-24 rounded-md bg-zinc-200 dark:bg-[#2a2640] animate-pulse" />
-              <div className="flex-1" />
-              <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" />
-            </div>
-            {/* Channel rows skeleton */}
-            <div className="flex-1 flex flex-col py-1">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-3" style={{ animationDelay: `${i * 60}ms` }}>
-                  <div className={`w-10 h-10 shrink-0 bg-zinc-200 dark:bg-[#2a2640] animate-pulse ${i % 3 === 0 ? 'rounded-[25%]' : 'rounded-full'}`} />
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className={`h-3.5 rounded-md bg-zinc-200 dark:bg-[#2a2640] animate-pulse ${['w-28', 'w-32', 'w-20', 'w-36', 'w-24', 'w-30', 'w-28', 'w-20'][i]}`} style={{ animationDelay: `${i * 80}ms` }} />
-                      <div className="h-3 w-10 rounded-md bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" style={{ animationDelay: `${i * 100}ms` }} />
-                    </div>
-                    <div className={`h-3 rounded-md bg-zinc-100 dark:bg-[#2a2640]/50 animate-pulse ${['w-40', 'w-36', 'w-44', 'w-28', 'w-48', 'w-32', 'w-40', 'w-36'][i]}`} style={{ animationDelay: `${i * 100 + 40}ms` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          {/* Main area skeleton */}
-          <div className="flex-1 flex flex-col">
-            {/* Chat header skeleton */}
-            <div className="flex items-center gap-3 px-5 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50">
-              <div className="w-9 h-9 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse" />
-              <div className="flex flex-col gap-1.5 flex-1">
-                <div className="h-4 w-36 rounded-md bg-zinc-200 dark:bg-[#2a2640] animate-pulse" />
-                <div className="h-3 w-20 rounded-md bg-zinc-100 dark:bg-[#2a2640]/50 animate-pulse" />
-              </div>
-              <div className="flex gap-2">
-                <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" />
-                <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" />
-                <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" />
-              </div>
-            </div>
-            {/* Messages area skeleton */}
-            <div className="flex-1 flex flex-col justify-end gap-4 p-5">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className={`flex items-end gap-2.5 ${i % 2 === 0 ? '' : 'flex-row-reverse'}`} style={{ animationDelay: `${i * 120}ms` }}>
-                  {i % 2 === 0 && <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse shrink-0" />}
-                  <div className={`flex flex-col gap-1 ${i % 2 === 0 ? 'items-start' : 'items-end'}`}>
-                    <div className={`h-10 rounded-2xl bg-zinc-100 dark:bg-[#2a2640]/40 animate-pulse ${['w-52', 'w-36', 'w-64', 'w-44', 'w-56'][i]}`} style={{ animationDelay: `${i * 100}ms` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-            {/* Input skeleton */}
-            <div className="px-5 pb-5">
-              <div className="h-12 rounded-2xl bg-zinc-100 dark:bg-[#2a2640]/40 animate-pulse" />
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Sidebar */}
       <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
@@ -963,6 +918,7 @@ export function ChatPage() {
                 <ChannelList
                   filters={CHANNEL_LIST_FILTERS}
                   showPendingInvites={false}
+                  waitForSync
                   onTopicDrillDown={handleTopicDrillDown}
                   onAddTopic={openCreateTopicModal}
                   onEditTopic={openEditTopicModal}
@@ -1075,6 +1031,43 @@ export function ChatPage() {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col relative min-w-0">
+        {/* Message area skeleton — only covers the chat area (not the sidebar).
+            Stays visible until URL restore + sync + message load are all done. */}
+        {hasUrlChannel && (
+          <div className={`absolute inset-0 z-[50] flex flex-col bg-white dark:bg-[#13111c] transition-opacity duration-300 ease-out ${
+            isRestoringFromUrl ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}>
+            {/* Chat header skeleton */}
+            <div className="flex items-center gap-3 px-5 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50">
+              <div className="w-9 h-9 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse" />
+              <div className="flex flex-col gap-1.5 flex-1">
+                <div className="h-4 w-36 rounded-md bg-zinc-200 dark:bg-[#2a2640] animate-pulse" />
+                <div className="h-3 w-20 rounded-md bg-zinc-100 dark:bg-[#2a2640]/50 animate-pulse" />
+              </div>
+              <div className="flex gap-2">
+                <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" />
+                <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" />
+                <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-[#2a2640]/60 animate-pulse" />
+              </div>
+            </div>
+            {/* Messages area skeleton */}
+            <div className="flex-1 flex flex-col justify-end gap-4 p-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className={`flex items-end gap-2.5 ${i % 2 === 0 ? '' : 'flex-row-reverse'}`} style={{ animationDelay: `${i * 120}ms` }}>
+                  {i % 2 === 0 && <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-[#2a2640] animate-pulse shrink-0" />}
+                  <div className={`flex flex-col gap-1 ${i % 2 === 0 ? 'items-start' : 'items-end'}`}>
+                    <div className={`h-10 rounded-2xl bg-zinc-100 dark:bg-[#2a2640]/40 animate-pulse ${['w-52', 'w-36', 'w-64', 'w-44', 'w-56'][i]}`} style={{ animationDelay: `${i * 100}ms` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Input skeleton */}
+            <div className="px-5 pb-5">
+              <div className="h-12 rounded-2xl bg-zinc-100 dark:bg-[#2a2640]/40 animate-pulse" />
+            </div>
+          </div>
+        )}
+
         <div className="pointer-events-none absolute inset-x-0 top-0 z-30">
           {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
           <ConnectionStatusBanner status={status} onRetry={retryConnection} />
@@ -1157,6 +1150,7 @@ export function ChatPage() {
             onMentionClick={handleMentionClick}
             onUserNameClick={handleMentionClick}
             onAddReactionClick={handleAddReactionClick}
+            onReady={handleMessageListReady}
           />
 
           {/* Message Input Floating Card */}

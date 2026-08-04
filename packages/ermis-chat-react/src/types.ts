@@ -617,6 +617,10 @@ export type ChannelListProps = {
   scrollToTopOnOwnMessage?: boolean;
   /** Whether to show topic pills on team channels (default: false) */
   showTopicPills?: boolean;
+  /** When true, the LoadingIndicator stays visible until the initial sync
+   *  (sync.completed) has finished after queryChannels. This prevents visual
+   *  flickering on cold start (F5). Default: false */
+  waitForSync?: boolean;
 };
 
 /* ----------------------------------------------------------
@@ -805,6 +809,9 @@ export type MessageListProps = {
   GapIndicatorComponent?: React.ComponentType<{ channel: any; gapSeqRange: [number, number] }>;
   /** I18n Label for the gap indicator "Load N missing messages" button */
   gapIndicatorLabel?: string | ((count: number) => string);
+  /** Called once when the message list has completed initial loading, scrolled to position, and is ready to display.
+   *  Useful for coordinating skeleton overlay removal with message list readiness to prevent double-flash. */
+  onReady?: () => void;
 };
 
 /* ----------------------------------------------------------
