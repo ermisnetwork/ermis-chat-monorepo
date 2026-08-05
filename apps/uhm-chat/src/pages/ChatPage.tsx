@@ -287,6 +287,11 @@ export function ChatPage() {
     }
   }, [activeChannel?.id, activeChannel?.type, setSearchParams, searchParams, hasAttemptedRestore])
 
+  // Reset infoChannel whenever activeChannel changes so ChannelInfo stays synced with the active channel
+  useEffect(() => {
+    setInfoChannel(null);
+  }, [activeChannel?.cid]);
+
   const refreshActiveRestoreProgress = useCallback(async () => {
     const requestId = activeRestoreProgressRequestRef.current + 1
     activeRestoreProgressRequestRef.current = requestId

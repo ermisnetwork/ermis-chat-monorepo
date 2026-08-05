@@ -586,6 +586,15 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
+  // Reset open sub-panels whenever target channel changes
+  useEffect(() => {
+    setShowSearchPanel(false);
+    setShowSettingsPanel(false);
+    setShowEditChannelModal(false);
+    setShowEditTopicModal(false);
+    setShowAddMemberModal(false);
+  }, [channel?.cid]);
+
   // Permission: only owner or moderator can edit channel info (banned users cannot)
   const canEditChannel = (isTeamChannel || isTopic) && !isBanned && canManageChannel(currentUserRole);
 
