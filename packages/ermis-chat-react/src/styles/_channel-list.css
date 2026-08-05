@@ -368,6 +368,15 @@
   color: var(--ermis-text-muted);
 }
 
+.ermis-channel-list__muted-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--ermis-text-muted);
+  opacity: 0.7;
+}
+
 /* --- Pending channel indicator --- */
 .ermis-channel-list__item--pending {
   border-left: 3px solid var(--ermis-color-danger);

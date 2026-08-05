@@ -19,6 +19,8 @@ import {
   Loader2,
   ShieldAlert,
   Eraser,
+  Bell,
+  BellOff,
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -95,7 +97,10 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     isTopic,
     isClosedTopic,
     isBlocked,
+    isMuted,
     isPinned,
+    onMuteChannel,
+    onUnmuteChannel,
     topicsEnabled,
     currentUserRole,
     searchLabel,
@@ -108,6 +113,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     unblockLabel,
     pinLabel,
     unpinLabel,
+    muteLabel,
+    unmuteLabel,
     closeTopicLabel,
     reopenTopicLabel,
     deleteTopicLabel,
@@ -261,6 +268,25 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
             label={isPinned ? unpinLabel : pinLabel}
             disabled={isBlocked}
           />
+
+          {/* Mute/Unmute Action */}
+          {!isTopic && (
+            isMuted ? (
+              <ActionItem
+                onClick={onUnmuteChannel}
+                icon={Bell}
+                label={unmuteLabel || t('actions.unmute_channel')}
+                disabled={isBlocked}
+              />
+            ) : (
+              <ActionItem
+                onClick={onMuteChannel}
+                icon={BellOff}
+                label={muteLabel || t('actions.mute_channel')}
+                disabled={isBlocked}
+              />
+            )
+          )}
 
           {isE2ee && onRotateKey && (
             <ActionItem

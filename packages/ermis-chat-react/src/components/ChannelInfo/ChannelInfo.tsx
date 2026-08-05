@@ -4,6 +4,7 @@ import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
 import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
 import { useBannedState } from '../../hooks/useBannedState';
 import { useBlockedState } from '../../hooks/useBlockedState';
+import { useMutedState } from '../../hooks/useMutedState';
 import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData';
 import { useChatCore } from '../../hooks/useChatCore';
 import { usePreviewState } from '../../hooks/usePreviewState';
@@ -115,11 +116,13 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
 DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
-  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, onDeleteTopic, onTruncateChannel,
+  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, onDeleteTopic, onTruncateChannel, onTruncateChannelForMe,
   onBlockUser, onUnblockUser, onPin, onUnpin, onCloseTopic, onReopenTopic,
-  isTeamChannel, isTopic, isClosedTopic, isBlocked, isPinned, currentUserRole,
-  searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', truncateLabel = 'Clear history', leaveLabel = 'Leave',
+  isTeamChannel, isTopic, isClosedTopic, isBlocked, isMuted, isPinned, currentUserRole,
+  onMuteChannel, onUnmuteChannel,
+  searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', truncateLabel = 'Clear history', truncateForMeLabel = 'Clear history for me', leaveLabel = 'Leave',
   blockLabel = 'Block', unblockLabel = 'Unblock', pinLabel = 'Pin', unpinLabel = 'Unpin',
+  muteLabel = 'Mute', unmuteLabel = 'Unmute',
   closeTopicLabel = 'Close Topic', reopenTopicLabel = 'Reopen Topic', deleteTopicLabel = 'Delete Topic'
 }) => {
   return (
@@ -136,6 +139,33 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         </div>
         <span>{isPinned ? unpinLabel : pinLabel}</span>
       </button>
+      {/* Mute / Unmute — available for all non-topic channels */}
+      {!isTopic && (
+        isMuted ? (
+          <button className="ermis-channel-info__action-btn" onClick={onUnmuteChannel} disabled={isBlocked}>
+            <div className="ermis-channel-info__action-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </div>
+            <span>{unmuteLabel}</span>
+          </button>
+        ) : (
+          <button className="ermis-channel-info__action-btn" onClick={onMuteChannel} disabled={isBlocked}>
+            <div className="ermis-channel-info__action-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                <path d="M18.63 13A17.89 17.89 0 0 1 18 8" />
+                <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" />
+                <path d="M18 8a6 6 0 0 0-9.33-5" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            </div>
+            <span>{muteLabel}</span>
+          </button>
+        )
+      )}
       {isTeamChannel && canManageChannel(currentUserRole) && (
         <button className="ermis-channel-info__action-btn" onClick={onSettingsClick}>
           <div className="ermis-channel-info__action-icon">
@@ -199,6 +229,14 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
               <span>{truncateLabel}</span>
             </button>
           )}
+          {onTruncateChannelForMe && (
+            <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannelForMe}>
+              <div className="ermis-channel-info__action-icon">
+                <DeleteIcon />
+              </div>
+              <span>{truncateForMeLabel}</span>
+            </button>
+          )}
           {isBlocked ? (
           <button className="ermis-channel-info__action-btn" onClick={onUnblockUser}>
             <div className="ermis-channel-info__action-icon">
@@ -242,6 +280,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     actionsTruncateLabel,
     actionsTruncateForMeLabel,
     actionsLeaveLabel,
+    actionsMuteLabel,
+    actionsUnmuteLabel,
     actionsCreateTopicLabel,
     MemberItemComponent,
     MediaItemComponent,
@@ -316,6 +356,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const channel = channelProp || activeChannel;
   const { isBanned } = useBannedState(channel, client?.userID);
   const { isBlocked } = useBlockedState(channel, client?.userID);
+  const { isMuted } = useMutedState(channel, client?.userID);
   const { isPreviewMode } = usePreviewState(channel, client?.userID);
 
   const currentUserId = client?.userID;
@@ -498,6 +539,16 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     try { await channel.unpin(); } catch (e) { console.error('Error unpanning channel', e); }
   }, [channel, onUnpinChannelProp]);
 
+  const handleMuteChannel = useCallback(async () => {
+    if (!channel) return;
+    try { await channel.muteNotification(null); } catch (e) { console.error('Error muting channel', e); }
+  }, [channel]);
+
+  const handleUnmuteChannel = useCallback(async () => {
+    if (!channel) return;
+    try { await channel.unMuteNotification(); } catch (e) { console.error('Error unmuting channel', e); }
+  }, [channel]);
+
   const handleCloseTopic = useCallback(async () => {
     if (!channel || !parentChannel) return;
     try { await parentChannel.closeTopic(channel.cid); } catch (e) { console.error('Error closing topic', e); }
@@ -654,7 +705,10 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 isTopic={isTopic}
                 isClosedTopic={isClosedTopic}
                 isBlocked={isBlocked}
+                isMuted={isMuted}
                 isPinned={isPinned}
+                onMuteChannel={handleMuteChannel}
+                onUnmuteChannel={handleUnmuteChannel}
                 topicsEnabled={channel?.data?.topics_enabled === true}
                 currentUserRole={currentUserRole}
                 isE2ee={isE2ee}
@@ -674,6 +728,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 unblockLabel={actionsUnblockLabel}
                 pinLabel={isTopic ? (actionsPinTopicLabel || 'Pin topic') : (actionsPinLabel || 'Pin channel')}
                 unpinLabel={isTopic ? (actionsUnpinTopicLabel || 'Unpin topic') : (actionsUnpinLabel || 'Unpin channel')}
+                muteLabel={actionsMuteLabel}
+                unmuteLabel={actionsUnmuteLabel}
                 closeTopicLabel={actionsCloseTopicLabel}
                 reopenTopicLabel={actionsReopenTopicLabel}
                 deleteTopicLabel={actionsDeleteTopicLabel}

@@ -398,6 +398,8 @@ export type ChannelActionLabels = {
   deleteChannel?: string;
   leaveChannel?: string;
   truncateChannel?: string;
+  muteChannel?: string;
+  unmuteChannel?: string;
 };
 
 export type ChannelActionIcons = {
@@ -413,6 +415,8 @@ export type ChannelActionIcons = {
   DeleteChannelIcon?: React.ReactNode;
   LeaveChannelIcon?: React.ReactNode;
   TruncateChannelIcon?: React.ReactNode;
+  MuteIcon?: React.ReactNode;
+  UnmuteIcon?: React.ReactNode;
 };
 
 export type ChannelActionsProps = {
@@ -439,6 +443,12 @@ export type ChannelItemProps = {
   pendingBadgeLabel?: string;
   /** Label for the blocked channel badge indicator */
   blockedBadgeLabel?: string;
+  /** Whether the current user has muted notifications for this channel */
+  isMuted?: boolean;
+  /** Label/tooltip for the muted channel icon */
+  mutedBadgeLabel?: string;
+  /** Custom icon component displayed when the channel is muted */
+  MutedIconComponent?: React.ComponentType;
   isClosedTopic?: boolean;
   closedTopicIcon?: React.ReactNode;
   PinnedIconComponent?: React.ComponentType;
@@ -1430,8 +1440,13 @@ export type ChannelInfoActionsProps = {
   isTopic?: boolean;
   isClosedTopic?: boolean;
   isBlocked?: boolean;
+  isMuted?: boolean;
   isPinned?: boolean;
   currentUserRole?: string;
+  onMuteChannel?: () => void;
+  onUnmuteChannel?: () => void;
+  muteLabel?: string;
+  unmuteLabel?: string;
   searchLabel?: string;
   settingsLabel?: string;
   deleteLabel?: string;
@@ -1707,6 +1722,8 @@ export type ChannelInfoProps = {
   /** I18n labels for block/unblock actions */
   actionsBlockLabel?: string;
   actionsUnblockLabel?: string;
+  actionsMuteLabel?: string;
+  actionsUnmuteLabel?: string;
   actionsCloseTopicLabel?: string;
   actionsReopenTopicLabel?: string;
   actionsDeleteTopicLabel?: string;

@@ -523,6 +523,8 @@ export type ChannelMembership<ErmisChatGenerics extends ExtendableGenerics = Def
   blocked?: boolean;
   channel_role?: Role;
   created_at?: string;
+  /** ISO 8601 timestamp indicating when the mute expires, or null if not muted. */
+  muted?: string | null;
   updated_at?: string;
   user?: UserResponse<ErmisChatGenerics>;
 };

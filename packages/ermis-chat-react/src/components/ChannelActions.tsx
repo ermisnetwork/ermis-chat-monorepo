@@ -18,6 +18,8 @@ const UnlockIcon = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="
 const CreateTopicIcon = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>);
 const EditIcon = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>);
 const MoreIcon = () => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>);
+const MuteIcon = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13.73 21a2 2 0 0 1-3.46 0" /><path d="M18.63 13A17.89 17.89 0 0 1 18 8" /><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" /><path d="M18 8a6 6 0 0 0-9.33-5" /><line x1="1" y1="1" x2="23" y2="23" /></svg>);
+const UnmuteIcon = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>);
 
 /* ----------------------------------------------------------
    computeDefaultActions
@@ -35,6 +37,7 @@ export function computeDefaultActions(
     onDeleteTopic?: (channel: Channel) => void;
     onTruncateChannel?: (channel: Channel) => void;
     isBlocked?: boolean;
+    isMuted?: boolean;
     actionLabels?: ChannelActionLabels;
     actionIcons?: ChannelActionIcons;
   },
@@ -81,6 +84,34 @@ export function computeDefaultActions(
       }
     },
   });
+
+  // Mute / Unmute — available for all non-topic channel types
+  if (!isTopic) {
+    const isMuted = options?.isMuted ?? false;
+    const muteLabel = isMuted
+      ? (actionLabels?.unmuteChannel || 'Unmute channel')
+      : (actionLabels?.muteChannel || 'Mute channel');
+    const muteIcon = isMuted
+      ? (actionIcons?.UnmuteIcon || <UnmuteIcon />)
+      : (actionIcons?.MuteIcon || <MuteIcon />);
+
+    actions.push({
+      id: isMuted ? 'unmute' : 'mute',
+      label: muteLabel,
+      icon: muteIcon,
+      onClick: async (ch) => {
+        try {
+          if (isMuted) {
+            await ch.unMuteNotification();
+          } else {
+            await ch.muteNotification(null);
+          }
+        } catch (e) {
+          console.error('Error toggling mute state', e);
+        }
+      },
+    });
+  }
 
   if (isDirect) {
     // Direct channel: Block / Unblock

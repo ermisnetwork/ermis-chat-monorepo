@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { isDirectChannel } from '../channelTypeUtils';
+import { isChannelMuted } from './useMutedState';
 
 /**
  * Custom hook to abstract real-time row-level updates for a single channel.
@@ -12,6 +13,9 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
   const [isBlockedInChannel, setIsBlockedInChannel] = useState(() => {
     if (!isDirectChannel(channel)) return false;
     return Boolean(channel.state?.membership?.blocked);
+  });
+  const [isMutedInChannel, setIsMutedInChannel] = useState(() => {
+    return isChannelMuted((channel.state?.membership as any)?.muted);
   });
 
   // Force re-render when messages, members, or read state changes
@@ -29,6 +33,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
 
     setIsBannedInChannel(computeIsBanned());
     setIsBlockedInChannel(isDirectChannel(channel) ? Boolean(channel.state?.membership?.blocked) : false);
+    setIsMutedInChannel(isChannelMuted((channel.state?.membership as any)?.muted));
 
     const handleBanned = (event: any) => {
       if (event.member?.user_id === currentUserId) {
@@ -91,6 +96,14 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub19 = parentChannel.on('member.unbanned', handleUnbanned);
     }
 
+    // Muted state: listen for member.updated to detect mute/unmute
+    const handleMemberUpdated = (event: any) => {
+      if (event.member?.user_id === currentUserId) {
+        setIsMutedInChannel(isChannelMuted(event.member?.muted));
+      }
+    };
+    const subMemberUpdated = channel.on('member.updated', handleMemberUpdated);
+
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
@@ -115,8 +128,9 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub17.unsubscribe();
       if (sub18) sub18.unsubscribe();
       if (sub19) sub19.unsubscribe();
+      subMemberUpdated.unsubscribe();
     };
   }, [channel, currentUserId]);
 
-  return { isBannedInChannel, isBlockedInChannel, updateCount };
+  return { isBannedInChannel, isBlockedInChannel, isMutedInChannel, updateCount };
 }

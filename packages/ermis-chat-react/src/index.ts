@@ -30,6 +30,7 @@ export { useChannelListUpdates } from './hooks/useChannelListUpdates';
 export { useChannelRowUpdates } from './hooks/useChannelRowUpdates';
 export { useBannedState } from './hooks/useBannedState';
 export { useBlockedState } from './hooks/useBlockedState';
+export { useMutedState, isChannelMuted } from './hooks/useMutedState';
 export { useOnlineStatus } from './hooks/useOnlineStatus';
 export type { OnlineStatus } from './hooks/useOnlineStatus';
 export { useOnlineUsers } from './hooks/useOnlineUsers';

@@ -419,6 +419,8 @@ export function ChatPage() {
     deleteChannel: t('actions.delete_channel'),
     leaveChannel: t('actions.leave_channel'),
     truncateChannel: t('actions.truncate_channel'),
+    muteChannel: t('actions.mute_channel'),
+    unmuteChannel: t('actions.unmute_channel'),
   }), [t])
 
   const systemMessageTranslations = useMemo(() => ({
@@ -1192,6 +1194,8 @@ export function ChatPage() {
               actionsUnpinTopicLabel={t('actions.unpin_topic')}
               actionsBlockLabel={t('actions.block_user')}
               actionsUnblockLabel={t('actions.unblock_user')}
+              actionsMuteLabel={t('actions.mute_channel')}
+              actionsUnmuteLabel={t('actions.unmute_channel')}
               actionsDeleteLabel={t('actions.delete_channel')}
               actionsTruncateLabel={t('actions.truncate_channel')}
               actionsTruncateForMeLabel={t('actions.truncate_channel_for_me')}
