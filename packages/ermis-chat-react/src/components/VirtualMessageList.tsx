@@ -852,10 +852,10 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     activeChannel,
   ]);
 
-  if (isBanned || isBlocked) {
+  if (isBanned) {
     return (
       <BannedOverlay
-        isBlocked={isBlocked}
+        isBlocked={false}
         blockedTitle={blockedOverlayTitle}
         bannedTitle={bannedOverlayTitle}
         blockedSubtitle={blockedOverlaySubtitle}

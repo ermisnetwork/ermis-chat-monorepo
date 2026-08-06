@@ -340,8 +340,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
             </>
           )}
 
-          {/* Clear history for everyone (DM + Group, not topic) */}
-          {!isTopic && onTruncateChannel && (
+          {/* Clear history for everyone (DM or Group owner/moderator) */}
+          {!isTopic && onTruncateChannel && (!isTeamChannel || canManageChannel(currentUserRole)) && (
             <ActionItem
               onClick={() => handleActionWithConfirm('truncate', onTruncateChannel)}
               icon={Trash2}

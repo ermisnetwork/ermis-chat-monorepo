@@ -218,25 +218,27 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
           <span>{deleteTopicLabel}</span>
         </button>
       )}
-      {/* Block/Unblock & Truncate — messaging (1-1) channels only */}
+      {/* Clear history for everyone (DM or Group owner/moderator) */}
+      {!isTopic && onTruncateChannel && (!isTeamChannel || canManageChannel(currentUserRole)) && (
+        <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannel}>
+          <div className="ermis-channel-info__action-icon">
+            <DeleteIcon />
+          </div>
+          <span>{truncateLabel}</span>
+        </button>
+      )}
+      {/* Clear history for me */}
+      {!isTopic && onTruncateChannelForMe && (
+        <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannelForMe}>
+          <div className="ermis-channel-info__action-icon">
+            <DeleteIcon />
+          </div>
+          <span>{truncateForMeLabel}</span>
+        </button>
+      )}
+      {/* Block/Unblock — messaging (1-1) channels only */}
       {!isTeamChannel && !isTopic && (
         <>
-          {onTruncateChannel && (
-            <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannel}>
-              <div className="ermis-channel-info__action-icon">
-                <DeleteIcon />
-              </div>
-              <span>{truncateLabel}</span>
-            </button>
-          )}
-          {onTruncateChannelForMe && (
-            <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannelForMe}>
-              <div className="ermis-channel-info__action-icon">
-                <DeleteIcon />
-              </div>
-              <span>{truncateForMeLabel}</span>
-            </button>
-          )}
           {isBlocked ? (
           <button className="ermis-channel-info__action-btn" onClick={onUnblockUser}>
             <div className="ermis-channel-info__action-icon">

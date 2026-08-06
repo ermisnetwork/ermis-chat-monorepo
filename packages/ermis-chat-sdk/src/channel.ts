@@ -1891,11 +1891,52 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async blockUser() {
-    return await this.getClient().post(this._channelURL(), { action: 'block' });
+    const res = await this.getClient().post(this._channelURL(), { action: 'block' });
+    const currentUserId = this.getClient().user?.id;
+    if (this.state && currentUserId) {
+      if (this.state.membership) {
+        (this.state.membership as any).blocked = true;
+      }
+      if (this.state.members?.[currentUserId]) {
+        (this.state.members[currentUserId] as any).blocked = true;
+      }
+    }
+    this.getClient().dispatchEvent({
+      type: 'member.blocked',
+      cid: this.cid,
+      channel_type: this.type,
+      channel_id: this.id,
+      member: this.state?.membership || { user_id: currentUserId, blocked: true },
+      user: this.getClient().user,
+    } as any);
+    return res;
   }
 
   async unblockUser() {
-    return await this.getClient().post(this._channelURL(), { action: 'unblock' });
+    const res = await this.getClient().post(this._channelURL(), { action: 'unblock' });
+    const currentUserId = this.getClient().user?.id;
+    if (this.state && currentUserId) {
+      if (this.state.membership) {
+        (this.state.membership as any).blocked = false;
+      }
+      if (this.state.members?.[currentUserId]) {
+        (this.state.members[currentUserId] as any).blocked = false;
+      }
+    }
+    this.getClient().dispatchEvent({
+      type: 'member.unblocked',
+      cid: this.cid,
+      channel_type: this.type,
+      channel_id: this.id,
+      member: this.state?.membership || { user_id: currentUserId, blocked: false },
+      user: this.getClient().user,
+    } as any);
+    try {
+      await this.query({ messages_seq: { limit: 50 } });
+    } catch (e) {
+      console.error('Error querying messages after unblock:', e);
+    }
+    return res;
   }
 
   async acceptInvite(action: string) {

@@ -390,10 +390,10 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
     ]
   );
 
-  // Hide last message preview when banned, blocked, pending or skipped
-  const lastMessageText = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped) ? '' : rawLastMessageText;
-  const lastMessageUser = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped || isDirectChannel(channel)) ? '' : rawLastMessageUser;
-  const lastMessageTimestamp = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped) ? null : rawLastMessageTimestamp;
+  // Hide last message preview when banned, pending or skipped (keep visible for blocked)
+  const lastMessageText = (isBannedInChannel || isPending || isSkipped) ? '' : rawLastMessageText;
+  const lastMessageUser = (isBannedInChannel || isPending || isSkipped || isDirectChannel(channel)) ? '' : rawLastMessageUser;
+  const lastMessageTimestamp = (isBannedInChannel || isPending || isSkipped) ? null : rawLastMessageTimestamp;
 
   if (renderChannel) {
     return (
