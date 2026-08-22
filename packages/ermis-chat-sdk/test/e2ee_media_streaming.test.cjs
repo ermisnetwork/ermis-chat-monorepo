@@ -1,16 +1,22 @@
 const assert = require('node:assert/strict');
+const { webcrypto } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   E2EE_MEDIA_STREAM_BASE_SESSION_CACHE_LIMIT,
   E2EE_MEDIA_STREAM_FULL_REPLAY_CACHE_LIMIT,
   E2EE_MEDIA_STREAM_PREFETCH_FRAMES,
+  E2EE_MEDIA_STREAM_WORKER_VERSION,
   e2eeMediaFramePlainLength,
   e2eeMediaSessionCacheLimit,
   isE2eeMediaMsePlaybackAllowed,
   isE2eeMediaMsePlaybackEnabled,
   planE2eeMediaFrameBatch,
   probeE2eeMediaMp4ForMse,
+  validateE2eeR2RangeSmokeResponse,
 } = require('../dist/index.cjs');
 
 function box(type, payload = new Uint8Array()) {
@@ -39,6 +45,134 @@ function concat(...parts) {
   }
   return out;
 }
+
+function rangeSmokeResponse({
+  status = 206,
+  body = new Uint8Array([7]),
+  headers = {},
+} = {}) {
+  return new Response(body, {
+    status,
+    headers: {
+      'Content-Length': '1',
+      'Content-Range': 'bytes 0-0/1024',
+      'Accept-Ranges': 'bytes',
+      ETag: 'opaque-etag',
+      ...headers,
+    },
+  });
+}
+
+function loadMediaWorker(workerPath, fetchImpl) {
+  const context = {
+    AbortController,
+    Date,
+    Error,
+    Map,
+    Math,
+    Number,
+    Promise,
+    Response,
+    Uint8Array,
+    URL,
+    atob,
+    clearTimeout,
+    clients: { get: async () => undefined },
+    console: { error() {} },
+    crypto: webcrypto,
+    fetch: fetchImpl,
+    self: {
+      addEventListener() {},
+      skipWaiting() {},
+    },
+    setInterval: () => 0,
+    setTimeout,
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(workerPath, 'utf8'), context, { filename: workerPath });
+  return context;
+}
+
+test('E2EE media R2 smoke requires browser-readable exact range headers and one response byte', async () => {
+  assert.equal(E2EE_MEDIA_STREAM_WORKER_VERSION, '20260821-1');
+  assert.deepEqual(await validateE2eeR2RangeSmokeResponse(rangeSmokeResponse()), {
+    ok: true,
+    status: 206,
+  });
+});
+
+test('E2EE media R2 smoke rejects missing CORS-exposed response headers', async () => {
+  for (const [header, error] of [
+    ['Content-Range', 'content_range_missing_or_invalid'],
+    ['Accept-Ranges', 'accept_ranges_missing_or_invalid'],
+    ['ETag', 'etag_missing'],
+  ]) {
+    const response = rangeSmokeResponse();
+    response.headers.delete(header);
+    assert.deepEqual(await validateE2eeR2RangeSmokeResponse(response), {
+      ok: false,
+      status: 206,
+      error,
+    });
+  }
+});
+
+test('E2EE media R2 smoke rejects an inexact range body or header contract', async () => {
+  assert.deepEqual(
+    await validateE2eeR2RangeSmokeResponse(
+      rangeSmokeResponse({ headers: { 'Content-Range': 'bytes 1-1/1024' } }),
+    ),
+    { ok: false, status: 206, error: 'content_range_missing_or_invalid' },
+  );
+  assert.deepEqual(
+    await validateE2eeR2RangeSmokeResponse(rangeSmokeResponse({ body: new Uint8Array([7, 8]) })),
+    { ok: false, status: 206, error: 'body_length_mismatch' },
+  );
+});
+
+test('E2EE media worker validates every encrypted Range response and both shipped copies match', async () => {
+  const sdkWorker = path.resolve(__dirname, '../public/e2ee-media-stream-worker.js');
+  const appWorker = path.resolve(__dirname, '../../../apps/uhm-chat/public/e2ee-media-stream-worker.js');
+  assert.equal(fs.readFileSync(appWorker, 'utf8'), fs.readFileSync(sdkWorker, 'utf8'));
+
+  const session = {
+    grantUrl: 'https://storage.invalid/redacted',
+    expiresAtMs: Date.now() + 60_000,
+    safetyMarginMs: 1_000,
+    cipherSize: 20,
+  };
+  const exact = loadMediaWorker(
+    sdkWorker,
+    async () =>
+      new Response(new Uint8Array([4, 5, 6, 7]), {
+        status: 206,
+        headers: {
+          'Content-Length': '4',
+          'Content-Range': 'bytes 4-7/20',
+        },
+      }),
+  );
+  assert.deepEqual(
+    Array.from(await exact.fetchEncryptedRange(session, 4, 8, undefined, new AbortController().signal)),
+    [4, 5, 6, 7],
+  );
+
+  const shifted = loadMediaWorker(
+    sdkWorker,
+    async () =>
+      new Response(new Uint8Array([4, 5, 6, 7]), {
+        status: 206,
+        headers: {
+          'Content-Length': '4',
+          'Content-Range': 'bytes 5-8/20',
+        },
+      }),
+  );
+  await assert.rejects(
+    shifted.fetchEncryptedRange(session, 4, 8, undefined, new AbortController().signal),
+    /response contract mismatch/,
+  );
+});
 
 test('E2EE media planner prefetches sequential ranges in 8-frame batches', () => {
   const plan = planE2eeMediaFrameBatch({

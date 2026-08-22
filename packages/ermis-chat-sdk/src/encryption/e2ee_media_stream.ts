@@ -39,7 +39,8 @@ type PageSession = {
   safetyMarginMs: number;
 };
 
-const DEFAULT_WORKER_URL = '/e2ee-media-stream-worker.js?v=20260702-3';
+export const E2EE_MEDIA_STREAM_WORKER_VERSION = '20260821-1';
+const DEFAULT_WORKER_URL = `/e2ee-media-stream-worker.js?v=${E2EE_MEDIA_STREAM_WORKER_VERSION}`;
 const DEFAULT_WORKER_SCOPE = '/';
 const DEFAULT_GRANT_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_SAFETY_MARGIN_MS = 30 * 1000;
@@ -266,10 +267,54 @@ function displayString(asset: E2eeAttachmentManifestAsset | undefined, key: stri
   return typeof value === 'string' && value ? value : undefined;
 }
 
+export type E2eeR2RangeSmokeResult = {
+  ok: boolean;
+  status?: number;
+  error?:
+    | 'status_not_206'
+    | 'content_length_missing_or_invalid'
+    | 'content_range_missing_or_invalid'
+    | 'accept_ranges_missing_or_invalid'
+    | 'etag_missing'
+    | 'body_length_mismatch'
+    | 'fetch_failed';
+};
+
+export async function validateE2eeR2RangeSmokeResponse(
+  response: Pick<Response, 'status' | 'headers' | 'arrayBuffer'>,
+): Promise<E2eeR2RangeSmokeResult> {
+  if (response.status !== 206) return { ok: false, status: response.status, error: 'status_not_206' };
+
+  const contentLength = response.headers.get('Content-Length')?.trim();
+  if (contentLength !== '1') {
+    return { ok: false, status: response.status, error: 'content_length_missing_or_invalid' };
+  }
+
+  const contentRange = response.headers.get('Content-Range')?.trim();
+  const contentRangeMatch = contentRange?.match(/^bytes 0-0\/(\d+)$/i);
+  const totalSize = contentRangeMatch ? Number(contentRangeMatch[1]) : Number.NaN;
+  if (!Number.isSafeInteger(totalSize) || totalSize < 1) {
+    return { ok: false, status: response.status, error: 'content_range_missing_or_invalid' };
+  }
+
+  if (response.headers.get('Accept-Ranges')?.trim().toLowerCase() !== 'bytes') {
+    return { ok: false, status: response.status, error: 'accept_ranges_missing_or_invalid' };
+  }
+  if (!response.headers.get('ETag')?.trim()) {
+    return { ok: false, status: response.status, error: 'etag_missing' };
+  }
+
+  const body = await response.arrayBuffer();
+  if (body.byteLength !== 1) {
+    return { ok: false, status: response.status, error: 'body_length_mismatch' };
+  }
+  return { ok: true, status: response.status };
+}
+
 async function smokeTestR2Range(
   downloadUrl: string,
   timeoutMs = DEFAULT_RANGE_SMOKE_TIMEOUT_MS,
-): Promise<{ ok: boolean; status?: number; error?: string }> {
+): Promise<E2eeR2RangeSmokeResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -278,9 +323,9 @@ async function smokeTestR2Range(
       cache: 'no-store',
       signal: controller.signal,
     });
-    return { ok: response.status === 206, status: response.status };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return await validateE2eeR2RangeSmokeResponse(response);
+  } catch {
+    return { ok: false, error: 'fetch_failed' };
   } finally {
     clearTimeout(timeout);
     controller.abort();
@@ -316,6 +361,11 @@ export async function createE2eeAttachmentStreamUrl(
     if (!rangeSmoke.ok) {
       logMediaStreamFallback('R2 range smoke failed', rangeSmoke);
       return null;
+    }
+    if (mediaStreamDebugEnabled()) {
+      console.info(
+        '[E2EE media streaming] range_smoke state=succeeded status=206 content_length=exact content_range=exact accept_ranges=bytes etag=readable body_bytes=1',
+      );
     }
   }
   const sessionId = randomId();

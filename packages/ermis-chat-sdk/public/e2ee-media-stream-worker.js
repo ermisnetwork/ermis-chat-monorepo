@@ -265,8 +265,27 @@ async function fetchEncryptedRange(session, start, endExclusive, clientId, signa
 		const response = await fetch(session.grantUrl, { headers, cache: 'no-store', signal });
 		assertNotAborted(signal);
 		if (response.status === 206) {
+			const expectedLength = endExclusive - start;
+			const contentLength = Number(response.headers.get('Content-Length'));
+			const contentRange = response.headers.get('Content-Range')?.trim();
+			const match = contentRange?.match(/^bytes (\d+)-(\d+)\/(\d+)$/i);
+			const rangeStart = match ? Number(match[1]) : Number.NaN;
+			const rangeEnd = match ? Number(match[2]) : Number.NaN;
+			const totalSize = match ? Number(match[3]) : Number.NaN;
+			if (
+				!Number.isSafeInteger(contentLength) ||
+				contentLength !== expectedLength ||
+				rangeStart !== start ||
+				rangeEnd !== endExclusive - 1 ||
+				totalSize !== Number(session.cipherSize)
+			) {
+				throw new Error('E2EE media encrypted range response contract mismatch');
+			}
 			const encrypted = new Uint8Array(await response.arrayBuffer());
 			assertNotAborted(signal);
+			if (encrypted.byteLength !== expectedLength) {
+				throw new Error('E2EE media encrypted range response body length mismatch');
+			}
 			return encrypted;
 		}
 		if (response.status === 200) throw new Error('E2EE media stream unsupported: R2 ignored Range request');

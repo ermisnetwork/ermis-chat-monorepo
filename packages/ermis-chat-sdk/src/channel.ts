@@ -261,7 +261,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         ...override,
       };
 
-      if ((override as any).attachment_type === 'voiceRecording' || mimeType.startsWith('audio/')) {
+      const explicitType = (override as any).attachment_type;
+
+      if (explicitType === 'voiceRecording' || (!explicitType && mimeType.startsWith('audio/'))) {
         return {
           ...base,
           type: 'voiceRecording',
@@ -270,7 +272,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           url: objectUrl,
         };
       }
-      if (mimeType.startsWith('image/')) {
+      if (explicitType === 'file') {
+        return {
+          ...base,
+          type: 'file',
+          attachment_type: 'file',
+          url: objectUrl,
+          asset_url: objectUrl,
+        };
+      }
+      if (explicitType === 'image' || (!explicitType && mimeType.startsWith('image/'))) {
         return {
           ...base,
           type: 'image',
@@ -279,7 +290,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           url: objectUrl,
         };
       }
-      if (mimeType.startsWith('video/')) {
+      if (explicitType === 'video' || (!explicitType && mimeType.startsWith('video/'))) {
         return {
           ...base,
           type: 'video',

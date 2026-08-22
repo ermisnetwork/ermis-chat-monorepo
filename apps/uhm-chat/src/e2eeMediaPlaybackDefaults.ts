@@ -1,5 +1,6 @@
+import { E2EE_MEDIA_STREAM_WORKER_VERSION } from '@ermis-network/ermis-chat-sdk';
+
 const E2EE_MEDIA_WORKER_MARKER = '/e2ee-media-stream-worker.js';
-const E2EE_MEDIA_WORKER_VERSION = '20260702-3';
 
 function envEnabled(value: unknown, defaultValue: boolean): boolean {
   if (value === undefined || value === null || value === '') return defaultValue;
@@ -14,7 +15,7 @@ async function unregisterStaleE2eeMediaWorker(): Promise<void> {
       const scriptUrl =
         registration.active?.scriptURL || registration.waiting?.scriptURL || registration.installing?.scriptURL || '';
       if (!scriptUrl.includes(E2EE_MEDIA_WORKER_MARKER)) return;
-      if (scriptUrl.includes(`v=${E2EE_MEDIA_WORKER_VERSION}`)) return;
+      if (scriptUrl.includes(`v=${E2EE_MEDIA_STREAM_WORKER_VERSION}`)) return;
       await registration.unregister();
     }),
   );

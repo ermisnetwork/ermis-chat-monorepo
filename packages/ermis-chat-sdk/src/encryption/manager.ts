@@ -6905,9 +6905,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         total: file.size,
         percentage: 0,
       });
-      const previewResult = await generateE2eeAttachmentPreview(file);
-      const previewBlob = previewResult?.blob;
       const displayOverrides = options.displayOverrides?.get(index) || {};
+      // Authenticated document intent is authoritative over MIME. A file attachment must not pay
+      // the decode/encrypt/upload cost of an inline media preview.
+      const previewResult =
+        displayOverrides.attachment_type === 'file' ? undefined : await generateE2eeAttachmentPreview(file);
+      const previewBlob = previewResult?.blob;
       emitProgress({
         phase: 'generating_preview',
         loaded: file.size,
@@ -7225,8 +7228,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         ? sizeValue
         : original?.plaintext_size || projectionOriginal?.cipher_size || original?.cipher_size || 0;
     const attachmentType =
-      attachmentTypeValue === 'voiceRecording'
-        ? 'voiceRecording'
+      attachmentTypeValue === 'voiceRecording' ||
+      attachmentTypeValue === 'image' ||
+      attachmentTypeValue === 'video' ||
+      attachmentTypeValue === 'file'
+        ? attachmentTypeValue
         : mimeType.startsWith('image/')
         ? 'image'
         : mimeType.startsWith('video/')

@@ -206,11 +206,8 @@ function isLikelyVideo(name: string, mimeType?: string): boolean {
 }
 
 function isLikelyAudio(name: string, mimeType?: string, attachmentType?: string): boolean {
-  return Boolean(
-    attachmentType === 'voiceRecording' ||
-      mimeType?.startsWith('audio/') ||
-      /\.(aac|flac|m4a|mp3|oga|ogg|opus|wav|webm)$/i.test(name),
-  );
+  if (attachmentType) return attachmentType === 'voiceRecording';
+  return Boolean(mimeType?.startsWith('audio/') || /\.(aac|flac|m4a|mp3|oga|ogg|opus|wav|webm)$/i.test(name));
 }
 
 function E2eePlayIcon() {
@@ -257,8 +254,8 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
     const size = e2eeDisplayNumber(display, 'size') || asset?.plaintext_size || asset?.cipher_size;
     const ext = extensionForName(title);
     const sizeLabel = formatFileSize(size);
-    const isImageAsset = isLikelyImage(title, mimeType);
-    const isVideoAsset = isLikelyVideo(title, mimeType);
+    const isImageAsset = attachmentType ? attachmentType === 'image' : isLikelyImage(title, mimeType);
+    const isVideoAsset = attachmentType ? attachmentType === 'video' : isLikelyVideo(title, mimeType);
     const isAudioAsset = isLikelyAudio(title, mimeType, attachmentType);
     const loadedUrl = preview.url || original.url;
     const loading = original.loading || preview.loading;
@@ -1050,7 +1047,8 @@ export const AttachmentList: React.FC<{
  * Detect URLs and emails in plain text, wrapping them in <a> tags.
  * Returns an array of React nodes (strings and link elements).
  */
-const URL_REGEX = /(https?:\/\/[^\s<>]+?|www\.[^\s<>]+?|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?=[.,!?:;"']*(?:\s|<|>|$))/g;
+const URL_REGEX =
+  /(https?:\/\/[^\s<>]+?|www\.[^\s<>]+?|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?=[.,!?:;"']*(?:\s|<|>|$))/g;
 
 function linkifyText(text: string, keyPrefix: string): React.ReactNode[] {
   const parts = text.split(URL_REGEX);

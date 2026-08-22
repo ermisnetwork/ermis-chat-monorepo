@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { webcrypto } = require('node:crypto');
 const test = require('node:test');
 
 const {
@@ -7,11 +8,52 @@ const {
   ciphertextSha256,
   e2eeAttachmentMultipartUploadUrlExpiresAtMs,
   encryptAndUploadE2eeAssetMultipart,
+  encryptE2eeAsset,
   estimateE2eeEncryptedAssetSize,
   resolveE2eeAttachmentMultipartUploadConcurrency,
   Sha256,
   sha256Hex,
 } = require('../dist/index.cjs');
+
+test('E2EE attachment empty file matches the shared iOS and Bellboy vector', async () => {
+  const rawKey = Uint8Array.from({ length: 32 }, (_, index) => index);
+  const noncePrefix = Uint8Array.from({ length: 8 }, (_, index) => 0xf0 + index);
+  const cryptoProvider = {
+    randomBytes(length) {
+      assert.equal(length, noncePrefix.length);
+      return noncePrefix.slice();
+    },
+    async generateAesGcmKey() {
+      return rawKey.slice();
+    },
+    async aesGcmEncrypt(key, nonce, plain) {
+      const importedKey = await webcrypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt']);
+      return new Uint8Array(
+        await webcrypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, importedKey, plain),
+      );
+    },
+    async aesGcmDecrypt() {
+      throw new Error('not used');
+    },
+    createSha256() {
+      return new Sha256();
+    },
+  };
+
+  const encrypted = await encryptE2eeAsset(new Blob([]), {
+    kind: 'original',
+    cryptoProvider,
+  });
+  const wireBytes = new Uint8Array(await encrypted.encryptedBlob.arrayBuffer());
+
+  assert.equal(encrypted.plaintext_size, 0);
+  assert.equal(encrypted.cipher_size, 24);
+  assert.equal(
+    Buffer.from(wireBytes).toString('hex'),
+    '0000000000000010715896cfbf80df8c10223beeb74b78b9',
+  );
+  assert.equal(encrypted.cipher_sha256, 'dd60f2d52e14bace6b197f7fc6c36ba7c931b6f8dd1b6e2307be70d588dd30a7');
+});
 
 test('E2EE AAD sorts attachment UUIDs by raw bytes and rejects duplicates', () => {
   const a = '00000000-0000-0000-0000-0000000000ff';
