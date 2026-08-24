@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk';
 import { useTopicGroupUpdates } from '../hooks/useTopicGroupUpdates';
 import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
@@ -90,7 +90,7 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   signalMessageTranslations,
   showTopicPills = false,
 }) => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const currentUserId = client.userID;
 
   // Realtime updates for parent channel row (pin/unpin, channel.updated)

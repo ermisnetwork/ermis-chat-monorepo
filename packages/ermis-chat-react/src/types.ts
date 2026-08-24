@@ -66,6 +66,40 @@ export type ChatContextValue = {
   clearAllDrafts: () => void;
 };
 
+export type ChatCoreContextValue = Pick<
+  ChatContextValue,
+  | 'client'
+  | 'activeChannel'
+  | 'setActiveChannel'
+  | 'theme'
+  | 'setTheme'
+  | 'enableCall'
+  | 'syncMessages'
+  | 'setDraft'
+  | 'getDraft'
+  | 'clearAllDrafts'
+>;
+
+export type ChatMessagesContextValue = Pick<
+  ChatContextValue,
+  'messages' | 'setMessages' | 'syncMessages' | 'readState' | 'setReadState'
+>;
+
+export type ChatComposerContextValue = Pick<
+  ChatContextValue,
+  | 'quotedMessage'
+  | 'setQuotedMessage'
+  | 'editingMessage'
+  | 'setEditingMessage'
+  | 'forwardingMessage'
+  | 'setForwardingMessage'
+>;
+
+export type ChatNavigationContextValue = Pick<
+  ChatContextValue,
+  'jumpToMessageId' | 'setJumpToMessageId'
+>;
+
 import type { ChatComponentsContextValue } from './context/ChatComponentsContext';
 
 export type ChatProviderProps = {

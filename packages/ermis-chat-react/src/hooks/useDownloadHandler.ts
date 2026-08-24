@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 
 export const useDownloadHandler = () => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
 
   const downloadFile = useCallback(async (url: string | undefined, filename?: string) => {
     if (!url) return;

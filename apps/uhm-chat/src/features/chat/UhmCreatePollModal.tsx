@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useChatClient } from '@ermis-network/ermis-chat-react';
+import { useChatCore } from '@ermis-network/ermis-chat-react';
 import { UhmModal } from '@/components/custom/UhmModal';
 import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,7 +12,7 @@ export type UhmCreatePollModalProps = {
 
 export const UhmCreatePollModal: React.FC<UhmCreatePollModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation();
-  const { activeChannel } = useChatClient();
+  const { activeChannel } = useChatCore();
   const [question, setQuestion] = useState('');
   const [choices, setChoices] = useState(['', '']);
   const [pollType, setPollType] = useState<'single' | 'multiple'>('single');

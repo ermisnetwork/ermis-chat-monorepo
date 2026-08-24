@@ -24,7 +24,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
-  useChatClient,
+  useChatCore,
   useRecoveryPin,
   canManageChannel,
   CHANNEL_ROLES,
@@ -123,7 +123,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     enableE2eeDisabled,
   }) => {
     const { t } = useTranslation();
-    const { activeChannel, client } = useChatClient();
+    const { activeChannel, client } = useChatCore();
     const recovery = useRecoveryPin();
     const { loadRestoreProgress, repairEncryptedChannel } = recovery;
     const { requestConfirm, confirmDialog } = useActionConfirm();

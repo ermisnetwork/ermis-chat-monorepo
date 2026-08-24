@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChannelSettings } from '@ermis-network/ermis-chat-react';
 import type { ChannelSettingsPanelProps } from '@ermis-network/ermis-chat-react';
-import { useChatClient } from '@ermis-network/ermis-chat-react';
+import { useChatCore } from '@ermis-network/ermis-chat-react';
 import { ArrowLeft, ShieldCheck, MessageSquareWarning, FolderKanban, X, Loader2 } from 'lucide-react';
 import { isGroupChannel } from '@ermis-network/ermis-chat-react';
 
@@ -12,7 +12,7 @@ export const UhmChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = ({
   channel,
 }) => {
   const { t } = useTranslation();
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const currentUserId = client?.userID;
   const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
 

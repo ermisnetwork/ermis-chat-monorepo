@@ -1,18 +1,42 @@
 import React, { createContext, useState, useCallback, useRef, useMemo } from 'react';
 import type { Channel, FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
-import type { Theme, ChatContextValue, ChatProviderProps, ReadStateEntry } from '../types';
+import type {
+  Theme,
+  ChatComposerContextValue,
+  ChatContextValue,
+  ChatCoreContextValue,
+  ChatMessagesContextValue,
+  ChatNavigationContextValue,
+  ChatProviderProps,
+  ReadStateEntry,
+} from '../types';
 import { ErmisCallProvider } from '../components/ErmisCallProvider';
 import { ErmisCallUI } from '../components/ErmisCallUI';
 import { ChatComponentsContext } from './ChatComponentsContext';
+import type { ChatComponentsContextValue } from './ChatComponentsContext';
 
-export type { Theme, ChatContextValue, ChatProviderProps } from '../types';
+export type {
+  Theme,
+  ChatComposerContextValue,
+  ChatContextValue,
+  ChatCoreContextValue,
+  ChatMessagesContextValue,
+  ChatNavigationContextValue,
+  ChatProviderProps,
+} from '../types';
 
 export const ChatContext = createContext<ChatContextValue | null>(null);
+export const ChatCoreContext = createContext<ChatCoreContextValue | null>(null);
+export const ChatMessagesContext = createContext<ChatMessagesContextValue | null>(null);
+export const ChatComposerContext = createContext<ChatComposerContextValue | null>(null);
+export const ChatNavigationContext = createContext<ChatNavigationContextValue | null>(null);
+
+const DEFAULT_COMPONENTS: ChatComponentsContextValue = {};
 
 export const ChatProvider: React.FC<ChatProviderProps> = ({
   client,
   children,
-  components = {},
+  components = DEFAULT_COMPONENTS,
   initialTheme = 'light',
   enableCall = false,
   callSessionId,
@@ -82,7 +106,42 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     draftsRef.current.clear();
   }, []);
 
-  const value: ChatContextValue = {
+  const coreValue = useMemo<ChatCoreContextValue>(() => ({
+    client,
+    activeChannel,
+    setActiveChannel,
+    theme,
+    setTheme,
+    enableCall,
+    syncMessages,
+    setDraft,
+    getDraft,
+    clearAllDrafts,
+  }), [client, activeChannel, setActiveChannel, theme, enableCall, syncMessages, setDraft, getDraft, clearAllDrafts]);
+
+  const messagesValue = useMemo<ChatMessagesContextValue>(() => ({
+    messages,
+    setMessages,
+    syncMessages,
+    readState,
+    setReadState,
+  }), [messages, syncMessages, readState]);
+
+  const composerValue = useMemo<ChatComposerContextValue>(() => ({
+    quotedMessage,
+    setQuotedMessage,
+    editingMessage,
+    setEditingMessage,
+    forwardingMessage,
+    setForwardingMessage,
+  }), [quotedMessage, editingMessage, forwardingMessage]);
+
+  const navigationValue = useMemo<ChatNavigationContextValue>(() => ({
+    jumpToMessageId,
+    setJumpToMessageId,
+  }), [jumpToMessageId]);
+
+  const value = useMemo<ChatContextValue>(() => ({
     client,
     activeChannel,
     setActiveChannel,
@@ -105,7 +164,23 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     setDraft,
     getDraft,
     clearAllDrafts,
-  };
+  }), [
+    client,
+    activeChannel,
+    setActiveChannel,
+    theme,
+    messages,
+    syncMessages,
+    quotedMessage,
+    editingMessage,
+    readState,
+    forwardingMessage,
+    jumpToMessageId,
+    enableCall,
+    setDraft,
+    getDraft,
+    clearAllDrafts,
+  ]);
 
   const CallUIView = CallUIComponent ? <CallUIComponent /> : (
     <ErmisCallUI
@@ -116,12 +191,20 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
 
   const content = (
     <ChatComponentsContext.Provider value={components}>
-      <ChatContext.Provider value={value}>
-        <div className={`ermis-chat ermis-chat--${theme}`}>
-          {children}
-          {enableCall && CallUIView}
-        </div>
-      </ChatContext.Provider>
+      <ChatCoreContext.Provider value={coreValue}>
+        <ChatMessagesContext.Provider value={messagesValue}>
+          <ChatComposerContext.Provider value={composerValue}>
+            <ChatNavigationContext.Provider value={navigationValue}>
+              <ChatContext.Provider value={value}>
+                <div className={`ermis-chat ermis-chat--${theme}`}>
+                  {children}
+                  {enableCall && CallUIView}
+                </div>
+              </ChatContext.Provider>
+            </ChatNavigationContext.Provider>
+          </ChatComposerContext.Provider>
+        </ChatMessagesContext.Provider>
+      </ChatCoreContext.Provider>
     </ChatComponentsContext.Provider>
   );
 

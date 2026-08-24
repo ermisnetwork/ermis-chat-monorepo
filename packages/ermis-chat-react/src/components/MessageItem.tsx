@@ -4,7 +4,7 @@ import { QuotedMessagePreview } from './QuotedMessagePreview';
 import { MessageActionsBox } from './MessageActionsBox';
 import { MessageReactions } from './MessageReactions';
 import { useChannelCapabilities } from '../hooks/useChannelCapabilities';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { formatTime, getMessageUserId, getUserDisplayName } from '../utils';
 import { isSystemMessage, isDeletedDisplayMessage, isStickerMessage, isSignalMessage, isPollMessage } from '../messageTypeUtils';
 
@@ -110,7 +110,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   onAddReactionClick,
   hideAvatar,
 }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const { hasCapability } = useChannelCapabilities();
 
   const canReact = hasCapability('send-reaction');

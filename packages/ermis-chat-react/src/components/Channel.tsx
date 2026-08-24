@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatComposer } from '../hooks/useChatComposer';
+import { useChatCore } from '../hooks/useChatCore';
 import { useChatComponents } from '../context/ChatComponentsContext';
 import { useBannedState } from '../hooks/useBannedState';
 import { useBlockedState } from '../hooks/useBlockedState';
@@ -28,7 +29,8 @@ export const Channel: React.FC<ChannelProps> = React.memo(({
   HeaderComponent,
   ForwardMessageModalComponent: ForwardMessageModalProp,
 }) => {
-  const { activeChannel, client, forwardingMessage, setForwardingMessage } = useChatClient();
+  const { activeChannel, client } = useChatCore();
+  const { forwardingMessage, setForwardingMessage } = useChatComposer();
   const { ForwardMessageModalComponent: ForwardMessageModalContext } = useChatComponents();
 
   const ForwardMessageModalView = ForwardMessageModalProp || ForwardMessageModalContext || ForwardMessageModal;

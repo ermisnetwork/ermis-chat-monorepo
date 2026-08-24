@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { Modal as DefaultModal } from './Modal';
 import { UserPicker } from './UserPicker';
 import { Avatar } from './Avatar';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { useChatComponents } from '../context/ChatComponentsContext';
 import { markChannelAsFullyQueried } from '../hooks/useChannelMessages';
 import type { CreateChannelE2eeToggleProps, CreateChannelModalProps, UserPickerUser } from '../types';
@@ -66,7 +66,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   SelectedBoxComponent,
   E2eeToggleComponent = DefaultE2eeToggle,
 }) => {
-  const { client, setActiveChannel } = useChatClient();
+  const { client, setActiveChannel } = useChatCore();
   const { ModalComponent } = useChatComponents();
   const Modal = ModalComponent || DefaultModal;
   const currentUserId = client?.userID;

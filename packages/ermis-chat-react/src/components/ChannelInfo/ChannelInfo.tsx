@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Virtualizer as _Virtualizer } from 'virtua';
 const Virtualizer = _Virtualizer as any;
-import { useChatClient } from '../../hooks/useChatClient';
+import { useChatCore } from '../../hooks/useChatCore';
 import { useBannedState } from '../../hooks/useBannedState';
 import { useBlockedState } from '../../hooks/useBlockedState';
 import { usePreviewState } from '../../hooks/usePreviewState';
@@ -310,7 +310,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     roleLabels,
   } = props;
 
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const channel = channelProp || activeChannel;

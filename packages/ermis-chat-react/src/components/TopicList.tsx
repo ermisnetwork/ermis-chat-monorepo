@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { VList as _VList, type VListHandle } from 'virtua';
 const VList = _VList as any;
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { useTopicGroupUpdates } from '../hooks/useTopicGroupUpdates';
 import { ChannelRow } from './ChannelList';
 import { ChannelItem } from './ChannelList';
@@ -63,7 +63,7 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
   systemMessageTranslations,
   signalMessageTranslations,
 }) => {
-  const { client, activeChannel, setActiveChannel } = useChatClient();
+  const { client, activeChannel, setActiveChannel } = useChatCore();
   const currentUserId = client.userID;
   const { topics } = useTopicGroupUpdates(channel, currentUserId);
 

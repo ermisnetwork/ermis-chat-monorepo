@@ -3,10 +3,22 @@ import './styles/index.css';
 
 // Context
 export { ChatProvider } from './context/ChatProvider';
-export type { ChatProviderProps, ChatContextValue, Theme } from './context/ChatProvider';
+export type {
+  ChatComposerContextValue,
+  ChatContextValue,
+  ChatCoreContextValue,
+  ChatMessagesContextValue,
+  ChatNavigationContextValue,
+  ChatProviderProps,
+  Theme,
+} from './context/ChatProvider';
 
 // Hooks
 export { useChatClient } from './hooks/useChatClient';
+export { useChatCore } from './hooks/useChatCore';
+export { useChatMessages } from './hooks/useChatMessages';
+export { useChatComposer } from './hooks/useChatComposer';
+export { useChatNavigation } from './hooks/useChatNavigation';
 export { useChatUser } from './hooks/useChatUser';
 export { useInviteChannels } from './hooks/useInviteChannels';
 export { useContactChannels } from './hooks/useContactChannels';

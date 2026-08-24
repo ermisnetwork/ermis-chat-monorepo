@@ -7,7 +7,9 @@ import { useBannedState } from '../hooks/useBannedState';
 import { useBlockedState } from '../hooks/useBlockedState';
 import { useChannelProfile } from '../hooks/useChannelData';
 import { useChannelMessages } from '../hooks/useChannelMessages';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
+import { useChatMessages } from '../hooks/useChatMessages';
+import { useChatNavigation } from '../hooks/useChatNavigation';
 import { useLoadMessages } from '../hooks/useLoadMessages';
 import { usePendingState } from '../hooks/usePendingState';
 import { useScrollToMessage } from '../hooks/useScrollToMessage';
@@ -47,6 +49,7 @@ const DefaultDateSeparator: React.FC<{ label: string }> = React.memo(({ label })
 
 /** Time gap threshold in ms: messages more than 5 minutes apart get a time separator */
 const TIME_GAP_THRESHOLD_MS = 5 * 60 * 1000;
+const BOTTOM_FOLLOW_SETTLE_MS = 96;
 
 function getTimestamp(date: Date | string | undefined): number {
   if (!date) return 0;
@@ -185,7 +188,9 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   GapIndicatorComponent,
   gapIndicatorLabel,
 }) => {
-  const { client, messages, readState, activeChannel, setActiveChannel, jumpToMessageId, setJumpToMessageId } = useChatClient();
+  const { client, activeChannel, setActiveChannel } = useChatCore();
+  const { messages, readState } = useChatMessages();
+  const { jumpToMessageId, setJumpToMessageId } = useChatNavigation();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending, inviteUpdateCount } = usePendingState(activeChannel, client.userID);
@@ -310,9 +315,6 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
       return;
     }
 
-    if (!smooth && handle.scrollSize > handle.viewportSize) {
-      handle.scrollTo(Math.max(0, handle.scrollSize - handle.viewportSize));
-    }
     handle.scrollToIndex(count - 1, { align: 'end', smooth });
   }, []);
 
@@ -381,6 +383,46 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
     return scrollSize - (scrollOffset + viewportSize) <= 160;
   }, [isAtBottomRef]);
+  const bottomFollowFrameRef = useRef<number | null>(null);
+  const bottomFollowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const followBottomAfterRender = useCallback(
+    (force = false) => {
+      const shouldFollow = force || isAtBottomRef.current || isNearBottom();
+      if (!shouldFollow) return;
+
+      isAtBottomRef.current = true;
+      holdScrollLoadLock(750);
+
+      if (bottomFollowFrameRef.current !== null) {
+        cancelAnimationFrame(bottomFollowFrameRef.current);
+      }
+      if (bottomFollowTimerRef.current !== null) {
+        clearTimeout(bottomFollowTimerRef.current);
+      }
+
+      bottomFollowFrameRef.current = requestAnimationFrame(() => {
+        bottomFollowFrameRef.current = null;
+        if (!force && !isAtBottomRef.current && !isNearBottom()) return;
+
+        scrollToBottom(false);
+        bottomFollowTimerRef.current = setTimeout(() => {
+          bottomFollowTimerRef.current = null;
+          if (force || isAtBottomRef.current || isNearBottom()) {
+            scrollToBottom(false);
+          }
+        }, BOTTOM_FOLLOW_SETTLE_MS);
+      });
+    },
+    [holdScrollLoadLock, isAtBottomRef, isNearBottom, scrollToBottom],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (bottomFollowFrameRef.current !== null) cancelAnimationFrame(bottomFollowFrameRef.current);
+      if (bottomFollowTimerRef.current !== null) clearTimeout(bottomFollowTimerRef.current);
+    };
+  }, [activeChannel?.cid]);
 
   const { highlightedId, scrollToMessage, jumpToLatest } = useScrollToMessage({
     vlistRef,
@@ -403,7 +445,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   useChannelMessages({
     scrollToBottom,
     isNearBottom,
-    holdScrollLoadLock,
+    followBottomAfterRender,
     jumpingRef,
     isAtBottomRef,
     onChannelSwitch: useCallback(() => {
@@ -432,13 +474,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     if (loadingMoreRef.current || loadingNewerRef.current) return;
 
     lastAutoScrollKeyRef.current = key;
-    isAtBottomRef.current = true;
-    holdScrollLoadLock(750);
-
-    scrollToBottom(false);
-    setTimeout(() => scrollToBottom(false), 80);
-    setTimeout(() => scrollToBottom(false), 250);
-  }, [activeChannel?.cid, currentUserId, messages, scrollToBottom, isNearBottom, holdScrollLoadLock]);
+    followBottomAfterRender(true);
+  }, [activeChannel?.cid, currentUserId, messages, isNearBottom, followBottomAfterRender]);
 
   const hasOverlay = Boolean(isClosedTopic || isPending || isBanned || isBlocked || isSkipped);
   const prevOverlayRef = useRef(hasOverlay);

@@ -1,9 +1,9 @@
 import { Button } from '@/components/ui/button'
 import { STORAGE_KEYS } from '@/utils/constants'
-import { useChatClient } from '@ermis-network/ermis-chat-react'
+import { useChatCore } from '@ermis-network/ermis-chat-react'
 
 export function ThemeToggle() {
-  const { theme, setTheme } = useChatClient()
+  const { theme, setTheme } = useChatCore()
   const isDark = theme === 'dark'
 
   const toggleTheme = () => {

@@ -1,6 +1,12 @@
 import { ChannelState } from './channel_state';
 import { normalizeFileName, isVideoFile, buildAttachmentPayload } from './attachment_utils';
 import type { VoiceRecordingMeta } from './attachment_utils';
+import {
+  getPresignedUploadSize,
+  uploadMultipartPresignedFile,
+  uploadSinglePresignedFile,
+} from './presigned_upload';
+import type { StandardPresignedUploadResponse } from './presigned_upload';
 import { encodeEncryptionChannelFields } from './encryption/encoding';
 import {
   enrichWithUserInfo,
@@ -72,7 +78,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   disconnected: boolean;
   /** Timer handle for debounced IndexedDB persist of sync cursor on WS events */
   private _persistSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
+  private _pendingStandardAttachmentSends = new Map<
+    string,
+    {
+      message: Message<ErmisChatGenerics>;
+      files: File[];
+      localAttachments: any[];
+      displayOverrides?: Map<number, Record<string, unknown>>;
+      inFlight?: Promise<SendMessageAPIResponse<ErmisChatGenerics>>;
+    }
+  >();
 
   /**
    * Initializes a new Channel class instance.
@@ -197,6 +212,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (isE2ee && encryptionMgr?.initialized) {
       try {
         const response = await encryptionMgr.sendMessage(this.type, this.id, this.cid, message.text || '', messageId, {
+          local_created_at: createdAtIso,
           parent_id: message.parent_id,
           quoted_message_id: message.quoted_message_id,
           mentioned_users: message.mentioned_users,
@@ -296,7 +312,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
   }
 
-  private _buildPendingE2eeLocalAttachments(
+  private _buildPendingLocalAttachments(
     files: Blob[],
     displayOverrides?: Map<number, Record<string, unknown>>,
   ): any[] {
@@ -343,7 +359,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           type: 'video',
           asset_url: objectUrl,
           url: objectUrl,
-          thumb_url: objectUrl,
+          thumb_url: '',
         };
       }
       return {
@@ -355,7 +371,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     });
   }
 
-  private _revokePendingE2eeLocalAttachments(attachments: any[]) {
+  private _revokePendingLocalAttachments(attachments: any[]) {
     if (typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
     attachments.forEach((attachment) => {
       const objectUrl = attachment?.local_object_url;
@@ -378,7 +394,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   private _dispatchLocalMessageStateEvent(
-    type: 'message.new' | 'message.updated' | 'message.deleted',
+    type: 'message.new' | 'message.updated' | 'message.deleted' | 'message.pinned' | 'message.unpinned',
     message?: MessageResponse<ErmisChatGenerics> | FormatMessageResponse<ErmisChatGenerics>,
   ) {
     if (!message) return;
@@ -396,6 +412,32 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     this._callChannelListeners(event);
     this.getClient().dispatchEvent(event);
+  }
+
+  private _setLocalMessagePinState(
+    messageID: string,
+    pinned: boolean,
+    pinnedAt?: Date | string | null,
+  ): FormatMessageResponse<ErmisChatGenerics> | undefined {
+    const existing = this._findLocalMessageById(messageID);
+    if (!existing) return undefined;
+
+    const nextPinnedAt = pinned ? new Date(pinnedAt || Date.now()) : null;
+    this.state.updateMessageById(messageID, (message) => ({
+      ...message,
+      pinned,
+      pinned_at: nextPinnedAt,
+    }));
+
+    const updated = this._findLocalMessageById(messageID);
+    if (!updated) return undefined;
+    if (pinned) {
+      this.state.addPinnedMessage(updated as unknown as MessageResponse<ErmisChatGenerics>);
+    } else {
+      this.state.removePinnedMessage(updated as unknown as MessageResponse<ErmisChatGenerics>);
+    }
+    this._dispatchLocalMessageStateEvent(pinned ? 'message.pinned' : 'message.unpinned', updated);
+    return updated;
   }
 
   async enqueueE2eeAttachmentMessage(
@@ -417,7 +459,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const quotedMessage =
       (message as any).quoted_message ||
       (message.quoted_message_id ? this.state.findMessage(message.quoted_message_id) : undefined);
-    const localAttachments = this._buildPendingE2eeLocalAttachments(files, options.displayOverrides);
+    const localAttachments = this._buildPendingLocalAttachments(files, options.displayOverrides);
     const now = new Date().toISOString();
     const optimisticMessage = {
       ...message,
@@ -443,6 +485,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       messageId,
       files,
       options: {
+        local_created_at: now,
         parent_id: message.parent_id,
         quoted_message_id: message.quoted_message_id,
         mentioned_users: message.mentioned_users,
@@ -470,7 +513,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
       },
       onSuccess: (response: any) => {
-        this._revokePendingE2eeLocalAttachments(localAttachments);
+        this._revokePendingLocalAttachments(localAttachments);
         if (response?.message) {
           const responseUserId =
             response.message.user?.id || (response.message as any).user_id || this.getClient().userID || '';
@@ -505,9 +548,224 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return { message: optimisticMessage };
   }
 
+  /**
+   * Adds a standard attachment message to local state immediately, then uploads
+   * every file in the background before sending the final storage URLs.
+   */
+  async enqueueAttachmentMessage(
+    message: Message<ErmisChatGenerics>,
+    files: File[],
+    options: { displayOverrides?: Map<number, Record<string, unknown>> } = {},
+  ) {
+    if (this._isEffectiveE2ee()) {
+      return await this.enqueueE2eeAttachmentMessage(message, files, options);
+    }
+    if (files.length === 0) {
+      return await this.sendMessage(message);
+    }
+    if (!message.id) {
+      message = { ...message, id: randomId() };
+    }
+
+    const messageId = message.id!;
+    const quotedMessage =
+      (message as any).quoted_message ||
+      (message.quoted_message_id ? this.state.findMessage(message.quoted_message_id) : undefined);
+    const localAttachments = this._buildPendingLocalAttachments(files, options.displayOverrides);
+    const lastMessage = this.state.messages[this.state.messages.length - 1];
+    const lastCreatedAt = lastMessage?.created_at ? new Date(lastMessage.created_at).getTime() : 0;
+    const now = new Date(Math.max(Date.now(), lastCreatedAt + 1)).toISOString();
+    const optimisticMessage = {
+      ...message,
+      id: messageId,
+      attachments: localAttachments,
+      quoted_message: quotedMessage,
+      status: 'sending',
+      created_at: now,
+      updated_at: now,
+      user: this.getClient().user,
+      user_id: this.getClient().userID,
+      type: message.type || 'regular',
+    } as unknown as MessageResponse<ErmisChatGenerics>;
+
+    this._pendingStandardAttachmentSends.set(messageId, {
+      message,
+      files,
+      localAttachments,
+      displayOverrides: options.displayOverrides,
+    });
+    this.state.addMessageSorted(optimisticMessage);
+    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+
+    void this._processStandardAttachmentMessage(messageId).catch(() => undefined);
+    return { message: optimisticMessage };
+  }
+
+  private async _processStandardAttachmentMessage(
+    messageId: string,
+  ): Promise<SendMessageAPIResponse<ErmisChatGenerics>> {
+    const record = this._pendingStandardAttachmentSends.get(messageId);
+    if (!record) throw new Error(`Pending attachment message ${messageId} was not found`);
+    if (record.inFlight) return await record.inFlight;
+
+    const execute = async () => {
+      const attachments: Attachment[] = [];
+
+      try {
+        for (let index = 0; index < record.files.length; index += 1) {
+          const originalFile = record.files[index];
+          let lastProgressPercentage = -1;
+          let lastProgressAt = 0;
+          const normalizedName = normalizeFileName(originalFile.name);
+          const file =
+            normalizedName === originalFile.name
+              ? originalFile
+              : new File([originalFile], normalizedName, {
+                  type: originalFile.type,
+                  lastModified: originalFile.lastModified,
+                });
+
+          this.state.updateMessageById(messageId, (msg) => ({
+            ...msg,
+            status: 'sending',
+            attachments: (msg.attachments || []).map((attachment: any, attachmentIndex: number) =>
+              attachmentIndex === index
+                ? { ...attachment, upload_status: 'uploading', upload_progress: 0 }
+                : attachment,
+            ),
+          }));
+          this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+
+          const uploadResponse = await this.uploadFilePresigned(
+            file,
+            file.name,
+            file.type || 'application/octet-stream',
+            (progress) => {
+              const percentage = Math.max(0, Math.min(100, Math.round(progress.percentage)));
+              const now = Date.now();
+              if (
+                percentage === lastProgressPercentage ||
+                (percentage < 100 && lastProgressPercentage >= 0 && now - lastProgressAt < 50)
+              ) {
+                return;
+              }
+              lastProgressPercentage = percentage;
+              lastProgressAt = now;
+              this.state.updateMessageById(messageId, (msg) => ({
+                ...msg,
+                status: 'sending',
+                attachments: (msg.attachments || []).map((attachment: any, attachmentIndex: number) =>
+                  attachmentIndex === index
+                    ? {
+                        ...attachment,
+                        upload_status: 'uploading',
+                        upload_progress: percentage,
+                      }
+                    : attachment,
+                ),
+              }));
+              this._dispatchLocalMessageStateEvent(
+                'message.updated',
+                this._findLocalMessageById(messageId) as any,
+              );
+            },
+          );
+
+          let thumbUrl = '';
+          if (isVideoFile(file)) {
+            try {
+              const thumbBlob = await this.getThumbBlobVideo(originalFile);
+              if (thumbBlob) {
+                const thumbFile = new File([thumbBlob], `thumb_${file.name}.jpg`, { type: 'image/jpeg' });
+                const thumbResponse = await this.uploadFilePresigned(thumbFile, thumbFile.name, 'image/jpeg');
+                thumbUrl = thumbResponse.file;
+              }
+            } catch {
+              // A missing thumbnail must not fail the original video message.
+            }
+          }
+
+          const override = record.displayOverrides?.get(index) || {};
+          const voiceMeta =
+            (override as any).attachment_type === 'voiceRecording'
+              ? {
+                  waveform_data: Array.isArray((override as any).waveform_data)
+                    ? (override as any).waveform_data
+                    : [],
+                  duration: Number((override as any).duration) || 0,
+                }
+              : undefined;
+          attachments.push({
+            ...buildAttachmentPayload(file, uploadResponse.file, thumbUrl, voiceMeta),
+            ...override,
+          } as Attachment);
+        }
+
+        const response = await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(
+          this._channelURL() + '/message',
+          { message: { ...record.message, attachments } },
+        );
+        const responseMessage = response?.message || (response as any);
+
+        if (responseMessage && (responseMessage.id || responseMessage.text)) {
+          const responseUserId =
+            responseMessage.user?.id ||
+            (responseMessage as any).user_id ||
+            this.getClient().userID ||
+            '';
+          const confirmedMessage = {
+            ...responseMessage,
+            status: 'received',
+            user: pickUserWithDisplayName(
+              responseUserId,
+              responseMessage.user,
+              this.getClient().state.users[responseUserId],
+              this.getClient().user,
+            ),
+          } as MessageResponse<ErmisChatGenerics>;
+          this._removeLocalMessageById(messageId);
+          this.state.addMessageSorted(confirmedMessage, true, true, 'current');
+          this._dispatchLocalMessageStateEvent('message.updated', confirmedMessage);
+        } else {
+          this.state.updateMessageById(messageId, (msg) => ({
+            ...msg,
+            attachments,
+            status: 'received',
+          }));
+          this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+        }
+
+        this._revokePendingLocalAttachments(record.localAttachments);
+        this._pendingStandardAttachmentSends.delete(messageId);
+        return response;
+      } catch (error: any) {
+        const isOfflineError =
+          !error.response ||
+          error.code === 'ERR_NETWORK' ||
+          error.isWSFailure ||
+          !this.getClient().wsConnection?.isHealthy;
+        this.state.updateMessageById(messageId, (msg) => ({
+          ...msg,
+          status: isOfflineError ? 'failed_offline' : 'error',
+          attachments: (msg.attachments || []).map((attachment: any) => ({
+            ...attachment,
+            upload_status: 'failed',
+          })),
+        }));
+        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+        throw error;
+      }
+    };
+
+    record.inFlight = execute().finally(() => {
+      const current = this._pendingStandardAttachmentSends.get(messageId);
+      if (current === record) current.inFlight = undefined;
+    });
+    return await record.inFlight;
+  }
   async cancelPendingE2eeSend(messageId: string) {
     const stateMsg = this.state.messages.find((message) => message.id === messageId);
-    this._revokePendingE2eeLocalAttachments(((stateMsg as any)?.attachments || []) as any[]);
+    this._revokePendingLocalAttachments(((stateMsg as any)?.attachments || []) as any[]);
     await this.getClient().encryptionManager?.cancelPendingE2eeSend(messageId);
     if (stateMsg) {
       this._removeLocalMessageById(messageId);
@@ -518,6 +776,20 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async retryMessage(messageId: string) {
     const stateMsg = this.state.messages.find((m) => m.id === messageId);
     if (!stateMsg) throw new Error(`Message ${messageId} not found in state`);
+
+    if (this._pendingStandardAttachmentSends.has(messageId)) {
+      this.state.updateMessageById(messageId, (msg) => ({
+        ...msg,
+        status: 'sending',
+        attachments: (msg.attachments || []).map((attachment: any) => ({
+          ...attachment,
+          upload_status: 'uploading',
+          upload_progress: 0,
+        })),
+      }));
+      this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+      return await this._processStandardAttachmentMessage(messageId);
+    }
 
     this.state.updateMessageStatus(messageId, 'sending');
 
@@ -662,13 +934,35 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async pinMessage(messageID: string) {
-    return await this.getClient().post(this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageID}/pin`);
+    const previous = this._findLocalMessageById(messageID);
+    const wasPinned = Boolean(previous?.pinned || previous?.pinned_at);
+    const previousPinnedAt = previous?.pinned_at;
+    this._setLocalMessagePinState(messageID, true);
+
+    try {
+      return await this.getClient().post(
+        this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageID}/pin`,
+      );
+    } catch (error) {
+      this._setLocalMessagePinState(messageID, wasPinned, previousPinnedAt);
+      throw error;
+    }
   }
 
   async unpinMessage(messageID: string) {
-    return await this.getClient().post(
-      this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageID}/unpin`,
-    );
+    const previous = this._findLocalMessageById(messageID);
+    const wasPinned = Boolean(previous?.pinned || previous?.pinned_at);
+    const previousPinnedAt = previous?.pinned_at;
+    this._setLocalMessagePinState(messageID, false);
+
+    try {
+      return await this.getClient().post(
+        this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageID}/unpin`,
+      );
+    } catch (error) {
+      this._setLocalMessagePinState(messageID, wasPinned, previousPinnedAt);
+      throw error;
+    }
   }
 
   async pin() {
@@ -766,60 +1060,42 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     contentType: string,
     onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void,
   ): Promise<{ file: string }> {
-    // 1. Request presigned URL
-    const presignResp = await this.getClient().post<{
-      attachment_id: string;
-      upload_url: string;
-      expires_in_secs: number;
-    }>(`${this._channelURL()}/file/presign`, {
-      file_name: name,
-      content_type: contentType,
-    });
+    const presignResp = await this.getClient().post<StandardPresignedUploadResponse>(
+      `${this._channelURL()}/file/presign`,
+      {
+        file_name: name,
+        content_type: contentType,
+        file_size: getPresignedUploadSize(file),
+      },
+    );
 
-    // 2. Upload directly to storage (R2/S3)
-    await new Promise<void>((resolve, reject) => {
-      if (typeof XMLHttpRequest !== 'undefined') {
-        const xhr = new XMLHttpRequest();
-        xhr.open('PUT', presignResp.upload_url);
-        xhr.setRequestHeader('Content-Type', contentType);
-
-        xhr.upload.onprogress = ({ loaded, total }) => {
-          if (total > 0 && onProgress) {
-            onProgress({ loaded, total, percentage: Math.round((loaded / total) * 100) });
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status < 300) resolve();
-          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
-        };
-
-        xhr.onerror = () => reject(new Error('Network error'));
-        xhr.send(file as any);
-      } else {
-        // Fallback for Node.js
-        fetch(presignResp.upload_url, {
-          method: 'PUT',
-          headers: { 'Content-Type': contentType },
-          body: file as any,
-        })
-          .then((res) => {
-            if (res.ok) resolve();
-            else reject(new Error(`Upload failed: HTTP ${res.status}`));
-          })
-          .catch(reject);
-      }
-    });
-
-    // 3. Confirm upload
-    const confirmResp = await this.getClient().post<{ file: string }>(`${this._channelURL()}/file/confirm`, {
+    const confirmPayload: Record<string, unknown> = {
       attachment_id: presignResp.attachment_id,
       file_name: name,
       content_type: contentType,
-    });
+    };
 
-    return confirmResp;
+    if (presignResp.upload_mode === 'multipart') {
+      const multipart = presignResp.multipart;
+      const multipartUploadId = multipart?.upload_id || multipart?.multipart_upload_id;
+      if (!multipart || !multipartUploadId) {
+        throw new Error('Presigned multipart response does not contain an upload ID');
+      }
+      confirmPayload.multipart_upload_id = multipartUploadId;
+      confirmPayload.parts = await uploadMultipartPresignedFile(file, multipart, onProgress);
+    } else {
+      if (!presignResp.upload_url) {
+        throw new Error('Presigned single upload response does not contain an upload URL');
+      }
+      await uploadSinglePresignedFile(presignResp.upload_url, file, contentType, onProgress);
+    }
+
+    return await this.getClient().post<{ file: string }>(
+      `${this._channelURL()}/file/confirm`,
+      confirmPayload,
+    );
   }
+
   /**
    * Pre-process files (normalize names), upload them in parallel,
    * generate video thumbnails, and build attachment payloads.
@@ -2033,6 +2309,31 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this.listeners[key] = this.listeners[key].filter((value) => value !== callback);
   }
 
+  private _mergeChannelDataFromEvent(eventChannel: ChannelResponse<ErmisChatGenerics>): void {
+    const previousData = this.data;
+    const mergedData = {
+      ...previousData,
+      ...eventChannel,
+      own_capabilities: eventChannel.own_capabilities ?? previousData?.own_capabilities,
+    };
+
+    // Direct-channel names and avatars are client-derived from the other member.
+    // Channel update payloads (including the E2EE enable event) can omit these
+    // display fields, so re-derive them just as query/watch hydration does.
+    if (this.type === 'messaging') {
+      const members = Object.values(this.state.members);
+      if (members.length > 0) {
+        mergedData.name = getDirectChannelName(members, this.getClient().userID || '');
+        mergedData.image = getDirectChannelImage(members, this.getClient().userID || '');
+      } else {
+        mergedData.name = previousData?.name;
+        mergedData.image = typeof previousData?.image === 'string' ? previousData.image : undefined;
+      }
+    }
+
+    this.data = mergedData;
+  }
+
   // eslint-disable-next-line sonarjs/cognitive-complexity
   async _handleChannelEvent(event: Event<ErmisChatGenerics>) {
     const channel = this;
@@ -2554,7 +2855,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       case 'message.pinned':
         if (event.message) {
           const user = getUserInfo(event.message.user?.id || '', users);
-          event.message.user = user;
+          event.message = {
+            ...event.message,
+            user,
+            pinned: true,
+            pinned_at: event.message.pinned_at || event.created_at || new Date().toISOString(),
+          };
           channelState.addPinnedMessage(event.message);
           channelState.addMessageSorted(event.message, false, false);
         }
@@ -2562,7 +2868,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       case 'message.unpinned':
         if (event.message) {
           const user = getUserInfo(event.message.user?.id || '', users);
-          event.message.user = user;
+          event.message = { ...event.message, user, pinned: false, pinned_at: null };
           channelState.removePinnedMessage(event.message);
           channelState.addMessageSorted(event.message, false, false);
         }
@@ -2706,11 +3012,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         break;
       case 'channel.updated':
         if (event.channel) {
-          channel.data = {
-            ...channel.data,
-            ...event.channel,
-            own_capabilities: event.channel?.own_capabilities ?? channel.data?.own_capabilities,
-          };
+          channel._mergeChannelDataFromEvent(event.channel);
 
           const encryptionMgr = this.getClient().encryptionManager;
           const channelData = event.channel as any;
@@ -3230,7 +3532,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             reaction_groups: messageAny.reaction_groups ?? currentAny.reaction_groups,
             own_reactions: messageAny.own_reactions ?? currentAny.own_reactions,
             pinned: message.pinned ?? currentAny.pinned,
-            pinned_at: message.pinned_at ?? currentAny.pinned_at,
+            pinned_at: message.pinned_at !== undefined ? message.pinned_at : currentAny.pinned_at,
           } as any;
           const quotedMessage = resolveQuotedMessage(mergedMessage);
           if (quotedMessage) mergedMessage.quoted_message = quotedMessage;
@@ -3266,7 +3568,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         reaction_groups: messageAny.reaction_groups ?? storedMessage.reaction_groups,
         own_reactions: messageAny.own_reactions ?? storedMessage.own_reactions,
         pinned: message.pinned ?? storedMessage.pinned,
-        pinned_at: message.pinned_at ?? storedMessage.pinned_at,
+        pinned_at: message.pinned_at !== undefined ? message.pinned_at : storedMessage.pinned_at,
         status: message.status,
       } as any;
       const quotedMessage = resolveQuotedMessage(mergedMessage);
@@ -3731,7 +4033,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         case 'message.pinned':
           if (event.message) {
-            event.message.user = event.message.user || (event as any).sender || event.user;
+            event.message = {
+              ...event.message,
+              user: event.message.user || (event as any).sender || event.user,
+              pinned: true,
+              pinned_at: event.message.pinned_at || event.created_at || new Date().toISOString(),
+            };
             channelState.addPinnedMessage(event.message as any);
             channelState.addMessageSorted(event.message as any, true);
           }
@@ -3739,7 +4046,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         case 'message.unpinned':
           if (event.message) {
-            event.message.user = event.message.user || (event as any).sender || event.user;
+            event.message = {
+              ...event.message,
+              user: event.message.user || (event as any).sender || event.user,
+              pinned: false,
+              pinned_at: null,
+            };
             channelState.removePinnedMessage(event.message as any);
             channelState.addMessageSorted(event.message as any, true);
           }
@@ -3747,11 +4059,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         case 'channel.updated':
           if (event.channel) {
-            this.data = {
-              ...this.data,
-              ...event.channel,
-              own_capabilities: event.channel?.own_capabilities ?? this.data?.own_capabilities,
-            };
+            this._mergeChannelDataFromEvent(event.channel);
           }
           break;
 

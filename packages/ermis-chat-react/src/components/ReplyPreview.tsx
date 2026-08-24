@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { replaceMentionsForPreview, buildUserMap, getMessageUserId, getUserDisplayName } from '../utils';
 import {
   isStickerMessage,
@@ -70,7 +70,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   onDismiss,
   replyingToLabel = 'Replying to',
 }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
 
   const userMap = useMemo<Record<string, string>>(() => {
     return buildUserMap(activeChannel?.state, client?.state?.users);

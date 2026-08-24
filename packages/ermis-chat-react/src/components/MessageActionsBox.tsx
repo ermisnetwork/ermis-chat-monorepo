@@ -1,7 +1,8 @@
 import React, { useCallback } from 'react';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import { useMessageActions } from '../hooks/useMessageActions';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
+import { useChatComposer } from '../hooks/useChatComposer';
 import type { MessageActionsBoxProps } from '../types';
 import { Dropdown as DefaultDropdown, closeAllDropdowns } from './Dropdown';
 import { useChatComponents } from '../context/ChatComponentsContext';
@@ -27,7 +28,8 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
   deleteForMeLabel = 'Delete for me',
   deleteForEveryoneLabel = 'Delete for everyone',
 }) => {
-  const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel } = useChatClient();
+  const { activeChannel } = useChatCore();
+  const { setQuotedMessage, setEditingMessage, setForwardingMessage } = useChatComposer();
   const { DropdownComponent } = useChatComponents();
   const Dropdown = DropdownComponent || DefaultDropdown;
   const [anchorRect, setAnchorRect] = React.useState<DOMRect | null>(null);

@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Hash, MessageSquare, Globe, Users, Search } from 'lucide-react'
-import { useChatClient, Avatar, getUserDisplayName } from '@ermis-network/ermis-chat-react'
+import { useChatCore, Avatar, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import { useGlobalSearch } from '@/hooks/useGlobalSearch'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
 import type { TopicResult } from '@/hooks/useGlobalSearch'
@@ -248,7 +248,7 @@ function SearchPrompt() {
 
 export function SearchPanel({ searchQuery, onSelectChannel }: SearchPanelProps) {
   const { t } = useTranslation()
-  const { client, setActiveChannel } = useChatClient()
+  const { client, setActiveChannel } = useChatCore()
 
   const [joiningId, setJoiningId] = useState<string | null>(null)
   const [creatingUserId, setCreatingUserId] = useState<string | null>(null)

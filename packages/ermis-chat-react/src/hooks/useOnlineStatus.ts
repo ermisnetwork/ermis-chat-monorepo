@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isFriendChannel } from '../channelRoleUtils';
 
 export type OnlineStatus = 'online' | 'offline' | 'unknown';
@@ -22,7 +22,7 @@ export function useOnlineStatus(
   userId: string | undefined,
   channels: Channel[],
 ): OnlineStatus {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const currentUserId = client.userID;
 
   // Find the friend channel for this user — memoized to avoid re-scans.

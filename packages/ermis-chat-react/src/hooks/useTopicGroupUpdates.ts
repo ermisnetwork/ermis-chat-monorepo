@@ -4,7 +4,7 @@ import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
 import { isDirectChannel } from '../channelTypeUtils';
 import { getLastMessagePreview } from '../utils';
 import { SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 
 /** Preview data for the most recent message across the topic group */
 export type LatestMessagePreview = {
@@ -49,7 +49,7 @@ export function useTopicGroupUpdates(
   updateCount: number;
   latestMessagePreview: LatestMessagePreview | null;
 } {
-  const { client: chatClient, activeChannel } = useChatClient();
+  const { client: chatClient, activeChannel } = useChatCore();
   const [updateCount, setUpdateCount] = useState(0);
   const bump = useCallback(() => setUpdateCount((c) => c + 1), []);
 

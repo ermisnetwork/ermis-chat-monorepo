@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { Avatar } from './Avatar';
 import { Modal as DefaultModal } from './Modal';
 import { useChatComponents } from '../context/ChatComponentsContext';
@@ -19,7 +19,7 @@ const DefaultForwardChannelItem: React.FC<ForwardChannelItemProps> = React.memo(
   onToggle,
   AvatarComponent,
 }) => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const isTopic = isTopicChannel(channel);
   const parentCid = channel.data?.parent_cid as string | undefined;
   const parent = parentCid ? client.activeChannels[parentCid] : null;
@@ -74,7 +74,7 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   const { ModalComponent } = useChatComponents();
   const Modal = ModalComponent || DefaultModal;
   const backdropRef = useRef<HTMLDivElement>(null);
-  const { client } = useChatClient();
+  const { client } = useChatCore();
 
   const {
     search,

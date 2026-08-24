@@ -6,6 +6,7 @@ export const STORAGE_KEYS = {
   LOCALE: 'locale',
   THEME: 'theme',
   NOTIFICATION_SOUND_ENABLED: 'notification_sound_enabled',
+  RECOVERY_GATE_ACKNOWLEDGED_CIDS: 'recovery_gate_acknowledged_cids',
 } as const;
 
 export const NOTIFICATION_CONFIG = {

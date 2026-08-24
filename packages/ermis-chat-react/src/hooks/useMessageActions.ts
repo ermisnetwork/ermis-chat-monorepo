@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { useChannelCapabilities } from './useChannelCapabilities';
 import { usePreviewState } from './usePreviewState';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
@@ -25,7 +25,7 @@ export type MessageActionList = {
 };
 
 export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: boolean): MessageActionList => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const { isGroupChannel: isTeam, isOwner, hasCapability } = useChannelCapabilities();
   const { isPreviewMode } = usePreviewState(activeChannel, client?.userID);
 

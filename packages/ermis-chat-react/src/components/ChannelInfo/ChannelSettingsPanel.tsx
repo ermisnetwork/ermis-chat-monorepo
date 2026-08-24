@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Panel as DefaultPanel } from '../Panel';
 import { useChatComponents } from '../../context/ChatComponentsContext';
-import { useChatClient } from '../../hooks/useChatClient';
+import { useChatCore } from '../../hooks/useChatCore';
 import type { ChannelSettingsPanelProps } from '../../types';
 import { isGroupChannel } from '../../channelTypeUtils';
 import { CHANNEL_ROLES } from '../../channelRoleUtils';
@@ -26,7 +26,7 @@ export const ChannelSettingsPanel: React.FC<ChannelSettingsPanelProps> = React.m
   topicsFeatureName = 'Topics',
   topicsFeatureDescription = 'Allow users to reply to messages with dedicated conversation threads. Disabling this hides the reply-in-topic button for everyone.',
 }) => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const { PanelComponent } = useChatComponents();
   const Panel = PanelComponent || DefaultPanel;
   const currentUserId = client?.userID;

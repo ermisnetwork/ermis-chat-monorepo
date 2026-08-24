@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isDirectChannel } from '../channelTypeUtils';
 import { isOwnerMember } from '../channelRoleUtils';
 
@@ -14,7 +14,7 @@ import { isOwnerMember } from '../channelRoleUtils';
  * Re-renders automatically when related events arrive.
  */
 export function useContactChannels(): Channel[] {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [updateCount, setUpdateCount] = useState(0);
 
   const forceUpdate = useCallback(() => setUpdateCount((c) => c + 1), []);

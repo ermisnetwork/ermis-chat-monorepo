@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MessageSquare, Mail, Phone, Hash, Copy } from 'lucide-react';
-import { useChatClient, Avatar, isDirectChannel, useContactChannels } from '@ermis-network/ermis-chat-react';
+import { useChatCore, Avatar, isDirectChannel, useContactChannels } from '@ermis-network/ermis-chat-react';
 import { UhmModal } from '@/components/custom/UhmModal';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -21,7 +21,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onSendMessage,
 }) => {
   const { t } = useTranslation();
-  const { client, activeChannel } = useChatClient();
+  const { client, activeChannel } = useChatCore();
   const contacts = useContactChannels();
 
   const handleCopy = (text: string) => {

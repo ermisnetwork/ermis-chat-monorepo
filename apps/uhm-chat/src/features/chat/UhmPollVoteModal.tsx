@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useChatClient, Avatar } from '@ermis-network/ermis-chat-react';
+import { useChatCore, Avatar } from '@ermis-network/ermis-chat-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Check, BarChart2, ArrowLeft } from 'lucide-react';
@@ -29,7 +29,7 @@ export const UhmPollVoteModal: React.FC<UhmPollVoteModalProps> = ({
   votersByOption,
   initialViewingVotersOption = null,
 }) => {
-  const { activeChannel, syncMessages } = useChatClient();
+  const { activeChannel, syncMessages } = useChatCore();
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);

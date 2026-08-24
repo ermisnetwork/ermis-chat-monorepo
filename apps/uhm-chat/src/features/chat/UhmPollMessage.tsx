@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import type { MessageRendererProps } from '@ermis-network/ermis-chat-react';
-import { useChatClient, Avatar, getUserDisplayName, useChannelCapabilities } from '@ermis-network/ermis-chat-react';
+import { useChatCore, Avatar, getUserDisplayName, useChannelCapabilities } from '@ermis-network/ermis-chat-react';
 import { useTranslation } from 'react-i18next';
 import { Users, BarChart2, Lock } from 'lucide-react';
 import { UhmPollVoteModal } from './UhmPollVoteModal';
@@ -59,7 +59,7 @@ export const VoterAvatars: React.FC<{
 
 /** Read-only poll card displayed in the message list */
 export const UhmPollMessage: React.FC<MessageRendererProps> = ({ message }) => {
-  const { client, activeChannel } = useChatClient();
+  const { client, activeChannel } = useChatCore();
   const { t } = useTranslation();
   const [modalInitialViewOption, setModalInitialViewOption] = useState<string | null>(null);
   const [isVoteModalOpen, setIsVoteModalOpen] = useState(false);

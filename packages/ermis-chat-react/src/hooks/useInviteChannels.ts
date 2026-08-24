@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isPendingMember } from '../channelRoleUtils';
 import { isTopicChannel } from '../channelTypeUtils';
 
@@ -11,7 +11,7 @@ import { isTopicChannel } from '../channelTypeUtils';
  * Re-renders automatically when related events (e.g., invites, accepts, deletes) arrive.
  */
 export function useInviteChannels(): Channel[] {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [updateCount, setUpdateCount] = useState(0);
 
   useEffect(() => {

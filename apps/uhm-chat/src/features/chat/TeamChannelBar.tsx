@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  useChatClient,
+  useChatCore,
   Avatar,
   isDirectChannel,
   isGroupChannel,
@@ -44,7 +44,7 @@ function getAggregatedUnread(ch: Channel): number {
  */
 export function TeamChannelBar({ activeTeamChannel, onSwitchChannel }: TeamChannelBarProps) {
 
-  const { client } = useChatClient()
+  const { client } = useChatCore()
   const [channels, setChannels] = useState<Channel[]>([])
   // Counter to force re-render when topic messages arrive
   const [, setUpdateTick] = useState(0)

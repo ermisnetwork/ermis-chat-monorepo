@@ -10,7 +10,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
-import { useMessageActions, useChatClient, MessageQuickReactions } from '@ermis-network/ermis-chat-react';
+import {
+  MessageQuickReactions,
+  useChatComposer,
+  useChatCore,
+  useMessageActions,
+} from '@ermis-network/ermis-chat-react';
 import { UhmConfirmDialog } from './UhmConfirmDialog';
 
 /* ----------------------------------------------------------
@@ -43,7 +48,8 @@ export function UhmMessageActions({
   onDeleteForMe: onDeleteForMeProp,
 }: UhmMessageActionsProps) {
   const { t } = useTranslation();
-  const { setQuotedMessage, setEditingMessage, setForwardingMessage, activeChannel, syncMessages } = useChatClient();
+  const { activeChannel, syncMessages } = useChatCore();
+  const { setQuotedMessage, setEditingMessage, setForwardingMessage } = useChatComposer();
   
   if (message.type === 'signal') {
     return null;

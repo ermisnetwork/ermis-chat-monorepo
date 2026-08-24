@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Search, X, Loader2, ArrowLeft } from 'lucide-react';
 import { useMessageSearch, HighlightedText, replaceMentionsForPreview, formatRelativeDate, getUserDisplayName } from '@ermis-network/ermis-chat-react';
 import type { MessageSearchPanelProps } from '@ermis-network/ermis-chat-react';
-import { useChatClient } from '@ermis-network/ermis-chat-react';
+import { useChatCore, useChatNavigation } from '@ermis-network/ermis-chat-react';
 
 export const UhmMessageSearchPanel: React.FC<MessageSearchPanelProps> = ({
   isOpen,
@@ -13,7 +13,8 @@ export const UhmMessageSearchPanel: React.FC<MessageSearchPanelProps> = ({
   debounceMs = 500,
 }) => {
   const { t } = useTranslation();
-  const { setJumpToMessageId, client } = useChatClient();
+  const { client } = useChatCore();
+  const { setJumpToMessageId } = useChatNavigation();
   const {
     query,
     setQuery: _setQuery,

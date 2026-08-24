@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Search, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useContactChannels, Avatar, useChatClient, getUserDisplayName } from '@ermis-network/ermis-chat-react'
+import { useContactChannels, Avatar, useChatCore, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
 
 interface ContactsPanelProps {
@@ -15,7 +15,7 @@ type GroupedContacts = { letter: string; channels: Channel[] }[]
 export function ContactsPanel({ onBack }: ContactsPanelProps) {
   const { t } = useTranslation()
   const contacts = useContactChannels()
-  const { client, setActiveChannel } = useChatClient()
+  const { client, setActiveChannel } = useChatCore()
   const [searchQuery, setSearchQuery] = useState('')
 
   // Get the display name for a contact channel (the other user's name)

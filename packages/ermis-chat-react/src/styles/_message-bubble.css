@@ -635,7 +635,7 @@
 }
 
 .ermis-attachment-aspect-box--4-3 {
-  padding-bottom: 75%;
+  aspect-ratio: 4 / 3;
 }
 
 /* Blurred thumbnail preview (shown while full image loads) */

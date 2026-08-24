@@ -16,7 +16,7 @@ import {
   isImage,
   isVideo,
   useForwardMessage,
-  useChatClient,
+  useChatCore,
   getMessageUserId,
   getUserDisplayName,
 } from '@ermis-network/ermis-chat-react'
@@ -31,7 +31,7 @@ export function UhmForwardMessageModal({
   onDismiss,
 }: ForwardMessageModalProps) {
   const { t } = useTranslation()
-  const { client } = useChatClient()
+  const { client } = useChatCore()
   const {
     search,
     setSearch,

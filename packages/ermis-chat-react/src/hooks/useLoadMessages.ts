@@ -2,7 +2,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import { formatMessage } from '@ermis-network/ermis-chat-sdk';
 import type { VListHandle } from 'virtua';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
+import { useChatMessages } from './useChatMessages';
 
 const LOAD_MORE_THRESHOLD = 200;
 
@@ -50,13 +51,22 @@ export function useLoadMessages({
   scrollLoadLockRef,
   loadMoreLimit = 25,
 }: UseLoadMessagesOptions): UseLoadMessagesReturn {
-  const { activeChannel, setMessages } = useChatClient();
+  const { activeChannel } = useChatCore();
+  const { setMessages } = useChatMessages();
+  const activeChannelCidRef = useRef(activeChannel?.cid);
+  activeChannelCidRef.current = activeChannel?.cid;
+  const channelGenerationRef = useRef(0);
   const [hasMore, setHasMore] = useState(true);
   const [hasNewer, setHasNewer] = useState(false);
   const [shiftMode, setShiftMode] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const loadingNewerRef = useRef(false);
 
   // Reset shiftMode on channel switch so initial load isn't treated as a prepend
   useEffect(() => {
+    channelGenerationRef.current += 1;
+    loadingMoreRef.current = false;
+    loadingNewerRef.current = false;
     setShiftMode(false);
   }, [activeChannel?.cid]);
 
@@ -78,13 +88,13 @@ export function useLoadMessages({
   hasNewerRef.current = hasNewer;
   const isAtBottomRef = useRef(true);
 
-  // Concurrency guards
-  const loadingMoreRef = useRef(false);
-  const loadingNewerRef = useRef(false);
-
   const loadMore = useCallback(async () => {
     if (!activeChannel || loadingMoreRef.current) return;
 
+    const requestCid = activeChannel.cid;
+    const requestGeneration = channelGenerationRef.current;
+    const isCurrentRequest = () =>
+      channelGenerationRef.current === requestGeneration && activeChannelCidRef.current === requestCid;
     const currentMessages = messagesRef.current;
     const oldestMessage = currentMessages[0];
     if (!oldestMessage?.id) return;
@@ -102,6 +112,7 @@ export function useLoadMessages({
         olderRaw = await activeChannel.queryMessagesLessThanId(oldestMessage.id, loadMoreLimit);
       }
 
+      if (!isCurrentRequest()) return;
       if (olderRaw.length === 0) {
         setHasMore(false);
         return;
@@ -110,6 +121,7 @@ export function useLoadMessages({
       const olderFormatted = olderRaw.map((msg: any) => formatMessage(msg));
       setShiftMode(true);
       setMessages((prev) => {
+        if (!isCurrentRequest()) return prev;
         const unique = dedupMessages(olderFormatted, prev);
         if (unique.length === 0) {
           setHasMore(false);
@@ -117,15 +129,19 @@ export function useLoadMessages({
         return [...unique, ...prev];
       });
     } catch (err) {
-      console.error('Failed to load more messages:', err);
+      if (isCurrentRequest()) console.error('Failed to load more messages:', err);
     } finally {
-      loadingMoreRef.current = false;
+      if (isCurrentRequest()) loadingMoreRef.current = false;
     }
   }, [activeChannel, loadMoreLimit, setMessages]);
 
   const loadNewer = useCallback(async () => {
     if (!activeChannel || loadingNewerRef.current) return;
 
+    const requestCid = activeChannel.cid;
+    const requestGeneration = channelGenerationRef.current;
+    const isCurrentRequest = () =>
+      channelGenerationRef.current === requestGeneration && activeChannelCidRef.current === requestCid;
     const currentMessages = messagesRef.current;
     const newestMessage = currentMessages[currentMessages.length - 1];
     if (!newestMessage?.id) return;
@@ -143,6 +159,7 @@ export function useLoadMessages({
         newerRaw = await activeChannel.queryMessagesGreaterThanId(newestMessage.id, loadMoreLimit);
       }
 
+      if (!isCurrentRequest()) return;
       if (newerRaw.length === 0) {
         setHasNewer(false);
         return;
@@ -150,6 +167,7 @@ export function useLoadMessages({
 
       const newerFormatted = newerRaw.map((msg: any) => formatMessage(msg));
       setMessages((prev) => {
+        if (!isCurrentRequest()) return prev;
         const unique = dedupMessages(newerFormatted, prev);
         if (unique.length === 0) {
           setHasNewer(false);
@@ -157,9 +175,9 @@ export function useLoadMessages({
         return [...prev, ...unique];
       });
     } catch (err) {
-      console.error('Failed to load newer messages:', err);
+      if (isCurrentRequest()) console.error('Failed to load newer messages:', err);
     } finally {
-      loadingNewerRef.current = false;
+      if (isCurrentRequest()) loadingNewerRef.current = false;
     }
   }, [activeChannel, loadMoreLimit, setMessages]);
 

@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatComposer } from '../hooks/useChatComposer';
+import { useChatCore } from '../hooks/useChatCore';
 import { useBannedState } from '../hooks/useBannedState';
 import { useBlockedState } from '../hooks/useBlockedState';
 import { usePendingState } from '../hooks/usePendingState';
@@ -64,7 +65,8 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
   DragAndDropOverlayComponent = DefaultDragAndDropOverlay,
   maxCharsLabel = 'Tin nhắn không được vượt quá 5000 ký tự.',
 }) => {
-  const { client, activeChannel, syncMessages, quotedMessage, setQuotedMessage, editingMessage, setEditingMessage, setDraft, getDraft } = useChatClient();
+  const { client, activeChannel, syncMessages, setDraft, getDraft } = useChatCore();
+  const { quotedMessage, setQuotedMessage, editingMessage, setEditingMessage } = useChatComposer();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { VList as _VList, type VListHandle } from 'virtua';
 const VList = _VList as any;
 import type { Channel, Event, ChannelFilters } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
 import { useOnlineUsers } from '../hooks/useOnlineUsers';
 import { getLastMessagePreview } from '../utils';
@@ -60,7 +60,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   actionIcons,
   isOnline,
 }) => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const currentUserId = client.userID;
 
   // Subscribe to channel.updated so that when name/image/description change,
@@ -472,7 +472,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   signalMessageTranslations,
   showTopicPills = false,
 }) => {
-  const { client, activeChannel, setActiveChannel } = useChatClient();
+  const { client, activeChannel, setActiveChannel } = useChatCore();
   const { ChannelListErrorIndicator } = useChatComponents();
 
   const [channels, setChannels] = useState<Channel[]>([]);

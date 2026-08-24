@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isDirectChannel, isGroupChannel } from '../channelTypeUtils';
 import { isPendingMember } from '../channelRoleUtils';
 
@@ -20,7 +20,7 @@ export function useChannelListUpdates(
   setChannels: React.Dispatch<React.SetStateAction<Channel[]>>,
   onOwnMessageNew?: () => void,
 ): void {
-  const { client, activeChannel, setActiveChannel } = useChatClient();
+  const { client, activeChannel, setActiveChannel } = useChatCore();
 
   // Ref to always have the latest activeChannel without re-subscribing
   const activeChannelRef = useRef(activeChannel);

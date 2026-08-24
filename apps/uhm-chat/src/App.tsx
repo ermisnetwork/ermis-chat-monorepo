@@ -233,6 +233,10 @@ function AppContent() {
   );
 
   const clearSavedSession = useCallback(() => {
+    const savedUserId = localStorage.getItem(STORAGE_KEYS.USER_ID);
+    if (savedUserId) {
+      sessionStorage.removeItem(`${STORAGE_KEYS.RECOVERY_GATE_ACKNOWLEDGED_CIDS}:${savedUserId}`);
+    }
     localStorage.removeItem(STORAGE_KEYS.TOKEN);
     localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
     localStorage.removeItem(STORAGE_KEYS.USER_ID);

@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatClient, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
+import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatCore, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
 import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
@@ -44,8 +44,12 @@ import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
 import { useNotification } from '@/hooks/useNotification'
 import { useSyncStatus } from '@/hooks/useSyncStatus'
+import { useRecoveryGateAcknowledgement } from '@/hooks/useRecoveryGateAcknowledgement'
 import { isSafari } from '@/utils/browser'
 import { toast } from 'sonner'
+
+const CHANNEL_LIST_FILTERS = { type: ['messaging', 'team'] } as any
+const UHM_MESSAGE_RENDERERS = { signal: UhmSignalMessage, poll: UhmPollMessage }
 
 const isEffectiveE2eeChannel = (channel: ChannelType | null | undefined, client: any) => {
   if (channel?.data?.mls_enabled === true) return true
@@ -66,8 +70,9 @@ const isUserGatedRestoreProgress = (progress: RestoreProgressRecord | null | und
 export function ChatPage() {
   const { t, i18n } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { client, activeChannel, setActiveChannel } = useChatClient()
+  const { client, activeChannel, setActiveChannel } = useChatCore()
   const recovery = useRecoveryPin()
+  const recoveryGateAcknowledgement = useRecoveryGateAcknowledgement(client?.userID)
   const { status, retryConnection } = useConnectionStatus(client)
   const totalUnreadCount = useTotalUnreadCount()
   useNotification(activeChannel)
@@ -150,7 +155,6 @@ export function ChatPage() {
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [rotatingKeyCid, setRotatingKeyCid] = useState<string | null>(null)
   const [isRecoveryGateOpen, setIsRecoveryGateOpen] = useState(false)
-  const [recoveryGateDismissed, setRecoveryGateDismissed] = useState(false)
   const [activeRestoreProgress, setActiveRestoreProgress] = useState<RestoreProgressRecord | null>(null)
   const [activeRestoreProgressCheckedCid, setActiveRestoreProgressCheckedCid] = useState<string | null>(null)
   const activeRestoreEnqueuedCidRef = useRef<string | null>(null)
@@ -337,10 +341,9 @@ export function ChatPage() {
       setIsRecoveryGateOpen(false)
       return
     }
-    if (status.hasIncompleteRestore && !recoveryGateDismissed) {
-      setIsRecoveryGateOpen(true)
-    }
-  }, [recovery.recoveryStatus, recoveryGateDismissed])
+    const alreadyAcknowledged = recoveryGateAcknowledgement.areAllAcknowledged(status.incompleteChannels)
+    setIsRecoveryGateOpen(status.hasIncompleteRestore && !alreadyAcknowledged)
+  }, [recovery.recoveryStatus, recoveryGateAcknowledgement])
 
   useEffect(() => {
     if (!activeChannel?.id || !isEffectiveE2eeChannel(activeChannel, client)) return
@@ -355,7 +358,7 @@ export function ChatPage() {
       }
 
       if (
-        !recoveryGateDismissed &&
+        !recoveryGateAcknowledgement.isAcknowledged(activeChannel.cid) &&
         recovery.recoveryStatus?.hasVault &&
         recovery.recoveryStatus?.incompleteChannels.includes(activeChannel.cid) &&
         activeRestorePromptedCidRef.current !== activeChannel.cid
@@ -379,7 +382,7 @@ export function ChatPage() {
     }
 
     if (
-      !recoveryGateDismissed &&
+      !recoveryGateAcknowledgement.isAcknowledged(activeRestoreProgress.cid) &&
       recovery.recoveryStatus?.hasVault &&
       activeRestorePromptedCidRef.current !== activeRestoreProgress.cid
     ) {
@@ -394,10 +397,20 @@ export function ChatPage() {
     activeChannel?.data?.parent_cid,
     activeRestoreProgress,
     activeRestoreProgressCheckedCid,
-    recoveryGateDismissed,
+    recoveryGateAcknowledgement,
     client,
     recovery,
   ])
+
+  const acknowledgeCurrentRecoveryGate = useCallback(() => {
+    const cids = [...(recovery.recoveryStatus?.incompleteChannels || [])]
+    if (activeRestoreProgress && isUserGatedRestoreProgress(activeRestoreProgress)) {
+      cids.push(activeRestoreProgress.cid)
+    }
+    recoveryGateAcknowledgement.acknowledge(cids)
+    activeRestorePromptedCidRef.current = activeChannel?.cid || null
+    setIsRecoveryGateOpen(false)
+  }, [activeChannel?.cid, activeRestoreProgress, recovery.recoveryStatus, recoveryGateAcknowledgement])
 
   // Localized action labels passed to SDK ChannelList/TopicList
   const actionLabels = useMemo(() => ({
@@ -467,6 +480,27 @@ export function ChatPage() {
     durationUnitMin: t('signal_messages.durationUnitMin'),
     durationUnitSec: t('signal_messages.durationUnitSec'),
   }), [t])
+
+  const pendingInviteeLabel = useCallback(
+    (name?: string) => t('overlays.pendingInviteeLabel', { name: name || '' }),
+    [t],
+  )
+  const pinnedMessagesLabel = useCallback(
+    (count: number) => t('overlays.pinnedMessagesLabel', { count }),
+    [t],
+  )
+  const typingIndicatorLabel = useCallback((users: Array<{ id: string; name?: string }>) => {
+    const names = users.map((user) => user.name || user.id)
+    if (names.length === 1) return t('overlays.typing.isTyping', { name: names[0] })
+    if (names.length === 2) {
+      return t('overlays.typing.areTyping', { name1: names[0], name2: names[1] })
+    }
+    return t('overlays.typing.multipleTyping', {
+      name1: names[0],
+      name2: names[1],
+      count: names.length - 2,
+    })
+  }, [t])
 
   const activeRestoreTotal = useMemo(() => {
     if (!activeRestoreProgress) return 0
@@ -931,7 +965,7 @@ export function ChatPage() {
               {/* ChannelList — always visible; clipped at 66px shows only avatars */}
               <div className="flex-1 overflow-hidden relative">
                 <ChannelList
-                  filters={{ type: ['messaging', 'team'] } as any}
+                  filters={CHANNEL_LIST_FILTERS}
                   showPendingInvites={false}
                   onTopicDrillDown={handleTopicDrillDown}
                   onAddTopic={openCreateTopicModal}
@@ -1082,7 +1116,7 @@ export function ChatPage() {
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
-            messageRenderers={{ signal: UhmSignalMessage, poll: UhmPollMessage }}
+            messageRenderers={UHM_MESSAGE_RENDERERS}
             dateLocale={i18n.language}
             bannedOverlayTitle={t('overlays.bannedTitle', 'You are banned')}
             bannedOverlaySubtitle={t('overlays.bannedSubtitle', 'You have been banned from this channel and cannot send or receive messages.')}
@@ -1103,8 +1137,8 @@ export function ChatPage() {
             GapIndicatorComponent={MessageGapIndicator}
             blockedOverlayTitle={t('overlays.blockedTitle')}
             blockedOverlaySubtitle={t('overlays.blockedSubtitle')}
-            pendingInviteeLabel={(name) => t('overlays.pendingInviteeLabel', { name })}
-            pinnedMessagesLabel={(count) => t('overlays.pinnedMessagesLabel', { count })}
+            pendingInviteeLabel={pendingInviteeLabel}
+            pinnedMessagesLabel={pinnedMessagesLabel}
             seeAllLabel={t('overlays.seeAll')}
             collapseLabel={t('overlays.collapse')}
             unpinLabel={t('overlays.unpin')}
@@ -1115,20 +1149,7 @@ export function ChatPage() {
             encryptedMessageFailedLabel={t('chat.encrypted_message_failed', 'Encrypted message could not be decrypted')}
             encryptedMessageDecryptingLabel={t('chat.encrypted_message_decrypting', 'Decrypting encrypted message...')}
             encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
-            typingIndicatorLabel={(users) => {
-              const names = users.map((u) => u.name || u.id);
-              if (names.length === 1) {
-                return t('overlays.typing.isTyping', { name: names[0] });
-              }
-              if (names.length === 2) {
-                return t('overlays.typing.areTyping', { name1: names[0], name2: names[1] });
-              }
-              return t('overlays.typing.multipleTyping', {
-                name1: names[0],
-                name2: names[1],
-                count: names.length - 2
-              });
-            }}
+            typingIndicatorLabel={typingIndicatorLabel}
             deletedMessageLabel={t('chat.deleted_message', 'This message was deleted')}
             systemMessageTranslations={systemMessageTranslations}
             signalMessageTranslations={signalMessageTranslations}
@@ -1221,20 +1242,11 @@ export function ChatPage() {
       />
       <UhmRecoveryPinDialog
         isOpen={isRecoveryGateOpen}
-        onClose={() => {
-          activeRestorePromptedCidRef.current = activeChannel?.cid || null
-          setRecoveryGateDismissed(true)
-          setIsRecoveryGateOpen(false)
-        }}
+        onClose={acknowledgeCurrentRecoveryGate}
         variant="gate"
-        onSkip={() => {
-          activeRestorePromptedCidRef.current = activeChannel?.cid || null
-          setRecoveryGateDismissed(true)
-          setIsRecoveryGateOpen(false)
-        }}
+        onSkip={acknowledgeCurrentRecoveryGate}
         onUnlocked={() => {
-          setRecoveryGateDismissed(false)
-          setIsRecoveryGateOpen(false)
+          acknowledgeCurrentRecoveryGate()
           recovery.refresh()
           refreshActiveRestoreProgress()
         }}

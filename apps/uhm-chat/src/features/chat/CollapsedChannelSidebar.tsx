@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { Menu } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  useChatClient,
+  useChatCore,
   Avatar,
   isGroupChannel,
   isTopicChannel,
@@ -48,7 +48,7 @@ export function CollapsedChannelSidebar({
   onSwitchChannel,
   onMenuClick,
 }: CollapsedChannelSidebarProps) {
-  const { client } = useChatClient()
+  const { client } = useChatCore()
   const { inviteCount } = useInviteCount()
   const [updateTick, setUpdateTick] = useState(0)
 

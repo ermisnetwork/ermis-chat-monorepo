@@ -105,6 +105,28 @@ function isEpochStaleError(err: any): boolean {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getEpochStaleCurrentEpoch(err: any): number | undefined {
+  const data = err?.response?.data || err?.data || {};
+  const candidates = [
+    data.current_group_epoch,
+    data.current_epoch,
+    data.group_epoch,
+    data.details?.current_group_epoch,
+    data.details?.current_epoch,
+  ];
+  for (const candidate of candidates) {
+    const epoch = Number(candidate);
+    if (Number.isFinite(epoch) && epoch >= 0) return epoch;
+  }
+
+  const message = String(data.message || err?.message || err || '');
+  const match = message.match(/current(?:\s+group)?\s+epoch(?:\s+is)?\s*[:=]?\s*(\d+)/i);
+  if (!match) return undefined;
+  const epoch = Number(match[1]);
+  return Number.isFinite(epoch) ? epoch : undefined;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function isE2eeAttachmentInvalidError(err: any): boolean {
   const data = err?.response?.data || err?.data || err;
   const reason = typeof data?.reason === 'string' ? data.reason : '';
@@ -321,6 +343,8 @@ type QueuedE2eeAttachmentSendParams = {
   messageId: string;
   files: Blob[];
   options?: {
+    /** Client-side ordering anchor for the optimistic message. Never sent to the API. */
+    local_created_at?: string;
     parent_id?: string;
     quoted_message_id?: string;
     mentioned_users?: string[];
@@ -6447,6 +6471,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       fallback?.user,
       userId === this.userId ? this.client?.user : undefined,
     );
+    const envelopeMsgSeq = Number((envelope as any).msg_seq);
+    const envelopeLastEventSeq = Number((envelope as any).last_event_seq);
     return {
       id: envelope.id,
       cid,
@@ -6473,6 +6499,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       mentioned_users: (envelope as any).mentioned_users || fallback?.mentioned_users,
       mentioned_all:
         (envelope as any).mentioned_all !== undefined ? (envelope as any).mentioned_all : fallback?.mentioned_all,
+      msg_seq:
+        Number.isFinite(envelopeMsgSeq) && envelopeMsgSeq > 0 ? envelopeMsgSeq : fallback?.msg_seq,
+      last_event_seq:
+        Number.isFinite(envelopeLastEventSeq) && envelopeLastEventSeq > 0
+          ? envelopeLastEventSeq
+          : fallback?.last_event_seq,
     };
   }
 
@@ -6862,6 +6894,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       user,
       type: stored.type || envelope.type || 'regular',
       created_at: stored.created_at,
+      msg_seq: stored.msg_seq ?? envelope.msg_seq,
+      last_event_seq: stored.last_event_seq ?? envelope.last_event_seq,
       // Decrypted Standard content
       content_type: 'standard',
       text: stored.text,
@@ -7572,6 +7606,126 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
   }
 
+  /** Replace only the stale MLS group, preserving plaintext/message caches. */
+  private async _rejoinEpochStaleGroup(
+    channelType: string,
+    channelId: string,
+    e2eeGroupId: string,
+  ): Promise<number> {
+    const providerSnapshot = this.provider.to_bytes();
+    const groupSnapshot = this.groups.get(e2eeGroupId) || null;
+    const groupMarkerSnapshot = await this.storage.loadGroupState(e2eeGroupId);
+
+    try {
+      if (groupSnapshot && typeof groupSnapshot.delete_state === 'function') {
+        groupSnapshot.delete_state(this.provider);
+      }
+      this.groups.delete(e2eeGroupId);
+      this._channelReadyUntil.delete(e2eeGroupId);
+      await this.storage.deleteGroup(e2eeGroupId);
+      await this._persistProvider();
+
+      const joinResult = await this.joinExternal(channelType, channelId, e2eeGroupId);
+      await this.syncAfterExternalJoin(channelType, channelId, e2eeGroupId);
+      sdkLog('info', '[Encryption] epoch_stale recovery: external rejoin completed', {
+        cid: e2eeGroupId,
+        epoch: joinResult.epoch,
+      });
+      return this.getEpoch(e2eeGroupId);
+    } catch (err) {
+      this.provider = wasmModule.Provider.from_bytes(new Uint8Array(providerSnapshot));
+      if (groupSnapshot) {
+        this.groups.set(e2eeGroupId, groupSnapshot);
+      } else {
+        this.groups.delete(e2eeGroupId);
+      }
+      if (groupMarkerSnapshot !== null && groupMarkerSnapshot !== undefined) {
+        await this.storage.saveGroupState(e2eeGroupId, groupMarkerSnapshot);
+      } else {
+        await this.storage.deleteGroup(e2eeGroupId);
+      }
+      await this._persistProvider();
+      sdkLog('warn', '[Encryption] epoch_stale recovery: external rejoin failed, restored local group', {
+        cid: e2eeGroupId,
+        err,
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Catch a scope up after Bellboy rejects an application message as epoch_stale.
+   * The normal scope cursor is tried first. If it has already moved past a missed
+   * commit, replay from the membership/E2EE boundary; protocol processing is
+   * idempotent and skips commits already represented by the local group.
+   */
+  private async _recoverEpochStaleGroup(
+    channelType: string,
+    channelId: string,
+    e2eeGroupId: string,
+    staleError: unknown,
+  ): Promise<number> {
+    const startingEpoch = this.getEpoch(e2eeGroupId);
+    const serverEpoch = getEpochStaleCurrentEpoch(staleError);
+    const hasCaughtUp = (localEpoch: number) =>
+      serverEpoch !== undefined ? localEpoch >= serverEpoch : localEpoch > startingEpoch;
+    const groupParts = channelPartsFromCid(e2eeGroupId);
+    const syncChannelType = groupParts?.channelType || channelType;
+    const syncChannelId = groupParts?.channelId || channelId;
+
+    await this.ensureChannelReady(syncChannelType, syncChannelId, e2eeGroupId, {
+      source: 'epoch_stale',
+    });
+
+    let localEpoch = this.getEpoch(e2eeGroupId);
+    if (hasCaughtUp(localEpoch)) return localEpoch;
+
+    const activeScopeChannel = this._getActiveChannel(e2eeGroupId);
+    let replayCursor: EventCursor;
+    if (activeScopeChannel) {
+      replayCursor = this._membershipBoundedEventCursor(activeScopeChannel, null);
+    } else {
+      const savedCursor = await this._loadScopeSyncCursor(e2eeGroupId);
+      replayCursor = savedCursor
+        ? { created_at: this._initialSyncCursor(savedCursor.created_at), event_id: ZERO_EVENT_ID }
+        : this._nowEventCursor();
+    }
+
+    sdkLog('warn', '[Encryption] epoch_stale recovery: replaying scope before retry', {
+      cid: e2eeGroupId,
+      starting_epoch: startingEpoch,
+      local_epoch: localEpoch,
+      server_epoch: serverEpoch,
+      replay_cursor: replayCursor,
+    });
+    await this._syncChannelFromCursor(e2eeGroupId, replayCursor, 100);
+
+    localEpoch = this.getEpoch(e2eeGroupId);
+    if (hasCaughtUp(localEpoch)) return localEpoch;
+
+    let rejoinError: unknown;
+    if (serverEpoch !== undefined && localEpoch < serverEpoch) {
+      sdkLog('warn', '[Encryption] epoch_stale recovery: replay stayed behind, rejoining latest group', {
+        cid: e2eeGroupId,
+        local_epoch: localEpoch,
+        server_epoch: serverEpoch,
+      });
+      try {
+        localEpoch = await this._rejoinEpochStaleGroup(syncChannelType, syncChannelId, e2eeGroupId);
+      } catch (err) {
+        rejoinError = err;
+      }
+      if (hasCaughtUp(localEpoch)) return localEpoch;
+    }
+
+    const recoveryError = new Error(
+      `[Encryption] Could not recover stale group for ${e2eeGroupId}: local epoch ${localEpoch}` +
+        (serverEpoch !== undefined ? `, server epoch ${serverEpoch}` : ''),
+    ) as Error & { cause?: unknown };
+    recoveryError.cause = rejoinError || staleError;
+    throw recoveryError;
+  }
+
   /**
    * Send an encrypted E2EE message.
    *
@@ -7588,6 +7742,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     text: string,
     messageId: string,
     options: {
+      /** Client-side ordering anchor for the optimistic message. Never sent to the API. */
+      local_created_at?: string;
       parent_id?: string;
       quoted_message_id?: string;
       mentioned_users?: string[];
@@ -7620,6 +7776,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     text: string,
     messageId: string,
     options: {
+      /** Client-side ordering anchor for the optimistic message. Never sent to the API. */
+      local_created_at?: string;
       parent_id?: string;
       quoted_message_id?: string;
       mentioned_users?: string[];
@@ -7664,6 +7822,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     // Strip encrypted fields — only envelope metadata goes to server
     const {
+      local_created_at: _localCreatedAt,
       attachments: _a,
       sticker_url: _s,
       poll_type: _pt,
@@ -7744,7 +7903,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     } catch (err) {
       if (isEpochStaleError(err)) {
         sdkLog('warn', '[Encryption] sendMessage: epoch_stale — syncing group and retrying...');
-        await this.sync();
+        await this._recoverEpochStaleGroup(channelType, channelId, e2eeGroupId, err);
         // Re-encrypt with updated epoch after sync
         ciphertext = this.encryptMessage(e2eeGroupId, payload, aad);
         group = this.getGroup(e2eeGroupId)!;
@@ -7799,6 +7958,15 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     // Save to local DB with full decrypted Standard content
     const now = new Date().toISOString();
+    const serverMessage =
+      response?.message && typeof response.message === 'object'
+        ? (response.message as Record<string, any>)
+        : {};
+    const localCreatedAt = this._dateishToIso(options.local_created_at);
+    const serverCreatedAt = this._dateishToIso(serverMessage.created_at);
+    const serverUpdatedAt = this._dateishToIso(serverMessage.updated_at);
+    const serverMsgSeq = Number(serverMessage.msg_seq);
+    const serverLastEventSeq = Number(serverMessage.last_event_seq);
     const storedMsg: StoredMessage = {
       id: messageId,
       cid,
@@ -7815,7 +7983,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         this.client?.user,
         this.userId ? this.client?.state?.users?.[this.userId] : undefined,
       ),
-      created_at: now,
+      // Keep the optimistic timestamp as the local ordering anchor. E2EE sends
+      // are serialized, so replacing it with each request completion time can
+      // temporarily move an earlier message below newer optimistic messages.
+      created_at: localCreatedAt || serverCreatedAt || now,
+      updated_at: serverUpdatedAt,
+      msg_seq: Number.isFinite(serverMsgSeq) && serverMsgSeq > 0 ? serverMsgSeq : undefined,
+      last_event_seq:
+        Number.isFinite(serverLastEventSeq) && serverLastEventSeq > 0 ? serverLastEventSeq : undefined,
       type: this._messageTypeForPayload(payload),
       parent_id: options.parent_id,
       quoted_message_id: options.quoted_message_id,
@@ -7840,6 +8015,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     return {
       ...response,
       message: await this._buildFullMessageWithQuoted(storedMsg, {
+        ...serverMessage,
         forward_cid: options.forward_cid,
         forward_message_id: options.forward_message_id,
         forward_parent_cid: options.forward_parent_cid,
@@ -7944,7 +8120,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     } catch (err) {
       if (isEpochStaleError(err)) {
         sdkLog('warn', '[Encryption] updateMessage: epoch_stale — syncing group and retrying...');
-        await this.sync();
+        await this._recoverEpochStaleGroup(channelType, channelId, e2eeGroupId, err);
         ciphertext = this.encryptMessage(e2eeGroupId, payload);
         group = this.getGroup(e2eeGroupId)!;
         response = await this.e2eeClient!.updateMessage(channelType, channelId, messageId, {

@@ -7,7 +7,7 @@ import type {
   RestoreProgressRecord,
 } from '@ermis-network/ermis-chat-sdk';
 
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 
 export type RecoveryPinStatus = 'idle' | 'working' | 'ready' | 'locked' | 'error';
 
@@ -76,7 +76,7 @@ const requireEncryptionManager = (client: unknown): any => {
 };
 
 export const useRecoveryPin = (): UseRecoveryPinReturn => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [status, setStatus] = useState<RecoveryPinStatus>('idle');
   const [error, setError] = useState<Error | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatusInfo | null>(null);

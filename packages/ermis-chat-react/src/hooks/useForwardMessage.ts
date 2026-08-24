@@ -6,7 +6,7 @@ import type {
   FormatMessageResponse,
 } from '@ermis-network/ermis-chat-sdk';
 import { createForwardMessagePayload } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { removeAccents, buildUserMap, getUserDisplayName } from '../utils';
 import { isPendingMember, isSkippedMember } from '../channelRoleUtils';
 
@@ -140,7 +140,7 @@ async function materializeForwardSourceAttachments(
 }
 
 export function useForwardMessage(message: FormatMessageResponse, onDismiss: () => void) {
-  const { client, activeChannel } = useChatClient();
+  const { client, activeChannel } = useChatCore();
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);

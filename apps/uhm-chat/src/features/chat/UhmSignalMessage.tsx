@@ -1,12 +1,12 @@
 import React from 'react'
 import type { MessageRendererProps } from '@ermis-network/ermis-chat-react'
-import { useChatClient, useCallContext } from '@ermis-network/ermis-chat-react'
+import { useChatCore, useCallContext } from '@ermis-network/ermis-chat-react'
 import { parseSignalMessage, CallType } from '@ermis-network/ermis-chat-sdk'
 import { Video, Phone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 export const UhmSignalMessage: React.FC<MessageRendererProps> = ({ message, signalMessageTranslations }) => {
-  const { client, activeChannel } = useChatClient()
+  const { client, activeChannel } = useChatCore()
   const callContext = useCallContext()
   const { t } = useTranslation()
 

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isDirectChannel } from '../channelTypeUtils';
 import { isOwnerMember } from '../channelRoleUtils';
 
 export const useContactCount = () => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [contactCount, setContactCount] = useState(0);
 
   useEffect(() => {

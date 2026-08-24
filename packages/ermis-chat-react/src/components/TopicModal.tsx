@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import type { CreateTopicData, EditTopicData } from '@ermis-network/ermis-chat-sdk';
 import { Modal as DefaultModal } from './Modal';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { useChatComponents } from '../context/ChatComponentsContext';
 import type { TopicModalProps } from '../types';
 
@@ -24,7 +24,7 @@ export const TopicModal: React.FC<TopicModalProps> = React.memo(({
   saveButtonLabel = topic ? 'Save' : 'Create',
   savingButtonLabel = topic ? 'Saving...' : 'Creating...',
 }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const { ModalComponent } = useChatComponents();
   const Modal = ModalComponent || DefaultModal;
   

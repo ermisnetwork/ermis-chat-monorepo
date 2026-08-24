@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useContext } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { usePendingState } from '../hooks/usePendingState';
 import { Avatar } from './Avatar';
 import type { ChannelHeaderProps } from '../types';
@@ -43,7 +43,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   offlineLabel = 'Offline',
   OnlineIndicatorComponent,
 }) => {
-  const { activeChannel, client, enableCall } = useChatClient();
+  const { activeChannel, client, enableCall } = useChatCore();
   const { isPending } = usePendingState(activeChannel, client.userID);
   const callContext = useContext(ErmisCallContext);
 

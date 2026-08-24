@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useChatClient, isDirectChannel, isPendingMember, isSkippedMember, getUserDisplayName } from '@ermis-network/ermis-chat-react';
+import { useChatCore, isDirectChannel, isPendingMember, isSkippedMember, getUserDisplayName } from '@ermis-network/ermis-chat-react';
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk';
 import { NOTIFICATION_CONFIG } from '@/utils/constants';
 
@@ -63,7 +63,7 @@ function getChannelDisplayName(channel: ChannelType, currentUserId?: string): st
  * - Both are throttled to avoid spamming
  */
 export function useNotification(activeChannel: ChannelType | null | undefined) {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const { t } = useTranslation();
   const lastSoundTimeRef = useRef(0);
   const playBeepRef = useRef<(() => void) | null>(null);

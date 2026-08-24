@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useTranslation } from 'react-i18next'
-import { useChatClient, useChatUser, useInviteCount, useContactCount, Avatar, useRecoveryPin, getUserDisplayName } from '@ermis-network/ermis-chat-react'
+import { useChatCore, useChatUser, useInviteCount, useContactCount, Avatar, useRecoveryPin, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import { useUIStore } from '@/store/useUIStore'
 import { STORAGE_KEYS } from '@/utils/constants'
 import { ProfileModal } from '@/features/settings/ProfileModal'
@@ -36,7 +36,7 @@ export function SidebarHeader({
   onSearchClose,
 }: SidebarHeaderProps) {
   const { t, i18n } = useTranslation()
-  const { client, theme, setTheme, clearAllDrafts } = useChatClient()
+  const { client, theme, setTheme, clearAllDrafts } = useChatCore()
   const { user } = useChatUser()
   const userDisplayName = getUserDisplayName(user, user?.id)
   const { inviteCount } = useInviteCount()
@@ -84,6 +84,10 @@ export function SidebarHeader({
     } catch (err) {
       console.error('Logout error', err)
     } finally {
+      const savedUserId = client?.userID || localStorage.getItem(STORAGE_KEYS.USER_ID)
+      if (savedUserId) {
+        sessionStorage.removeItem(`${STORAGE_KEYS.RECOVERY_GATE_ACKNOWLEDGED_CIDS}:${savedUserId}`)
+      }
       localStorage.removeItem(STORAGE_KEYS.TOKEN)
       localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
       localStorage.removeItem(STORAGE_KEYS.USER_ID)
@@ -126,8 +130,9 @@ export function SidebarHeader({
     } catch (err) {
       console.error('Clear cache error', err)
     } finally {
-      // Clear localStorage
+      // Clear browser-scoped app storage
       localStorage.clear()
+      sessionStorage.clear()
 
       // Clear cookies
       document.cookie.split(';').forEach((c) => {

@@ -12,7 +12,8 @@ import {
   useBannedState,
   useBlockedState,
   useChannelCapabilities,
-  useChatClient,
+  useChatComposer,
+  useChatCore,
   useDragAndDrop,
   useFileUpload,
   useMentions,
@@ -39,17 +40,13 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   DragAndDropOverlayComponent = UhmDragAndDropOverlay,
 }) => {
   const { t } = useTranslation();
+  const { client, activeChannel, syncMessages, setDraft, getDraft } = useChatCore();
   const {
-    client,
-    activeChannel,
-    syncMessages,
     quotedMessage,
     setQuotedMessage,
     editingMessage,
     setEditingMessage,
-    setDraft,
-    getDraft,
-  } = useChatClient();
+  } = useChatComposer();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending } = usePendingState(activeChannel, client.userID);
@@ -126,35 +123,20 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         if (!encryptionMgr?.initialized) {
           throw new Error('E2EE voice messages require an initialized encryption manager');
         }
-        await (activeChannel as any).enqueueE2eeAttachmentMessage({ text: '' }, [file], {
-          displayOverrides: new Map([
-            [
-              0,
-              {
-                attachment_type: 'voiceRecording',
-                duration: recordingTime,
-                waveform_data: [],
-              },
-            ],
-          ]),
-        });
-        syncMessages();
-      } else {
-        const uploadRes = await activeChannel.sendFile(file, file.name, file.type);
-        await activeChannel.sendMessage({
-          text: '',
-          attachments: [
+      }
+      await (activeChannel as any).enqueueAttachmentMessage({ text: '' }, [file], {
+        displayOverrides: new Map([
+          [
+            0,
             {
-              type: 'voiceRecording',
-              asset_url: uploadRes.file,
-              title: file.name,
-              file_size: file.size,
-              mime_type: file.type,
+              attachment_type: 'voiceRecording',
               duration: recordingTime,
+              waveform_data: [],
             },
           ],
-        });
-      }
+        ]),
+      });
+      syncMessages();
       cancelRecording();
     } catch (err) {
       console.error('Failed to send voice message:', err);
@@ -564,7 +546,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
         )}
 
         <div className="px-4 pb-3 pt-1.5">
-          <div className="relative flex items-end w-full pl-2 pr-1.5 py-1.5 bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 rounded-3xl min-h-[44px]">
+          <div className="relative flex min-w-0 items-end w-full max-w-full pl-2 pr-1.5 py-1.5 bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 rounded-3xl min-h-[44px]">
             {isRecording || recordedBlob || isUploadingVoice ? (
               <div className="flex flex-1 items-center justify-between w-full h-[32px] mb-[1px]">
                 <style>{`
@@ -741,7 +723,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                 </div>
 
                 {/* Main input area */}
-                <div className="relative flex-1 flex flex-col justify-center">
+                <div className="relative flex min-w-0 flex-1 flex-col justify-center overflow-hidden">
                   {!hasContent && (
                     <div className="absolute left-2 text-[15px] text-zinc-500 dark:text-zinc-400 pointer-events-none select-none">
                       {t('chat.placeholder', 'Type a message...')}
@@ -749,7 +731,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                   )}
                   <div
                     ref={editableRef}
-                    className="flex-1 w-full max-h-[150px] overflow-y-auto px-2 py-1.5 text-[15px] text-zinc-900 dark:text-zinc-100 outline-none cursor-text break-words whitespace-pre-wrap leading-relaxed"
+                    className="min-w-0 flex-1 w-full max-h-[150px] overflow-x-hidden overflow-y-auto px-2 py-1.5 text-[15px] text-zinc-900 dark:text-zinc-100 outline-none cursor-text whitespace-pre-wrap [overflow-wrap:anywhere] [word-break:break-word] leading-relaxed"
                     contentEditable={!disabledInput}
                     role="textbox"
                     onInput={handleInput}

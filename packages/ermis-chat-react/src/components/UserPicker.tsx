@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useTransition } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { Avatar } from './Avatar';
 import { VList as _VList } from 'virtua';
 const VList = _VList as any;
@@ -150,7 +150,7 @@ export const UserPicker: React.FC<UserPickerProps> = ({
   selectedEmptyLabel,
   friendsOnly,
 }) => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const currentUserId = client?.userID;
 
   /* ---------- State ---------- */

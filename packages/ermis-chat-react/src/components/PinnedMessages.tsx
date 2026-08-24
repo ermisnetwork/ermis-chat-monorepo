@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { Avatar } from './Avatar';
 import {
   ATTACHMENT_TYPES,
@@ -27,7 +27,7 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
 }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const userId = getMessageUserId(message);
   const cachedUser = userId ? client?.state?.users?.[userId] : undefined;
   const userName = getUserDisplayName(message.user, userId, cachedUser) || 'Unknown';
@@ -156,7 +156,7 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
 }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const [expanded, setExpanded] = useState(false);
   const currentUserId = client.userID;
 

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import type { UserResponse, ExtendableGenerics, DefaultGenerics } from '@ermis-network/ermis-chat-sdk';
 
 export const useChatUser = <ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics>() => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [user, setUser] = useState<UserResponse<ErmisChatGenerics> | undefined>(client?.user);
 
   useEffect(() => {

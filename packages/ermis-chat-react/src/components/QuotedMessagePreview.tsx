@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { replaceMentionsForPreview, buildUserMap, getMessageUserId, getUserDisplayName } from '../utils';
 import type { QuotedMessagePreviewProps } from '../types';
 import {
@@ -94,7 +94,7 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
   stickerLabel = 'Sticker',
   deletedMessageLabel = 'This message was deleted',
 }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
 
   const userMap = useMemo<Record<string, string>>(() => {
     return buildUserMap(activeChannel?.state, client?.state?.users);

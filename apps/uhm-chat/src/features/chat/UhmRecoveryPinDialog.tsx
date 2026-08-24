@@ -12,7 +12,7 @@ import {
   ShieldPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useChatClient, useRecoveryPin, getUserDisplayName } from '@ermis-network/ermis-chat-react';
+import { useChatCore, useRecoveryPin, getUserDisplayName } from '@ermis-network/ermis-chat-react';
 import type { RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -83,7 +83,7 @@ export function UhmRecoveryPinDialog({
   onUnlocked,
 }: UhmRecoveryPinDialogProps) {
   const { t } = useTranslation();
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const recovery = useRecoveryPin();
   const { refresh } = recovery;
   const [pin, setPin] = useState('');

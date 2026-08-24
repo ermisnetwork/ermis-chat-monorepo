@@ -43,11 +43,11 @@ export function isPollMessage(message: any): boolean {
 
 // Helpers cho attachment
 export function isImageAttachment(attachment: any): boolean {
-  return attachment?.type === ATTACHMENT_TYPES.IMAGE;
+  return attachment?.type === ATTACHMENT_TYPES.IMAGE || attachment?.attachment_type === ATTACHMENT_TYPES.IMAGE;
 }
 
 export function isVideoAttachment(attachment: any): boolean {
-  return attachment?.type === ATTACHMENT_TYPES.VIDEO;
+  return attachment?.type === ATTACHMENT_TYPES.VIDEO || attachment?.attachment_type === ATTACHMENT_TYPES.VIDEO;
 }
 
 export function isVoiceRecordingAttachment(attachment: any): boolean {
@@ -59,14 +59,22 @@ export function isLinkPreviewAttachment(attachment: any): boolean {
 }
 
 export function isImage(attachment: any): boolean {
+  const mimeType = attachment?.mime_type || attachment?.content_type || '';
   return Boolean(
     isImageAttachment(attachment) ||
-      (!attachment?.type && (attachment?.mime_type?.startsWith('image/') || attachment?.image_url)),
+      mimeType.startsWith('image/') ||
+      (!attachment?.type && attachment?.image_url),
   );
 }
 
 export function isVideo(attachment: any): boolean {
-  return !!(isVideoAttachment(attachment) || (!attachment.type && attachment.mime_type?.startsWith('video/')));
+  const name = attachment?.file_name || attachment?.title || '';
+  const mimeType = attachment?.mime_type || attachment?.content_type || '';
+  return Boolean(
+    isVideoAttachment(attachment) ||
+      mimeType.startsWith('video/') ||
+      /\.(3g2|3gp|avi|m4v|mkv|mov|mp4|mpeg|mpg|ogv|webm)$/i.test(name),
+  );
 }
 
 export function isAudioAttachment(attachment: any): boolean {
