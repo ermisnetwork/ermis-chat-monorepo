@@ -268,10 +268,7 @@ test('standard attachment send inserts a local bubble before background upload c
 
     assert.equal(xhrInstances.length, 1);
     xhrInstances[0].upload.onprogress?.({ loaded: 5, total: 10 });
-    assert.equal(
-      channel.state.messages.find((message) => message.id === messageId).attachments[0].upload_progress,
-      50,
-    );
+    assert.equal(channel.state.messages.find((message) => message.id === messageId).attachments[0].upload_progress, 50);
 
     xhrInstances[0].status = 200;
     xhrInstances[0].onload?.();
@@ -280,6 +277,80 @@ test('standard attachment send inserts a local bubble before background upload c
     assert.equal(postedMessages.length, 1);
     assert.equal(postedMessages[0].attachments[0].image_url, 'https://cdn.example.test/local-preview.png');
     assert.equal(channel.state.messages.find((message) => message.id === messageId).status, 'received');
+  } finally {
+    if (previousXhr === undefined) delete global.XMLHttpRequest;
+    else global.XMLHttpRequest = previousXhr;
+  }
+});
+
+test('canceling a standard attachment send aborts the active upload and never posts the message', async () => {
+  const previousXhr = global.XMLHttpRequest;
+  const xhrInstances = [];
+
+  class AbortableXMLHttpRequest {
+    constructor() {
+      this.upload = {};
+      this.status = 0;
+      this.aborted = false;
+      xhrInstances.push(this);
+    }
+
+    open(method, url) {
+      this.method = method;
+      this.url = url;
+    }
+
+    setRequestHeader() {}
+
+    send(body) {
+      this.body = body;
+    }
+
+    abort() {
+      this.aborted = true;
+      this.onabort?.();
+    }
+  }
+
+  global.XMLHttpRequest = AbortableXMLHttpRequest;
+  let confirmCalls = 0;
+  let messagePosts = 0;
+  const channel = makeChannel(async (url) => {
+    if (url.endsWith('/file/presign')) {
+      return {
+        attachment_id: 'cancelled-attachment',
+        upload_mode: 'single',
+        upload_url: 'https://storage.example.test/cancelled',
+      };
+    }
+    if (url.endsWith('/file/confirm')) {
+      confirmCalls += 1;
+      return { file: 'https://cdn.example.test/cancelled.png' };
+    }
+    if (url.endsWith('/message')) {
+      messagePosts += 1;
+      return {};
+    }
+    throw new Error(`Unexpected POST ${url}`);
+  });
+
+  try {
+    const file = new File([new Uint8Array(10)], 'cancelled.png', { type: 'image/png' });
+    const result = await channel.enqueueAttachmentMessage({ text: 'do not send' }, [file]);
+    const messageId = result.message.id;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(xhrInstances.length, 1);
+    await channel.cancelPendingAttachmentSend(messageId);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(xhrInstances[0].aborted, true);
+    assert.equal(
+      channel.state.messages.some((message) => message.id === messageId),
+      false,
+    );
+    assert.equal(confirmCalls, 0);
+    assert.equal(messagePosts, 0);
   } finally {
     if (previousXhr === undefined) delete global.XMLHttpRequest;
     else global.XMLHttpRequest = previousXhr;

@@ -75,6 +75,9 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
     const sub12 = channel.on('channel.topic.created', handleUpdate);
     const sub13 = channel.on('channel.pinned', handleUpdate);
     const sub14 = channel.on('channel.unpinned', handleUpdate);
+    const subTruncate = channel.on('channel.truncate', handleUpdate);
+    const subTruncateForMe = channel.on('channel.truncate_for_me', handleUpdate);
+    const subTruncated = channel.on('channel.truncated' as any, handleUpdate);
     const client = channel.getClient();
     const sub15 = client.on('e2ee.message_decrypted' as any, handleE2eePreviewUpdate);
     const sub16 = client.on('e2ee.local_messages_loaded' as any, handleE2eePreviewUpdate);
@@ -104,6 +107,9 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub12.unsubscribe();
       sub13.unsubscribe();
       sub14.unsubscribe();
+      subTruncate.unsubscribe();
+      subTruncateForMe.unsubscribe();
+      subTruncated.unsubscribe();
       sub15.unsubscribe();
       sub16.unsubscribe();
       sub17.unsubscribe();

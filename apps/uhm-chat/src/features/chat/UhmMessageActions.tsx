@@ -50,7 +50,7 @@ export function UhmMessageActions({
   const { t } = useTranslation();
   const { activeChannel, syncMessages } = useChatCore();
   const { setQuotedMessage, setEditingMessage, setForwardingMessage } = useChatComposer();
-  
+
   if (message.type === 'signal') {
     return null;
   }
@@ -64,7 +64,7 @@ export function UhmMessageActions({
     actions.canEdit = false;
     actions.canCopy = false;
   }
-  const canCancelPendingE2eeSend =
+  const canCancelPendingSend =
     isOwnMessage &&
     message.status === 'sending' &&
     Array.isArray(message.attachments) &&
@@ -124,11 +124,15 @@ export function UhmMessageActions({
   const handleCancelPendingSend = useCallback(async () => {
     if (!activeChannel || !message.id) return;
     try {
-      await (activeChannel as any).cancelPendingE2eeSend?.(message.id);
+      const channelWithCancellation = activeChannel as any;
+      const cancelPendingSend =
+        channelWithCancellation.cancelPendingAttachmentSend || channelWithCancellation.cancelPendingE2eeSend;
+      if (typeof cancelPendingSend !== 'function') throw new Error('Pending-send cancellation is unavailable');
+      await cancelPendingSend.call(channelWithCancellation, message.id);
       syncMessages();
       toast.success(t('message_actions.cancel_send_success', 'Send canceled'));
     } catch (err) {
-      console.error('Failed to cancel pending E2EE send', err);
+      console.error('Failed to cancel pending send', err);
       toast.error(t('message_actions.cancel_send_error', 'Could not cancel send'));
     }
   }, [activeChannel, message.id, syncMessages, t]);
@@ -192,7 +196,7 @@ export function UhmMessageActions({
 
   /* --- Check if we have any dropdown actions --- */
   const hasDropdownActions =
-    canCancelPendingE2eeSend ||
+    canCancelPendingSend ||
     actions.canPin ||
     actions.canEdit ||
     actions.canCopy ||
@@ -201,8 +205,11 @@ export function UhmMessageActions({
 
   return (
     <>
-      <div className={`ermis-message-list__actions !bg-transparent !border-none !shadow-none !p-0 !gap-4 ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
-        
+      <div
+        className={`ermis-message-list__actions !bg-transparent !border-none !shadow-none !p-0 !gap-4 ${
+          isOwnMessage ? 'flex-row-reverse' : 'flex-row'
+        }`}
+      >
         {/* Action Buttons Wrapper (mimicking the original .ermis-message-list__actions style) */}
         <div className="flex items-center gap-0.5 bg-white dark:bg-[#202022] border border-zinc-200 dark:border-zinc-800 rounded-md p-0.5 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
           {/* Reply */}
@@ -251,8 +258,8 @@ export function UhmMessageActions({
               </DropdownMenuTrigger>
 
               <DropdownMenuContent align={isOwnMessage ? 'end' : 'start'} sideOffset={6} className="min-w-[180px] p-1">
-                {/* Cancel pending local E2EE send */}
-                {canCancelPendingE2eeSend && (
+                {/* Cancel a pending local attachment send */}
+                {canCancelPendingSend && (
                   <DropdownMenuItem
                     className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400 focus:bg-red-50 dark:focus:bg-red-950/30 transition-colors"
                     onClick={handleCancelPendingSend}
@@ -262,7 +269,7 @@ export function UhmMessageActions({
                   </DropdownMenuItem>
                 )}
 
-                {canCancelPendingE2eeSend &&
+                {canCancelPendingSend &&
                   (actions.canPin ||
                     actions.canEdit ||
                     actions.canCopy ||

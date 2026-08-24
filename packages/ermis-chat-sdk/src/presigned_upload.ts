@@ -33,6 +33,16 @@ type UploadSource = File | Blob | Buffer;
 
 const DEFAULT_MULTIPART_CONCURRENCY = 4;
 
+function createUploadAbortError(): Error {
+  const error = new Error('Presigned upload aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfUploadAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createUploadAbortError();
+}
+
 export function getPresignedUploadSize(source: UploadSource): number {
   const blobSize = (source as Blob).size;
   if (typeof blobSize === 'number') return blobSize;
@@ -55,23 +65,48 @@ async function putPresignedUrl(
   contentType: string,
   onLoaded?: (loaded: number) => void,
   readEtag = false,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
+  throwIfUploadAborted(signal);
+
   if (typeof XMLHttpRequest !== 'undefined') {
     return await new Promise<string | undefined>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      let settled = false;
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener('abort', abortUpload);
+        callback();
+      };
+      const abortUpload = () => {
+        xhr.abort();
+        finish(() => reject(createUploadAbortError()));
+      };
       xhr.open('PUT', url);
       xhr.setRequestHeader('Content-Type', contentType);
       xhr.upload.onprogress = ({ loaded }) => onLoaded?.(loaded);
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(readEtag ? xhr.getResponseHeader('ETag') || undefined : undefined);
+          finish(() => resolve(readEtag ? xhr.getResponseHeader('ETag') || undefined : undefined));
           return;
         }
-        reject(new Error(`Presigned upload failed: HTTP ${xhr.status}`));
+        finish(() => reject(new Error(`Presigned upload failed: HTTP ${xhr.status}`)));
       };
-      xhr.onerror = () => reject(new Error('Presigned upload network error'));
-      xhr.onabort = () => reject(new Error('Presigned upload aborted'));
-      xhr.send(body as any);
+      xhr.onerror = () => finish(() => reject(new Error('Presigned upload network error')));
+      xhr.onabort = () => finish(() => reject(createUploadAbortError()));
+      signal?.addEventListener('abort', abortUpload, { once: true });
+
+      if (signal?.aborted) {
+        abortUpload();
+        return;
+      }
+
+      try {
+        xhr.send(body as any);
+      } catch (error) {
+        finish(() => reject(error));
+      }
     });
   }
 
@@ -79,6 +114,7 @@ async function putPresignedUrl(
     method: 'PUT',
     headers: { 'Content-Type': contentType },
     body: body as any,
+    signal,
   });
   if (!response.ok) throw new Error(`Presigned upload failed: HTTP ${response.status}`);
   onLoaded?.(getPresignedUploadSize(body));
@@ -90,16 +126,25 @@ export async function uploadSinglePresignedFile(
   file: UploadSource,
   contentType: string,
   onProgress?: (progress: PresignedUploadProgress) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const total = getPresignedUploadSize(file);
-  await putPresignedUrl(url, file, contentType, (loaded) => {
-    const safeLoaded = Math.max(0, Math.min(total, loaded));
-    onProgress?.({
-      loaded: safeLoaded,
-      total,
-      percentage: total > 0 ? Math.round((safeLoaded / total) * 100) : 100,
-    });
-  });
+  await putPresignedUrl(
+    url,
+    file,
+    contentType,
+    (loaded) => {
+      const safeLoaded = Math.max(0, Math.min(total, loaded));
+      onProgress?.({
+        loaded: safeLoaded,
+        total,
+        percentage: total > 0 ? Math.round((safeLoaded / total) * 100) : 100,
+      });
+    },
+    false,
+    signal,
+  );
+  throwIfUploadAborted(signal);
   onProgress?.({ loaded: total, total, percentage: 100 });
 }
 
@@ -108,7 +153,9 @@ export async function uploadMultipartPresignedFile(
   multipart: StandardPresignedMultipart,
   onProgress?: (progress: PresignedUploadProgress) => void,
   concurrency = DEFAULT_MULTIPART_CONCURRENCY,
+  signal?: AbortSignal,
 ): Promise<CompletedPresignedPart[]> {
+  throwIfUploadAborted(signal);
   const total = getPresignedUploadSize(file);
   if (!Number.isFinite(multipart.part_size) || multipart.part_size <= 0) {
     throw new Error('Presigned multipart response has an invalid part_size');
@@ -155,6 +202,7 @@ export async function uploadMultipartPresignedFile(
 
   const uploadNext = async (): Promise<void> => {
     while (nextIndex < parts.length) {
+      throwIfUploadAborted(signal);
       const part = parts[nextIndex];
       nextIndex += 1;
       const start = (part.part_number - 1) * multipart.part_size;
@@ -170,6 +218,7 @@ export async function uploadMultipartPresignedFile(
         'application/octet-stream',
         (loaded) => emitProgress(part.part_number, loaded, chunkSize),
         true,
+        signal,
       );
       if (!etag) {
         throw new Error(
@@ -183,6 +232,7 @@ export async function uploadMultipartPresignedFile(
 
   const workerCount = Math.max(1, Math.min(Math.floor(concurrency) || 1, parts.length));
   await Promise.all(Array.from({ length: workerCount }, () => uploadNext()));
+  throwIfUploadAborted(signal);
   onProgress?.({ loaded: total, total, percentage: 100 });
   return completedParts.sort((a, b) => a.part_number - b.part_number);
 }

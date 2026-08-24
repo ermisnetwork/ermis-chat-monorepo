@@ -296,7 +296,7 @@ export function useChannelMessages({
 
         loadStoredMessages
           .then((decryptedMessages: any[]) => {
-            if (!isCurrentEffect() || (guardsWholeWindow && syncVersion !== e2eeCacheSyncVersion)) return;
+            if (!isCurrentEffect() || syncVersion !== e2eeCacheSyncVersion) return;
             setMessages((prev) => {
               if (!isCurrentEffect()) return prev;
 
@@ -316,7 +316,7 @@ export function useChannelMessages({
             });
           })
           .catch((err: any) => {
-            if (!isCurrentEffect() || (guardsWholeWindow && syncVersion !== e2eeCacheSyncVersion)) return;
+            if (!isCurrentEffect() || syncVersion !== e2eeCacheSyncVersion) return;
             console.warn('[Cache] Failed to load message cache', err);
             setMessages(mergeAndFilterE2eeMessages(baseMessages, []));
           });
@@ -522,6 +522,25 @@ export function useChannelMessages({
       }
     };
 
+    const handleChannelTruncate = () => {
+      // Invalidate every pending cache read so stale decrypted messages cannot
+      // repopulate the list after clear-history has updated the SDK state.
+      e2eeCacheSyncVersion += 1;
+      const baseMessages = [...activeChannel.state.latestMessages];
+
+      if (isE2eeChannel(activeChannel, client)) {
+        setMessages((prev) =>
+          isCurrentEffect()
+            ? mergeAndFilterE2eeMessages(baseMessages, prev, { includeMissing: false })
+            : prev,
+        );
+      } else {
+        setMessages(baseMessages);
+      }
+
+      setReadState({ ...activeChannel.state.read });
+    };
+
     const handleMessageRead = (_event: Event) => {
       // SDK already updated channel.state.read — sync into React state
       setReadState({ ...activeChannel.state.read });
@@ -624,9 +643,9 @@ export function useChannelMessages({
     const sub8 = activeChannel.on('reaction.new', handleMessageChange);
     const sub9 = activeChannel.on('reaction.deleted', handleMessageChange);
     const sub10 = activeChannel.on('member.unblocked', handleUnblocked);
-    const sub11 = activeChannel.on('channel.truncate', handleMessageChange);
-    const sub12 = activeChannel.on('channel.truncate_for_me', handleMessageChange);
-    const sub12b = activeChannel.on('channel.truncated' as any, handleMessageChange);
+    const sub11 = activeChannel.on('channel.truncate', handleChannelTruncate);
+    const sub12 = activeChannel.on('channel.truncate_for_me', handleChannelTruncate);
+    const sub12b = activeChannel.on('channel.truncated' as any, handleChannelTruncate);
 
     const sub13 = eventClient.on('notification.invite_accepted', refreshAfterOwnInviteMembership);
     const sub14 = eventClient.on('member.joined', refreshAfterOwnInviteMembership);

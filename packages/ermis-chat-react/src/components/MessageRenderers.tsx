@@ -245,8 +245,8 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
     const isImageAsset = isLikelyImage(title, mimeType);
     const isVideoAsset = isLikelyVideo(title, mimeType);
     const isAudioAsset = isLikelyAudio(title, mimeType, attachmentType);
-    const loadedUrl = preview.url || original.url;
-    const loading = original.loading || preview.loading;
+    const loadedUrl = preview.url || (!isVideoAsset ? original.url : undefined);
+    const loading = original.loading || original.streamLoading || preview.loading;
     const error = original.error || preview.error;
     const progressLabel = formatE2eeProgress(original.progress || preview.progress);
     const statusLabel = mediaError
@@ -290,7 +290,8 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
     const ensureOriginal = useCallback(() => {
       if (!grantReady) return;
       setMediaError(false);
-      if (isVideoAsset && !original.streamUrl && !original.streamLoading) {
+      if (isVideoAsset) {
+        if (original.streamUrl || original.streamLoading) return;
         void original.loadStream().then((streamUrl) => {
           if (!streamUrl && !original.url && !original.loading) void original.load();
         });
@@ -437,7 +438,7 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
           <button
             type="button"
             className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3 ermis-attachment--clickable"
-            onClick={handleLoad}
+            onClick={isVideoAsset ? openViewer : handleLoad}
             disabled={loading || !grantReady}
           >
             <span className="ermis-attachment-shimmer" />
@@ -451,6 +452,9 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
               )}
             </span>
           </button>
+          {isVideoAsset && lightboxOpen && (
+            <MediaLightbox items={lightboxItems} isOpen={lightboxOpen} onClose={() => setLightboxOpen(false)} />
+          )}
         </div>
       );
     }
@@ -897,9 +901,9 @@ export const AttachmentList: React.FC<{
     const standardAttachments = attachments.filter((a): a is Attachment => !isE2eeAttachmentManifest(a));
     const media = standardAttachments.filter((a) => isImage(a) || isVideo(a));
     const files = standardAttachments.filter(
-      (a) => !isImage(a) && !isVideo(a) && !isVoiceRecordingAttachment(a) && !isLinkPreviewAttachment(a),
+      (a) => !isImage(a) && !isVideo(a) && !isAudio(a) && !isLinkPreviewAttachment(a),
     );
-    const voices = standardAttachments.filter(isVoiceRecordingAttachment);
+    const voices = standardAttachments.filter(isAudio);
     const links = standardAttachments.filter(isLinkPreviewAttachment);
 
     // Lightbox state
@@ -1003,7 +1007,8 @@ export const AttachmentList: React.FC<{
  * Detect URLs and emails in plain text, wrapping them in <a> tags.
  * Returns an array of React nodes (strings and link elements).
  */
-const URL_REGEX = /(https?:\/\/[^\s<>]+?|www\.[^\s<>]+?|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?=[.,!?:;"']*(?:\s|<|>|$))/g;
+const URL_REGEX =
+  /(https?:\/\/[^\s<>]+?|www\.[^\s<>]+?|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?=[.,!?:;"']*(?:\s|<|>|$))/g;
 
 function linkifyText(text: string, keyPrefix: string): React.ReactNode[] {
   const parts = text.split(URL_REGEX);
