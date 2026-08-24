@@ -7,6 +7,7 @@ const {
   ciphertextSha256,
   e2eeAttachmentMultipartUploadUrlExpiresAtMs,
   encryptAndUploadE2eeAssetMultipart,
+  EncryptionManager,
   estimateE2eeEncryptedAssetSize,
   resolveE2eeAttachmentMultipartUploadConcurrency,
   Sha256,
@@ -391,6 +392,51 @@ test('E2EE multipart upload abort cancels all in-flight PUTs', async () => {
     );
     assert.equal(fake.requests.length, 2);
     assert.equal(aborted, 2);
+  } finally {
+    fake.restore();
+  }
+});
+
+test('EncryptionManager schedules attachment cleanup when multipart upload fails after init', async () => {
+  const attachmentId = '11111111-1111-4111-8111-111111111111';
+  const assetId = '22222222-2222-4222-8222-222222222222';
+  const deleted = [];
+  const manager = new EncryptionManager();
+  manager._e2eeAttachmentMultipartEnabled = true;
+  manager._e2eeAttachmentMultipartUploadConcurrency = 1;
+  manager._attachmentCryptoProvider = fakeAttachmentCryptoProvider();
+  manager.e2eeClient = {
+    async initAttachment(_channelType, _channelId, request) {
+      const cipherSizeEstimate = request.assets[0].cipher_size_estimate;
+      return {
+        attachment_id: attachmentId,
+        status: 'initiated',
+        upload_expires_at: '2030-01-01T00:00:00Z',
+        assets: [
+          {
+            asset_id: assetId,
+            kind: 'original',
+            upload_mode: 'multipart',
+            object_key: 'test/e2ee/v1/object',
+            cipher_size_estimate: cipherSizeEstimate,
+            multipart: multipartFor(cipherSizeEstimate, 64),
+          },
+        ],
+      };
+    },
+    async deleteAttachment(channelType, channelId, id) {
+      deleted.push({ channelType, channelId, id });
+      return { attachment_id: id, status: 'deleted' };
+    },
+  };
+  const fake = installFakeXhr((xhr) => setTimeout(() => finishXhr(xhr, 500), 1));
+
+  try {
+    await assert.rejects(
+      () => manager.uploadE2eeAttachments('team', 'channel-id', [new Blob([new Uint8Array(40)])]),
+      /HTTP 500/,
+    );
+    assert.deepEqual(deleted, [{ channelType: 'team', channelId: 'channel-id', id: attachmentId }]);
   } finally {
     fake.restore();
   }

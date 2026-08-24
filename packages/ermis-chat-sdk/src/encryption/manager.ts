@@ -47,6 +47,7 @@ import type {
   QueryE2eeAttachmentProjection,
   QueryE2eeAttachmentsRequest,
   CompleteE2eeAttachmentRequest,
+  InitE2eeAttachmentRequest,
   InitE2eeAttachmentAssetResponse,
   RecoveryStatus,
   RecoveryVaultResponse,
@@ -6928,6 +6929,28 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const attachments: E2eeAttachmentManifest[] = [];
     const ids: string[] = [];
     const multipartEnabled = this._e2eeAttachmentMultipartEnabled;
+    const cleanupUnboundAttachments = async (attachmentIds: string[]): Promise<void> => {
+      const uniqueIds = [...new Set(attachmentIds)];
+      await Promise.all(
+        uniqueIds.map(async (attachmentId) => {
+          try {
+            await e2eeClient.deleteAttachment(channelType, channelId, attachmentId);
+          } catch (cleanupError) {
+            sdkLog('warn', '[Encryption] Failed to schedule E2EE attachment cleanup:', attachmentId, cleanupError);
+          }
+        }),
+      );
+    };
+    const initAttachment = async (request: InitE2eeAttachmentRequest) => {
+      try {
+        return await e2eeClient.initAttachment(channelType, channelId, request, { multipart: multipartEnabled });
+      } catch (err) {
+        // A later file failing to initialize must not orphan attachments that
+        // were completed earlier in the same pending message.
+        await cleanupUnboundAttachments(ids);
+        throw err;
+      }
+    };
 
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index] as Blob & { name?: string; type?: string };
@@ -7045,33 +7068,33 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       };
 
       const completeOriginalOnly = async () => {
-        const init = await e2eeClient.initAttachment(
-          channelType,
-          channelId,
-          {
-            idempotency_key: newUuid(this._attachmentCryptoProvider),
-            assets: [{ kind: 'original', cipher_size_estimate: originalCipherSizeEstimate }],
-          },
-          { multipart: multipartEnabled },
-        );
-        const initAsset = init.assets.find((asset) => asset.kind === 'original');
-        if (!initAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
-        const uploadedOriginal = await uploadOriginalAsset(initAsset);
-        emitProgress({
-          phase: 'completing',
-          loaded: uploadedOriginal.manifestAsset.cipher_size,
-          total: uploadedOriginal.manifestAsset.cipher_size,
-          percentage: 100,
+        const init = await initAttachment({
+          idempotency_key: newUuid(this._attachmentCryptoProvider),
+          assets: [{ kind: 'original', cipher_size_estimate: originalCipherSizeEstimate }],
         });
-        const completeRequest: CompleteE2eeAttachmentRequest = {
-          completion_lease_id: newUuid(this._attachmentCryptoProvider),
-          ...(uploadedOriginal.completeAsset ? { assets: [uploadedOriginal.completeAsset] } : {}),
-        };
-        await completeAttachmentWithRetry(init.attachment_id, completeRequest);
-        return buildAttachmentManifest({
-          attachment_id: init.attachment_id,
-          assets: [uploadedOriginal.manifestAsset],
-        });
+        try {
+          const initAsset = init.assets.find((asset) => asset.kind === 'original');
+          if (!initAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
+          const uploadedOriginal = await uploadOriginalAsset(initAsset);
+          emitProgress({
+            phase: 'completing',
+            loaded: uploadedOriginal.manifestAsset.cipher_size,
+            total: uploadedOriginal.manifestAsset.cipher_size,
+            percentage: 100,
+          });
+          const completeRequest: CompleteE2eeAttachmentRequest = {
+            completion_lease_id: newUuid(this._attachmentCryptoProvider),
+            ...(uploadedOriginal.completeAsset ? { assets: [uploadedOriginal.completeAsset] } : {}),
+          };
+          await completeAttachmentWithRetry(init.attachment_id, completeRequest);
+          return buildAttachmentManifest({
+            attachment_id: init.attachment_id,
+            assets: [uploadedOriginal.manifestAsset],
+          });
+        } catch (err) {
+          await cleanupUnboundAttachments([...ids, init.attachment_id]);
+          throw err;
+        }
       };
 
       if (!previewEncrypted) {
@@ -7081,59 +7104,59 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         continue;
       }
 
-      const init = await e2eeClient.initAttachment(
-        channelType,
-        channelId,
-        {
-          idempotency_key: newUuid(this._attachmentCryptoProvider),
-          assets: [
-            { kind: 'original', cipher_size_estimate: originalCipherSizeEstimate },
-            { kind: 'preview', cipher_size_estimate: previewEncrypted.cipher_size },
-          ],
-        },
-        { multipart: multipartEnabled },
-      );
-      const originalInitAsset = init.assets.find((asset) => asset.kind === 'original');
-      const previewInitAsset = init.assets.find((asset) => asset.kind === 'preview');
-      if (!originalInitAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
-      if (!previewInitAsset) throw new Error('[Encryption] E2EE attachment init did not return preview asset');
-      if (!previewInitAsset.put_url)
-        throw new Error('[Encryption] E2EE attachment init did not return preview PUT URL');
-
-      const uploadedOriginal = await uploadOriginalAsset(originalInitAsset);
+      const init = await initAttachment({
+        idempotency_key: newUuid(this._attachmentCryptoProvider),
+        assets: [
+          { kind: 'original', cipher_size_estimate: originalCipherSizeEstimate },
+          { kind: 'preview', cipher_size_estimate: previewEncrypted.cipher_size },
+        ],
+      });
       try {
-        await putPresignedObject(
-          previewInitAsset.put_url,
-          previewEncrypted.encryptedBlob,
-          emitProgress,
-          options.signal,
-        );
-      } catch {
-        void e2eeClient.deleteAttachment(channelType, channelId, init.attachment_id).catch(() => undefined);
-        const manifest = await completeOriginalOnly();
-        attachments.push(manifest);
-        ids.push(manifest.attachment_id);
-        continue;
-      }
+        const originalInitAsset = init.assets.find((asset) => asset.kind === 'original');
+        const previewInitAsset = init.assets.find((asset) => asset.kind === 'preview');
+        if (!originalInitAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
+        if (!previewInitAsset) throw new Error('[Encryption] E2EE attachment init did not return preview asset');
+        if (!previewInitAsset.put_url)
+          throw new Error('[Encryption] E2EE attachment init did not return preview PUT URL');
 
-      const completeTotal = uploadedOriginal.manifestAsset.cipher_size + previewEncrypted.cipher_size;
-      emitProgress({
-        phase: 'completing',
-        loaded: completeTotal,
-        total: completeTotal,
-        percentage: 100,
-      });
-      const completeRequest: CompleteE2eeAttachmentRequest = {
-        completion_lease_id: newUuid(this._attachmentCryptoProvider),
-        ...(uploadedOriginal.completeAsset ? { assets: [uploadedOriginal.completeAsset] } : {}),
-      };
-      await completeAttachmentWithRetry(init.attachment_id, completeRequest);
-      const manifest = buildAttachmentManifest({
-        attachment_id: init.attachment_id,
-        assets: [uploadedOriginal.manifestAsset, buildManifestAsset(previewInitAsset.asset_id, previewEncrypted)],
-      });
-      attachments.push(manifest);
-      ids.push(init.attachment_id);
+        const uploadedOriginal = await uploadOriginalAsset(originalInitAsset);
+        try {
+          await putPresignedObject(
+            previewInitAsset.put_url,
+            previewEncrypted.encryptedBlob,
+            emitProgress,
+            options.signal,
+          );
+        } catch {
+          await cleanupUnboundAttachments([init.attachment_id]);
+          const manifest = await completeOriginalOnly();
+          attachments.push(manifest);
+          ids.push(manifest.attachment_id);
+          continue;
+        }
+
+        const completeTotal = uploadedOriginal.manifestAsset.cipher_size + previewEncrypted.cipher_size;
+        emitProgress({
+          phase: 'completing',
+          loaded: completeTotal,
+          total: completeTotal,
+          percentage: 100,
+        });
+        const completeRequest: CompleteE2eeAttachmentRequest = {
+          completion_lease_id: newUuid(this._attachmentCryptoProvider),
+          ...(uploadedOriginal.completeAsset ? { assets: [uploadedOriginal.completeAsset] } : {}),
+        };
+        await completeAttachmentWithRetry(init.attachment_id, completeRequest);
+        const manifest = buildAttachmentManifest({
+          attachment_id: init.attachment_id,
+          assets: [uploadedOriginal.manifestAsset, buildManifestAsset(previewInitAsset.asset_id, previewEncrypted)],
+        });
+        attachments.push(manifest);
+        ids.push(init.attachment_id);
+      } catch (err) {
+        await cleanupUnboundAttachments([...ids, init.attachment_id]);
+        throw err;
+      }
     }
 
     return { attachments, e2ee_attachment_ids: ids };
