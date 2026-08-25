@@ -74,9 +74,24 @@ try {
 
   fs.writeFileSync(reactPath, JSON.stringify(reactPkg, null, 2) + '\n');
 
+  // 4. Update apps/uhm-chat if present
+  const uhmPath = path.join(__dirname, '../apps/uhm-chat/package.json');
+  if (fs.existsSync(uhmPath)) {
+    const uhmPkg = JSON.parse(fs.readFileSync(uhmPath, 'utf8'));
+    if (uhmPkg.dependencies) {
+      if (uhmPkg.dependencies['@ermis-network/ermis-chat-sdk']) {
+        uhmPkg.dependencies['@ermis-network/ermis-chat-sdk'] = newVersion;
+      }
+      if (uhmPkg.dependencies['@ermis-network/ermis-chat-react']) {
+        uhmPkg.dependencies['@ermis-network/ermis-chat-react'] = newVersion;
+      }
+    }
+    fs.writeFileSync(uhmPath, JSON.stringify(uhmPkg, null, 2) + '\n');
+  }
+
   console.log(`\x1b[32m🚀 Thành công!\x1b[0m Nâng cấp mức độ [\x1b[35m${bumpType.toUpperCase()}\x1b[0m]`);
   console.log(`Version: \x1b[33m${oldVersion}\x1b[0m ➡️ \x1b[36m${newVersion}\x1b[0m`);
-  console.log(`Áp dụng thành công cho cả 2 packages: SDK và React UI.`);
+  console.log(`Áp dụng thành công cho SDK, React UI và UHM Chat.`);
 } catch (error) {
   console.error('\x1b[31m❌ Lỗi khi tự động nâng version:\x1b[0m', error.message);
 }
