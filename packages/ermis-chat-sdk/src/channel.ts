@@ -1,6 +1,18 @@
 import { ChannelState } from './channel_state';
 import { normalizeFileName, isVideoFile, buildAttachmentPayload } from './attachment_utils';
 import type { VoiceRecordingMeta } from './attachment_utils';
+import {
+  getPresignedUploadSize,
+  isPresignedUploadExpiredError,
+  uploadMultipartPresignedFile,
+  uploadSinglePresignedFile,
+} from './presigned_upload';
+import type { StandardPresignedUploadResponse, PendingUploadSession } from './presigned_upload';
+import type {
+  PendingStandardAttachmentUploadRecord,
+  StandardAttachmentFileState,
+  StandardUploadSession,
+} from './standard_attachment_upload_storage';
 import { encodeEncryptionChannelFields } from './encryption/encoding';
 import {
   enrichWithUserInfo,
@@ -63,6 +75,29 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   lastTypingEvent: Date | null;
   isTyping: boolean;
   disconnected: boolean;
+  private _pendingStandardAttachmentSends = new Map<
+    string,
+    {
+      message: Message<ErmisChatGenerics>;
+      files: File[];
+      localAttachments: any[];
+      fileStates: StandardAttachmentFileState[];
+      createdAt: string;
+      paused?: boolean;
+      displayOverrides?: Map<number, Record<string, unknown>>;
+      abortController: AbortController;
+      phase: 'uploading' | 'sending';
+      cancelled?: boolean;
+      inFlight?: Promise<SendMessageAPIResponse<ErmisChatGenerics>>;
+    }
+  >();
+  private _pendingE2eeAttachmentSends = new Map<
+    string,
+    {
+      localAttachments: any[];
+      phase: 'generating_preview' | 'encrypting' | 'uploading' | 'completing' | 'sending';
+    }
+  >();
 
   /**
    * Initializes a new Channel class instance.
@@ -378,6 +413,17 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       type: message.type || 'regular',
     } as unknown as MessageResponse<ErmisChatGenerics>;
 
+    const abortController = new AbortController();
+    this._pendingStandardAttachmentSends.set(messageId, {
+      message,
+      files: files as any,
+      localAttachments,
+      fileStates: [],
+      createdAt: now,
+      abortController,
+      phase: 'uploading',
+    });
+
     this.state.addMessageSorted(optimisticMessage);
     this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
 
@@ -391,7 +437,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         });
 
         const { attachments, failedFiles } = await this.uploadAndPrepareAttachments(fileObjects, {
+          signal: abortController.signal,
           onProgress: (fileIndex: number, percentage: number) => {
+            if (abortController.signal.aborted) return;
             this.state.updateMessageById(messageId, (msg) => ({
               ...msg,
               status: 'sending',
@@ -405,11 +453,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           },
         });
 
+        if (abortController.signal.aborted) return;
+
         if (failedFiles.length > 0 && attachments.length === 0) {
           throw new Error('All attachment uploads failed');
         }
 
         this._revokePendingE2eeLocalAttachments(localAttachments);
+        this._pendingStandardAttachmentSends.delete(messageId);
 
         const finalMessagePayload: Record<string, any> = {
           ...message,
@@ -445,6 +496,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
         }
       } catch (error: any) {
+        if (abortController.signal.aborted) return;
         this.state.updateMessageStatus(messageId, 'failed_offline');
         this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
       }
@@ -759,73 +811,151 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   /**
+   * Fetches fresh presigned URLs for a pending multipart upload session.
+   *
+   * Called when a chunk upload fails with HTTP 403 (presigned URL expired).
+   * Per spec section 7.1: instead of creating a new upload session via POST /presign,
+   * the client should call GET /upload-sessions to obtain refreshed URLs for
+   * remaining parts without losing already-completed parts.
+   *
+   * @returns A refreshed StandardUploadSession, or undefined if the session has expired/not found.
+   */
+  private async _refreshUploadSession(
+    attachmentId: string | undefined,
+  ): Promise<StandardUploadSession | undefined> {
+    if (!attachmentId) return undefined;
+    try {
+      const resp = await this.getClient().get<{ sessions: PendingUploadSession[] }>(
+        `${this._channelURL()}/file/upload-sessions`,
+      );
+      const serverSession = (resp.sessions || []).find(
+        (s) => s.attachment_id === attachmentId,
+      );
+      if (!serverSession) {
+        // Session expired or cleaned up on server (spec section 7.2)
+        return undefined;
+      }
+      const ttlSecs = serverSession.ttl_secs ?? 900;
+      return {
+        presign: {
+          attachment_id: serverSession.attachment_id,
+          upload_mode: 'multipart',
+          upload_url: null,
+          multipart: {
+            upload_id: serverSession.upload_id,
+            part_size: serverSession.part_size,
+            part_count: serverSession.part_count,
+            parts: serverSession.remaining_parts,
+            completed_parts: serverSession.completed_parts,
+          },
+        },
+        expires_at: Date.now() + ttlSecs * 1000,
+        completed_parts: serverSession.completed_parts,
+      };
+    } catch {
+      // Network error or unexpected response — fall back to new presign on next attempt
+      return undefined;
+    }
+  }
+
+  /**
    * Uploads a file directly to the storage bucket via a presigned URL, bypassing the server.
    * This reduces server bandwidth and latency for file uploads.
    *
-   * @param file       - The File or Blob to upload
-   * @param name       - The file name
+   * @param file        - The File or Blob to upload
+   * @param name        - The file name
    * @param contentType - The MIME type of the file
-   * @param onProgress - Optional callback for upload progress (browser only)
+   * @param onProgress  - Optional callback for upload progress (browser only)
    */
   async uploadFilePresigned(
     file: File | Blob | Buffer,
     name: string,
     contentType: string,
     onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void,
+    signal?: AbortSignal,
+    options: {
+      session?: StandardUploadSession;
+      onSession?: (session: StandardUploadSession) => void | Promise<void>;
+      onPartCompleted?: (session: StandardUploadSession) => void | Promise<void>;
+    } = {},
   ): Promise<{ file: string }> {
-    // 1. Request presigned URL
-    const presignResp = await this.getClient().post<{
-      attachment_id: string;
-      upload_url: string;
-      expires_in_secs: number;
-    }>(`${this._channelURL()}/file/presign`, {
-      file_name: name,
-      content_type: contentType,
-    });
+    const sessionSafetyWindowMs = 60_000;
+    const totalSize = getPresignedUploadSize(file);
+    const uploadProgress = onProgress
+      ? (progress: { loaded: number; total: number; percentage: number }) =>
+          onProgress({ ...progress, percentage: Math.min(99, progress.percentage) })
+      : undefined;
 
-    // 2. Upload directly to storage (R2/S3)
-    await new Promise<void>((resolve, reject) => {
-      if (typeof XMLHttpRequest !== 'undefined') {
-        const xhr = new XMLHttpRequest();
-        xhr.open('PUT', presignResp.upload_url);
-        xhr.setRequestHeader('Content-Type', contentType);
+    let session =
+      options.session && options.session.expires_at > Date.now() + sessionSafetyWindowMs ? options.session : undefined;
+    if (!session) {
+      const presign = await this.getClient().post<StandardPresignedUploadResponse>(
+        `${this._channelURL()}/file/presign`,
+        {
+          file_name: name,
+          content_type: contentType,
+          file_size: totalSize,
+        },
+      );
+      const ttlSeconds = presign.ttl_secs ?? 900;
+      session = {
+        presign,
+        expires_at: Date.now() + Math.max(0, ttlSeconds) * 1000,
+        completed_parts: [],
+      };
+      await options.onSession?.(session);
+    }
 
-        xhr.upload.onprogress = ({ loaded, total }) => {
-          if (total > 0 && onProgress) {
-            onProgress({ loaded, total, percentage: Math.round((loaded / total) * 100) });
-          }
-        };
+    const presignResp = session.presign;
 
-        xhr.onload = () => {
-          if (xhr.status < 300) resolve();
-          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
-        };
-
-        xhr.onerror = () => reject(new Error('Network error'));
-        xhr.send(file as any);
-      } else {
-        // Fallback for Node.js
-        fetch(presignResp.upload_url, {
-          method: 'PUT',
-          headers: { 'Content-Type': contentType },
-          body: file as any,
-        })
-          .then((res) => {
-            if (res.ok) resolve();
-            else reject(new Error(`Upload failed: HTTP ${res.status}`));
-          })
-          .catch(reject);
-      }
-    });
-
-    // 3. Confirm upload
-    const confirmResp = await this.getClient().post<{ file: string }>(`${this._channelURL()}/file/confirm`, {
+    const confirmPayload: Record<string, unknown> = {
       attachment_id: presignResp.attachment_id,
       file_name: name,
       content_type: contentType,
-    });
+    };
 
-    return confirmResp;
+    if (presignResp.upload_mode === 'multipart') {
+      const multipart = presignResp.multipart;
+      const multipartUploadId = multipart?.upload_id;
+      if (!multipart || !multipartUploadId) {
+        throw new Error('Presigned multipart response does not contain an upload ID');
+      }
+      confirmPayload.multipart_upload_id = multipartUploadId;
+      confirmPayload.parts = await uploadMultipartPresignedFile(
+        file,
+        multipart,
+        uploadProgress,
+        undefined,
+        signal,
+        session.completed_parts,
+        async (completedPart) => {
+          const completedByNumber = new Map(session.completed_parts.map((part) => [part.part_number, part] as const));
+          completedByNumber.set(completedPart.part_number, completedPart);
+          session.completed_parts = Array.from(completedByNumber.values()).sort(
+            (left, right) => left.part_number - right.part_number,
+          );
+          await options.onPartCompleted?.(session);
+        },
+      );
+    } else {
+      if (!presignResp.upload_url) {
+        throw new Error('Presigned single upload response does not contain an upload URL');
+      }
+      await uploadSinglePresignedFile(presignResp.upload_url, file, contentType, uploadProgress, signal);
+    }
+
+    if (signal?.aborted) {
+      const error = new Error('Presigned upload aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+
+    const response = await this.getClient().post<{ file: string }>(
+      `${this._channelURL()}/file/confirm`,
+      confirmPayload,
+    );
+    onProgress?.({ loaded: totalSize, total: totalSize, percentage: 100 });
+    return response;
   }
   /**
    * Pre-process files (normalize names), upload them in parallel,
@@ -842,6 +972,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       voiceMetadata?: Map<number, VoiceRecordingMeta>;
       /** Callback for per-file upload progress (fileIndex, percentage 0-100) */
       onProgress?: (fileIndex: number, percentage: number) => void;
+      signal?: AbortSignal;
     },
   ): Promise<{
     attachments: Attachment[];
@@ -868,6 +999,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           (progress) => {
             options?.onProgress?.(fileIndex, progress.percentage);
           },
+          options?.signal,
         ),
       ),
     );
@@ -885,7 +1017,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               const thumbBlob = await this.getThumbBlobVideo(files[i]);
               if (thumbBlob) {
                 const thumbFile = new File([thumbBlob], `thumb_${processedFiles[i].name}.jpg`, { type: 'image/jpeg' });
-                const thumbResp = await this.uploadFilePresigned(thumbFile, thumbFile.name, 'image/jpeg');
+                const thumbResp = await this.uploadFilePresigned(
+                  thumbFile,
+                  thumbFile.name,
+                  'image/jpeg',
+                  undefined,
+                  options?.signal,
+                );
                 thumbUrls.set(i, thumbResp.file);
               }
             } catch {
@@ -916,6 +1054,23 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
 
     return { attachments, failedFiles };
+  }
+
+  async cancelPendingAttachmentSend(messageId: string) {
+    const pendingStandardSend = this._pendingStandardAttachmentSends.get(messageId);
+    if (pendingStandardSend) {
+      pendingStandardSend.cancelled = true;
+      pendingStandardSend.abortController.abort();
+      this._pendingStandardAttachmentSends.delete(messageId);
+      this._revokePendingE2eeLocalAttachments(pendingStandardSend.localAttachments);
+      const stateMessage = this._findLocalMessageById(messageId);
+      if (stateMessage) {
+        this._removeLocalMessageById(messageId);
+        this._dispatchLocalMessageStateEvent('message.deleted', stateMessage);
+      }
+      return;
+    }
+    return await this.cancelPendingE2eeSend(messageId);
   }
 
   async sendEvent(event: Event<ErmisChatGenerics>) {
