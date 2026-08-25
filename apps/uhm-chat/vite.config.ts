@@ -15,6 +15,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'prompt',
       workbox: {
+        // Keep E2EE range playback in the app worker. Registering a second
+        // root-scoped worker from the SDK would replace this PWA worker and
+        // make vite-plugin-pwa report a false app update.
+        importScripts: ['/e2ee-media-stream-worker.js?v=20260723-4'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // Tăng giới hạn lên 5MB
         runtimeCaching: [
           {
@@ -51,18 +55,40 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Use workspace sources in dev so Vite can hot-reload SDK/UI changes instantly.
+      react: path.resolve(__dirname, '../../node_modules/react'),
+      'react-dom': path.resolve(__dirname, '../../node_modules/react-dom'),
+      '@ermis-network/ermis-chat-react/dist/index.css': path.resolve(
+        __dirname,
+        '../../packages/ermis-chat-react/src/styles/index.css',
+      ),
+      '@ermis-network/ermis-chat-react': path.resolve(
+        __dirname,
+        '../../packages/ermis-chat-react/src/index.ts',
+      ),
+      '@ermis-network/ermis-chat-sdk': path.resolve(
+        __dirname,
+        '../../packages/ermis-chat-sdk/src/index.ts',
+      ),
     },
     dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {
     exclude: ['@ermis-network/ermis-chat-react', '@ermis-network/ermis-chat-sdk'],
-    // The SDK intentionally keeps these CommonJS/UMD dependencies external.
-    // Prebundle them so Vite dev provides correct ESM interop.
-    include: ['event-source-polyfill', 'form-data', 'isomorphic-ws'],
   },
-  css: { devSourcemap: false },
+  css: {
+    devSourcemap: true,
+  },
   server: {
     port: 3001,
     strictPort: true,
+    allowedHosts: ['3001uhm.sub2s.live'],
+    watch: {
+      // Prevent HMR full-page reloads caused by tsup --watch rebuilding dist/
+      ignored: [
+        '**/packages/ermis-chat-sdk/dist/**',
+        '**/packages/ermis-chat-react/dist/**',
+      ],
+    },
   },
 });

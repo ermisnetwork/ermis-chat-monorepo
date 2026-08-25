@@ -51,7 +51,7 @@ export function ConnectionStatusBanner({ status, onRetry }: ConnectionStatusBann
   if (showRestored) {
     return (
       <div
-        className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium animate-slide-down bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-b border-emerald-500/20"
+        className="pointer-events-auto flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium animate-slide-down bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-b border-emerald-500/20 backdrop-blur-sm"
         role="status"
         aria-live="polite"
       >
@@ -66,7 +66,7 @@ export function ConnectionStatusBanner({ status, onRetry }: ConnectionStatusBann
 
   return (
     <div
-      className={`flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium animate-slide-down border-b ${
+      className={`pointer-events-auto flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium animate-slide-down border-b backdrop-blur-sm ${
         isOffline
           ? 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20'
           : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20'

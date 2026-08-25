@@ -14,20 +14,23 @@ const PREFETCH_THRESHOLD_FRAMES = 2;
 const SEQUENTIAL_PREFETCH_HITS = 2;
 const SEQUENTIAL_FRAME_GAP = 2;
 const DEFAULT_GRANT_RENEWAL_SAFETY_MARGIN_MS = 30 * 1000;
+const IS_STANDALONE_E2EE_MEDIA_WORKER = new URL(self.location.href).pathname.endsWith('/e2ee-media-stream-worker.js');
 
 const sessions = new Map();
 let globalCacheBytes = 0;
 const grantRenewals = new Map();
 
-self.addEventListener('install', () => {
-	self.skipWaiting();
-});
+if (IS_STANDALONE_E2EE_MEDIA_WORKER) {
+	self.addEventListener('install', () => {
+		self.skipWaiting();
+	});
 
-self.addEventListener('activate', (event) => {
-	// The worker uses root scope so the chat page can request virtual media URLs.
-	// Fetch handling below is still limited to /__ermis/e2ee-media/* and the smoke route.
-	event.waitUntil(self.clients.claim());
-});
+	self.addEventListener('activate', (event) => {
+		// The standalone worker uses root scope so the chat page can request virtual media URLs.
+		// Fetch handling below is still limited to /__ermis/e2ee-media/* and the smoke route.
+		event.waitUntil(self.clients.claim());
+	});
+}
 
 function ack(source, requestId, ok, payload, error) {
 	if (!source || !requestId) return;

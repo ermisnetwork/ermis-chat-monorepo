@@ -3,10 +3,22 @@ import './styles/index.css';
 
 // Context
 export { ChatProvider } from './context/ChatProvider';
-export type { ChatProviderProps, ChatContextValue, Theme } from './context/ChatProvider';
+export type {
+  ChatComposerContextValue,
+  ChatContextValue,
+  ChatCoreContextValue,
+  ChatMessagesContextValue,
+  ChatNavigationContextValue,
+  ChatProviderProps,
+  Theme,
+} from './context/ChatProvider';
 
 // Hooks
 export { useChatClient } from './hooks/useChatClient';
+export { useChatCore } from './hooks/useChatCore';
+export { useChatMessages } from './hooks/useChatMessages';
+export { useChatComposer } from './hooks/useChatComposer';
+export { useChatNavigation } from './hooks/useChatNavigation';
 export { useChatUser } from './hooks/useChatUser';
 export { useInviteChannels } from './hooks/useInviteChannels';
 export { useContactChannels } from './hooks/useContactChannels';
@@ -18,6 +30,7 @@ export { useChannelListUpdates } from './hooks/useChannelListUpdates';
 export { useChannelRowUpdates } from './hooks/useChannelRowUpdates';
 export { useBannedState } from './hooks/useBannedState';
 export { useBlockedState } from './hooks/useBlockedState';
+export { useMutedState, isChannelMuted } from './hooks/useMutedState';
 export { useOnlineStatus } from './hooks/useOnlineStatus';
 export type { OnlineStatus } from './hooks/useOnlineStatus';
 export { useOnlineUsers } from './hooks/useOnlineUsers';
@@ -92,6 +105,7 @@ export {
   formatDateLabel,
   getMessageUserId,
   getUserDisplayName,
+  getChannelDisplayInfo,
   replaceMentionsForPreview,
   getLastMessagePreview,
   buildUserMap,
@@ -115,6 +129,7 @@ export {
   isSkippedMember,
   isOwnerMember,
   isFriendChannel,
+  canStartDirectCall,
   canManageChannel,
   canRemoveTargetMember,
   canBanTargetMember,
@@ -134,10 +149,13 @@ export {
   isVideoAttachment,
   isVoiceRecordingAttachment,
   isLinkPreviewAttachment,
+  isE2eeAttachmentManifest,
+  getAttachmentDisplayName,
   isImage,
   isVideo,
   MESSAGE_DISPLAY_TYPES,
   isDeletedDisplayMessage,
+  isDeletedMessage,
 } from './messageTypeUtils';
 export type { MessageType, AttachmentType, MessageDisplayType } from './messageTypeUtils';
 
@@ -146,7 +164,6 @@ export {
   RegularMessage,
   SystemMessage,
   SignalMessage,
-  PollMessage,
   StickerMessage,
   ErrorMessage,
   AttachmentList,
@@ -249,6 +266,7 @@ export type { UserPickerProps, UserPickerUser, UserPickerItemProps, UserPickerSe
 
 export { CreateChannelModal } from './components/CreateChannelModal';
 export type { CreateChannelModalProps } from './types';
+
 // Call Components
 export { ErmisCallContext } from './context/ErmisCallContext';
 export type { CallContextValue } from './context/ErmisCallContext';
@@ -264,3 +282,6 @@ export type {
   ErmisCallErrorProps,
   ErmisCallControlsBarProps,
 } from './types';
+
+export { TgsStickerPlayer, StickerImage, isTgsUrl, isWebmStickerUrl } from './components/TgsStickerPlayer';
+export type { TgsStickerPlayerProps } from './components/TgsStickerPlayer';

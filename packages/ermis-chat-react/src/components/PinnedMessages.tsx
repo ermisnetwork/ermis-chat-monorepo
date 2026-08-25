@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { Avatar } from './Avatar';
 import {
   ATTACHMENT_TYPES,
@@ -27,7 +27,7 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
 }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const userId = getMessageUserId(message);
   const cachedUser = userId ? client?.state?.users?.[userId] : undefined;
   const userName = getUserDisplayName(message.user, userId, cachedUser) || 'Unknown';
@@ -67,7 +67,7 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
   }
 
   // Attachment icon prefix
-  let attachIcon = '';
+  let attachIcon: React.ReactNode = null;
   if (!isUnavailable && hasAttachments) {
     const firstAttach = message.attachments![0];
     if (isImageAttachment(firstAttach)) attachIcon = '📷 ';
@@ -89,7 +89,9 @@ const DefaultPinnedMessageItem: React.FC<PinnedMessageItemProps> = React.memo(({
     >
       <AvatarComponent image={userAvatar} name={userName} size={38} />
       <div className="ermis-pinned-messages__item-content">
-        <span className="ermis-pinned-messages__item-user">{userName}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="ermis-pinned-messages__item-user">{userName}</span>
+        </div>
         <span className="ermis-pinned-messages__item-text">{attachIcon}{previewText || unavailableMessageLabel}</span>
       </div>
       <button
@@ -125,12 +127,11 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
   attachmentLabel = 'Attachment',
   unavailableMessageLabel = 'Message unavailable',
 }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const [expanded, setExpanded] = useState(false);
   const currentUserId = client.userID;
 
-  // Track pinned messages via a revision counter so we re-read from channel
-  // state only when pin events fire, rather than on every new message.
+  // Revision counter bumped on pin/unpin WS events and after initial channel query
   const [pinRevision, setPinRevision] = useState(0);
 
   // Reset expanded state when switching channels
@@ -151,8 +152,31 @@ export const PinnedMessages: React.FC<PinnedMessagesProps> = React.memo(({
     };
   }, [activeChannel]);
 
+  // After channel switch, briefly poll for pinnedMessages to catch
+  // channel query populating them (query is async, no event is emitted).
+  // Stops as soon as pinned messages are found or after timeout.
+  useEffect(() => {
+    if (!activeChannel) return;
+    const pinned = (activeChannel.state as any)?.pinnedMessages;
+    if (Array.isArray(pinned) && pinned.length > 0) return; // already populated
+
+    let attempts = 0;
+    const maxAttempts = 10; // 10 × 200ms = 2s
+    const timer = setInterval(() => {
+      attempts++;
+      const current = (activeChannel.state as any)?.pinnedMessages;
+      if ((Array.isArray(current) && current.length > 0) || attempts >= maxAttempts) {
+        clearInterval(timer);
+        if (Array.isArray(current) && current.length > 0) {
+          setPinRevision((r) => r + 1);
+        }
+      }
+    }, 200);
+
+    return () => clearInterval(timer);
+  }, [activeChannel]);
+
   const pinnedMessages = useMemo<FormatMessageResponse[]>(() => {
-    // pinRevision is used as a dependency trigger only
     void pinRevision;
     if (!activeChannel) return [];
     const pinned = (activeChannel.state as any)?.pinnedMessages;

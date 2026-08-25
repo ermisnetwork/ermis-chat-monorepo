@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { useChatClient } from '@ermis-network/ermis-chat-react';
+import { useChatCore } from '@ermis-network/ermis-chat-react';
 
 const DEFAULT_TOPIC_ICONS = ['💬', '🔥', '🚀', '⭐', '💡', '🎉', '📌', '📁', '🎨', '💻', '📈', '🤝', '🌈', '⚡', '🤖', '🎮', '🎧', '📚', '🍕', '⚽'];
 
@@ -25,7 +25,7 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
   savingButtonLabel: propSavingLabel,
 }) => {
   const { t } = useTranslation();
-  const { client, activeChannel } = useChatClient();
+  const { client, activeChannel } = useChatCore();
   
   // Use props if provided, otherwise use localized strings
   const title = propTitle || (topic ? t('edit.edit_topic_title') : t('edit.create_topic_title'));

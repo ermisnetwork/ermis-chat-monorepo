@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Search, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useContactChannels, Avatar, useChatClient, getUserDisplayName } from '@ermis-network/ermis-chat-react'
+import { useContactChannels, Avatar, useChatCore, getUserDisplayName } from '@ermis-network/ermis-chat-react'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
 
 interface ContactsPanelProps {
@@ -15,7 +15,7 @@ type GroupedContacts = { letter: string; channels: Channel[] }[]
 export function ContactsPanel({ onBack }: ContactsPanelProps) {
   const { t } = useTranslation()
   const contacts = useContactChannels()
-  const { client, setActiveChannel } = useChatClient()
+  const { client, setActiveChannel } = useChatCore()
   const [searchQuery, setSearchQuery] = useState('')
 
   // Get the display name for a contact channel (the other user's name)
@@ -84,9 +84,9 @@ export function ContactsPanel({ onBack }: ContactsPanelProps) {
   )
 
   return (
-    <div className="flex flex-col h-full bg-white/60 dark:bg-[#1a1828]/60 backdrop-blur-xl">
+    <div className="flex flex-col h-full bg-white dark:bg-[#1a1828]">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-200/50 dark:border-zinc-800/50 sticky top-0 bg-white/50 dark:bg-[#1a1828]/50 backdrop-blur-md z-10">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-200 dark:border-zinc-800/50 sticky top-0 bg-white/95 dark:bg-[#1a1828]/95 backdrop-blur-md z-10">
         <Button
           variant="ghost"
           size="icon"

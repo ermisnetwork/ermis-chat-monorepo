@@ -24,6 +24,14 @@ export default defineConfig([
 			// Keep type safety at the `tsc -b` gate without forcing fake types for SDK callbacks.
 			'@typescript-eslint/no-explicit-any': 'off',
 			'@typescript-eslint/no-empty-object-type': 'off',
+			'@typescript-eslint/no-unused-vars': [
+				'error',
+				{
+					argsIgnorePattern: '^_',
+					varsIgnorePattern: '^_',
+					caughtErrorsIgnorePattern: '^_',
+				},
+			],
 			// React 19 compiler-advisory rules are not enabled for this app yet.
 			'react-hooks/preserve-manual-memoization': 'off',
 			'react-hooks/refs': 'off',

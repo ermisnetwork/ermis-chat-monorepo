@@ -4,6 +4,22 @@ import type { Channel, E2eeAttachmentManifest, E2eeAttachmentTransferProgress } 
 export const E2EE_PREVIEW_MAX_CONCURRENT = 3;
 export const E2EE_PREVIEW_CACHE_LIMIT = 100;
 
+let activeE2eePreviewLoads = 0;
+const queuedE2eePreviewLoads: Array<() => void> = [];
+
+export function scheduleE2eePreviewLoad(load: () => Promise<unknown>): void {
+  const run = () => {
+    activeE2eePreviewLoads += 1;
+    void load().finally(() => {
+      activeE2eePreviewLoads = Math.max(0, activeE2eePreviewLoads - 1);
+      const next = queuedE2eePreviewLoads.shift();
+      if (next) next();
+    });
+  };
+  if (activeE2eePreviewLoads < E2EE_PREVIEW_MAX_CONCURRENT) run();
+  else queuedE2eePreviewLoads.push(run);
+}
+
 const previewObjectUrlCache = new Map<string, { url: string; blob: Blob }>();
 
 export function clearE2eePreviewObjectUrlCache(): void {

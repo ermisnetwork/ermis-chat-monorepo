@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { replaceMentionsForPreview, buildUserMap, getMessageUserId, getUserDisplayName } from '../utils';
 import { isStickerMessage } from '../messageTypeUtils';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
@@ -47,7 +47,7 @@ export const EditPreview: React.FC<{
   editingMessageLabel = 'Editing message',
 }: any) => {
   console.log('--message--', message)
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
 
   const userMap = useMemo<Record<string, string>>(() => {
     return buildUserMap(activeChannel?.state, client?.state?.users);

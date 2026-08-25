@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isFriendChannel } from '../channelRoleUtils';
 
 /**
@@ -18,7 +18,7 @@ import { isFriendChannel } from '../channelRoleUtils';
  * @param channels – The full list of loaded channels (from ChannelList).
  */
 export function useOnlineUsers(channels: Channel[]): Set<string> {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const currentUserId = client.userID;
 
   // Build a map: friendUserId → Channel (the friend channel).

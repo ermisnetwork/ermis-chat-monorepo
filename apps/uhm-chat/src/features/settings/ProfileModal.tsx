@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Camera, Loader2, Mail, Phone, Hash, Copy, Music, Play, RotateCcw } from 'lucide-react';
-import { useChatClient, useChatUser, Avatar, getUserDisplayName } from '@ermis-network/ermis-chat-react';
+import { useChatCore, useChatUser, Avatar, getUserDisplayName } from '@ermis-network/ermis-chat-react';
 import { toast } from 'sonner';
 import { UhmModal } from '@/components/custom/UhmModal';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,7 @@ interface ProfileModalProps {
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation();
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const { user } = useChatUser();
   const userDisplayName = getUserDisplayName(user, user?.id);
   const [name, setName] = useState(userDisplayName);

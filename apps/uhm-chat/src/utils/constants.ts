@@ -6,6 +6,7 @@ export const STORAGE_KEYS = {
   LOCALE: 'locale',
   THEME: 'theme',
   NOTIFICATION_SOUND_ENABLED: 'notification_sound_enabled',
+  RECOVERY_GATE_ACKNOWLEDGED_CIDS: 'recovery_gate_acknowledged_cids',
 } as const;
 
 export const NOTIFICATION_CONFIG = {
@@ -32,4 +33,9 @@ export const OTP_CONFIG = {
   COUNTDOWN_SECONDS: 60,
   CODE_LENGTH: 6,
   PHONE_METHOD: 'Sms',
+} as const;
+
+export const RECOVERY_PIN_CONFIG = {
+  MIN_DIGITS: 8,
+  RESTORE_PREVIEW_LIMIT: 8,
 } as const;

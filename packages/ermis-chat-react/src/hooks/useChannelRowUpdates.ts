@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { isDirectChannel } from '../channelTypeUtils';
+import { isChannelMuted } from './useMutedState';
 
 /**
  * Custom hook to abstract real-time row-level updates for a single channel.
@@ -12,6 +13,9 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
   const [isBlockedInChannel, setIsBlockedInChannel] = useState(() => {
     if (!isDirectChannel(channel)) return false;
     return Boolean(channel.state?.membership?.blocked);
+  });
+  const [isMutedInChannel, setIsMutedInChannel] = useState(() => {
+    return isChannelMuted((channel.state?.membership as any)?.muted);
   });
 
   // Force re-render when messages, members, or read state changes
@@ -29,6 +33,7 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
 
     setIsBannedInChannel(computeIsBanned());
     setIsBlockedInChannel(isDirectChannel(channel) ? Boolean(channel.state?.membership?.blocked) : false);
+    setIsMutedInChannel(isChannelMuted((channel.state?.membership as any)?.muted));
 
     const handleBanned = (event: any) => {
       if (event.member?.user_id === currentUserId) {
@@ -75,6 +80,9 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
     const sub12 = channel.on('channel.topic.created', handleUpdate);
     const sub13 = channel.on('channel.pinned', handleUpdate);
     const sub14 = channel.on('channel.unpinned', handleUpdate);
+    const subTruncate = channel.on('channel.truncate', handleUpdate);
+    const subTruncateForMe = channel.on('channel.truncate_for_me', handleUpdate);
+    const subTruncated = channel.on('channel.truncated' as any, handleUpdate);
     const client = channel.getClient();
     const sub15 = client.on('e2ee.message_decrypted' as any, handleE2eePreviewUpdate);
     const sub16 = client.on('e2ee.local_messages_loaded' as any, handleE2eePreviewUpdate);
@@ -87,6 +95,14 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub18 = parentChannel.on('member.banned', handleBanned);
       sub19 = parentChannel.on('member.unbanned', handleUnbanned);
     }
+
+    // Muted state: listen for member.updated to detect mute/unmute
+    const handleMemberUpdated = (event: any) => {
+      if (event.member?.user_id === currentUserId) {
+        setIsMutedInChannel(isChannelMuted(event.member?.muted));
+      }
+    };
+    const subMemberUpdated = channel.on('member.updated', handleMemberUpdated);
 
     return () => {
       sub1.unsubscribe();
@@ -104,13 +120,17 @@ export function useChannelRowUpdates(channel: Channel, currentUserId?: string) {
       sub12.unsubscribe();
       sub13.unsubscribe();
       sub14.unsubscribe();
+      subTruncate.unsubscribe();
+      subTruncateForMe.unsubscribe();
+      subTruncated.unsubscribe();
       sub15.unsubscribe();
       sub16.unsubscribe();
       sub17.unsubscribe();
       if (sub18) sub18.unsubscribe();
       if (sub19) sub19.unsubscribe();
+      subMemberUpdated.unsubscribe();
     };
   }, [channel, currentUserId]);
 
-  return { isBannedInChannel, isBlockedInChannel, updateCount };
+  return { isBannedInChannel, isBlockedInChannel, isMutedInChannel, updateCount };
 }

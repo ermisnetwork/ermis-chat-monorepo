@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Hash, Plus, Info, MoreVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
-  useChatClient,
+  useChatCore,
   TopicList,
   canManageChannel,
 } from '@ermis-network/ermis-chat-react'
@@ -66,7 +66,7 @@ export function TopicsPanel({
   signalMessageTranslations,
 }: TopicsPanelProps) {
   const { t } = useTranslation()
-  const { client } = useChatClient()
+  const { client } = useChatCore()
   const currentUserId = client.userID
 
   const channelName = channel.data?.name || channel.cid

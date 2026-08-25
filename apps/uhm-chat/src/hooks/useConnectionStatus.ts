@@ -44,9 +44,12 @@ export function useConnectionStatus(
         // No WS connection yet → still connecting
         return
       }
-      if (ws.isHealthy) {
+      if (ws.isHealthy && offlineSinceRef.current === null) {
         setStatus('connected')
-        offlineSinceRef.current = null
+      } else if (ws.isHealthy) {
+        // The socket is online, but recoverState() has not completed yet.
+        // Keep the recovery banner until `connection.recovered` arrives.
+        setStatus('reconnecting')
       } else if (!ws.isConnecting && !ws.isDisconnected) {
         // WS failed and not reconnecting → show reconnecting
         // SDK auto-retries so display reconnecting state
@@ -65,9 +68,9 @@ export function useConnectionStatus(
     // connection.changed: { online: boolean }
     const handleConnectionChanged = (event: any) => {
       if (event.online) {
-        // Back online
-        setStatus('connected')
-        offlineSinceRef.current = null
+        // WebSocket transport is back, but SDK state recovery still runs next.
+        // Do not report a fully restored connection until that work completes.
+        setStatus(offlineSinceRef.current === null ? 'connected' : 'reconnecting')
         if (offlineTimerRef.current) {
           clearTimeout(offlineTimerRef.current)
           offlineTimerRef.current = null

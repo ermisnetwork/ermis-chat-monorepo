@@ -32,6 +32,48 @@
   position: relative;
 }
 
+.ermis-message-list__repair-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ermis-spacing-sm);
+  padding: var(--ermis-spacing-xl);
+  background-color: var(--ermis-bg-primary);
+  text-align: center;
+}
+
+.ermis-message-list__repair-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--ermis-border);
+  border-top-color: var(--ermis-accent);
+  border-radius: 50%;
+  animation: ermis-message-list-repair-spin 0.8s linear infinite;
+}
+
+.ermis-message-list__repair-title {
+  font-size: var(--ermis-font-size-base);
+  font-weight: 600;
+  color: var(--ermis-text-primary);
+}
+
+.ermis-message-list__repair-subtitle {
+  max-width: 320px;
+  font-size: var(--ermis-font-size-sm);
+  line-height: 1.5;
+  color: var(--ermis-text-muted);
+}
+
+@keyframes ermis-message-list-repair-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .ermis-message-list__vlist {
   display: flex !important;
   flex-direction: column !important;
@@ -49,7 +91,7 @@
 }
 
 /* Push content to bottom when few messages, margin collapses when content overflows */
-.ermis-message-list__vlist > div {
+.ermis-message-list__vlist>div {
   margin-top: auto;
 }
 
@@ -138,6 +180,7 @@
   white-space: nowrap;
   font-weight: 400;
 }
+
 .ermis-message-list__empty {
   display: flex;
   flex-direction: column;
@@ -218,6 +261,16 @@
 .ermis-message-list__item--group-middle,
 .ermis-message-list__item--group-bottom {
   padding-top: 2px;
+}
+
+/* Use gap instead of padding to separate call messages */
+.ermis-message-group__messages-col:has(.ermis-message-list__item--signal) {
+  gap: 5px;
+}
+
+.ermis-message-group__messages-col:has(.ermis-message-list__item--signal) .ermis-message-list__item--group-middle,
+.ermis-message-group__messages-col:has(.ermis-message-list__item--signal) .ermis-message-list__item--group-bottom {
+  padding-top: 0;
 }
 
 .ermis-message-list__item--other {
@@ -556,4 +609,14 @@
 
 .ermis-message-list__pending-invitee-content svg {
   color: var(--ermis-accent);
+}
+
+/* Gap Indicator */
+.ermis-message-list__gap-indicator {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: var(--ermis-spacing-sm, 8px) 0;
+  margin: var(--ermis-spacing-sm, 8px) 0;
 }

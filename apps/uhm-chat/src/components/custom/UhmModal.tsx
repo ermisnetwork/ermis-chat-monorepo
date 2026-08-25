@@ -6,9 +6,19 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import type { ModalProps } from '@ermis-network/ermis-chat-react';
+export interface UhmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title?: React.ReactNode;
+  children?: React.ReactNode;
+  footer?: React.ReactNode;
+  maxWidth?: string;
+  hideCloseButton?: boolean;
+  closeOnOutsideClick?: boolean;
+  centerTitle?: boolean;
+}
 
-export const UhmModal: React.FC<ModalProps> = ({
+export const UhmModal: React.FC<UhmModalProps> = ({
   isOpen,
   onClose,
   title,
@@ -17,6 +27,7 @@ export const UhmModal: React.FC<ModalProps> = ({
   maxWidth = '400px',
   hideCloseButton,
   closeOnOutsideClick = true,
+  centerTitle,
 }) => {
   return (
     <Dialog
@@ -38,8 +49,8 @@ export const UhmModal: React.FC<ModalProps> = ({
         }}
       >
         {title && (
-          <DialogHeader className="p-6 pb-2 border-b border-zinc-100 dark:border-zinc-800">
-            <DialogTitle>{title}</DialogTitle>
+          <DialogHeader className={`p-6 pb-2 border-b border-zinc-100 dark:border-zinc-800 ${centerTitle ? 'text-center sm:text-center' : ''}`}>
+            <DialogTitle className={`leading-normal py-0.5 ${centerTitle ? 'w-full text-center' : ''}`}>{title}</DialogTitle>
           </DialogHeader>
         )}
         

@@ -415,8 +415,15 @@
   flex-shrink: 0;
   width: 36px;
   height: 36px;
-  border-radius: var(--ermis-radius-xs, 4px);
+  border-radius: var(--ermis-radius-xs);
   object-fit: cover;
+}
+
+.ermis-message-input__reply-preview-thumb--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ermis-bg-hover);
 }
 
 /* ----------------------------------------------------------

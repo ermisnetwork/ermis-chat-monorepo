@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { VList as _VList, type VListHandle } from 'virtua';
 const VList = _VList as any;
 import type { Channel, Event, ChannelFilters } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
 import { useOnlineUsers } from '../hooks/useOnlineUsers';
-import { getLastMessagePreview } from '../utils';
+import { getLastMessagePreview, getChannelDisplayInfo } from '../utils';
 import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
 import { usePendingState } from '../hooks/usePendingState';
 import {
@@ -59,8 +59,11 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   actionLabels,
   actionIcons,
   isOnline,
+  isMuted,
+  mutedBadgeLabel,
+  MutedIconComponent,
 }) => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const currentUserId = client.userID;
 
   // Subscribe to channel.updated so that when name/image/description change,
@@ -79,8 +82,8 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   }, [channel]);
 
   const defaultActions = useMemo(
-    () => computeDefaultActions(channel, currentUserId, { onAddTopic, onEditTopic, onToggleCloseTopic, onDeleteTopic, onTruncateChannel, isBlocked, actionLabels, actionIcons }),
-    [channel, currentUserId, updateCount, onAddTopic, onEditTopic, onToggleCloseTopic, onDeleteTopic, onTruncateChannel, isBlocked, actionLabels, actionIcons],
+    () => computeDefaultActions(channel, currentUserId, { onAddTopic, onEditTopic, onToggleCloseTopic, onDeleteTopic, onTruncateChannel, isBlocked, isMuted, actionLabels, actionIcons }),
+    [channel, currentUserId, updateCount, onAddTopic, onEditTopic, onToggleCloseTopic, onDeleteTopic, onTruncateChannel, isBlocked, isMuted, actionLabels, actionIcons],
   );
 
   const filteredActions = useMemo(() => {
@@ -91,23 +94,8 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
 
   // For DM channels, resolve name/image from the other member if channel.data.name is missing
   const resolvedNameImage = useMemo(() => {
-    if (channel.data?.name) {
-      return { name: channel.data.name as string, image: channel.data.image as string | undefined };
-    }
-    // For DM (messaging) channels, find the other member's info
-    if (isDirectChannel(channel) && currentUserId && channel.state?.members) {
-      const members = Object.values(channel.state.members) as any[];
-      const other = members.find((m: any) => (m.user_id || m.user?.id) !== currentUserId);
-      if (other) {
-        const otherUser = other.user || other;
-        return {
-          name: otherUser.name || otherUser.id || channel.cid,
-          image: otherUser.image || otherUser.avatar || otherUser.avatar_url,
-        };
-      }
-    }
-    return { name: channel.cid, image: channel.data?.image as string | undefined };
-  }, [channel.data?.name, channel.data?.image, channel.state?.members, currentUserId, channel.cid, updateCount]);
+    return getChannelDisplayInfo(channel, currentUserId);
+  }, [channel, currentUserId, channel?.data?.name, channel?.data?.image, channel?.state?.members, updateCount]);
 
   const name = resolvedNameImage.name;
   const image = resolvedNameImage.image;
@@ -151,7 +139,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
       </div>
       <div className="ermis-channel-list__item-content">
         <div className="ermis-channel-list__item-top-row">
-          <div className="ermis-channel-list__item-name">{name}</div>
+          <div className="ermis-channel-list__item-name" title={name}>{name}</div>
           {channel.data?.is_pinned === true && !isClosedTopic && PinnedIconComponent && (
             <span className="ermis-channel-list__pinned-icon" title="Pinned">
               <PinnedIconComponent />
@@ -179,6 +167,20 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
                 <circle cx="12" cy="12" r="10" />
                 <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
               </svg>
+            </span>
+          )}
+
+          {isMuted && (
+            <span className="ermis-channel-list__muted-icon" title={mutedBadgeLabel || "Muted"}>
+              {MutedIconComponent ? <MutedIconComponent /> : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                  <path d="M18.63 13A17.89 17.89 0 0 1 18 8" />
+                  <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" />
+                  <path d="M18 8a6 6 0 0 0-9.33-5" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              )}
             </span>
           )}
         </div>
@@ -326,7 +328,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   signalMessageTranslations,
 }) => {
   // Use the new custom hook to handle all row-level realtime updates
-  const { isBannedInChannel, isBlockedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
+  const { isBannedInChannel, isBlockedInChannel, isMutedInChannel, updateCount } = useChannelRowUpdates(channel, currentUserId);
   const { isPending } = usePendingState(channel, currentUserId);
   const isSkipped = isSkippedMember(channel.state?.membership?.channel_role as string);
 
@@ -373,10 +375,10 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
     ]
   );
 
-  // Hide last message preview when banned, blocked, pending or skipped
-  const lastMessageText = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped) ? '' : rawLastMessageText;
-  const lastMessageUser = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped || isDirectChannel(channel)) ? '' : rawLastMessageUser;
-  const lastMessageTimestamp = (isBannedInChannel || isBlockedInChannel || isPending || isSkipped) ? null : rawLastMessageTimestamp;
+  // Hide last message preview when banned, pending or skipped (keep visible for blocked)
+  const lastMessageText = (isBannedInChannel || isPending || isSkipped) ? '' : rawLastMessageText;
+  const lastMessageUser = (isBannedInChannel || isPending || isSkipped || isDirectChannel(channel)) ? '' : rawLastMessageUser;
+  const lastMessageTimestamp = (isBannedInChannel || isPending || isSkipped) ? null : rawLastMessageTimestamp;
 
   if (renderChannel) {
     return (
@@ -414,6 +416,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       actionLabels={actionLabels}
       actionIcons={actionIcons}
       isOnline={isOnline}
+      isMuted={isMutedInChannel}
     />
   );
 });
@@ -421,7 +424,7 @@ ChannelRow.displayName = 'ChannelRow';
 
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
-  filters = { type: ['messaging', 'team', 'meeting'], include_hidden_messages: true } as unknown as ChannelFilters,
+  filters = { type: ['messaging', 'team', 'meeting'] } as unknown as ChannelFilters,
   sort = [],
   options = { message_limit: 1 } as unknown as ChannelListProps['options'],
   renderChannel,
@@ -471,13 +474,35 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   systemMessageTranslations,
   signalMessageTranslations,
   showTopicPills = false,
+  waitForSync = false,
 }) => {
-  const { client, activeChannel, setActiveChannel } = useChatClient();
+  const { client, activeChannel, setActiveChannel } = useChatCore();
   const { ChannelListErrorIndicator } = useChatComponents();
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<any>(null);
+
+  // When waitForSync is enabled, keep the skeleton visible until sync completes.
+  // This prevents flickering on cold start (F5) when sync updates channels.
+  const [syncReady, setSyncReady] = useState(!waitForSync);
+
+  useEffect(() => {
+    if (!waitForSync || syncReady) return;
+
+    const handleSyncDone = () => setSyncReady(true);
+    const sub1 = client.on('sync.completed', handleSyncDone);
+    const sub2 = client.on('connection.recovered', handleSyncDone);
+
+    // Safety net: drop skeleton after 5s even if sync never fires
+    const safetyTimer = setTimeout(() => setSyncReady(true), 5000);
+
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+      clearTimeout(safetyTimer);
+    };
+  }, [client, waitForSync, syncReady]);
 
   const ActualErrorIndicator = ErrorIndicator || ChannelListErrorIndicator || DefaultError;
   const [isPendingExpanded, setIsPendingExpanded] = useState(true);
@@ -640,7 +665,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
     [setActiveChannel, onChannelSelect, setChannels],
   );
 
-  if (loading) return <LoadingIndicator text={loadingLabel} />;
+  if (loading || (waitForSync && !syncReady)) return <LoadingIndicator text={loadingLabel} />;
   if (error) return <ActualErrorIndicator text={errorLabel} onRetry={loadChannels} />;
 
   const isEmpty = showPendingInvites

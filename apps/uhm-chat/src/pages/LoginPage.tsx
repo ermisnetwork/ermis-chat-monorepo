@@ -21,6 +21,7 @@ interface LoginPageProps {
 function createAuthProvider() {
   return API_DEFAULTS.SELF_HOSTED
     ? new ErmisAuthProvider({
+        apiKey: API_DEFAULTS.API_KEY,
         baseURL: API_DEFAULTS.BASE_URL,
         ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
         selfHosted: true,
@@ -130,10 +131,23 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
         onLoginSuccess(finalUserId, token, refreshToken)
       } else {
-        setError(res.message || t('errors.wrong_otp'))
+        const msg = res?.message || ''
+        if (!msg || msg.includes('401') || msg.toLowerCase().includes('unauthorized')) {
+          setError(t('errors.wrong_otp'))
+        } else {
+          setError(msg)
+        }
       }
     } catch (err: any) {
-      setError(err?.message || t('errors.system_verify_err'))
+      const status = err?.response?.status || err?.status || err?.statusCode
+      const msg = typeof err === 'string' ? err : err?.response?.data?.message || err?.message || ''
+      if (status === 401 || msg.includes('401') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('invalid otp')) {
+        setError(t('errors.wrong_otp'))
+      } else if (msg && !/^\d{3}$/.test(msg.trim()) && !msg.startsWith('Request failed with status code')) {
+        setError(msg)
+      } else {
+        setError(t('errors.wrong_otp'))
+      }
     } finally {
       setLoading(false)
     }

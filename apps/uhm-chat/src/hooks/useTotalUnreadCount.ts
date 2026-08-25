@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useChatClient, isPendingMember, isSkippedMember, isDirectChannel, isGroupChannel, isTopicChannel } from '@ermis-network/ermis-chat-react';
+import { useChatCore, isPendingMember, isSkippedMember, isDirectChannel, isGroupChannel, isTopicChannel } from '@ermis-network/ermis-chat-react';
 
 export function useTotalUnreadCount(): number {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [totalUnread, setTotalUnread] = useState(0);
 
   useEffect(() => {

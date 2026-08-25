@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useTranslation } from 'react-i18next';
 import {
-  useChatClient,
+  useChatCore,
   useChatUser,
   useInviteCount,
   useContactCount,
@@ -42,7 +42,7 @@ export function SidebarHeader({
   onSearchClose,
 }: SidebarHeaderProps) {
   const { t, i18n } = useTranslation();
-  const { client, theme, setTheme, clearAllDrafts } = useChatClient();
+  const { client, theme, setTheme, clearAllDrafts } = useChatCore();
   const { user } = useChatUser();
   const userDisplayName = getUserDisplayName(user, user?.id);
   const { inviteCount } = useInviteCount();
@@ -88,6 +88,10 @@ export function SidebarHeader({
     } catch (err) {
       console.error('Logout error', err);
     } finally {
+      const savedUserId = client?.userID || localStorage.getItem(STORAGE_KEYS.USER_ID);
+      if (savedUserId) {
+        sessionStorage.removeItem(`${STORAGE_KEYS.RECOVERY_GATE_ACKNOWLEDGED_CIDS}:${savedUserId}`);
+      }
       localStorage.removeItem(STORAGE_KEYS.TOKEN);
       localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
       localStorage.removeItem(STORAGE_KEYS.USER_ID);
@@ -187,11 +191,13 @@ export function SidebarHeader({
               <span className="text-base">{i18n.language === 'vi' ? '🇻🇳' : '🇬🇧'}</span>
             </DropdownMenuItem>
 
+            <DropdownMenuSeparator />
+
             <DropdownMenuItem
               className="cursor-pointer text-red-500 focus:text-red-500 focus:bg-red-50 dark:focus:bg-red-950/50"
               onClick={handleLogout}
             >
-              <LogOut className="mr-2 h-4 w-4" />
+              <LogOut className="h-4 w-4" />
               <span>{t('chat.menu_logout', 'Đăng xuất')}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>

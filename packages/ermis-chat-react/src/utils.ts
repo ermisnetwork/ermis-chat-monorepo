@@ -1,5 +1,4 @@
 import React from 'react';
-import type { MentionMember } from './types';
 import type { Attachment, FormatMessageResponse, Channel } from '@ermis-network/ermis-chat-sdk';
 import {
   parseSystemMessage,
@@ -7,7 +6,14 @@ import {
   SystemMessageTranslations,
   SignalMessageTranslations,
 } from '@ermis-network/ermis-chat-sdk';
-import { isDeletedDisplayMessage } from './messageTypeUtils';
+import {
+  ATTACHMENT_TYPES,
+  isDeletedDisplayMessage,
+  isImage,
+  isVideo,
+  isVoiceRecordingAttachment,
+} from './messageTypeUtils';
+import { isDirectChannel } from './channelTypeUtils';
 
 /**
  * Remove Vietnamese diacritics (accents) from a string.
@@ -131,6 +137,40 @@ export function getUserDisplayName(user: any, fallbackId?: string, ...fallbackUs
   };
 
   return pick(['display_name', 'name'], true) || pick(['email'], false) || pick(['phone'], false) || id;
+}
+
+/**
+ * Get resolved display name and avatar image for a channel.
+ * For 1-on-1 direct channels without custom name, resolves the other member's display name and avatar.
+ */
+export function getChannelDisplayInfo(
+  channel: any,
+  currentUserId?: string,
+): { name: string; image?: string } {
+  if (!channel) return { name: '' };
+
+  if (channel.data?.name && channel.data.name !== channel.cid) {
+    return {
+      name: channel.data.name as string,
+      image: channel.data.image as string | undefined,
+    };
+  }
+
+  if (isDirectChannel(channel) && currentUserId && channel.state?.members) {
+    const members = Object.values(channel.state.members) as any[];
+    const other = members.find((m: any) => (m.user_id || m.user?.id) !== currentUserId);
+    if (other) {
+      const otherUser = other.user || other;
+      const name = getUserDisplayName(otherUser, other.user_id || otherUser.id) || channel.cid;
+      const image = otherUser.image || otherUser.avatar || otherUser.avatar_url || channel.data?.image;
+      return { name, image };
+    }
+  }
+
+  return {
+    name: channel.data?.name || channel.cid || '',
+    image: channel.data?.image as string | undefined,
+  };
 }
 
 /**
@@ -367,8 +407,23 @@ export function getLastMessagePreview(
     signalMessageTranslations?: SignalMessageTranslations;
   },
 ): { text: React.ReactNode; user: string; timestamp?: string | Date } {
-  const lastMsg = channel.state?.latestMessages?.slice(-1)[0];
-  if (!lastMsg) return { text: '', user: '' };
+  // Walk backwards through latestMessages to find the first non-deleted message.
+  // This prevents the channel list from "jumping" when a message is deleted
+  // for everyone, because the preview falls back to the previous real message
+  // instead of flashing "This message was deleted".
+  const messages = channel.state?.latestMessages;
+  if (!messages || messages.length === 0) return { text: '', user: '' };
+
+  let lastMsg: (typeof messages)[number] | undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (!isDeletedDisplayMessage(messages[i])) {
+      lastMsg = messages[i];
+      break;
+    }
+  }
+  // If every message is deleted, fall back to the most recent one so we still
+  // show *something* (the deleted label) rather than a blank row.
+  if (!lastMsg) lastMsg = messages[messages.length - 1];
 
   const timestamp = lastMsg.created_at;
 
@@ -410,15 +465,21 @@ export function getLastMessagePreview(
   let displayText: React.ReactNode = rawText;
   if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
     const att = lastMsg.attachments[0];
-    const type = att.type || '';
+    const type = isImage(att)
+      ? ATTACHMENT_TYPES.IMAGE
+      : isVideo(att)
+        ? ATTACHMENT_TYPES.VIDEO
+        : isVoiceRecordingAttachment(att)
+          ? ATTACHMENT_TYPES.VOICE_RECORDING
+          : ATTACHMENT_TYPES.FILE;
     switch (type) {
-      case 'image':
+      case ATTACHMENT_TYPES.IMAGE:
         displayText = options?.photoMessageLabel || '📷 Photo';
         break;
-      case 'video':
+      case ATTACHMENT_TYPES.VIDEO:
         displayText = options?.videoMessageLabel || '🎬 Video';
         break;
-      case 'voiceRecording':
+      case ATTACHMENT_TYPES.VOICE_RECORDING:
         displayText = options?.voiceRecordingMessageLabel || '🎤 Voice message';
         break;
       default:
@@ -437,8 +498,8 @@ export function getLastMessagePreview(
   if (!displayText && isEncrypted) {
     displayText =
       (lastMsg as any).e2ee_status === 'failed'
-        ? options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable'
-        : options?.encryptedMessageLabel || 'Encrypted message';
+        ? (options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable')
+        : (options?.encryptedMessageLabel || 'Encrypted message');
   }
 
   // Format mentions if necessary
@@ -446,11 +507,7 @@ export function getLastMessagePreview(
   const mentionedUsers = lastMsgRecord.mentioned_users as string[] | undefined;
   const mentionedAll = lastMsgRecord.mentioned_all as boolean | undefined;
 
-  if (
-    typeof displayText === 'string' &&
-    displayText &&
-    (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))
-  ) {
+  if (typeof displayText === 'string' && displayText && (mentionedAll || (mentionedUsers && mentionedUsers.length > 0))) {
     displayText = replaceMentionsForPreview(displayText, lastMsg as any, userMap);
   }
 

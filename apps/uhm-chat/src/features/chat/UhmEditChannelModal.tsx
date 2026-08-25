@@ -127,17 +127,17 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
 
   return (
     <Dialog open onOpenChange={(open) => !open && !isSaving && onClose()}>
-      <DialogContent className="sm:max-w-[380px] p-0 overflow-hidden bg-white dark:bg-[#1a1828] border-zinc-200 dark:border-[#3a3555] shadow-2xl">
-        <DialogHeader className="p-5 pb-1 text-center">
-          <DialogTitle className="text-lg font-bold">{title}</DialogTitle>
+      <DialogContent className="sm:max-w-[380px] w-full p-0 overflow-hidden bg-white dark:bg-[#1a1828] border-zinc-200 dark:border-[#3a3555] shadow-2xl">
+        <DialogHeader className="p-5 pb-1 text-center min-w-0 max-w-full">
+          <DialogTitle className="text-lg font-bold truncate">{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col">
+        <div className="flex flex-col min-w-0 max-w-full">
           {/* Identity Area (Centered Avatar) */}
-          <div className="py-4 flex flex-col items-center bg-zinc-50/50 dark:bg-zinc-800/10 gap-3">
+          <div className="py-4 flex flex-col items-center bg-zinc-50/50 dark:bg-zinc-800/10 gap-3 min-w-0 max-w-full">
             <div className="relative group">
               <div className="p-1 bg-white dark:bg-[#1a1828] rounded-xl shadow-xl border border-zinc-100 dark:border-zinc-800">
-                <AvatarComponent image={image} name={name} size={80} className="rounded-lg !w-20 !h-20 object-cover" />
+                <AvatarComponent image={image} name={(channel?.data?.name as string) || name} size={80} className="rounded-lg !w-20 !h-20 object-cover" />
               </div>
               <button
                 onClick={() => !isProcessingImage && !isUploading && imageInputRef.current?.click()}
@@ -157,8 +157,8 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
               </button>
               <input type="file" ref={imageInputRef} className="hidden" accept={imageAccept} onChange={handleFileChange} />
             </div>
-            <div className="text-center px-4 w-full">
-              <h3 className="font-bold text-base leading-none truncate w-full">{name || t('edit.new_name_fallback')}</h3>
+            <div className="text-center px-4 w-full min-w-0 max-w-full">
+              <h3 className="font-bold text-base leading-none truncate w-full max-w-full" title={name || t('edit.new_name_fallback')}>{name || t('edit.new_name_fallback')}</h3>
             </div>
           </div>
 

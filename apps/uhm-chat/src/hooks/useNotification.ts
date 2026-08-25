@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useChatClient, isDirectChannel, isPendingMember, isSkippedMember, getUserDisplayName } from '@ermis-network/ermis-chat-react';
+import { useChatCore, isDirectChannel, isPendingMember, isSkippedMember, getUserDisplayName, isChannelMuted } from '@ermis-network/ermis-chat-react';
 import type { Channel as ChannelType } from '@ermis-network/ermis-chat-sdk';
 import { NOTIFICATION_CONFIG } from '@/utils/constants';
 
@@ -63,7 +63,7 @@ function getChannelDisplayName(channel: ChannelType, currentUserId?: string): st
  * - Both are throttled to avoid spamming
  */
 export function useNotification(activeChannel: ChannelType | null | undefined) {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const { t } = useTranslation();
   const lastSoundTimeRef = useRef(0);
   const playBeepRef = useRef<(() => void) | null>(null);
@@ -179,16 +179,27 @@ export function useNotification(activeChannel: ChannelType | null | undefined) {
         messageText = t('notifications.new_message');
       }
 
+      // --- Muted channel check ---
+      // If channel is muted, suppress sound and browser notifications
+      // unless the current user is mentioned in the message.
+      const channelMuted = isChannelMuted((membership as any)?.muted);
+      const isMentioned = Array.isArray(event.message?.mentioned_users) && event.message.mentioned_users.some(
+        (u: any) => (typeof u === 'string' ? u : u?.id) === client.userID,
+      );
+
       // --- Sound notification ---
       // Play sound if the message is NOT in the currently active channel,
       // OR if the tab is hidden (even if it's the active channel)
-      if (!isActiveChannel || document.hidden) {
+      // Suppress sound entirely if the channel is muted (unless mentioned)
+      if ((!channelMuted || isMentioned) && (!isActiveChannel || document.hidden)) {
         playSound();
       }
 
       // --- Browser push notification ---
       // Only show browser notification when tab is not focused
+      // Suppress if the channel is muted (unless mentioned)
       if (
+        (!channelMuted || isMentioned) &&
         document.hidden &&
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted'

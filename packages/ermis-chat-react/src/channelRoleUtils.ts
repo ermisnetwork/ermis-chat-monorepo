@@ -9,7 +9,7 @@ export const CHANNEL_ROLES = {
   SKIPPED: 'skipped',
 } as const;
 
-export type ChannelRole = typeof CHANNEL_ROLES[keyof typeof CHANNEL_ROLES] | string;
+export type ChannelRole = (typeof CHANNEL_ROLES)[keyof typeof CHANNEL_ROLES] | string;
 
 /** Checks if the user is in a pending state */
 export function isPendingMember(role?: string): boolean {
@@ -32,7 +32,7 @@ export function canRemoveTargetMember(currentUserRole?: string, targetRole?: str
     targetRole === CHANNEL_ROLES.MEMBER ||
     targetRole === CHANNEL_ROLES.PENDING ||
     (currentUserRole === CHANNEL_ROLES.OWNER && targetRole === CHANNEL_ROLES.MODERATOR);
-  
+
   return canManageChannel(currentUserRole) && isTargetRemovable;
 }
 
@@ -68,6 +68,15 @@ export function isFriendChannel(
   if (!channel || !isDirectChannel(channel)) return false;
   const targetMember = channel.state?.members?.[targetUserId];
   const currentMember = channel.state?.members?.[currentUserId];
-  return isOwnerMember(targetMember?.channel_role as string)
-      && isOwnerMember(currentMember?.channel_role as string);
+  return isOwnerMember(targetMember?.channel_role as string) && isOwnerMember(currentMember?.channel_role as string);
+}
+
+/** Checks whether both participants in a direct channel have accepted the relationship. */
+export function canStartDirectCall(
+  channel: Channel | null | undefined,
+  currentUserId: string | null | undefined,
+): boolean {
+  if (!channel || !currentUserId || !isDirectChannel(channel)) return false;
+  const targetUserId = Object.keys(channel.state?.members || {}).find((memberId) => memberId !== currentUserId);
+  return Boolean(targetUserId && isFriendChannel(channel, targetUserId, currentUserId));
 }

@@ -8,7 +8,7 @@ export type UseStickerPickerOptions = {
 
 export function useStickerPicker({
   activeChannel,
-  stickerIframeUrl = 'https://sticker.ermis.network',
+  stickerIframeUrl = 'https://sticker2.ermis.network',
 }: UseStickerPickerOptions) {
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
 

@@ -197,6 +197,7 @@ export function formatMessage<ErmisChatGenerics extends ExtendableGenerics = Def
 ): FormatMessageResponse<ErmisChatGenerics> {
   return {
     ...message,
+    user: message.user || (message as any).sender,
     /**
      * @deprecated please use `html`
      */
@@ -243,6 +244,12 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
     (Object.keys(incomingMessage) as Array<keyof typeof incomingMessage>).forEach((key) => {
       if (incomingMessage[key] === undefined) return;
       if (incomingIsEncrypted && existingHasPlaintext && encryptedPlaintextKeys.has(String(key))) return;
+
+      if (key === 'user' && existingMessage.user && incomingMessage.user) {
+        (mergedMessage as any)[key] = { ...existingMessage.user, ...(incomingMessage.user as any) };
+        return;
+      }
+
       (mergedMessage as any)[key] = incomingMessage[key];
     });
     if (incomingIsEncrypted && existingHasPlaintext) {
@@ -271,8 +278,19 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
     return messageArr.concat(message);
   }
 
-  const messageTime = (message[sortBy] as Date).getTime();
-  const messageIsNewest = (messageArr[messageArrayLength - 1][sortBy] as Date).getTime() < messageTime;
+  const getSortValue = (msg: any): number => {
+    if (!msg) return 0;
+    const val = msg[sortBy] || msg.created_at || msg.updated_at;
+    if (val) {
+      const t = val instanceof Date ? val.getTime() : new Date(val).getTime();
+      if (Number.isFinite(t) && t > 0) return t;
+    }
+    if (typeof msg.msg_seq === 'number' && msg.msg_seq > 0) return msg.msg_seq;
+    return 0;
+  };
+
+  const messageSort = getSortValue(message);
+  const messageIsNewest = getSortValue(messageArr[messageArrayLength - 1]) < messageSort;
 
   // if message is newer than last item in the list concat and return unless it's an update or deletion
   if (messageIsNewest && addMessageToList) {
@@ -287,7 +305,7 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
   let right = messageArrayLength - 1;
   while (left <= right) {
     middle = Math.floor((right + left) / 2);
-    if ((messageArr[middle][sortBy] as Date).getTime() <= messageTime) left = middle + 1;
+    if (getSortValue(messageArr[middle]) <= messageSort) left = middle + 1;
     else right = middle - 1;
   }
 
@@ -300,6 +318,14 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
 
     if (messageArr[left - 1] && message.id === messageArr[left - 1].id) {
       messageArr[left - 1] = mergeMessage(messageArr[left - 1], message);
+      return [...messageArr];
+    }
+
+    // Fallback: linear scan when binary search position doesn't match
+    // (handles timestamp collisions or precision differences)
+    const existingIdx = messageArr.findIndex((m) => m.id === message.id);
+    if (existingIdx >= 0) {
+      messageArr[existingIdx] = mergeMessage(messageArr[existingIdx], message);
       return [...messageArr];
     }
   }
@@ -335,18 +361,17 @@ export const enrichWithUserInfo = (items: any[], users: any[]) => {
   }
 
   return items.map((item) => {
-    const userId = item.user?.id || item.user_id;
+    const userId = item.user?.id || item.sender?.id;
     const lastestReactionMsg = item?.latest_reactions;
     const quotedMsg = item?.quoted_message;
-    const user = users.find((u) => u.id === userId);
-    if (user) {
-      item.user = {
-        ...item.user,
-        ...user,
-        id: user.id,
-        name: getUserDisplayName(user, user.id),
-        avatar: user.avatar || item.user?.avatar || '',
-      };
+    
+    if (userId) {
+      const user = users.find((u) => u.id === userId);
+      if (user) {
+        item.user = { id: user.id, name: user.name || user.id, avatar: user.avatar || '' };
+      } else if (!item.user && item.sender) {
+        item.user = { id: item.sender.id, name: item.sender.name || item.sender.id, avatar: item.sender.avatar || '' };
+      }
     }
 
     if (lastestReactionMsg) {

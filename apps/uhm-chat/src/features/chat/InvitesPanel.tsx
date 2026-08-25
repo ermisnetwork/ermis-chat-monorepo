@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Inbox } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useInviteChannels, ChannelItem, Avatar, useChatClient } from '@ermis-network/ermis-chat-react'
+import { useInviteChannels, ChannelItem, Avatar, useChatCore } from '@ermis-network/ermis-chat-react'
 
 interface InvitesPanelProps {
   onBack: () => void
@@ -10,7 +10,7 @@ interface InvitesPanelProps {
 export function InvitesPanel({ onBack }: InvitesPanelProps) {
   const { t } = useTranslation()
   const invites = useInviteChannels()
-  const { setActiveChannel } = useChatClient()
+  const { setActiveChannel } = useChatCore()
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-[#1a1828]">

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { useChannelCapabilities } from './useChannelCapabilities';
 import { usePreviewState } from './usePreviewState';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
@@ -25,7 +25,7 @@ export type MessageActionList = {
 };
 
 export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: boolean): MessageActionList => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const { isGroupChannel: isTeam, isOwner, hasCapability } = useChannelCapabilities();
   const { isPreviewMode } = usePreviewState(activeChannel, client?.userID);
 
@@ -65,9 +65,9 @@ export const useMessageActions = (message: FormatMessageResponse, isOwnMessage: 
     const canEdit = !isPreviewMode && !isSystem && !isSignal && !isSticker && isOwnMessage && !isDeleted;
 
     // Delete for everyone:
-    // + Team channel: only the owner can perform this action natively.
+    // + Team channel: owner can delete any message, members can delete their own messages.
     // + Messaging channel: only own messages can be deleted
-    const canDeleteForEveryoneTeam = isTeam && isOwner;
+    const canDeleteForEveryoneTeam = isTeam && (isOwner || isOwnMessage);
     const canDeleteForEveryoneMessaging = !isTeam && isOwnMessage;
 
     const canDelete = !isPreviewMode && !isSystem && (canDeleteForEveryoneTeam || canDeleteForEveryoneMessaging) && !isDeleted;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { getUserDisplayName } from '../utils';
 
 export type TypingUser = {
@@ -16,7 +16,7 @@ export type TypingUser = {
  * the SDK's `channel.state.clean()` behaviour.
  */
 export function useTypingIndicator() {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const currentUserId = client.userID;
 

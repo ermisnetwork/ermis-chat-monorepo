@@ -1,14 +1,9 @@
 {
   "name": "@ermis-network/ermis-chat-react",
-  "version": "2.1.0-external.2",
+  "version": "2.1.0",
   "description": "React UI components for Ermis Chat",
   "author": "Ermis",
   "homepage": "https://ermis.network/",
-  "license": "SEE LICENSE IN LICENSE",
-  "publishConfig": {
-    "access": "public",
-    "tag": "external"
-  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -22,14 +17,14 @@
   },
   "files": [
     "/dist",
-    "README.md",
-    "LICENSE"
+    "/src"
   ],
   "dependencies": {
-    "@ermis-network/ermis-chat-sdk": "2.1.0-external.2",
+    "@ermis-network/ermis-chat-sdk": "2.1.0",
     "react-ts-audio-recorder": "^1.1.4",
     "virtua": "^0.48.8",
-    "frimousse": "^0.3.0"
+    "frimousse": "^0.3.0",
+    "lottie-web": "^5.13.0"
   },
   "peerDependencies": {
     "react": ">=18.0.0",

@@ -4,7 +4,8 @@ import { replaceMentionsForPreview, formatRelativeDate, getUserDisplayName } fro
 import { Avatar } from '../Avatar';
 import { Panel as DefaultPanel } from '../Panel';
 import { useChatComponents } from '../../context/ChatComponentsContext';
-import { useChatClient } from '../../hooks/useChatClient';
+import { useChatCore } from '../../hooks/useChatCore';
+import { useChatNavigation } from '../../hooks/useChatNavigation';
 import type { MessageSearchPanelProps } from '../../types';
 import { useMessageSearch } from './useMessageSearch';
 import { removeAccents } from '../../utils';
@@ -64,7 +65,8 @@ export const MessageSearchPanel: React.FC<MessageSearchPanelProps> = React.memo(
   loadingText = 'Searching...',
   debounceMs = 500,
 }) => {
-  const { setJumpToMessageId, client } = useChatClient();
+  const { client } = useChatCore();
+  const { setJumpToMessageId } = useChatNavigation();
   const { PanelComponent } = useChatComponents();
   const Panel = PanelComponent || DefaultPanel;
 

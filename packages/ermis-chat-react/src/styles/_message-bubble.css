@@ -62,8 +62,24 @@
   flex-shrink: 0;
   width: 36px;
   height: 36px;
-  border-radius: var(--ermis-radius-xs, 4px);
+  border-radius: var(--ermis-radius-xs);
   object-fit: cover;
+}
+
+.ermis-quoted-message__thumb--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ermis-bg-hover);
+}
+
+.ermis-e2ee-attachment-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: var(--ermis-radius-full);
+  animation: ermis-spin 0.7s linear infinite;
 }
 
 
@@ -409,21 +425,46 @@
   border-bottom-right-radius: 0;
 }
 
+/* --- Suppress tail & restore radius when a signal (call) message follows --- */
+.ermis-message-list__item--before-signal .ermis-message-bubble::after {
+  display: none;
+}
+
+.ermis-message-list__item--other.ermis-message-list__item--before-signal .ermis-message-bubble {
+  border-bottom-left-radius: var(--ermis-radius-lg);
+}
+
+.ermis-message-list__item--own.ermis-message-list__item--before-signal .ermis-message-bubble {
+  border-bottom-right-radius: var(--ermis-radius-lg);
+}
+
 /* --- System messages --- */
 .ermis-message-list__system {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--ermis-spacing-sm);
-  padding: var(--ermis-spacing-sm) 0;
+  padding: var(--ermis-spacing-sm) var(--ermis-spacing-md);
   margin: var(--ermis-spacing-xs) 0;
   align-self: center;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .ermis-message-list__system-text {
   font-size: var(--ermis-font-size-xs);
   color: var(--ermis-text-muted);
   font-style: italic;
+  text-align: center;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 /* --- Signal messages (call events) --- */
@@ -622,7 +663,7 @@
 }
 
 .ermis-attachment-aspect-box--4-3 {
-  padding-bottom: 75%;
+  aspect-ratio: 4 / 3;
 }
 
 /* Blurred thumbnail preview (shown while full image loads) */
@@ -733,6 +774,8 @@
   text-decoration: none;
   color: var(--ermis-text-primary);
   transition: background-color var(--ermis-transition);
+  position: relative;
+  overflow: hidden;
 }
 
 .ermis-attachment--file:hover {
@@ -1182,21 +1225,6 @@
   margin-top: 2px;
 }
 
-/* --- Poll message --- */
-.ermis-message-poll {
-  display: flex;
-  align-items: center;
-  gap: var(--ermis-spacing-sm);
-}
-
-.ermis-message-poll__icon {
-  font-size: 1.25rem;
-}
-
-.ermis-message-poll__text {
-  font-size: var(--ermis-font-size-sm);
-}
-
 /* --- Sticker message --- */
 .ermis-message-sticker-wrapper {
   position: relative;
@@ -1204,6 +1232,15 @@
   height: 160px;
   overflow: hidden;
   border-radius: 10px;
+}
+
+.ermis-message-sticker-wrapper--gif {
+  width: auto;
+  height: auto;
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 14px;
+  display: inline-block;
 }
 
 .ermis-message-sticker {
@@ -1215,6 +1252,16 @@
   object-fit: contain;
   opacity: 0;
   transition: opacity 0.3s ease;
+}
+
+.ermis-message-sticker-wrapper--gif .ermis-message-sticker {
+  position: relative;
+  width: auto;
+  height: auto;
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 14px;
+  display: block;
 }
 
 .ermis-message-sticker.ermis-attachment--loaded {

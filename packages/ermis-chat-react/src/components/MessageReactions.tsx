@@ -1,7 +1,7 @@
 import React from 'react';
 import type { MessageReactionsProps } from '../types';
 
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { createPortal } from 'react-dom';
 import { getUserDisplayName } from '../utils';
 
@@ -48,7 +48,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = React.memo(({
   disabled,
   isOwnMessage,
 }) => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const currentUserId = client?.userID;
   const [hoveredTooltip, setHoveredTooltip] = React.useState<{text: string, rect: DOMRect} | null>(null);
 

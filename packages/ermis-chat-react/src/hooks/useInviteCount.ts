@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isPendingMember } from '../channelRoleUtils';
 import { isTopicChannel } from '../channelTypeUtils';
 
 export const useInviteCount = () => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [inviteCount, setInviteCount] = useState(0);
 
   useEffect(() => {

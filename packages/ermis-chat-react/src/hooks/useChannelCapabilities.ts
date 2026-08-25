@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { usePreviewState } from './usePreviewState';
 import { isGroupChannel } from '../channelTypeUtils';
 import { canManageChannel, CHANNEL_ROLES } from '../channelRoleUtils';
 
 export const useChannelCapabilities = () => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const [updateTick, setUpdateTick] = useState(0);
 
   // Real-time synchronization for channel adjustments

@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { EmojiPicker } from 'frimousse';
 import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 
 const EmojiPickerRoot = EmojiPicker.Root as any;
 const EmojiPickerSearch = EmojiPicker.Search as any;
@@ -25,7 +25,7 @@ export const MessageQuickReactions: React.FC<{
   isOwnMessage: boolean;
   disabled?: boolean;
 }> = React.memo(({ message, isOwnMessage, disabled }) => {
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const currentUserId = client?.userID;
   const [isExpanded, setIsExpanded] = useState(false);
   const [showPicker, setShowPicker] = useState(false);

@@ -65,6 +65,45 @@ export type ChatContextValue = {
   clearAllDrafts: () => void;
 };
 
+export type ChatCoreContextValue = Pick<
+  ChatContextValue,
+  | 'client'
+  | 'activeChannel'
+  | 'setActiveChannel'
+  | 'theme'
+  | 'setTheme'
+  | 'enableCall'
+  | 'syncMessages'
+  | 'setDraft'
+  | 'getDraft'
+  | 'clearAllDrafts'
+>;
+
+export type ChatMessagesContextValue = Pick<
+  ChatContextValue,
+  'messages' | 'setMessages' | 'syncMessages' | 'readState' | 'setReadState'
+> & {
+  /** Channel CIDs whose E2EE repair presentation is currently active. */
+  e2eeRepairingChannelCids: readonly string[];
+  /** Shows or hides the atomic E2EE repair presentation for one channel. */
+  setChannelE2eeRepairing: (cid: string, repairing: boolean) => void;
+};
+
+export type ChatComposerContextValue = Pick<
+  ChatContextValue,
+  | 'quotedMessage'
+  | 'setQuotedMessage'
+  | 'editingMessage'
+  | 'setEditingMessage'
+  | 'forwardingMessage'
+  | 'setForwardingMessage'
+>;
+
+export type ChatNavigationContextValue = Pick<
+  ChatContextValue,
+  'jumpToMessageId' | 'setJumpToMessageId'
+>;
+
 import type { ChatComponentsContextValue } from './context/ChatComponentsContext';
 
 export type ChatProviderProps = {
@@ -358,6 +397,8 @@ export type ChannelActionLabels = {
   deleteChannel?: string;
   leaveChannel?: string;
   truncateChannel?: string;
+  muteChannel?: string;
+  unmuteChannel?: string;
 };
 
 export type ChannelActionIcons = {
@@ -373,6 +414,8 @@ export type ChannelActionIcons = {
   DeleteChannelIcon?: React.ReactNode;
   LeaveChannelIcon?: React.ReactNode;
   TruncateChannelIcon?: React.ReactNode;
+  MuteIcon?: React.ReactNode;
+  UnmuteIcon?: React.ReactNode;
 };
 
 export type ChannelActionsProps = {
@@ -399,6 +442,12 @@ export type ChannelItemProps = {
   pendingBadgeLabel?: string;
   /** Label for the blocked channel badge indicator */
   blockedBadgeLabel?: string;
+  /** Whether the current user has muted notifications for this channel */
+  isMuted?: boolean;
+  /** Label/tooltip for the muted channel icon */
+  mutedBadgeLabel?: string;
+  /** Custom icon component displayed when the channel is muted */
+  MutedIconComponent?: React.ComponentType;
   isClosedTopic?: boolean;
   closedTopicIcon?: React.ReactNode;
   PinnedIconComponent?: React.ComponentType;
@@ -577,6 +626,10 @@ export type ChannelListProps = {
   scrollToTopOnOwnMessage?: boolean;
   /** Whether to show topic pills on team channels (default: false) */
   showTopicPills?: boolean;
+  /** When true, the LoadingIndicator stays visible until the initial sync
+   *  (sync.completed) has finished after queryChannels. This prevents visual
+   *  flickering on cold start (F5). Default: false */
+  waitForSync?: boolean;
 };
 
 /* ----------------------------------------------------------
@@ -703,6 +756,10 @@ export type MessageListProps = {
   emptyTitle?: string;
   emptySubtitle?: string;
   jumpToLatestLabel?: string;
+  /** I18n title shown while encrypted history repair is running. */
+  repairingOverlayTitle?: string;
+  /** I18n description shown while encrypted history repair is running. */
+  repairingOverlaySubtitle?: string;
   bannedOverlayTitle?: string;
   bannedOverlaySubtitle?: string;
   blockedOverlayTitle?: string;
@@ -757,6 +814,13 @@ export type MessageListProps = {
   signalMessageTranslations?: SignalMessageTranslations;
   /** Whether to include hidden (deleted) messages in the initial channel query. Defaults to true. */
   includeHiddenMessages?: boolean;
+  /** Custom gap indicator component shown between messages when a real msg_seq gap is detected */
+  GapIndicatorComponent?: React.ComponentType<{ channel: any; gapSeqRange: [number, number] }>;
+  /** I18n Label for the gap indicator "Load N missing messages" button */
+  gapIndicatorLabel?: string | ((count: number) => string);
+  /** Called once when the message list has completed initial loading, scrolled to position, and is ready to display.
+   *  Useful for coordinating skeleton overlay removal with message list readiness to prevent double-flash. */
+  onReady?: () => void;
 };
 
 /* ----------------------------------------------------------
@@ -834,6 +898,8 @@ export type MessageItemProps = {
   isOwnMessage: boolean;
   isFirstInGroup: boolean;
   isLastInGroup: boolean;
+  /** When true, the next message in the group is a signal (call) from the same user — suppresses pointed tail */
+  nextIsSignal?: boolean;
   isHighlighted: boolean;
   AvatarComponent: React.ComponentType<AvatarProps>;
   MessageBubble: React.ComponentType<MessageBubbleProps>;
@@ -987,7 +1053,7 @@ export type MessageInputProps = {
 
   /** Disable stickers entirely */
   disableStickers?: boolean;
-  /** URL for the sticker picker iframe (default: https://sticker.ermis.network) */
+  /** URL for the sticker picker iframe (default: https://sticker2.ermis.network) */
   stickerIframeUrl?: string;
   /** Custom sticker picker component */
   StickerPickerComponent?: React.ComponentType<{ stickerIframeUrl: string; onClose: () => void }>;
@@ -1373,8 +1439,13 @@ export type ChannelInfoActionsProps = {
   isTopic?: boolean;
   isClosedTopic?: boolean;
   isBlocked?: boolean;
+  isMuted?: boolean;
   isPinned?: boolean;
   currentUserRole?: string;
+  onMuteChannel?: () => void;
+  onUnmuteChannel?: () => void;
+  muteLabel?: string;
+  unmuteLabel?: string;
   searchLabel?: string;
   settingsLabel?: string;
   deleteLabel?: string;
@@ -1650,6 +1721,8 @@ export type ChannelInfoProps = {
   /** I18n labels for block/unblock actions */
   actionsBlockLabel?: string;
   actionsUnblockLabel?: string;
+  actionsMuteLabel?: string;
+  actionsUnmuteLabel?: string;
   actionsCloseTopicLabel?: string;
   actionsReopenTopicLabel?: string;
   actionsDeleteTopicLabel?: string;
@@ -1889,7 +1962,7 @@ export type TopicModalProps = {
   onClose: () => void;
   onSuccess?: (channel: Channel) => void;
   /** Inject external emoji picker component */
-  EmojiPickerComponent?: React.ComponentType<{ onSelect: (emoji: any) => void; [key: string]: any }>;
+  EmojiPickerComponent?: React.ComponentType<{ onSelect: (emoji: any) => void;[key: string]: any }>;
   /** Parent team channel to create topic under, will use activeChannel if not provided */
   parentChannel?: Channel;
 

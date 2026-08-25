@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { PendingE2eeSendRecord } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 
 export function usePendingE2eeSends(statuses?: string[]) {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [records, setRecords] = useState<PendingE2eeSendRecord[]>([]);
   const [loading, setLoading] = useState(false);
 

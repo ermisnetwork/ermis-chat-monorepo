@@ -1,6 +1,5 @@
 import { createRoot } from 'react-dom/client';
 import { GoogleOAuthProvider } from '@react-oauth/google';
-import '@ermis-network/ermis-chat-react/dist/index.css';
 import './index.scss';
 import './i18n';
 import { registerSW } from 'virtual:pwa-register';
@@ -16,6 +15,7 @@ const updateSW = registerSW({
     // Delay import to avoid circular deps during bootstrap
     Promise.all([import('sonner'), import('./i18n')]).then(([{ toast }, { default: i18n }]) => {
       toast.info(i18n.t('app.new_version'), {
+        id: 'pwa-update-available',
         description: i18n.t('app.new_version_desc'),
         action: {
           label: i18n.t('app.update'),

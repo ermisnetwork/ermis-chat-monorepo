@@ -1,8 +1,36 @@
 import { useEffect, useRef } from 'react';
 import type { Channel, Event } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isDirectChannel, isGroupChannel } from '../channelTypeUtils';
 import { isPendingMember } from '../channelRoleUtils';
+
+const getChannelListRevision = (channels: Channel[]) =>
+  JSON.stringify(
+    channels.map((channel) => {
+      const membership = channel.state?.membership as Record<string, unknown> | undefined;
+      const lastMessage = channel.state?.latestMessages?.[channel.state.latestMessages.length - 1] as any;
+      return [
+        channel.cid,
+        (channel.state as any)?.unreadCount,
+        membership?.channel_role,
+        membership?.banned,
+        membership?.blocked,
+        channel.data?.name,
+        channel.data?.image,
+        channel.data?.is_pinned,
+        channel.data?.is_closed_topic,
+        lastMessage?.id,
+        lastMessage?.msg_seq,
+        lastMessage?.last_event_seq,
+        lastMessage?.type,
+        lastMessage?.display_type,
+        lastMessage?.status,
+        lastMessage?.text,
+        lastMessage?.updated_at,
+        lastMessage?.deleted_at,
+      ];
+    }),
+  );
 
 /**
  * Subscribes to real-time events and keeps the channel list in sync:
@@ -20,7 +48,7 @@ export function useChannelListUpdates(
   setChannels: React.Dispatch<React.SetStateAction<Channel[]>>,
   onOwnMessageNew?: () => void,
 ): void {
-  const { client, activeChannel, setActiveChannel } = useChatClient();
+  const { client, activeChannel, setActiveChannel } = useChatCore();
 
   // Ref to always have the latest activeChannel without re-subscribing
   const activeChannelRef = useRef(activeChannel);
@@ -29,6 +57,14 @@ export function useChannelListUpdates(
   // Ref to always have the latest callback without re-subscribing
   const onOwnMessageNewRef = useRef(onOwnMessageNew);
   onOwnMessageNewRef.current = onOwnMessageNew;
+
+  const channelsRef = useRef(channels);
+  channelsRef.current = channels;
+  const renderedRevisionRef = useRef(getChannelListRevision(channels));
+
+  useEffect(() => {
+    renderedRevisionRef.current = getChannelListRevision(channels);
+  }, [channels]);
 
   useEffect(() => {
     // --- message.new: re-sort + auto mark-read ---
@@ -278,6 +314,32 @@ export function useChannelListUpdates(
       setChannels((prev) => [...prev]);
     };
 
+    // --- sync.completed: force channel list refresh so unread badges update ---
+    // applySyncResult() mutates channel.state directly without dispatching events,
+    // so React.memo'd ChannelRow components won't re-render. This ensures they do.
+    const handleSyncCompleted = () => {
+      const active = activeChannelRef.current;
+      if (active) {
+        const chState = active.state as unknown as Record<string, unknown> | undefined;
+        const isBannedInActive = Boolean(active.state?.membership?.banned);
+        const isBlockedInActive = isDirectChannel(active) && Boolean(active.state?.membership?.blocked);
+        const isPendingActive = isPendingMember(active.state?.membership?.channel_role as string);
+
+        if (!isBannedInActive && !isBlockedInActive && !isPendingActive) {
+          if ((chState?.unreadCount as number) > 0) {
+            active.markRead().catch(() => {});
+            if (chState) chState.unreadCount = 0;
+          }
+        }
+      }
+
+      const nextRevision = getChannelListRevision(channelsRef.current);
+      if (nextRevision === renderedRevisionRef.current) return;
+
+      renderedRevisionRef.current = nextRevision;
+      setChannels((prev) => [...prev]);
+    };
+
     const sub1 = client.on('message.new', handleNewMessage);
     const sub2 = client.on('channel.deleted', handleChannelDeleted);
     const sub3 = client.on('member.removed', handleMemberRemoved);
@@ -298,6 +360,7 @@ export function useChannelListUpdates(
     // When a user joins a public channel (action='join'), the server sends member.joined
     // instead of notification.invite_accepted — handle it to re-group the channel list
     const sub15 = client.on('member.joined', handleMemberUpdated);
+    const sub16 = client.on('sync.completed', handleSyncCompleted);
 
     return () => {
       sub1.unsubscribe();
@@ -315,6 +378,7 @@ export function useChannelListUpdates(
       sub13.unsubscribe();
       sub14.unsubscribe();
       sub15.unsubscribe();
+      sub16.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }

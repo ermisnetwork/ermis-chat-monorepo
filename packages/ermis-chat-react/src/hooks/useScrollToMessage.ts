@@ -3,7 +3,8 @@ import type { FormatMessageResponse } from '@ermis-network/ermis-chat-sdk';
 import { formatMessage } from '@ermis-network/ermis-chat-sdk';
 import type { VListHandle } from 'virtua';
 import { dedupMessages } from './useLoadMessages';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
+import { useChatMessages } from './useChatMessages';
 import { getDateKey, getMessageUserId } from '../utils';
 import { isStickerMessage } from '../messageTypeUtils';
 
@@ -137,9 +138,18 @@ export function useScrollToMessage({
   scrollToBottom,
   jumpingRef,
 }: UseScrollToMessageOptions): UseScrollToMessageReturn {
-  const { activeChannel, setMessages } = useChatClient();
+  const { activeChannel } = useChatCore();
+  const { setMessages } = useChatMessages();
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeChannelCidRef = useRef(activeChannel?.cid);
+  activeChannelCidRef.current = activeChannel?.cid;
+  const channelGenerationRef = useRef(0);
+
+  useEffect(() => {
+    channelGenerationRef.current += 1;
+    setHighlightedId(null);
+  }, [activeChannel?.cid]);
 
   // Cleanup highlight timer on unmount
   useEffect(() => {
@@ -165,12 +175,13 @@ export function useScrollToMessage({
       // Case 1: message is already in current list
       const idx = messagesRef.current.findIndex((m) => m.id === messageId);
       if (idx !== -1) {
+        const requestGeneration = channelGenerationRef.current;
         const renderedIdx = getRenderedMessageIndex(messagesRef.current, messageId);
         if (renderedIdx !== -1) {
           jumpingRef.current = true;
           vlistRef.current?.scrollToIndex(renderedIdx, { align: 'center', smooth: true });
           setTimeout(() => {
-            jumpingRef.current = false;
+            if (channelGenerationRef.current === requestGeneration) jumpingRef.current = false;
           }, 500);
         }
         highlight(messageId);
@@ -180,6 +191,10 @@ export function useScrollToMessage({
       // Case 2: message NOT in list — fetch around it
       if (!activeChannel) return;
 
+      const requestCid = activeChannel.cid;
+      const requestGeneration = channelGenerationRef.current;
+      const isCurrentRequest = () =>
+        channelGenerationRef.current === requestGeneration && activeChannelCidRef.current === requestCid;
       jumpingRef.current = true;
 
       const vlistEl = getVListElement();
@@ -190,6 +205,7 @@ export function useScrollToMessage({
 
       try {
         const rawMessages = await activeChannel.queryMessagesAroundId(messageId, 25);
+        if (!isCurrentRequest()) return;
         if (!rawMessages || rawMessages.length === 0) {
           jumpingRef.current = false;
           if (vlistEl) vlistEl.style.opacity = '1';
@@ -201,10 +217,11 @@ export function useScrollToMessage({
 
         setHasMore(true);
         setHasNewer(true);
-        setMessages(unique);
+        setMessages((prev) => isCurrentRequest() ? unique : prev);
 
         // Wait for VList to render, then jump while hidden, then fade in
         setTimeout(() => {
+          if (!isCurrentRequest()) return;
           const renderedIdx = getRenderedMessageIndex(unique, messageId);
           if (renderedIdx === -1) {
             jumpingRef.current = false;
@@ -215,20 +232,23 @@ export function useScrollToMessage({
           vlistRef.current?.scrollToIndex(renderedIdx, { align: 'center' });
 
           setTimeout(() => {
+            if (!isCurrentRequest()) return;
             if (vlistEl) {
               vlistEl.style.transition = 'opacity 200ms ease-in';
               vlistEl.style.opacity = '1';
             }
             highlight(messageId);
             setTimeout(() => {
-              jumpingRef.current = false;
+              if (isCurrentRequest()) jumpingRef.current = false;
             }, 500);
           }, 100);
         }, 200);
       } catch (err) {
-        console.error('Failed to fetch messages around ID:', err);
-        jumpingRef.current = false;
-        if (vlistEl) vlistEl.style.opacity = '1';
+        if (isCurrentRequest()) {
+          console.error('Failed to fetch messages around ID:', err);
+          jumpingRef.current = false;
+          if (vlistEl) vlistEl.style.opacity = '1';
+        }
       }
     },
     [activeChannel, highlight, setMessages, setHasMore, setHasNewer, getVListElement],
@@ -236,6 +256,10 @@ export function useScrollToMessage({
 
   const jumpToLatest = useCallback(() => {
     if (!activeChannel) return;
+    const requestCid = activeChannel.cid;
+    const requestGeneration = channelGenerationRef.current;
+    const isCurrentRequest = () =>
+      channelGenerationRef.current === requestGeneration && activeChannelCidRef.current === requestCid;
     jumpingRef.current = true;
 
     const vlistEl = getVListElement();
@@ -250,14 +274,16 @@ export function useScrollToMessage({
     setHasMore(true);
 
     setTimeout(() => {
+      if (!isCurrentRequest()) return;
       scrollToBottom(false);
       setTimeout(() => {
+        if (!isCurrentRequest()) return;
         if (vlistEl) {
           vlistEl.style.transition = 'opacity 200ms ease-in';
           vlistEl.style.opacity = '1';
         }
         setTimeout(() => {
-          jumpingRef.current = false;
+          if (isCurrentRequest()) jumpingRef.current = false;
         }, 500);
       }, 100);
     }, 200);

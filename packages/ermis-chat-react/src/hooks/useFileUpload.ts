@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { isHeicFile, isVideoFile, normalizeFileName } from '@ermis-network/ermis-chat-sdk';
+import { isHeicFile } from '@ermis-network/ermis-chat-sdk';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import type { FilePreviewItem } from '../types';
 
@@ -14,75 +14,9 @@ export type UseFileUploadOptions = {
   setHasContent: (value: boolean) => void;
 };
 
-export function useFileUpload({ activeChannel, editableRef, setHasContent }: UseFileUploadOptions) {
+export function useFileUpload({ editableRef, setHasContent }: UseFileUploadOptions) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<FilePreviewItem[]>([]);
-  const isE2eeChannel =
-    !!activeChannel &&
-    (typeof (activeChannel as any)._isEffectiveE2ee === 'function'
-      ? (activeChannel as any)._isEffectiveE2ee()
-      : activeChannel.data?.mls_enabled === true);
-
-  /**
-   * Upload a single file immediately:
-   * 1. Normalize file name
-   * 2. Call sendFile API
-   * 3. For video: generate + upload thumbnail
-   * 4. Update file item state with uploaded URL
-   */
-  const uploadSingleFile = useCallback(async (item: FilePreviewItem) => {
-    if (!activeChannel) return;
-
-    try {
-      const file = item.file!;
-      const normalizedName = normalizeFileName(file.name);
-      const fileToUpload = normalizedName !== file.name
-        ? new File([file], normalizedName, { type: file.type, lastModified: file.lastModified })
-        : file;
-
-      const response = await activeChannel.uploadFilePresigned(
-        fileToUpload,
-        fileToUpload.name,
-        fileToUpload.type || 'application/octet-stream',
-        (progress) => {
-          setFiles((prev) =>
-            prev.map((f) => (f.id === item.id ? { ...f, progress: progress.percentage } : f))
-          );
-        }
-      );
-      const uploadedUrl = response.file;
-
-      let thumbUrl = '';
-      if (isVideoFile(file)) {
-        try {
-          const thumbBlob = await activeChannel.getThumbBlobVideo(file);
-          if (thumbBlob) {
-            const thumbFile = new File([thumbBlob], `thumb_${normalizedName}.jpg`, { type: 'image/jpeg' });
-            const thumbResp = await activeChannel.uploadFilePresigned(thumbFile, thumbFile.name, 'image/jpeg');
-            thumbUrl = thumbResp.file;
-          }
-        } catch {
-          // Thumbnail failure is non-critical
-        }
-      }
-
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === item.id
-            ? { ...f, status: 'done' as const, uploadedUrl, thumbUrl, normalizedFile: fileToUpload }
-            : f,
-        ),
-      );
-    } catch (err: any) {
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === item.id
-            ? { ...f, status: 'error' as const, error: err?.message || 'Upload failed' }
-            : f,
-        ),
-      );
-    }
-  }, [activeChannel]);
 
   const handleFilesSelected = useCallback((selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) return;
@@ -95,21 +29,17 @@ export function useFileUpload({ activeChannel, editableRef, setHasContent }: Use
         id: nextFileId(),
         file,
         previewUrl: isPreviewable ? URL.createObjectURL(file) : undefined,
-        status: isE2eeChannel ? ('pending' as const) : ('uploading' as const),
-        e2eePhase: isE2eeChannel ? ('encrypting' as const) : undefined,
+        // Upload starts only after Send so the message can enter the list immediately.
+        status: 'pending' as const,
       };
     });
 
     setFiles((prev) => [...prev, ...newItems]);
     setHasContent(true);
 
-    if (!isE2eeChannel) {
-      newItems.forEach((item) => uploadSingleFile(item));
-    }
-
     // Auto-focus the input so user can press Enter to send immediately
     editableRef.current?.focus();
-  }, [uploadSingleFile, setHasContent, editableRef, isE2eeChannel]);
+  }, [setHasContent, editableRef]);
 
   const handleRemoveFile = useCallback((id: string) => {
     setFiles((prev) => {

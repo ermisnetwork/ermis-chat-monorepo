@@ -38,6 +38,7 @@ export class MediaStreamReceiver {
       await this.nodeCall.acceptConnection();
     } catch (error) {
       sdkLog('error', '❌ Error starting MediaStreamReceiver:', error);
+      throw error;
     }
   }
 

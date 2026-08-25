@@ -583,7 +583,7 @@ export type MessageBase<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     user_id?: string;
   };
 
-export type MessageLabel = 'regular' | 'system' | 'signal' | 'poll' | 'sticker' | 'error';
+export type MessageLabel = 'regular' | 'system' | 'signal' | 'sticker' | 'error';
 
 export type Reaction<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['reactionType'] & {

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { preloadImage, isImagePreloaded } from '../../utils';
 import type { AttachmentItem, MediaLightboxItem } from '../../types';
 import { MediaLightbox } from '../MediaLightbox';
-import { useChatClient } from '../../hooks/useChatClient';
+import { useChatCore } from '../../hooks/useChatCore';
 import { E2EE_PREVIEW_MAX_CONCURRENT, useE2eeAttachmentRenderer } from '../../hooks/useE2eeAttachmentRenderer';
 
 let activeChannelInfoPreviewLoads = 0;
@@ -24,7 +24,7 @@ function scheduleChannelInfoPreviewLoad(load: () => Promise<unknown>): void {
 const E2eeMediaGridItem: React.FC<{
   item: AttachmentItem;
 }> = ({ item }) => {
-  const { activeChannel } = useChatClient();
+  const { activeChannel } = useChatCore();
   const previewRef = useRef<HTMLDivElement | null>(null);
   const manifest = item.e2ee_manifest;
   const preview = useE2eeAttachmentRenderer(activeChannel, manifest, 'preview');

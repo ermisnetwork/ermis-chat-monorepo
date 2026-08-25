@@ -272,7 +272,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
                 poster={currentItem.posterSrc}
                 controls
                 autoPlay
-                preload="metadata"
+                preload="auto"
                 onClick={(e) => e.stopPropagation()}
                 onLoadedMetadata={restorePendingVideoSeekTime}
                 onCanPlay={restorePendingVideoSeekTime}

@@ -340,6 +340,119 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     this.getClient().dispatchEvent(event);
   }
 
+  /**
+   * Adds an attachment message to local state immediately (optimistic preview with progress spinner),
+   * then uploads all files in the background and sends the message.
+   * Works seamlessly for both standard and E2EE channels without blocking user interaction.
+   */
+  async enqueueAttachmentMessage(
+    message: Message<ErmisChatGenerics>,
+    files: (File | Blob)[],
+    options: { displayOverrides?: Map<number, Record<string, unknown>> } = {},
+  ) {
+    if (this._isEffectiveE2ee()) {
+      return await this.enqueueE2eeAttachmentMessage(message, files, options);
+    }
+    if (files.length === 0) {
+      return await this.sendMessage(message);
+    }
+    if (!message.id) {
+      message = { ...message, id: randomId() };
+    }
+    const messageId = message.id!;
+    const quotedMessage =
+      (message as any).quoted_message ||
+      (message.quoted_message_id ? this.state.findMessage(message.quoted_message_id) : undefined);
+    const localAttachments = this._buildPendingE2eeLocalAttachments(files, options.displayOverrides);
+    const now = new Date().toISOString();
+    const optimisticMessage = {
+      ...message,
+      id: messageId,
+      attachments: localAttachments,
+      quoted_message: quotedMessage,
+      status: 'sending',
+      created_at: now,
+      updated_at: now,
+      user: this.getClient().user,
+      user_id: this.getClient().userID,
+      type: message.type || 'regular',
+    } as unknown as MessageResponse<ErmisChatGenerics>;
+
+    this.state.addMessageSorted(optimisticMessage);
+    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+
+    // Background async upload & send execution
+    void (async () => {
+      try {
+        const fileObjects = files.map((f, index) => {
+          if (f instanceof File) return f;
+          const name = (f as any).name || `file-${index + 1}`;
+          return new File([f], name, { type: f.type || 'application/octet-stream' });
+        });
+
+        const { attachments, failedFiles } = await this.uploadAndPrepareAttachments(fileObjects, {
+          onProgress: (fileIndex: number, percentage: number) => {
+            this.state.updateMessageById(messageId, (msg) => ({
+              ...msg,
+              status: 'sending',
+              attachments: (msg.attachments || []).map((attachment: any, index: number) =>
+                index === fileIndex
+                  ? { ...attachment, upload_status: 'uploading', upload_progress: percentage }
+                  : attachment,
+              ),
+            }));
+            this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+          },
+        });
+
+        if (failedFiles.length > 0 && attachments.length === 0) {
+          throw new Error('All attachment uploads failed');
+        }
+
+        this._revokePendingE2eeLocalAttachments(localAttachments);
+
+        const finalMessagePayload: Record<string, any> = {
+          ...message,
+          id: messageId,
+          attachments,
+        };
+        if (quotedMessage?.id) {
+          finalMessagePayload.quoted_message_id = quotedMessage.id;
+        }
+
+        const response = await this.getClient().post<SendMessageAPIResponse<ErmisChatGenerics>>(
+          this._channelURL() + '/message',
+          { message: finalMessagePayload },
+        );
+
+        if (response?.message) {
+          const responseUserId =
+            response.message.user?.id || (response.message as any).user_id || this.getClient().userID || '';
+          this.state.addMessageSorted(
+            {
+              ...response.message,
+              status: 'received',
+              user: pickUserWithDisplayName(
+                responseUserId,
+                response.message.user,
+                this.getClient().state.users[responseUserId],
+                this.getClient().user,
+              ),
+            } as MessageResponse<ErmisChatGenerics>,
+            true,
+            false,
+          );
+          this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+        }
+      } catch (error: any) {
+        this.state.updateMessageStatus(messageId, 'failed_offline');
+        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+      }
+    })();
+
+    return { message: optimisticMessage };
+  }
+
   async enqueueE2eeAttachmentMessage(
     message: Message<ErmisChatGenerics>,
     files: Blob[],
@@ -727,6 +840,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     options?: {
       /** Map from file index → voice recording metadata */
       voiceMetadata?: Map<number, VoiceRecordingMeta>;
+      /** Callback for per-file upload progress (fileIndex, percentage 0-100) */
+      onProgress?: (fileIndex: number, percentage: number) => void;
     },
   ): Promise<{
     attachments: Attachment[];
@@ -745,7 +860,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     // 2. Upload all files in parallel
     const uploadResults = await Promise.allSettled(
-      processedFiles.map((file) => this.uploadFilePresigned(file, file.name, file.type || 'application/octet-stream')),
+      processedFiles.map((file, fileIndex) =>
+        this.uploadFilePresigned(
+          file,
+          file.name,
+          file.type || 'application/octet-stream',
+          (progress) => {
+            options?.onProgress?.(fileIndex, progress.percentage);
+          },
+        ),
+      ),
     );
 
     // 3. For successful video uploads, generate and upload thumbnails
@@ -2529,9 +2653,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
           const encryptionMgrAccept = this.getClient().encryptionManager;
           if (
-            event.mls_enabled &&
+            (event.mls_enabled || this._isEffectiveE2ee()) &&
             encryptionMgrAccept?.initialized &&
-            event.member.user_id === this.getClient().user?.id &&
             this.cid
           ) {
             encryptionMgrAccept

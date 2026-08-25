@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
+import { getChannelDisplayInfo } from '../utils';
 
 export const useChannelMembers = (channel: Channel | null | undefined) => {
   const [memberUpdateCount, setMemberUpdateCount] = useState(0);
@@ -41,7 +42,7 @@ export const useChannelMembers = (channel: Channel | null | undefined) => {
   return { members: membersArray, memberUpdateCount };
 };
 
-export const useChannelProfile = (channel: Channel | null | undefined) => {
+export const useChannelProfile = (channel: Channel | null | undefined, currentUserId?: string) => {
   const [channelUpdateCount, setChannelUpdateCount] = useState(0);
 
   useEffect(() => {
@@ -50,15 +51,24 @@ export const useChannelProfile = (channel: Channel | null | undefined) => {
     const sub1 = channel.on('channel.updated', updateChannel);
     const sub2 = channel.on('channel.pinned', updateChannel);
     const sub3 = channel.on('channel.unpinned', updateChannel);
+    const sub4 = channel.on('member.added', updateChannel);
+    const sub5 = channel.on('member.updated', updateChannel);
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
       sub3.unsubscribe();
+      sub4.unsubscribe();
+      sub5.unsubscribe();
     };
   }, [channel]);
 
-  const channelName = useMemo(() => channel?.data?.name || channel?.cid || 'Unknown Channel', [channel?.data?.name, channel?.cid, channel?.type, channelUpdateCount]);
-  const channelImage = useMemo(() => channel?.data?.image as string | undefined, [channel?.data?.image, channelUpdateCount]);
+  const displayInfo = useMemo(
+    () => getChannelDisplayInfo(channel, currentUserId),
+    [channel, currentUserId, channel?.data?.name, channel?.data?.image, channel?.state?.members, channelUpdateCount],
+  );
+
+  const channelName = displayInfo.name || 'Unknown Channel';
+  const channelImage = displayInfo.image;
   const channelDescription = useMemo(() => channel?.data?.description as string | undefined, [channel?.data?.description, channelUpdateCount]);
   const isPinned = useMemo(() => channel?.data?.is_pinned === true, [channel?.data?.is_pinned, channelUpdateCount]);
 

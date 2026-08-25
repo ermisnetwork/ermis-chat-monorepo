@@ -150,10 +150,7 @@ export function useChannelMessages({
       return (
         typeof message.text === 'string' ||
         Boolean(message.attachments?.length) ||
-        Boolean(message.sticker_url) ||
-        Boolean(message.poll_type) ||
-        Boolean(message.poll_choice_counts) ||
-        Boolean(message.latest_poll_choices)
+        Boolean(message.sticker_url)
       );
     };
 

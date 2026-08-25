@@ -37,6 +37,7 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
         channel.state.membership = {
           ...channel.state.membership,
           ...(event.member as Record<string, unknown>),
+          channel_role: (event.member as any)?.channel_role || 'member',
         } as unknown as Record<string, unknown>;
       }
     };
@@ -44,14 +45,33 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
     const handleInviteAction = (event: Record<string, unknown>) => {
       const eventMember = event.member as Record<string, unknown>;
       const eventUser = event.user as Record<string, unknown>;
-      const eventUserId = eventMember?.user_id || (eventMember?.user as Record<string, unknown>)?.id || eventUser?.id;
+      const eventUserId =
+        (eventMember?.user_id as string) ||
+        ((eventMember?.user as Record<string, unknown>)?.id as string) ||
+        (eventUser?.id as string);
 
       const eventCid =
         event.cid ||
         (event.channel as Record<string, unknown>)?.cid ||
         (event.channel_id ? `${event.channel_type}:${event.channel_id}` : undefined);
 
-      if (eventCid !== channel.cid) return; // Only react to events on this channel
+      if (eventCid && eventCid !== channel.cid) return; // Only react to events on this channel
+
+      // Update channel.state.members for the user who accepted/joined
+      if (eventUserId && channel.state?.members) {
+        if (channel.state.members[eventUserId]) {
+          channel.state.members[eventUserId] = {
+            ...channel.state.members[eventUserId],
+            ...((event.member as Record<string, unknown>) || {}),
+            channel_role: (event.member as any)?.channel_role || 'member',
+          };
+        } else if (eventMember) {
+          channel.state.members[eventUserId] = {
+            ...(eventMember as Record<string, unknown>),
+            channel_role: (eventMember as any)?.channel_role || 'member',
+          };
+        }
+      }
 
       // If this event is for the current user, update their membership state
       if (eventUserId === currentUserId) {
@@ -59,9 +79,6 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
       }
 
       // Re-check pending state regardless of which user triggered the event.
-      // This handles both cases:
-      // - Current user accepts/rejects their own invite
-      // - Another user accepts an invite (hide pending-invitee box on inviter's side)
       setIsPending(checkPending());
       setInviteUpdateCount(c => c + 1);
     };
@@ -70,14 +87,22 @@ export function usePendingState(channel: Channel | null | undefined, currentUser
     const sub1 = client.on('notification.invite_accepted', handleInviteAction);
     const sub2 = client.on('notification.invite_rejected', handleInviteAction);
     const sub3 = client.on('notification.invite_messaging_skipped', handleInviteAction);
-    // Public channel join sends 'member.joined' instead of 'notification.invite_accepted'
     const sub4 = client.on('member.joined', handleInviteAction);
+    const sub5 = channel.on('member.updated', handleInviteAction);
+    const sub6 = channel.on('member.added', handleInviteAction);
+    const sub7 = channel.on('channel.updated', () => {
+      setIsPending(checkPending());
+      setInviteUpdateCount(c => c + 1);
+    });
 
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
       sub3.unsubscribe();
       sub4.unsubscribe();
+      sub5.unsubscribe();
+      sub6.unsubscribe();
+      sub7.unsubscribe();
     };
   }, [channel, currentUserId]);
 

@@ -50,20 +50,11 @@ export function useMessageSend({
   const handleSend = useCallback(async () => {
     if (!activeChannel || !hasContent || sending || isProcessingRef.current) return;
 
-    // Wait for all files to finish uploading
-    const stillUploading = files.some((f) => f.status === 'uploading');
-    if (stillUploading) return;
-
     isProcessingRef.current = true;
 
     const payload = buildPayload();
     const text = payload.text.trim();
-    const isE2eeChannelForFiles =
-      !!activeChannel &&
-      (typeof (activeChannel as any)._isEffectiveE2ee === 'function'
-        ? (activeChannel as any)._isEffectiveE2ee()
-        : activeChannel.data?.mls_enabled === true);
-    const uploadedFiles = files.filter((f) => f.status === 'done' || (isE2eeChannelForFiles && f.status === 'pending'));
+    const uploadedFiles = files.filter((f) => f.status === 'done' || f.status === 'pending');
 
     if (!text && uploadedFiles.length === 0) return;
 
@@ -83,13 +74,21 @@ export function useMessageSend({
           ? (activeChannel as any)._isEffectiveE2ee()
           : activeChannel.data?.mls_enabled === true;
 
-      // Build attachment payloads from already-uploaded files (only applied on new messages)
+      // New local files enter the message list first. The SDK uploads them in the
+      // background and replaces their blob URLs only after storage confirmation.
       let attachments: unknown[] = [];
       let e2eeAttachmentIds: string[] | undefined;
-      if (isE2eeChannel && !editingMessage && uploadedFiles.length > 0) {
-        const encryptionMgr = (activeChannel as any).getClient?.().encryptionManager;
-        if (!encryptionMgr?.initialized) throw new Error('E2EE attachments require an initialized encryption manager');
-        const filesToUpload = uploadedFiles.map((f) => f.normalizedFile || f.file!).filter(Boolean);
+      const pendingFiles = uploadedFiles.filter((item) => item.status === 'pending' && item.file);
+      if (!editingMessage && pendingFiles.length > 0) {
+        if (isE2eeChannel) {
+          const encryptionMgr = (activeChannel as any).getClient?.().encryptionManager;
+          if (!encryptionMgr?.initialized) {
+            throw new Error('E2EE attachments require an initialized encryption manager');
+          }
+        }
+        const filesToUpload = pendingFiles
+          .map((item) => item.normalizedFile || item.file)
+          .filter((file): file is File => Boolean(file));
         const message: Record<string, any> = { text };
         if (isTeamChannel) {
           message.mentioned_all = payload.mentioned_all;
@@ -98,13 +97,13 @@ export function useMessageSend({
         if (quotedMessage?.id) {
           message.quoted_message_id = quotedMessage.id;
         }
-        await (activeChannel as any).enqueueE2eeAttachmentMessage(message, filesToUpload);
+        await (activeChannel as any).enqueueAttachmentMessage(message, filesToUpload);
         syncMessages();
 
-        files.forEach((f) => {
-          if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
+        files.forEach((item) => {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
         });
-        const errorFiles = files.filter((f) => f.status === 'error');
+        const errorFiles = files.filter((item) => item.status === 'error');
         setFiles(errorFiles);
         setHasContent(errorFiles.length > 0);
         reset();
@@ -174,9 +173,9 @@ export function useMessageSend({
       // Message lists will automatically update when the backend blasts the `message.new` WS event.
       sendPromise
         .then(() => {
-          // E2EE own-device WS events may arrive before the SDK replaces the
-          // optimistic message with the confirmed local plaintext snapshot.
-          syncMessages();
+          // E2EE confirmation already dispatches message.updated. Copying the
+          // whole SDK array again here makes virtualized lists remeasure twice.
+          if (!isE2eeChannel) syncMessages();
         })
         .catch((err: Error) => {
           console.error('Failed to send message over API:', err);

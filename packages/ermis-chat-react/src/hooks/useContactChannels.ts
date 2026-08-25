@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from './useChatClient';
+import { useChatCore } from './useChatCore';
 import { isDirectChannel } from '../channelTypeUtils';
 import { isOwnerMember } from '../channelRoleUtils';
 
@@ -11,10 +11,11 @@ import { isOwnerMember } from '../channelRoleUtils';
  * A contact is defined as a direct (1-1) channel where both members
  * hold the 'owner' channel_role.
  *
- * Re-renders automatically when related events arrive.
+ * Re-renders automatically when related events arrive, including when a
+ * contact updates their name or avatar (users.updated).
  */
 export function useContactChannels(): Channel[] {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
   const [updateCount, setUpdateCount] = useState(0);
 
   const forceUpdate = useCallback(() => setUpdateCount((c) => c + 1), []);
@@ -25,6 +26,8 @@ export function useContactChannels(): Channel[] {
     const listeners = [
       client.on('channels.queried', forceUpdate),
       client.on('notification.invite_accepted', forceUpdate),
+      // Re-render when a contact changes their name/avatar
+      client.on('users.updated' as any, forceUpdate),
     ];
 
     return () => listeners.forEach((l) => l.unsubscribe());

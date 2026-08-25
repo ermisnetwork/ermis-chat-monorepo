@@ -1,29 +1,39 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { preloadImage, isImagePreloaded, formatTime } from '../utils';
 import type {
-  FormatMessageResponse,
   Attachment,
-  MessageLabel,
   E2eeAttachmentManifest,
+  FormatMessageResponse,
+  MessageLabel,
 } from '@ermis-network/ermis-chat-sdk';
-import { parseSystemMessage, parseSignalMessage, CallType } from '@ermis-network/ermis-chat-sdk';
-import { useChatClient } from '../hooks/useChatClient';
+import { CallType, parseSignalMessage, parseSystemMessage } from '@ermis-network/ermis-chat-sdk';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
+import { useChatCore } from '../hooks/useChatCore';
 import { useDownloadHandler } from '../hooks/useDownloadHandler';
-import { E2EE_PREVIEW_MAX_CONCURRENT, useE2eeAttachmentRenderer } from '../hooks/useE2eeAttachmentRenderer';
-import { buildUserMap } from '../utils';
-import { MediaLightbox } from './MediaLightbox';
+import {
+  scheduleE2eePreviewLoad,
+  useE2eeAttachmentRenderer,
+} from '../hooks/useE2eeAttachmentRenderer';
+import {
+  isAudio,
+  isE2eeAttachmentManifest,
+  isImage,
+  isLinkPreviewAttachment,
+  isVideo
+} from '../messageTypeUtils';
+import type { AttachmentProps, MediaLightboxItem, MessageRendererProps } from '../types';
+import { buildUserMap, formatTime, isImagePreloaded, preloadImage } from '../utils';
 import { getFileIcon } from './ChannelInfo/utils';
-import type { AttachmentProps, MessageRendererProps, MessageBubbleProps, MediaLightboxItem } from '../types';
+import { MediaLightbox } from './MediaLightbox';
+import { StickerImage } from './TgsStickerPlayer';
 
-export type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
-import { isVoiceRecordingAttachment, isLinkPreviewAttachment, isImage, isVideo, isAudio } from '../messageTypeUtils';
+export type { AttachmentProps, MessageBubbleProps, MessageRendererProps } from '../types';
 
 /* ----------------------------------------------------------
    Attachment renderers
    ---------------------------------------------------------- */
 const ImageAttachment: React.FC<AttachmentProps> = React.memo(
   ({ attachment, onClick }) => {
-    const src = attachment.image_url || attachment.thumb_url || attachment.url;
+    const src = attachment.image_url || attachment.thumb_url || attachment.url || (attachment as any).asset_url;
     const thumbSrc = attachment.thumb_url;
     if (!src) return null;
 
@@ -98,16 +108,6 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(
   },
 );
 
-function isE2eeAttachmentManifest(attachment: unknown): attachment is E2eeAttachmentManifest {
-  return Boolean(
-    attachment &&
-      typeof attachment === 'object' &&
-      (attachment as E2eeAttachmentManifest).version === 1 &&
-      typeof (attachment as E2eeAttachmentManifest).attachment_id === 'string' &&
-      Array.isArray((attachment as E2eeAttachmentManifest).assets),
-  );
-}
-
 function e2eeDisplayString(display: Record<string, unknown> | undefined, key: string): string | undefined {
   const value = display?.[key];
   return typeof value === 'string' && value.trim() ? value : undefined;
@@ -172,19 +172,6 @@ function LocalUploadOverlay({ attachment }: { attachment: Attachment }) {
   );
 }
 
-function e2eeAspectStyle(width?: number, height?: number): React.CSSProperties {
-  const ratio = width && height && width > 0 && height > 0 ? width / height : 4 / 3;
-  const maxWidth = 340;
-  const maxHeight = 420;
-  const targetWidth = Math.max(160, Math.min(maxWidth, Math.round(maxHeight * ratio)));
-  return {
-    aspectRatio: `${width && height ? width : 4} / ${width && height ? height : 3}`,
-    width: `min(100%, ${targetWidth}px)`,
-    maxWidth: `${maxWidth}px`,
-    maxHeight: `${maxHeight}px`,
-  };
-}
-
 function formatFileSize(size?: number): string | undefined {
   if (!size || size <= 0) return undefined;
   if (size < 1024) return `${size} B`;
@@ -221,36 +208,18 @@ function E2eePlayIcon() {
   );
 }
 
-let activeE2eePreviewLoads = 0;
-const queuedE2eePreviewLoads: Array<() => void> = [];
-
-function scheduleE2eePreviewLoad(load: () => Promise<unknown>): void {
-  const run = () => {
-    activeE2eePreviewLoads += 1;
-    void load().finally(() => {
-      activeE2eePreviewLoads = Math.max(0, activeE2eePreviewLoads - 1);
-      const next = queuedE2eePreviewLoads.shift();
-      if (next) next();
-    });
-  };
-  if (activeE2eePreviewLoads < E2EE_PREVIEW_MAX_CONCURRENT) run();
-  else queuedE2eePreviewLoads.push(run);
-}
-
 const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?: boolean }> = React.memo(
   ({ attachment, grantReady = true }) => {
-    const { activeChannel } = useChatClient();
+    const { activeChannel } = useChatCore();
     const original = useE2eeAttachmentRenderer(activeChannel, attachment, 'original');
     const preview = useE2eeAttachmentRenderer(activeChannel, attachment, 'preview');
     const [mediaError, setMediaError] = useState(false);
     const [lightboxOpen, setLightboxOpen] = useState(false);
-    const [naturalPreviewSize, setNaturalPreviewSize] = useState<{ width: number; height: number } | undefined>();
     const previewRef = useRef<HTMLDivElement | null>(null);
     const asset = attachment.assets.find((item) => item.kind === 'original') || attachment.assets[0];
     const previewAsset = attachment.assets.find((item) => item.kind === 'preview');
     const hasPreview = Boolean(previewAsset);
     const display = asset?.display;
-    const previewDisplay = previewAsset?.display;
     const title = e2eeDisplayString(display, 'name') || 'Encrypted attachment';
     const mimeType = e2eeDisplayString(display, 'mime_type');
     const attachmentType = e2eeDisplayString(display, 'attachment_type');
@@ -260,14 +229,9 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
     const isImageAsset = isLikelyImage(title, mimeType);
     const isVideoAsset = isLikelyVideo(title, mimeType);
     const isAudioAsset = isLikelyAudio(title, mimeType, attachmentType);
-    const loadedUrl = preview.url || original.url;
-    const loading = original.loading || preview.loading;
+    const loadedUrl = preview.url || (!isVideoAsset ? original.url : undefined);
+    const loading = original.loading || original.streamLoading || preview.loading;
     const error = original.error || preview.error;
-    const width =
-      e2eeDisplayNumber(display, 'width') || e2eeDisplayNumber(previewDisplay, 'width') || naturalPreviewSize?.width;
-    const height =
-      e2eeDisplayNumber(display, 'height') || e2eeDisplayNumber(previewDisplay, 'height') || naturalPreviewSize?.height;
-    const aspectStyle = e2eeAspectStyle(width, height);
     const progressLabel = formatE2eeProgress(original.progress || preview.progress);
     const statusLabel = mediaError
       ? 'Preview unavailable, download file'
@@ -310,7 +274,8 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
     const ensureOriginal = useCallback(() => {
       if (!grantReady) return;
       setMediaError(false);
-      if (isVideoAsset && !original.streamUrl && !original.streamLoading) {
+      if (isVideoAsset) {
+        if (original.streamUrl || original.streamLoading) return;
         void original.loadStream().then((streamUrl) => {
           if (!streamUrl && !original.url && !original.loading) void original.load();
         });
@@ -410,50 +375,40 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
 
     if ((isImageAsset || isVideoAsset) && loadedUrl && !mediaError) {
       return (
-        <div className="ermis-e2ee-attachment-media" ref={previewRef}>
+        <div className="ermis-attachment-grid ermis-attachment-grid--single" ref={previewRef}>
           <button
-            className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--e2ee"
-            style={aspectStyle}
+            className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3 ermis-attachment--clickable"
             type="button"
             onClick={openViewer}
             disabled={!grantReady}
           >
             <img
-              className="ermis-attachment ermis-attachment--image ermis-attachment--loaded"
+              className={
+                'ermis-attachment ermis-attachment--loaded ' +
+                (isVideoAsset ? 'ermis-attachment--video-poster' : 'ermis-attachment--image')
+              }
               src={loadedUrl}
               alt={title}
               loading="lazy"
-              onLoad={(event) => {
-                const img = event.currentTarget;
-                if (img.naturalWidth && img.naturalHeight) {
-                  setNaturalPreviewSize({ width: img.naturalWidth, height: img.naturalHeight });
-                }
-              }}
               onError={() => setMediaError(true)}
             />
-            {(isVideoAsset || original.loading) && (
-              <span className="ermis-e2ee-attachment-placeholder__icon">
-                {original.loading ? <span className="ermis-e2ee-attachment-spinner" /> : <E2eePlayIcon />}
-              </span>
-            )}
-            {original.loading && (
-              <span className="ermis-e2ee-attachment-progress">
-                {formatE2eeProgress(original.progress) || 'Loading'}
-              </span>
-            )}
+            <span className="ermis-attachment__overlay">
+              {isVideoAsset || original.loading ? (
+                original.loading ? (
+                  <span className="ermis-e2ee-attachment-spinner" />
+                ) : (
+                  <E2eePlayIcon />
+                )
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  <line x1="11" y1="8" x2="11" y2="14" />
+                  <line x1="8" y1="11" x2="14" y2="11" />
+                </svg>
+              )}
+            </span>
           </button>
-          <div className="ermis-e2ee-attachment-actions">
-            <span className="ermis-e2ee-attachment-actions__label">{title}</span>
-            <button
-              className="ermis-attachment__file-download"
-              onClick={handleDownload}
-              title="Download decrypted file"
-              type="button"
-              disabled={!grantReady}
-            >
-              <DownloadIcon />
-            </button>
-          </div>
           {lightboxOpen && (
             <MediaLightbox items={lightboxItems} isOpen={lightboxOpen} onClose={() => setLightboxOpen(false)} />
           )}
@@ -463,41 +418,27 @@ const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?
 
     if (isImageAsset || isVideoAsset) {
       return (
-        <div className="ermis-e2ee-attachment-media" ref={previewRef}>
+        <div className="ermis-attachment-grid ermis-attachment-grid--single" ref={previewRef}>
           <button
             type="button"
-            className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--e2ee"
-            style={aspectStyle}
-            onClick={handleLoad}
+            className="ermis-e2ee-attachment-placeholder ermis-attachment-aspect-box ermis-attachment-aspect-box--4-3 ermis-attachment--clickable"
+            onClick={isVideoAsset ? openViewer : handleLoad}
             disabled={loading || !grantReady}
           >
             <span className="ermis-attachment-shimmer" />
-            <span className="ermis-e2ee-attachment-placeholder__center">
-              <span className="ermis-e2ee-attachment-placeholder__icon">
-                {loading ? (
-                  <span className="ermis-e2ee-attachment-spinner" />
-                ) : isVideoAsset ? (
-                  <E2eePlayIcon />
-                ) : (
-                  getFileIcon(mimeType || 'image/*', title)
-                )}
-              </span>
-              <span className="ermis-e2ee-attachment-placeholder__title">{title}</span>
-              <span className="ermis-e2ee-attachment-placeholder__meta">{statusLabel}</span>
+            <span className="ermis-attachment__overlay">
+              {loading ? (
+                <span className="ermis-e2ee-attachment-spinner" />
+              ) : isVideoAsset ? (
+                <E2eePlayIcon />
+              ) : (
+                getFileIcon(mimeType || 'image/*', title)
+              )}
             </span>
           </button>
-          <div className="ermis-e2ee-attachment-actions">
-            <span className="ermis-e2ee-attachment-actions__label">{sizeLabel || 'Encrypted media'}</span>
-            <button
-              className="ermis-attachment__file-download"
-              onClick={handleDownload}
-              title="Download decrypted file"
-              type="button"
-              disabled={loading || !grantReady}
-            >
-              <DownloadIcon />
-            </button>
-          </div>
+          {isVideoAsset && lightboxOpen && (
+            <MediaLightbox items={lightboxItems} isOpen={lightboxOpen} onClose={() => setLightboxOpen(false)} />
+          )}
         </div>
       );
     }
@@ -587,7 +528,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
             <video
               className={`ermis-attachment ermis-attachment--video${loaded ? ' ermis-attachment--loaded' : ''}`}
               src={src}
-              preload="metadata"
+              preload="none"
               onLoadedData={() => setLoaded(true)}
             />
           )}
@@ -626,7 +567,7 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
           src={src}
           poster={posterSrc}
           controls
-          preload="metadata"
+          preload={posterSrc ? 'none' : 'metadata'}
           onLoadedData={() => {
             if (!posterSrc) setLoaded(true);
           }}
@@ -643,6 +584,125 @@ const VideoAttachment: React.FC<AttachmentProps> = React.memo(
 );
 (VideoAttachment as any).displayName = 'VideoAttachment';
 
+const PdfViewerOverlay: React.FC<{
+  url: string;
+  name: string;
+  onClose: () => void;
+  onDownload: (e: React.MouseEvent) => void;
+}> = ({ url, name, onClose, onDownload }) => {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return ReactDOM.createPortal(
+    <div
+      className="ermis-pdf-overlay"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 10000,
+        background: 'rgba(0, 0, 0, 0.85)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 12,
+          right: 16,
+          display: 'flex',
+          gap: 8,
+          zIndex: 10001,
+        }}
+      >
+        <button
+          onClick={onDownload}
+          title="Download"
+          type="button"
+          style={{
+            background: 'rgba(255,255,255,0.15)',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 14px',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Download
+        </button>
+        <button
+          onClick={onClose}
+          title="Close"
+          type="button"
+          style={{
+            background: 'rgba(255,255,255,0.15)',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 12px',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: 16,
+            lineHeight: 1,
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          ✕
+        </button>
+      </div>
+      <div
+        style={{
+          width: '90vw',
+          height: '90vh',
+          maxWidth: 1200,
+          borderRadius: 12,
+          overflow: 'hidden',
+          background: '#fff',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+        }}
+      >
+        <iframe
+          src={url}
+          title={name}
+          style={{ width: '100%', height: '100%', border: 'none' }}
+        />
+      </div>
+      <div
+        style={{
+          color: 'rgba(255,255,255,0.7)',
+          fontSize: 13,
+          marginTop: 8,
+          textAlign: 'center',
+        }}
+      >
+        {name}
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 const FileAttachment: React.FC<AttachmentProps> = React.memo(
   ({ attachment }) => {
     const url = attachment.url || attachment.asset_url;
@@ -650,8 +710,12 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(
     const size = attachment.file_size;
     const mimeType = attachment.mime_type || attachment.type || '';
     const ext = name.split('.').pop()?.toUpperCase() || 'FILE';
+    const isPdf =
+      mimeType.includes('pdf') || name.toLowerCase().endsWith('.pdf');
 
-    const { downloadFile } = useDownloadHandler();
+    const [showPdf, setShowPdf] = useState(false);
+    const { downloadFile, activeDownloads, cancelDownload } = useDownloadHandler();
+    const downloadProgress = url ? activeDownloads.get(url) : undefined;
 
     const handleDownload = useCallback(
       async (e: React.MouseEvent) => {
@@ -662,38 +726,119 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(
       [downloadFile, url, name],
     );
 
+    const handleCancelDownload = useCallback(
+      (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (url) cancelDownload(url);
+      },
+      [cancelDownload, url],
+    );
+
+    const handleClick = useCallback(() => {
+      if (isPdf && url) setShowPdf(true);
+    }, [isPdf, url]);
+
     return (
-      <div className="ermis-attachment ermis-attachment--file">
-        <span className="ermis-attachment__file-icon">
-          {getFileIcon(mimeType, name)}
-          <span className="ermis-attachment__file-ext">{ext}</span>
-        </span>
-        <span className="ermis-attachment__file-info">
-          <span className="ermis-attachment__file-name">{name}</span>
-          {size && (
-            <span className="ermis-attachment__file-size">
-              {typeof size === 'number' ? `${(size / 1024).toFixed(1)} KB` : size}
-              {getLocalUploadProgress(attachment) !== undefined ? ` · ${getLocalUploadProgress(attachment)}%` : ''}
+      <>
+        <div
+          className={`ermis-attachment ermis-attachment--file${isPdf ? ' ermis-attachment--pdf' : ''}`}
+          onClick={handleClick}
+          style={isPdf ? { cursor: 'pointer' } : undefined}
+          title={isPdf ? 'Click to preview PDF' : undefined}
+        >
+          <span className="ermis-attachment__file-icon">
+            {getFileIcon(mimeType, name)}
+            <span className="ermis-attachment__file-ext">{ext}</span>
+          </span>
+          <span className="ermis-attachment__file-info">
+            <span className="ermis-attachment__file-name">{name}</span>
+            {size && (
+              <span className="ermis-attachment__file-size">
+                {typeof size === 'number' ? `${(size / 1024).toFixed(1)} KB` : size}
+                {getLocalUploadProgress(attachment) !== undefined ? ` · ${getLocalUploadProgress(attachment)}%` : ''}
+              </span>
+            )}
+          </span>
+          {isPdf && (
+            <span
+              className="ermis-attachment__file-preview-badge"
+              style={{
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.8)',
+                marginRight: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              View
             </span>
           )}
-        </span>
-        <button className="ermis-attachment__file-download" onClick={handleDownload} title="Download" type="button">
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-        </button>
-      </div>
+          <button className="ermis-attachment__file-download" onClick={downloadProgress?.active ? handleCancelDownload : handleDownload} title={downloadProgress?.active ? 'Cancel' : 'Download'} type="button">
+            {downloadProgress?.active ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              </svg>
+            ) : (
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            )}
+          </button>
+          {downloadProgress?.active && (
+            <div
+              className="ermis-attachment__download-progress"
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                background: 'rgba(255,255,255,0.15)',
+                borderRadius: '0 0 8px 8px',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: downloadProgress.percent >= 0 ? `${downloadProgress.percent}%` : '50%',
+                  background: 'rgba(255,255,255,0.7)',
+                  borderRadius: '0 0 8px 8px',
+                  transition: 'width 0.2s ease',
+                  ...(downloadProgress.percent < 0 ? {
+                    animation: 'ermis-progress-indeterminate 1.5s ease-in-out infinite',
+                  } : {}),
+                }}
+              />
+            </div>
+          )}
+        </div>
+        {showPdf && url && (
+          <PdfViewerOverlay
+            url={url}
+            name={name}
+            onClose={() => setShowPdf(false)}
+            onDownload={handleDownload}
+          />
+        )}
+      </>
     );
   },
   (prev, next) => {
@@ -944,9 +1089,9 @@ export const AttachmentList: React.FC<{
     const standardAttachments = attachments.filter((a): a is Attachment => !isE2eeAttachmentManifest(a));
     const media = standardAttachments.filter((a) => isImage(a) || isVideo(a));
     const files = standardAttachments.filter(
-      (a) => !isImage(a) && !isVideo(a) && !isVoiceRecordingAttachment(a) && !isLinkPreviewAttachment(a),
+      (a) => !isImage(a) && !isVideo(a) && !isAudio(a) && !isLinkPreviewAttachment(a),
     );
-    const voices = standardAttachments.filter(isVoiceRecordingAttachment);
+    const voices = standardAttachments.filter(isAudio);
     const links = standardAttachments.filter(isLinkPreviewAttachment);
 
     // Lightbox state
@@ -959,7 +1104,7 @@ export const AttachmentList: React.FC<{
         if (isImage(att)) {
           return {
             type: 'image' as const,
-            src: att.image_url || att.thumb_url || att.url || '',
+            src: att.image_url || att.thumb_url || att.url || (att as any).asset_url || '',
             alt: att.file_name || att.title,
           };
         }
@@ -1050,7 +1195,8 @@ export const AttachmentList: React.FC<{
  * Detect URLs and emails in plain text, wrapping them in <a> tags.
  * Returns an array of React nodes (strings and link elements).
  */
-const URL_REGEX = /(https?:\/\/[^\s<>]+?|www\.[^\s<>]+?|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?=[.,!?:;"']*(?:\s|<|>|$))/g;
+const URL_REGEX =
+  /(https?:\/\/[^\s<>]+?|www\.[^\s<>]+?|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?=[.,!?:;"']*(?:\s|<|>|$))/g;
 
 function linkifyText(text: string, keyPrefix: string): React.ReactNode[] {
   const parts = text.split(URL_REGEX);
@@ -1164,9 +1310,11 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
     encryptedMessageFailedLabel = 'Encrypted message could not be decrypted',
     encryptedMessageDecryptingLabel = 'Decrypting encrypted message...',
   }) => {
-    const { activeChannel } = useChatClient();
+    const { activeChannel } = useChatCore();
 
-    const isEncrypted = message.content_type === 'mls' || Boolean((message as any).mls_ciphertext);
+    const isEncrypted =
+      message.content_type === 'mls' ||
+      (Boolean((message as any).mls_ciphertext) && message.content_type !== 'standard');
     const hasRawAttachments = Boolean(message.attachments?.length);
     const rawText = message.text || '';
     const isEncryptedSentinelText =
@@ -1196,7 +1344,6 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
     }, [message.attachments, message.text]);
 
     const hasAttachments = attachmentsToRender.length > 0;
-    const hasE2eeAttachments = attachmentsToRender.some(isE2eeAttachmentManifest);
     const messageStatus = (message as any).status;
     const e2eeGrantReady = !['sending', 'error', 'failed_offline'].includes(messageStatus);
     const encryptedPlaceholder =
@@ -1212,11 +1359,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
 
     if (hasAttachments) {
       return (
-        <div
-          className={`ermis-message-content--with-attachments${
-            hasE2eeAttachments ? ' ermis-message-content--with-e2ee-attachments' : ''
-          }`}
-        >
+        <div className="ermis-message-content--with-attachments">
           {textContent && <span className="ermis-message-list__item-text">{textContent}</span>}
           {encryptedPlaceholder}
           <AttachmentList attachments={attachmentsToRender} e2eeGrantReady={e2eeGrantReady} />
@@ -1248,7 +1391,7 @@ RegularMessage.displayName = 'RegularMessage';
 
 /** System message: centered info text, parsed from raw format */
 export const SystemMessage: React.FC<MessageRendererProps> = ({ message, systemMessageTranslations }) => {
-  const { activeChannel } = useChatClient();
+  const { activeChannel } = useChatCore();
 
   const userMap = useMemo<Record<string, string>>(() => {
     return buildUserMap(activeChannel?.state);
@@ -1259,12 +1402,18 @@ export const SystemMessage: React.FC<MessageRendererProps> = ({ message, systemM
     [message.text, userMap, systemMessageTranslations],
   );
 
-  return <span className="ermis-message-list__system-text">{parsedText || message.text}</span>;
+  const displayText = parsedText || message.text || '';
+
+  return (
+    <span className="ermis-message-list__system-text" title={displayText}>
+      {displayText}
+    </span>
+  );
 };
 
 /** Signal message: call events */
 export const SignalMessage: React.FC<MessageRendererProps> = ({ message, signalMessageTranslations }) => {
-  const { client } = useChatClient();
+  const { client } = useChatCore();
 
   const rawText = message.text ?? '';
   const result = rawText ? parseSignalMessage(rawText, client.userID || '', signalMessageTranslations) : null;
@@ -1318,17 +1467,21 @@ export const SignalMessage: React.FC<MessageRendererProps> = ({ message, signalM
   );
 };
 
-/** Poll message */
-export const PollMessage: React.FC<MessageRendererProps> = ({ message }) => (
-  <div className="ermis-message-poll">
-    <span className="ermis-message-poll__icon">📊</span>
-    <span className="ermis-message-poll__text">{message.text || 'Poll'}</span>
-  </div>
-);
-
 /** Sticker message */
 export const StickerMessage: React.FC<MessageRendererProps> = ({ message }) => {
-  const stickerUrl = (message as any).sticker_url;
+  const stickerUrl =
+    (message as any).sticker_url ||
+    (message.attachments &&
+      (message.attachments[0]?.image_url ||
+        message.attachments[0]?.asset_url ||
+        message.attachments[0]?.url));
+
+  const isGif = Boolean(
+    stickerUrl &&
+      (/\.gif($|#|\?)/i.test(stickerUrl) ||
+        stickerUrl.includes('giphy.com') ||
+        stickerUrl.includes('.gif')),
+  );
 
   const alreadyCached = stickerUrl ? isImagePreloaded(stickerUrl) : false;
   const [loaded, setLoaded] = useState(alreadyCached);
@@ -1346,14 +1499,16 @@ export const StickerMessage: React.FC<MessageRendererProps> = ({ message }) => {
 
   if (stickerUrl) {
     return (
-      <div className="ermis-message-sticker-wrapper">
+      <div
+        className={`ermis-message-sticker-wrapper${
+          isGif ? ' ermis-message-sticker-wrapper--gif' : ''
+        }`}
+      >
         {!loaded && <div className="ermis-attachment-shimmer" />}
-        <img
-          ref={imgRef}
+        <StickerImage
           className={`ermis-message-sticker${loaded ? ' ermis-attachment--loaded' : ''}`}
           src={stickerUrl}
           alt="sticker"
-          loading="lazy"
           onLoad={() => setLoaded(true)}
         />
       </div>
@@ -1375,7 +1530,6 @@ export const defaultMessageRenderers: Record<MessageLabel, React.ComponentType<M
   regular: RegularMessage,
   system: SystemMessage,
   signal: SignalMessage,
-  poll: PollMessage,
   sticker: StickerMessage,
   error: ErrorMessage,
 };

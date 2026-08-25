@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useContext } from 'react';
-import { useChatClient } from '../hooks/useChatClient';
+import { useChatCore } from '../hooks/useChatCore';
 import { usePendingState } from '../hooks/usePendingState';
 import { Avatar } from './Avatar';
 import type { ChannelHeaderProps } from '../types';
@@ -7,23 +7,13 @@ import type { OnlineStatus } from '../hooks/useOnlineStatus';
 import { ErmisCallContext } from '../context/ErmisCallContext';
 import { hasTopicsEnabled, isDirectChannel } from '../channelTypeUtils';
 import { isSkippedMember, isFriendChannel } from '../channelRoleUtils';
+import { getChannelDisplayInfo } from '../utils';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
 
 export type { ChannelHeaderProps } from '../types';
 
 /**
  * ChannelHeader displays the active channel's avatar and name.
- *
- * Customization:
- * - `title` / `image` — override the channel name and avatar
- * - `subtitle` — add a subtitle line (e.g. member count)
- * - `AvatarComponent` — replace the avatar
- * - `renderTitle(channel)` — fully custom title rendering
- * - `renderRight(channel)` — render content on the right side
- * - `showOnlineStatus` — show online/offline dot for friend channels (default: true)
- * - `OnlineIndicatorComponent` — replace the default indicator
- *
- * For a fully custom header, use `Channel`'s `HeaderComponent` prop instead.
  */
 export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   className,
@@ -43,7 +33,7 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   offlineLabel = 'Offline',
   OnlineIndicatorComponent,
 }) => {
-  const { activeChannel, client, enableCall } = useChatClient();
+  const { activeChannel, client, enableCall } = useChatCore();
   const { isPending } = usePendingState(activeChannel, client.userID);
   const callContext = useContext(ErmisCallContext);
 
@@ -63,8 +53,6 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
 
     const sub1 = activeChannel.on('channel.updated', handleUpdate);
 
-    // Also listen for client-level notifications that might affect this channel's roles/members
-    // We only care about this for messaging (direct) channels to update online status
     const sub2 = client.on('notification.invite_accepted', (event) => {
       if (event.cid === activeChannel.cid && isDirectChannel(activeChannel)) {
         handleUpdate();
@@ -78,23 +66,20 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
   }, [activeChannel, client]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const channelName = useMemo(() =>
-    title || activeChannel?.data?.name || activeChannel?.cid || '',
-    [title, activeChannel?.data?.name, activeChannel?.cid, channelUpdateCount],
+  const displayInfo = useMemo(() =>
+    getChannelDisplayInfo(activeChannel, client.userID),
+    [activeChannel, client.userID, activeChannel?.data?.name, activeChannel?.data?.image, activeChannel?.state?.members, channelUpdateCount],
   );
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const channelImage = useMemo(() =>
-    image || (activeChannel?.data?.image as string | undefined),
-    [image, activeChannel?.data?.image, channelUpdateCount],
-  );
+  const channelName = title || displayInfo.name;
+
+  const channelImage = image || displayInfo.image;
 
   const teamName = undefined;
 
   // ── Online Status (direct friend channels only) ──
   const currentUserId = client.userID;
 
-  // Get the "other" user's ID from the direct channel.
   const otherUserId = useMemo(() => {
     if (!activeChannel || !currentUserId || !isDirectChannel(activeChannel)) return undefined;
     const members = activeChannel.state?.members;
@@ -105,13 +90,11 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
     return undefined;
   }, [activeChannel, currentUserId, channelUpdateCount]);
 
-  // Check if this is a friend channel (both members are owner).
   const isFriend = useMemo(() => {
     if (!otherUserId || !currentUserId || !activeChannel) return false;
     return isFriendChannel(activeChannel, otherUserId, currentUserId);
   }, [activeChannel, otherUserId, currentUserId, channelUpdateCount]);
 
-  // Derive online status from watchers + subscribe to realtime events.
   const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>('unknown');
 
   useEffect(() => {
@@ -120,7 +103,6 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
       return;
     }
 
-    // Read initial state from watchers.
     setOnlineStatus(activeChannel.state?.watchers?.[otherUserId] ? 'online' : 'offline');
 
     const handleWatchingStart = (event: Event) => {
@@ -166,10 +148,11 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
           renderTitle(activeChannel)
         ) : (
           <div className="ermis-channel-header__title-container">
-            <div className="ermis-channel-header__name">{channelName}</div>
+            <div className="ermis-channel-header__name" title={title || teamName || channelName}>
+              {title || channelName}
+            </div>
           </div>
         )}
-        {/* Online/Offline indicator for friend direct channels */}
         {showOnlineDot && (
           OnlineIndicatorComponent ? (
             <OnlineIndicatorComponent isOnline={isOnline} />
@@ -182,15 +165,13 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
             </div>
           )
         )}
-        {/* Consumer-provided subtitle (takes over if set) */}
         {subtitle && !showOnlineDot && (
           <div className="ermis-channel-header__subtitle">{subtitle}</div>
         )}
       </div>
 
-      {/* renderRight exposes actionDisabled for consumers to disable UI features natively */}
       <div className="ermis-channel-header__actions">
-        {enableCall && callContext && isDirectChannel(activeChannel) && !isPending && !isSkipped && (
+        {enableCall && callContext && isDirectChannel(activeChannel) && !isPending && !isSkipped && isFriend && (
           <>
             {renderAudioCallButton ? (
               renderAudioCallButton(() => callContext.createCall('audio', activeChannel.cid || ''), actionDisabled)
@@ -224,7 +205,6 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
             )}
           </>
         )}
-        {/* C8: Active call badge */}
         {enableCall && callContext && callContext.callStatus && CallBadgeComponent && (
           <CallBadgeComponent callType={callContext.callType} />
         )}

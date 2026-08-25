@@ -1,29 +1,30 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Virtualizer as _Virtualizer } from 'virtua';
-const Virtualizer = _Virtualizer as any;
-import { useChatClient } from '../../hooks/useChatClient';
+import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
+import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
 import { useBannedState } from '../../hooks/useBannedState';
 import { useBlockedState } from '../../hooks/useBlockedState';
-import { usePreviewState } from '../../hooks/usePreviewState';
-import { Avatar } from '../Avatar';
-import { DefaultChannelInfoTabHeader } from './ChannelInfoTabs';
-import { useChannelInfoTabs } from './useChannelInfoTabs';
-import { AddMemberModal } from './AddMemberModal';
-import { EditChannelModal } from './EditChannelModal';
-import { TopicModal } from '../TopicModal';
-import { MessageSearchPanel } from './MessageSearchPanel';
-import { ChannelSettingsPanel } from './ChannelSettingsPanel';
-import { MediaLightbox } from '../MediaLightbox';
-import { PENDING_STYLE, READY_STYLE } from './utils';
-import type {
-  ChannelInfoProps,
-  ChannelInfoHeaderProps,
-  ChannelInfoCoverProps,
-  ChannelInfoActionsProps,
-} from '../../types';
+import { useMutedState } from '../../hooks/useMutedState';
 import { useChannelMembers, useChannelProfile } from '../../hooks/useChannelData';
-import { isGroupChannel, isTopicChannel } from '../../channelTypeUtils';
-import { canManageChannel, CHANNEL_ROLES } from '../../channelRoleUtils';
+import { useChatCore } from '../../hooks/useChatCore';
+import { usePreviewState } from '../../hooks/usePreviewState';
+import type {
+  ChannelInfoActionsProps,
+  ChannelInfoCoverProps,
+  ChannelInfoHeaderProps,
+  ChannelInfoProps,
+} from '../../types';
+import { Avatar } from '../Avatar';
+import { MediaLightbox } from '../MediaLightbox';
+import { TopicModal } from '../TopicModal';
+import { AddMemberModal } from './AddMemberModal';
+import { DefaultChannelInfoTabHeader } from './ChannelInfoTabs';
+import { ChannelSettingsPanel } from './ChannelSettingsPanel';
+import { EditChannelModal } from './EditChannelModal';
+import { MessageSearchPanel } from './MessageSearchPanel';
+import { useChannelInfoTabs } from './useChannelInfoTabs';
+import { PENDING_STYLE, READY_STYLE } from './utils';
+const Virtualizer = _Virtualizer as any;
 
 const MemoizedVirtualizer = React.memo(({ scrollRef, startMargin, data, renderItem, overscan = 10 }: any) => (
   <Virtualizer scrollRef={scrollRef} startMargin={startMargin} data={data} overscan={overscan}>
@@ -44,7 +45,7 @@ const BlockIcon = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="n
 export const DefaultChannelInfoHeader: React.FC<ChannelInfoHeaderProps> = React.memo(({ title, onClose }) => {
   return (
     <div className="ermis-channel-info__header">
-      <h3 className="ermis-channel-info__title">{title}</h3>
+      <h3 className="ermis-channel-info__title" title={title}>{title}</h3>
       {onClose && (
         <button className="ermis-channel-info__close" onClick={onClose} aria-label="Close">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -74,7 +75,7 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
     <div className="ermis-channel-info__cover">
       {renderAvatar()}
       <div className="ermis-channel-info__name-row">
-        <h2 className="ermis-channel-info__name">{channelName}</h2>
+        <h2 className="ermis-channel-info__name" title={channelName}>{channelName}</h2>
         {canEdit && onEditClick && (
           <button className="ermis-channel-info__cover-edit-btn" onClick={onEditClick} aria-label="Edit channel">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -115,11 +116,13 @@ export const DefaultChannelInfoCover: React.FC<ChannelInfoCoverProps> = React.me
 DefaultChannelInfoCover.displayName = 'DefaultChannelInfoCover';
 
 export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.memo(({
-  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, onDeleteTopic, onTruncateChannel,
+  onSearchClick, onSettingsClick, onLeaveChannel, onDeleteChannel, onDeleteTopic, onTruncateChannel, onTruncateChannelForMe,
   onBlockUser, onUnblockUser, onPin, onUnpin, onCloseTopic, onReopenTopic,
-  isTeamChannel, isTopic, isClosedTopic, isBlocked, isPinned, currentUserRole,
-  searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', truncateLabel = 'Clear history', leaveLabel = 'Leave',
+  isTeamChannel, isTopic, isClosedTopic, isBlocked, isMuted, isPinned, currentUserRole,
+  onMuteChannel, onUnmuteChannel,
+  searchLabel = 'Search', settingsLabel = 'Settings', deleteLabel = 'Delete', truncateLabel = 'Clear history', truncateForMeLabel = 'Clear history for me', leaveLabel = 'Leave',
   blockLabel = 'Block', unblockLabel = 'Unblock', pinLabel = 'Pin', unpinLabel = 'Unpin',
+  muteLabel = 'Mute', unmuteLabel = 'Unmute',
   closeTopicLabel = 'Close Topic', reopenTopicLabel = 'Reopen Topic', deleteTopicLabel = 'Delete Topic'
 }) => {
   return (
@@ -136,6 +139,33 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
         </div>
         <span>{isPinned ? unpinLabel : pinLabel}</span>
       </button>
+      {/* Mute / Unmute — available for all non-topic channels */}
+      {!isTopic && (
+        isMuted ? (
+          <button className="ermis-channel-info__action-btn" onClick={onUnmuteChannel} disabled={isBlocked}>
+            <div className="ermis-channel-info__action-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </div>
+            <span>{unmuteLabel}</span>
+          </button>
+        ) : (
+          <button className="ermis-channel-info__action-btn" onClick={onMuteChannel} disabled={isBlocked}>
+            <div className="ermis-channel-info__action-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                <path d="M18.63 13A17.89 17.89 0 0 1 18 8" />
+                <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" />
+                <path d="M18 8a6 6 0 0 0-9.33-5" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            </div>
+            <span>{muteLabel}</span>
+          </button>
+        )
+      )}
       {isTeamChannel && canManageChannel(currentUserRole) && (
         <button className="ermis-channel-info__action-btn" onClick={onSettingsClick}>
           <div className="ermis-channel-info__action-icon">
@@ -188,17 +218,27 @@ export const DefaultChannelInfoActions: React.FC<ChannelInfoActionsProps> = Reac
           <span>{deleteTopicLabel}</span>
         </button>
       )}
-      {/* Block/Unblock & Truncate — messaging (1-1) channels only */}
+      {/* Clear history for everyone (DM or Group owner/moderator) */}
+      {!isTopic && onTruncateChannel && (!isTeamChannel || canManageChannel(currentUserRole)) && (
+        <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannel}>
+          <div className="ermis-channel-info__action-icon">
+            <DeleteIcon />
+          </div>
+          <span>{truncateLabel}</span>
+        </button>
+      )}
+      {/* Clear history for me */}
+      {!isTopic && onTruncateChannelForMe && (
+        <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannelForMe}>
+          <div className="ermis-channel-info__action-icon">
+            <DeleteIcon />
+          </div>
+          <span>{truncateForMeLabel}</span>
+        </button>
+      )}
+      {/* Block/Unblock — messaging (1-1) channels only */}
       {!isTeamChannel && !isTopic && (
         <>
-          {onTruncateChannel && (
-            <button className="ermis-channel-info__action-btn ermis-channel-info__action-btn--danger" onClick={onTruncateChannel}>
-              <div className="ermis-channel-info__action-icon">
-                <DeleteIcon />
-              </div>
-              <span>{truncateLabel}</span>
-            </button>
-          )}
           {isBlocked ? (
           <button className="ermis-channel-info__action-btn" onClick={onUnblockUser}>
             <div className="ermis-channel-info__action-icon">
@@ -242,6 +282,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     actionsTruncateLabel,
     actionsTruncateForMeLabel,
     actionsLeaveLabel,
+    actionsMuteLabel,
+    actionsUnmuteLabel,
     actionsCreateTopicLabel,
     MemberItemComponent,
     MediaItemComponent,
@@ -310,16 +352,21 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     roleLabels,
   } = props;
 
-  const { activeChannel, client } = useChatClient();
+  const { activeChannel, client } = useChatCore();
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const channel = channelProp || activeChannel;
   const { isBanned } = useBannedState(channel, client?.userID);
   const { isBlocked } = useBlockedState(channel, client?.userID);
+  const { isMuted } = useMutedState(channel, client?.userID);
   const { isPreviewMode } = usePreviewState(channel, client?.userID);
 
   const currentUserId = client?.userID;
-  const currentUserRole = currentUserId ? channel?.state?.members?.[currentUserId]?.channel_role : undefined;
+  const currentUserRole = currentUserId
+    ? (channel?.state?.members?.[currentUserId]?.channel_role ||
+       channel?.state?.membership?.channel_role ||
+       ((channel?.data as any)?.created_by_id === currentUserId || (channel?.data as any)?.created_by?.id === currentUserId ? CHANNEL_ROLES.OWNER : undefined))
+    : undefined;
   const isTeamChannel = isGroupChannel(channel);
   const isTopic = isTopicChannel(channel);
   const isClosedTopic = channel?.data?.is_closed_topic === true;
@@ -430,7 +477,17 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   }, [client, e2eeChannel?.cid, parentCid]);
 
   const handleEnableE2ee = useCallback(async () => {
-    if (!channel?.id || !channel?.cid || !client?.encryptionManager?.initialized || parentCid || isE2ee) return;
+    if (!channel?.id || !channel?.cid || parentCid || isE2ee) return;
+    if (!client?.encryptionManager?.initialized) {
+      const msg = 'Encryption manager is not initialized';
+      try {
+        const { toast } = await import('sonner');
+        toast.error(msg);
+      } catch {
+        alert(msg);
+      }
+      return;
+    }
     try {
       setIsEnablingE2ee(true);
       const memberUserIds = Object.keys(channel.state?.members || {});
@@ -454,8 +511,15 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
         channel: channel.data,
         user: channel.getClient().user,
       } as any);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error enabling E2EE', e);
+      const backendMessage = e?.response?.data?.message || e?.response?.data?.error || e?.message || String(e);
+      try {
+        const { toast } = await import('sonner');
+        toast.error(backendMessage);
+      } catch {
+        alert(backendMessage);
+      }
     } finally {
       setIsEnablingE2ee(false);
     }
@@ -472,6 +536,16 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
     if (!channel) return;
     try { await channel.unpin(); } catch (e) { console.error('Error unpanning channel', e); }
   }, [channel, onUnpinChannelProp]);
+
+  const handleMuteChannel = useCallback(async () => {
+    if (!channel) return;
+    try { await channel.muteNotification(null); } catch (e) { console.error('Error muting channel', e); }
+  }, [channel]);
+
+  const handleUnmuteChannel = useCallback(async () => {
+    if (!channel) return;
+    try { await channel.unMuteNotification(); } catch (e) { console.error('Error unmuting channel', e); }
+  }, [channel]);
 
   const handleCloseTopic = useCallback(async () => {
     if (!channel || !parentChannel) return;
@@ -490,7 +564,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   }, [channel, onDeleteTopicProp]);
 
   const { members } = useChannelMembers(channel);
-  const { channelName: profileChannelName, channelImage, channelDescription, isPinned } = useChannelProfile(channel);
+  const { channelName: profileChannelName, channelImage, channelDescription, isPinned } = useChannelProfile(channel, currentUserId);
 
   let finalChannelName = profileChannelName;
   let finalParentChannelName = parentChannelName;
@@ -509,6 +583,15 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
   const [showEditTopicModal, setShowEditTopicModal] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+
+  // Reset open sub-panels whenever target channel changes
+  useEffect(() => {
+    setShowSearchPanel(false);
+    setShowSettingsPanel(false);
+    setShowEditChannelModal(false);
+    setShowEditTopicModal(false);
+    setShowAddMemberModal(false);
+  }, [channel?.cid]);
 
   // Permission: only owner or moderator can edit channel info (banned users cannot)
   const canEditChannel = (isTeamChannel || isTopic) && !isBanned && canManageChannel(currentUserRole);
@@ -629,7 +712,10 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 isTopic={isTopic}
                 isClosedTopic={isClosedTopic}
                 isBlocked={isBlocked}
+                isMuted={isMuted}
                 isPinned={isPinned}
+                onMuteChannel={handleMuteChannel}
+                onUnmuteChannel={handleUnmuteChannel}
                 topicsEnabled={channel?.data?.topics_enabled === true}
                 currentUserRole={currentUserRole}
                 isE2ee={isE2ee}
@@ -637,7 +723,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 encryptionEpoch={encryptionEpoch}
                 onRotateKey={!isTopic && isE2ee && canManageChannel(currentUserRole) ? handleRotateKey : undefined}
                 rotateKeyDisabled={isRotatingKey || isBlocked || isClosedTopic}
-                onEnableE2ee={!isTopic && !isE2ee && currentUserRole === CHANNEL_ROLES.OWNER ? handleEnableE2ee : undefined}
+                onEnableE2ee={!isTopic && !isE2ee && (currentUserRole === CHANNEL_ROLES.OWNER || canManageChannel(currentUserRole) || (channel?.data as any)?.created_by_id === currentUserId) ? handleEnableE2ee : undefined}
                 enableE2eeDisabled={isEnablingE2ee || isBlocked || isClosedTopic || !client?.encryptionManager?.initialized}
                 searchLabel={actionsSearchLabel}
                 settingsLabel={actionsSettingsLabel}
@@ -649,6 +735,8 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
                 unblockLabel={actionsUnblockLabel}
                 pinLabel={isTopic ? (actionsPinTopicLabel || 'Pin topic') : (actionsPinLabel || 'Pin channel')}
                 unpinLabel={isTopic ? (actionsUnpinTopicLabel || 'Unpin topic') : (actionsUnpinLabel || 'Unpin channel')}
+                muteLabel={actionsMuteLabel}
+                unmuteLabel={actionsUnmuteLabel}
                 closeTopicLabel={actionsCloseTopicLabel}
                 reopenTopicLabel={actionsReopenTopicLabel}
                 deleteTopicLabel={actionsDeleteTopicLabel}
