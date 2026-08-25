@@ -510,11 +510,6 @@ export function ChatPage() {
     ]).size
     return Math.max(target, known)
   }, [activeRestoreProgress])
-  const e2eeBootstrapRunning = recovery.recoveryStatus?.e2eeBootstrapRunning === true
-  const e2eeBootstrapCompleted = recovery.recoveryStatus?.e2eeBootstrapCompleted || 0
-  const e2eeBootstrapTotal = recovery.recoveryStatus?.e2eeBootstrapTotal || 0
-
-  const activeRestoreCompleted = activeRestoreProgress?.completed_epochs.length || 0
   const getRestoreBadge = useCallback((channel: ChannelType): { label: string; tone: 'pending' | 'running' } | null => {
     const cid = channel.cid
     if (!cid) return null
@@ -1082,15 +1077,6 @@ export function ChatPage() {
           <SyncStatusBanner syncState={syncState} />
         </div>
 
-        {e2eeBootstrapRunning && e2eeBootstrapTotal > 0 && (
-          <div className="mx-4 mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-[12px] font-semibold text-violet-800 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200">
-            {t('recovery_pin.bootstrap_progress', {
-              completed: e2eeBootstrapCompleted,
-              total: e2eeBootstrapTotal,
-            })}
-          </div>
-        )}
-
         <Channel EmptyStateIndicator={ChannelEmptyState}>
           <ChannelHeader
             title={activeChannel && isGroupChannel(activeChannel) && activeChannel.data?.topics_enabled ? t('chat.topics_general', 'Chủ đề chung') : undefined}
@@ -1103,15 +1089,6 @@ export function ChatPage() {
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
-
-          {activeRestoreProgress?.status === 'running' && activeRestoreTotal > 0 && (
-            <div className="mx-4 mt-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-[12px] font-semibold text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-200">
-              {t('recovery_pin.restore_progress_detail', {
-                restored: activeRestoreCompleted,
-                total: activeRestoreTotal,
-              })}
-            </div>
-          )}
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
