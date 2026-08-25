@@ -38,37 +38,43 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
   // Default handlers
   const onReply = onReplyProp ?? ((msg: FormatMessageResponse) => setQuotedMessage(msg));
   const onForwardHandler = onForward ?? ((msg: FormatMessageResponse) => setForwardingMessage(msg));
-  const onPinToggleHandler = onPinToggle ?? (async (msg: FormatMessageResponse, isPinned: boolean) => {
-    if (!activeChannel) return;
-    try {
-      if (isPinned) {
-        await activeChannel.unpinMessage(msg.id!);
-      } else {
-        await activeChannel.pinMessage(msg.id!);
+  const onPinToggleHandler =
+    onPinToggle ??
+    (async (msg: FormatMessageResponse, isPinned: boolean) => {
+      if (!activeChannel) return;
+      try {
+        if (isPinned) {
+          await activeChannel.unpinMessage(msg.id!);
+        } else {
+          await activeChannel.pinMessage(msg.id!);
+        }
+      } catch (err) {
+        console.error('Failed to toggle pin', err);
       }
-    } catch (err) {
-      console.error('Failed to toggle pin', err);
-    }
-  });
+    });
   const onEditHandler = onEdit ?? ((msg: FormatMessageResponse) => setEditingMessage(msg));
 
-  const onDeleteForEveryoneHandler = onDelete ?? (async (msg: FormatMessageResponse) => {
-    if (!activeChannel) return;
-    try {
-      await activeChannel.deleteMessage(msg.id!);
-    } catch (err) {
-      console.error('Failed to delete message', err);
-    }
-  });
+  const onDeleteForEveryoneHandler =
+    onDelete ??
+    (async (msg: FormatMessageResponse) => {
+      if (!activeChannel) return;
+      try {
+        await activeChannel.deleteMessage(msg.id!);
+      } catch (err) {
+        console.error('Failed to delete message', err);
+      }
+    });
 
-  const onDeleteForMeHandler = onDeleteForMe ?? (async (msg: FormatMessageResponse) => {
-    if (!activeChannel) return;
-    try {
-      await activeChannel.deleteMessageForMe(msg.id!);
-    } catch (err) {
-      console.error('Failed to delete message for me', err);
-    }
-  });
+  const onDeleteForMeHandler =
+    onDeleteForMe ??
+    (async (msg: FormatMessageResponse) => {
+      if (!activeChannel) return;
+      try {
+        await activeChannel.deleteMessageForMe(msg.id!, msg);
+      } catch (err) {
+        console.error('Failed to delete message for me', err);
+      }
+    });
 
   const isOpen = anchorRect !== null;
   const onClose = useCallback(() => setAnchorRect(null), []);
@@ -97,9 +103,9 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
     <>
       <div className={`ermis-message-list__actions ${isOpen ? 'ermis-message-list__actions--active' : ''}`}>
         {actions.canReply && (
-          <button 
-            className="ermis-message-list__actions-trigger" 
-            onClick={() => onReply?.(message)} 
+          <button
+            className="ermis-message-list__actions-trigger"
+            onClick={() => onReply?.(message)}
             title="Reply"
             disabled={!actions.hasCapReply}
           >
@@ -110,24 +116,44 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
         )}
         <MessageQuickReactions message={message} isOwnMessage={isOwnMessage} disabled={!actions.hasCapReact} />
         {actions.canForward && (
-          <button 
-            className="ermis-message-list__actions-trigger" 
-            onClick={() => onForwardHandler(message)} 
+          <button
+            className="ermis-message-list__actions-trigger"
+            onClick={() => onForwardHandler(message)}
             title="Forward"
             disabled={!actions.hasCapQuote}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <polyline points="15 14 20 9 15 4" />
               <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
             </svg>
           </button>
         )}
         <button
-          className={`ermis-message-list__actions-trigger ${isOpen ? 'ermis-message-list__actions-trigger--active' : ''}`}
+          className={`ermis-message-list__actions-trigger ${
+            isOpen ? 'ermis-message-list__actions-trigger--active' : ''
+          }`}
           onClick={handleMoreClick}
           title="More actions"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <circle cx="12" cy="12" r="1" />
             <circle cx="12" cy="5" r="1" />
             <circle cx="12" cy="19" r="1" />
@@ -135,26 +161,27 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
         </button>
       </div>
 
-      <Dropdown 
-        isOpen={isOpen} 
-        anchorRect={anchorRect} 
-        onClose={onClose} 
-        align={isOwnMessage ? 'right' : 'left'}
-      >
+      <Dropdown isOpen={isOpen} anchorRect={anchorRect} onClose={onClose} align={isOwnMessage ? 'right' : 'left'}>
         <div className="ermis-dropdown__menu">
           {actions.canPin && (
-            <button 
-              className="ermis-dropdown__item" 
-              onClick={() => { onPinToggleHandler(message, actions.isPinned); onClose(); }}
+            <button
+              className="ermis-dropdown__item"
+              onClick={() => {
+                onPinToggleHandler(message, actions.isPinned);
+                onClose();
+              }}
               disabled={!actions.hasCapPin}
             >
               {actions.isPinned ? unpinLabel : pinLabel}
             </button>
           )}
           {actions.canEdit && (
-            <button 
-              className="ermis-dropdown__item" 
-              onClick={() => { onEditHandler(message); onClose(); }}
+            <button
+              className="ermis-dropdown__item"
+              onClick={() => {
+                onEditHandler(message);
+                onClose();
+              }}
               disabled={!actions.hasCapEdit}
             >
               {editLabel}
@@ -169,18 +196,24 @@ export const MessageActionsBox: React.FC<MessageActionsBoxProps> = ({
           {(actions.canDelete || actions.canDeleteForMe) && <div className="ermis-dropdown__divider" />}
 
           {actions.canDeleteForMe && (
-            <button 
-              className="ermis-dropdown__item ermis-dropdown__item--danger" 
-              onClick={() => { onDeleteForMeHandler(message); onClose(); }}
+            <button
+              className="ermis-dropdown__item ermis-dropdown__item--danger"
+              onClick={() => {
+                onDeleteForMeHandler(message);
+                onClose();
+              }}
               disabled={!actions.hasCapDeleteForMe}
             >
               {deleteForMeLabel}
             </button>
           )}
           {actions.canDelete && (
-            <button 
-              className="ermis-dropdown__item ermis-dropdown__item--danger" 
-              onClick={() => { onDeleteForEveryoneHandler(message); onClose(); }}
+            <button
+              className="ermis-dropdown__item ermis-dropdown__item--danger"
+              onClick={() => {
+                onDeleteForEveryoneHandler(message);
+                onClose();
+              }}
               disabled={!actions.hasCapDelete}
             >
               {deleteForEveryoneLabel}

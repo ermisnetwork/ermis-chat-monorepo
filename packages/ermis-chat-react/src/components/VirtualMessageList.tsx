@@ -149,6 +149,8 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   emptyTitle = 'No messages yet',
   emptySubtitle = 'Send a message to start the conversation',
   jumpToLatestLabel = '↓ Jump to latest',
+  repairingOverlayTitle = 'Repairing conversation',
+  repairingOverlaySubtitle = 'Messages will appear when repair is complete.',
   bannedOverlayTitle = 'You have been banned from this channel',
   bannedOverlaySubtitle = 'You can no longer read or send messages here',
   blockedOverlayTitle = 'You have blocked this user',
@@ -189,11 +191,12 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   gapIndicatorLabel,
 }) => {
   const { client, activeChannel, setActiveChannel } = useChatCore();
-  const { messages, readState } = useChatMessages();
+  const { messages, readState, e2eeRepairingChannelCids } = useChatMessages();
   const { jumpToMessageId, setJumpToMessageId } = useChatNavigation();
   const { isBanned } = useBannedState(activeChannel, client.userID);
   const { isBlocked } = useBlockedState(activeChannel, client.userID);
   const { isPending, inviteUpdateCount } = usePendingState(activeChannel, client.userID);
+  const isE2eeRepairing = Boolean(activeChannel?.cid && e2eeRepairingChannelCids.includes(activeChannel.cid));
 
   const isSkipped = client.userID
     ? isSkippedMember(activeChannel?.state?.members?.[client.userID]?.channel_role as string) ||
@@ -946,6 +949,13 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
           JumpToLatestButton === DefaultJumpToLatest
             ? <DefaultJumpToLatest onClick={hasNewer ? jumpToLatest : () => { scrollToBottom(true); setIsScrolledUp(false); }} label={jumpToLatestLabel} />
             : <JumpToLatestButton onClick={hasNewer ? jumpToLatest : () => { scrollToBottom(true); setIsScrolledUp(false); }} />
+        )}
+        {isE2eeRepairing && (
+          <div className="ermis-message-list__repair-overlay" role="status" aria-live="polite" aria-busy="true">
+            <span className="ermis-message-list__repair-spinner" aria-hidden="true" />
+            <span className="ermis-message-list__repair-title">{repairingOverlayTitle}</span>
+            <span className="ermis-message-list__repair-subtitle">{repairingOverlaySubtitle}</span>
+          </div>
         )}
       </div>
 

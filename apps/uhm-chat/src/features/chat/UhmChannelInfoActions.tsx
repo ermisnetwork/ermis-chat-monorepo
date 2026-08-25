@@ -141,9 +141,11 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     const loadRepairProgress = useCallback(async () => {
       if (!repairChannelType || !repairChannelId) {
         setRepairProgress(null);
-        return;
+        return null;
       }
-      setRepairProgress(await loadRestoreProgress(repairChannelType, repairChannelId));
+      const progress = await loadRestoreProgress(repairChannelType, repairChannelId);
+      setRepairProgress(progress);
+      return progress;
     }, [loadRestoreProgress, repairChannelId, repairChannelType]);
 
     useEffect(() => {
@@ -172,7 +174,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
           const result = await repairEncryptedChannel(repairChannelType, repairChannelId, { mode });
           setChannelRepairResult(result);
           if (result.messageRepair) setRepairResult(result.messageRepair);
-          await loadRepairProgress();
+          const latestProgress = await loadRepairProgress();
+          const remainingIssueCount = Math.max(result.stillFailed, latestProgress?.repair_issues?.length || 0);
           if (result.requiresPin) {
             setRepairAfterUnlock(true);
             setIsPinDialogOpen(true);
@@ -180,8 +183,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
           } else if (result.resetAvailable) {
             toast.warning(t('encrypted_history.reset_available'));
             setIsRepairDetailOpen(true);
-          } else if (result.stillFailed > 0) {
-            toast.warning(t('encrypted_history.repair_partial', { count: result.stillFailed }));
+          } else if (remainingIssueCount > 0) {
+            toast.warning(t('encrypted_history.repair_partial', { count: remainingIssueCount }));
             setIsRepairDetailOpen(true);
           } else if (result.repairedMessages > 0) {
             toast.success(t('encrypted_history.repair_complete', { count: result.repairedMessages }));

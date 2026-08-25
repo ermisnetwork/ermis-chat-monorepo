@@ -364,6 +364,7 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   me?: UserResponse<ErmisChatGenerics>;
   member?: ChannelMemberResponse<ErmisChatGenerics>;
   message?: MessageResponse<ErmisChatGenerics>;
+  message_id?: string;
   online?: boolean;
   parent_id?: string;
   parent_cid?: string;

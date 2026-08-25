@@ -83,7 +83,12 @@ export type ChatCoreContextValue = Pick<
 export type ChatMessagesContextValue = Pick<
   ChatContextValue,
   'messages' | 'setMessages' | 'syncMessages' | 'readState' | 'setReadState'
->;
+> & {
+  /** Channel CIDs whose E2EE repair presentation is currently active. */
+  e2eeRepairingChannelCids: readonly string[];
+  /** Shows or hides the atomic E2EE repair presentation for one channel. */
+  setChannelE2eeRepairing: (cid: string, repairing: boolean) => void;
+};
 
 export type ChatComposerContextValue = Pick<
   ChatContextValue,
@@ -738,6 +743,10 @@ export type MessageListProps = {
   emptyTitle?: string;
   emptySubtitle?: string;
   jumpToLatestLabel?: string;
+  /** I18n title shown while encrypted history repair is running. */
+  repairingOverlayTitle?: string;
+  /** I18n description shown while encrypted history repair is running. */
+  repairingOverlaySubtitle?: string;
   bannedOverlayTitle?: string;
   bannedOverlaySubtitle?: string;
   blockedOverlayTitle?: string;

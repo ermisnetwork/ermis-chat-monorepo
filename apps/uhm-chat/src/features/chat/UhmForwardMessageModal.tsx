@@ -71,7 +71,7 @@ export function UhmForwardMessageModal({
 
         {/* Message Preview */}
         <div className="p-4 bg-zinc-50/50 dark:bg-zinc-900/30 border-b border-zinc-100 dark:border-zinc-800/50">
-          <div className="flex gap-3 p-3 rounded-xl bg-white dark:bg-[#1a1828] border border-zinc-200/50 dark:border-white/5 shadow-sm overflow-hidden">
+          <div className="flex gap-3 p-3 rounded-xl bg-white dark:bg-[#1a1828] border border-zinc-200/50 dark:border-white/5 shadow-sm overflow-hidden min-w-0">
             {previewImageUrl && (
               <div className="relative w-14 h-14 shrink-0 rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800">
                 <img
@@ -95,12 +95,13 @@ export function UhmForwardMessageModal({
                 )}
               </div>
             )}
-            <div className="flex flex-col gap-1 flex-1 min-w-0">
+            {/* text column — must constrain width so long unbreakable strings don't overflow */}
+            <div className="flex flex-col gap-1 flex-1 min-w-0 overflow-hidden">
               <span className="text-[11px] font-bold uppercase tracking-wider text-primary/70 truncate">
                 {senderName}
               </span>
               {previewText ? (
-                <p className="text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2 leading-relaxed">
+                <p className="text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2 leading-relaxed break-words overflow-hidden">
                   {previewText}
                 </p>
               ) : isSticker ? (

@@ -4,6 +4,34 @@ import { useChatCore } from './useChatCore';
 import { isDirectChannel, isGroupChannel } from '../channelTypeUtils';
 import { isPendingMember } from '../channelRoleUtils';
 
+const getChannelListRevision = (channels: Channel[]) =>
+  JSON.stringify(
+    channels.map((channel) => {
+      const membership = channel.state?.membership as Record<string, unknown> | undefined;
+      const lastMessage = channel.state?.latestMessages?.[channel.state.latestMessages.length - 1] as any;
+      return [
+        channel.cid,
+        (channel.state as any)?.unreadCount,
+        membership?.channel_role,
+        membership?.banned,
+        membership?.blocked,
+        channel.data?.name,
+        channel.data?.image,
+        channel.data?.is_pinned,
+        channel.data?.is_closed_topic,
+        lastMessage?.id,
+        lastMessage?.msg_seq,
+        lastMessage?.last_event_seq,
+        lastMessage?.type,
+        lastMessage?.display_type,
+        lastMessage?.status,
+        lastMessage?.text,
+        lastMessage?.updated_at,
+        lastMessage?.deleted_at,
+      ];
+    }),
+  );
+
 /**
  * Subscribes to real-time events and keeps the channel list in sync:
  *
@@ -29,6 +57,14 @@ export function useChannelListUpdates(
   // Ref to always have the latest callback without re-subscribing
   const onOwnMessageNewRef = useRef(onOwnMessageNew);
   onOwnMessageNewRef.current = onOwnMessageNew;
+
+  const channelsRef = useRef(channels);
+  channelsRef.current = channels;
+  const renderedRevisionRef = useRef(getChannelListRevision(channels));
+
+  useEffect(() => {
+    renderedRevisionRef.current = getChannelListRevision(channels);
+  }, [channels]);
 
   useEffect(() => {
     // --- message.new: re-sort + auto mark-read ---
@@ -296,6 +332,11 @@ export function useChannelListUpdates(
           }
         }
       }
+
+      const nextRevision = getChannelListRevision(channelsRef.current);
+      if (nextRevision === renderedRevisionRef.current) return;
+
+      renderedRevisionRef.current = nextRevision;
       setChannels((prev) => [...prev]);
     };
 

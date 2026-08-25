@@ -4,6 +4,7 @@ import { useChatCore } from '@ermis-network/ermis-chat-react';
 import { UhmModal } from '@/components/custom/UhmModal';
 import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { POLL_QUESTION_MAX_LENGTH, validatePollDraft } from './pollValidation';
 
 export type UhmCreatePollModalProps = {
   isOpen: boolean;
@@ -51,23 +52,24 @@ export const UhmCreatePollModal: React.FC<UhmCreatePollModalProps> = ({ isOpen, 
       return;
     }
 
-    if (!question.trim()) {
-      toast.error(t('chat.poll_question_required', 'Question is required.'));
-      return;
-    }
-
-    const validChoices = choices.map(c => c.trim()).filter(c => c !== '');
-    if (validChoices.length < 2) {
-      toast.error(t('chat.poll_min_valid_choices', 'Please enter at least 2 options.'));
+    const validation = validatePollDraft(question, choices);
+    if (!validation.valid) {
+      const errorKey = {
+        question_required: 'chat.poll_question_required',
+        question_too_long: 'chat.poll_question_too_long',
+        min_valid_choices: 'chat.poll_min_valid_choices',
+        duplicate_options: 'chat.poll_duplicate_options',
+      }[validation.error];
+      toast.error(t(errorKey));
       return;
     }
 
     setIsSubmitting(true);
     try {
       await activeChannel.createPoll({
-        text: question.trim(),
+        text: validation.question,
         poll_type: pollType,
-        poll_choices: validChoices,
+        poll_choices: validation.choices,
         allow_change_choice: allowChangeChoice,
       });
       toast.success(t('chat.poll_created', 'Poll created successfully!'));
@@ -127,9 +129,13 @@ export const UhmCreatePollModal: React.FC<UhmCreatePollModalProps> = ({ isOpen, 
             disabled={isE2ee || isSubmitting}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
+            maxLength={POLL_QUESTION_MAX_LENGTH}
             placeholder={t('chat.poll_question_placeholder', 'Ask a question...')}
             className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 rounded-xl text-[14px] outline-none focus:border-blue-500 transition-colors"
           />
+          <span className="self-end text-[11px] text-zinc-400">
+            {question.length}/{POLL_QUESTION_MAX_LENGTH}
+          </span>
         </div>
 
         {/* Options */}

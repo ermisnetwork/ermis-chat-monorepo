@@ -5,6 +5,10 @@ import type {
   InitE2eeAttachmentMultipartResponse,
 } from './types';
 import { defaultE2eeAttachmentCryptoProvider, type E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
+import {
+  E2EE_ATTACHMENT_MULTIPART_ENCRYPTION_PROGRESS_WEIGHT,
+  E2EE_ATTACHMENT_MULTIPART_UPLOAD_PROGRESS_WEIGHT,
+} from './attachment_progress_constants';
 
 export const E2EE_ATTACHMENT_FRAME_SIZE = 256 * 1024;
 export const E2EE_ATTACHMENT_PREVIEW_MAX_SIDE = 480;
@@ -52,10 +56,24 @@ export type MultipartEncryptedAssetUploadResult = {
   parts: MultipartEncryptedAssetPart[];
 };
 
+export type E2eeMultipartResumeState = {
+  content_key: string;
+  nonce_prefix: string;
+  frame_size: number;
+  completed_parts: MultipartEncryptedAssetPart[];
+};
+
 export type EncryptMultipartAssetOptions = Omit<EncryptAssetOptions, 'onProgress'> & {
   multipart: InitE2eeAttachmentMultipartResponse;
   uploadConcurrency?: number;
-  onProgress?: (progress: { phase: 'uploading'; loaded: number; total: number; percentage: number }) => void;
+  onProgress?: (progress: {
+    phase: 'encrypting' | 'uploading';
+    loaded: number;
+    total: number;
+    percentage: number;
+  }) => void;
+  resumeState?: E2eeMultipartResumeState;
+  onResumeStateChange?: (state: E2eeMultipartResumeState) => Promise<void> | void;
   signal?: AbortSignal;
 };
 
@@ -597,20 +615,94 @@ export async function encryptAndUploadE2eeAssetMultipart(
   const partUrls = new Map<number, string>();
   for (const part of multipart.parts || []) partUrls.set(part.part_number, part.put_url);
 
-  const rawKey = await cryptoProvider.generateAesGcmKey();
-  const noncePrefix = cryptoProvider.randomBytes(8);
+  const resumedFrameSize = options.resumeState?.frame_size;
+  if (resumedFrameSize !== undefined && resumedFrameSize !== frameSize) {
+    throw new Error('E2EE attachment multipart resume frame size mismatch');
+  }
+  const rawKey = options.resumeState
+    ? base64ToBytes(options.resumeState.content_key)
+    : await cryptoProvider.generateAesGcmKey();
+  const noncePrefix = options.resumeState
+    ? base64ToBytes(options.resumeState.nonce_prefix)
+    : cryptoProvider.randomBytes(8);
+  if (rawKey.length !== 32 || noncePrefix.length !== 8) {
+    throw new Error('Invalid E2EE attachment multipart resume crypto material');
+  }
+
+  const completedByPart = new Map<number, MultipartEncryptedAssetPart>();
+  for (const part of options.resumeState?.completed_parts || []) {
+    if (
+      !Number.isInteger(part.part_number) ||
+      part.part_number < 1 ||
+      part.part_number > multipart.part_count ||
+      typeof part.etag !== 'string' ||
+      !part.etag.trim() ||
+      completedByPart.has(part.part_number)
+    ) {
+      throw new Error('Invalid E2EE attachment multipart completed part checkpoint');
+    }
+    completedByPart.set(part.part_number, { part_number: part.part_number, etag: part.etag });
+  }
   const cipherHash = cryptoProvider.createSha256();
   const plainHash = cryptoProvider.createSha256();
   const queueController = createLinkedAbortController(options.signal);
-  const uploadedParts: MultipartEncryptedAssetPart[] = [];
+  const uploadedParts: MultipartEncryptedAssetPart[] = Array.from(completedByPart.values());
   const inFlightUploads = new Map<number, Promise<MultipartInFlightResult>>();
   const inFlightProgress = new Map<number, number>();
   let firstUploadFailure: unknown;
-  let completedBytes = 0;
-  let lastEmittedUploadLoaded = 0;
+  const partByteLength = (partNumber: number) =>
+    partNumber < multipart.part_count
+      ? partSize
+      : totalCipherSize - partSize * Math.max(0, multipart.part_count - 1);
+  let completedBytes = uploadedParts.reduce((total, part) => total + partByteLength(part.part_number), 0);
+  let encryptedPlaintextBytes = 0;
+  let lastEmittedCombinedPercentage = -1;
+  let lastEmittedUploadLoaded = completedBytes;
   let nextPartNumberToSeal = 1;
   let partChunks: Uint8Array[] = [];
   let partLength = 0;
+  let resumePersistChain = Promise.resolve();
+
+  const persistResumeState = async () => {
+    const snapshot: E2eeMultipartResumeState = {
+      content_key: bytesToBase64(rawKey),
+      nonce_prefix: bytesToBase64(noncePrefix),
+      frame_size: frameSize,
+      completed_parts: Array.from(completedByPart.values()).sort((a, b) => a.part_number - b.part_number),
+    };
+    const operation = resumePersistChain.then(() => options.onResumeStateChange?.(snapshot));
+    resumePersistChain = operation.then(() => undefined, () => undefined);
+    await operation;
+  };
+
+  // Make crypto material and existing ETags durable before the first new PUT.
+  await persistResumeState();
+
+  const emitCombinedProgress = (phase: 'encrypting' | 'uploading') => {
+    const encryptionFraction = input.size === 0 ? 1 : Math.min(1, encryptedPlaintextBytes / input.size);
+    const uploadFraction =
+      totalCipherSize === 0 ? 1 : Math.min(1, lastEmittedUploadLoaded / totalCipherSize);
+    const uploadSettled =
+      uploadedParts.length === multipart.part_count && completedBytes >= totalCipherSize;
+    const percentage = Math.max(
+      lastEmittedCombinedPercentage,
+      Math.min(
+        uploadSettled ? 100 : 99,
+        Math.round(
+          encryptionFraction * E2EE_ATTACHMENT_MULTIPART_ENCRYPTION_PROGRESS_WEIGHT +
+            uploadFraction * E2EE_ATTACHMENT_MULTIPART_UPLOAD_PROGRESS_WEIGHT,
+        ),
+      ),
+    );
+    if (percentage === lastEmittedCombinedPercentage) return;
+    lastEmittedCombinedPercentage = percentage;
+    options.onProgress?.({
+      phase,
+      loaded: Math.round((totalCipherSize * percentage) / 100),
+      total: totalCipherSize,
+      percentage,
+    });
+  };
 
   const emitUploadProgress = () => {
     let inFlightLoaded = 0;
@@ -620,12 +712,7 @@ export async function encryptAndUploadE2eeAssetMultipart(
       Math.max(lastEmittedUploadLoaded, completedBytes, completedBytes + inFlightLoaded),
     );
     lastEmittedUploadLoaded = loaded;
-    options.onProgress?.({
-      phase: 'uploading',
-      loaded,
-      total: totalCipherSize,
-      percentage: totalCipherSize === 0 ? 100 : Math.round((loaded / totalCipherSize) * 100),
-    });
+    emitCombinedProgress('uploading');
   };
 
   const failAndDrain = async (err: unknown): Promise<never> => {
@@ -647,6 +734,10 @@ export async function encryptAndUploadE2eeAssetMultipart(
   };
 
   const enqueuePartUpload = async (partNumber: number, putUrl: string, partBytes: Uint8Array): Promise<void> => {
+    if (completedByPart.has(partNumber)) {
+      emitUploadProgress();
+      return;
+    }
     await waitForUploadCapacity();
     inFlightProgress.set(partNumber, 0);
     const task = (async (): Promise<MultipartInFlightResult> => {
@@ -662,7 +753,10 @@ export async function encryptAndUploadE2eeAssetMultipart(
           },
           queueController.signal,
         );
-        uploadedParts.push({ part_number: partNumber, etag });
+        const completedPart = { part_number: partNumber, etag };
+        completedByPart.set(partNumber, completedPart);
+        await persistResumeState();
+        uploadedParts.push(completedPart);
         completedBytes += partBytes.length;
         inFlightProgress.delete(partNumber);
         emitUploadProgress();
@@ -724,7 +818,9 @@ export async function encryptAndUploadE2eeAssetMultipart(
     await appendEncryptedBytes(header);
     await appendEncryptedBytes(cipher);
     offset = end;
+    encryptedPlaintextBytes = Math.min(offset, input.size);
     frameIndex += 1;
+    emitCombinedProgress('encrypting');
     throwIfMultipartUploadStopped(queueController.signal, firstUploadFailure);
     if (input.size === 0) break;
   }

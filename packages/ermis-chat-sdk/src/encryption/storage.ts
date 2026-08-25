@@ -44,7 +44,7 @@ import type {
 const DB_NAME_PREFIX = 'ermis_data';
 /** Global DB (no userId) — only used for migrating legacy device_id */
 const DB_NAME_LEGACY = 'ermis_mls';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 const STORE_IDENTITY = 'identity';
 const STORE_MESSAGES = 'messages';
@@ -227,6 +227,13 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
             msgStore.createIndex('cid_msg_seq', ['cid', 'msg_seq'], { unique: false });
           }
         }
+
+        // DB version 8: pending standard uploads are stored in the 'meta' store
+        // (key prefix 'std_upload:') — no dedicated store needed.
+        // Clean up any erroneously created 'pending_standard_uploads' store from dev builds.
+        if (db.objectStoreNames.contains('pending_standard_uploads')) {
+          db.deleteObjectStore('pending_standard_uploads');
+        }
       };
 
       request.onsuccess = () => resolve(request.result);
@@ -237,6 +244,14 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
 
     return this.dbPromise;
+  }
+
+  /**
+   * Expose the shared DB connection for reuse by other storage classes
+   * (e.g. StandardAttachmentUploadStorage) so they don't create a separate DB.
+   */
+  getDB(): Promise<IDBDatabase> {
+    return this.openDB();
   }
 
   /**
@@ -419,9 +434,15 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
 
       // Idempotency check (Section 5.6): only overwrite if the incoming
       // message has a newer (or equal) last_event_seq than the stored copy.
+      let didWrite = false;
       const getReq = store.get(message.id);
       getReq.onsuccess = () => {
         const existing = getReq.result as StoredMessage | undefined;
+        const existingIsTombstone = existing?.display_type === 'deleted' || existing?.type === 'deleted';
+        const incomingIsTombstone = message.display_type === 'deleted' || message.type === 'deleted';
+        if (existingIsTombstone && !incomingIsTombstone) {
+          return;
+        }
         if (
           existing &&
           typeof existing.last_event_seq === 'number' &&
@@ -429,15 +450,14 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           message.last_event_seq < existing.last_event_seq
         ) {
           // Incoming data is older — skip write
-          resolve();
           return;
         }
         store.put(message);
+        didWrite = true;
       };
 
       tx.oncomplete = () => {
-        // Incrementally update MiniSearch index
-        this._indexMessage(message);
+        if (didWrite) this._indexMessage(message);
         resolve();
       };
       tx.onerror = () => reject(tx.error);
@@ -475,9 +495,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
             cursor.continue();
           } else {
             // Sort oldest first, mark excess for deletion
-            allKeys.sort((a, b) =>
-              new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-            );
+            allKeys.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
             const excess = allKeys.length - keepCount;
             if (excess > 0) {
               for (let i = 0; i < excess; i++) {
@@ -510,9 +528,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
             }
             // Delete oldest per channel
             for (const [, msgs] of byCid) {
-              msgs.sort((a, b) =>
-                new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-              );
+              msgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
               const excess = msgs.length - keepCount;
               if (excess > 0) {
                 for (let i = 0; i < excess; i++) {
@@ -652,12 +668,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
    * Get messages for a channel within a msg_seq range, sorted ascending.
    * Used for offline pagination (scroll up / scroll down).
    */
-  async getMessagesBySeqRange(
-    cid: string,
-    anchorSeq: number,
-    before = 0,
-    after = 0,
-  ): Promise<StoredMessage[]> {
+  async getMessagesBySeqRange(cid: string, anchorSeq: number, before = 0, after = 0): Promise<StoredMessage[]> {
     const db = await this.openDB();
     return new Promise<StoredMessage[]>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readonly');
@@ -888,13 +899,13 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
    */
   private _indexMessage(message: StoredMessage): void {
     if (!this._searchIndex || !this._indexReady) return;
-    if (!message.text || message.text.length === 0) return;
 
     try {
       if (this._indexedIds.has(message.id)) {
-        // Update: remove old, add new
         this._searchIndex.discard(message.id);
+        this._indexedIds.delete(message.id);
       }
+      if (!message.text || message.text.length === 0) return;
       this._searchIndex.add(message);
       this._indexedIds.add(message.id);
     } catch (err) {

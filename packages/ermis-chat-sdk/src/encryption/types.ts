@@ -654,6 +654,37 @@ export type PendingE2eeSendStatus =
   | 'failed_terminal'
   | 'canceled';
 
+export interface PendingE2eeAttachmentFileFingerprint {
+  name: string;
+  size: number;
+  type: string;
+  last_modified: number;
+}
+
+export interface PendingE2eeMultipartCryptoCheckpoint {
+  content_key: string;
+  nonce_prefix: string;
+  frame_size: number;
+  completed_parts: Array<{
+    part_number: number;
+    etag: string;
+  }>;
+}
+
+/**
+ * Frontend-owned multipart checkpoint. It is optional so records written by
+ * older SDK versions remain readable and restart once on upgrade.
+ */
+export interface PendingE2eeAttachmentUploadCheckpoint {
+  version: 1;
+  file: PendingE2eeAttachmentFileFingerprint;
+  attachment_id: string;
+  upload_expires_at: string;
+  init: InitE2eeAttachmentResponse;
+  original: PendingE2eeMultipartCryptoCheckpoint;
+  completion_lease_id: string;
+}
+
 export interface PendingE2eeSendRecord {
   message_id: string;
   cid: string;
@@ -665,6 +696,7 @@ export interface PendingE2eeSendRecord {
   display_overrides?: Array<Record<string, unknown> | undefined>;
   local_attachments?: unknown[];
   local_progress?: number;
+  local_progress_by_file?: number[];
   mls_ciphertext?: Uint8Array;
   mls_ciphertext_sha256?: string;
   mls_epoch?: number;
@@ -675,6 +707,7 @@ export interface PendingE2eeSendRecord {
   forward_message_id?: string;
   forward_parent_cid?: string;
   manifest?: E2eeAttachmentManifest[];
+  attachment_upload_checkpoints?: Array<PendingE2eeAttachmentUploadCheckpoint | undefined>;
   retry_count: number;
   last_error?: string;
   status: PendingE2eeSendStatus;
@@ -955,6 +988,16 @@ export type E2eeSyncEvent =
   | {
       type: 'message_deleted';
       /** Message tombstone emitted while catching up events missed offline. */
+      data: {
+        event_seq: number;
+        message_id: string;
+        sender?: { id: string; [key: string]: unknown };
+        created_at: string;
+      };
+    }
+  | {
+      type: 'message_deleted_for_me';
+      /** User-scoped message tombstone emitted while catching up missed events. */
       data: {
         event_seq: number;
         message_id: string;

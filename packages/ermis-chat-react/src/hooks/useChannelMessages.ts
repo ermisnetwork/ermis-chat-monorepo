@@ -43,11 +43,42 @@ const isE2eeChannel = (channel: any, client: any) => {
   return client?.activeChannels?.[parentCid]?.data?.mls_enabled === true;
 };
 
+const getSdkMessagesRevision = (messages: any[] = []) =>
+  JSON.stringify(
+    messages.map((message) => [
+      message?.id,
+      message?.msg_seq,
+      message?.last_event_seq,
+      message?.type,
+      message?.display_type,
+      message?.status,
+      message?.text,
+      message?.updated_at,
+      message?.deleted_at,
+      (message?.attachments || []).map((attachment: any) => [
+        attachment?.id,
+        attachment?.type,
+        attachment?.asset_url,
+        attachment?.image_url,
+      ]),
+    ]),
+  );
+
 /**
  * Single delayed scroll-to-bottom fallback. Must complete BEFORE
  * fadeListIn makes the list visible (~200ms delay).
  */
 const SCROLL_DELAYS = [50, 150, 300, 500];
+const waitForRepairPresentationCommit = () =>
+  new Promise<void>((resolve) => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0);
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
 
 /**
  * Subscribes to channel message events and handles:
@@ -67,14 +98,13 @@ export function useChannelMessages({
   vlistRef,
 }: UseChannelMessagesOptions): void {
   const { client, activeChannel } = useChatCore();
-  const { syncMessages, setMessages, setReadState } = useChatMessages();
+  const { syncMessages, setMessages, setReadState, setChannelE2eeRepairing } = useChatMessages();
   const inviteRefreshInFlightRef = useRef<Set<string>>(new Set());
 
   const shouldAutoScroll = useCallback(
     () => isAtBottomRef.current || Boolean(isNearBottom?.()),
     [isAtBottomRef, isNearBottom],
   );
-
 
   const scheduleScrollToBottom = useCallback(
     (smooth: boolean, force = false) => {
@@ -126,6 +156,7 @@ export function useChannelMessages({
     const effectCid = activeChannel.cid;
     let disposed = false;
     const isCurrentEffect = () => !disposed && activeChannel.cid === effectCid;
+    let lastSdkMessagesRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
 
     // Reset state for the new channel
     onChannelSwitch?.();
@@ -134,6 +165,7 @@ export function useChannelMessages({
     const el = containerRef?.current;
     let e2eeCacheSyncVersion = 0;
 
+    const activeE2eeRepairIds = new Set<string>();
     const fadeListIn = () => {
       if (!el) return;
       // Wait until all scheduled scrollToBottom calls have fired and VList has
@@ -196,7 +228,7 @@ export function useChannelMessages({
       );
 
     const loadStoredE2eeMessagesById = async (messageIds: string[]) => {
-      const storage = (client as any).messageStorage || client.encryptionManager?.storage;
+      const storage = client.encryptionManager?.storage;
       if (!storage || messageIds.length === 0) return [];
 
       const uniqueIds = Array.from(new Set(messageIds));
@@ -217,10 +249,7 @@ export function useChannelMessages({
       const includeMissing = options.includeMissing ?? true;
       const byId = new Map(
         baseMessages
-          .filter(
-            (message: any) =>
-              !isUnavailableDisplayMessage(message) && !isHiddenPlaintextMessage(message),
-          )
+          .filter((message: any) => !isUnavailableDisplayMessage(message) && !isHiddenPlaintextMessage(message))
           .map((message: any) => [message.id, message]),
       );
       for (const decrypted of decryptedMessages) {
@@ -274,14 +303,15 @@ export function useChannelMessages({
       );
     };
 
-    const syncMessagesWithCache = (
-      options: { includeStoredWindow?: boolean; messageIds?: string[] } = {},
-    ) => {
+    const syncMessagesWithCache = (options: { includeStoredWindow?: boolean; messageIds?: string[] } = {}) => {
       if (!isCurrentEffect()) return;
-      const storage = (client as any).messageStorage || client.encryptionManager?.storage;
+      const e2eeChannel = isE2eeChannel(activeChannel, client);
+      const storage = e2eeChannel
+        ? client.encryptionManager?.storage
+        : (client as any).messageStorage || client.encryptionManager?.storage;
 
       // For E2EE channels: merge with decrypted cache
-      if (isE2eeChannel(activeChannel, client) && storage && activeChannel.cid) {
+      if (e2eeChannel && storage && activeChannel.cid) {
         const baseMessages = [...activeChannel.state.latestMessages];
         const targetIds = options.messageIds?.length ? new Set(options.messageIds) : null;
         const guardsWholeWindow = !targetIds;
@@ -327,7 +357,8 @@ export function useChannelMessages({
       syncMessages();
 
       if (storage && activeChannel.cid && options.includeStoredWindow) {
-        storage.getMessages(activeChannel.cid, 100)
+        storage
+          .getMessages(activeChannel.cid, 100)
           .then((storedMessages: any[]) => {
             if (!isCurrentEffect() || storedMessages.length === 0) return;
             // Merge stored messages with current state (stored messages fill in gaps)
@@ -367,26 +398,55 @@ export function useChannelMessages({
       }
     };
 
+    const syncMessagesPreservingViewport = (options: { includeStoredWindow?: boolean } = {}) => {
+      const wasAtBottom = shouldAutoScroll();
+      const handle = vlistRef?.current;
+      const savedOffset = wasAtBottom ? undefined : handle?.scrollOffset;
+
+      syncMessagesWithCache(options);
+
+      if (wasAtBottom) {
+        followBottomAfterRender(true);
+      } else if (typeof savedOffset === 'number' && handle) {
+        requestAnimationFrame(() => {
+          if (isCurrentEffect()) handle.scrollTo(savedOffset);
+        });
+      }
+    };
+
     const syncStoredE2eeMessages = (includeStoredWindow = false) => {
-      if (!isCurrentEffect() || !isE2eeChannel(activeChannel, client) || !client.encryptionManager?.storage || !activeChannel.cid) return;
+      if (
+        !isCurrentEffect() ||
+        !isE2eeChannel(activeChannel, client) ||
+        !client.encryptionManager?.storage ||
+        !activeChannel.cid
+      )
+        return Promise.resolve();
       const syncVersion = ++e2eeCacheSyncVersion;
       const baseMessages = [...activeChannel.state.latestMessages];
       const loadStoredMessages = includeStoredWindow
         ? client.encryptionManager.storage.getMessages(activeChannel.cid, 100)
         : loadStoredE2eeMessagesById(getMessageAndQuoteIds(baseMessages));
 
-      loadStoredMessages
+      return loadStoredMessages
         .then((storedMessages: any[]) => {
           if (!isCurrentEffect() || syncVersion !== e2eeCacheSyncVersion) return;
           mergeDecryptedMessages(storedMessages, includeStoredWindow);
         })
         .catch((err: any) => {
-          if (isCurrentEffect() && syncVersion === e2eeCacheSyncVersion) console.warn('[E2EE] Failed to load decrypted message cache', err);
+          if (isCurrentEffect() && syncVersion === e2eeCacheSyncVersion)
+            console.warn('[E2EE] Failed to load decrypted message cache', err);
         });
     };
 
     const ensureE2eeChannelReady = () => {
-      if (!isCurrentEffect() || !isE2eeChannel(activeChannel, client) || !client.encryptionManager?.initialized || !activeChannel.cid) return;
+      if (
+        !isCurrentEffect() ||
+        !isE2eeChannel(activeChannel, client) ||
+        !client.encryptionManager?.initialized ||
+        !activeChannel.cid
+      )
+        return;
       if (isInactiveInviteRole(activeChannel.state?.membership?.channel_role as string)) return;
       client.encryptionManager
         .ensureChannelReady(activeChannel.type, activeChannel.id, activeChannel.cid, { source: 'open' })
@@ -494,11 +554,63 @@ export function useChannelMessages({
 
       const changedIds = getMessageAndQuoteIds(event.message ? [event.message] : []);
       syncMessagesWithCache({ messageIds: changedIds });
+      lastSdkMessagesRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
 
       if (shouldFollowBottom) followBottomAfterRender(true);
     };
 
+    const isPendingUploadMessage = (message: any) =>
+      message?.status === 'sending' &&
+      Array.isArray(message?.attachments) &&
+      message.attachments.some((a: any) => typeof a.upload_status === 'string');
+
     const handleMessageChange = (event: Event) => {
+      const deletedMessageId = event.message?.id || event.message_id;
+      const removeCompletely = event.hard_delete === true || isUnavailableDisplayMessage(event.message);
+
+      if (deletedMessageId && removeCompletely) {
+        // Invalidate pending E2EE cache reads before removing the item. Otherwise
+        // an older IndexedDB read can put the decrypted plaintext back into the list.
+        e2eeCacheSyncVersion += 1;
+        setMessages((prev) => prev.filter((message: any) => message.id !== deletedMessageId));
+        lastSdkMessagesRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
+        return;
+      }
+
+      // Fast-path for pending upload progress events: the percentage is already
+      // in SDK ChannelState. Do NOT read IndexedDB — an async cache read resolves
+      // after the render and can overwrite a newer upload_progress with an older one.
+      // Merge synchronously and enforce monotonic upload_progress via Math.max.
+      if (event.message && isPendingUploadMessage(event.message)) {
+        const updatedMessage = event.message as any;
+        setMessages((prev) => {
+          if (!isCurrentEffect()) return prev;
+          const idx = prev.findIndex((m: any) => m.id === updatedMessage.id);
+          if (idx === -1) {
+            // Message not yet in list — add it
+            return [...prev, updatedMessage];
+          }
+          const existing = prev[idx] as any;
+          const merged = {
+            ...existing,
+            ...updatedMessage,
+            // Never let upload_progress go backwards within a session
+            attachments: (updatedMessage.attachments || []).map((a: any, i: number) => {
+              const prev_a = existing.attachments?.[i] as any;
+              const prevProgress = typeof prev_a?.upload_progress === 'number' ? prev_a.upload_progress : 0;
+              const nextProgress = typeof a.upload_progress === 'number' ? a.upload_progress : 0;
+              return { ...a, upload_progress: Math.max(prevProgress, nextProgress) };
+            }),
+          };
+          const next = [...prev];
+          next[idx] = merged;
+          return next;
+        });
+        lastSdkMessagesRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
+        if (shouldAutoScroll()) followBottomAfterRender(true);
+        return;
+      }
+
       const wasAtBottom = shouldAutoScroll();
       // Save the current scroll position BEFORE syncing so we can restore it
       // after React commits the new DOM. When a message is deleted, its height
@@ -511,6 +623,7 @@ export function useChannelMessages({
 
       const changedIds = getMessageAndQuoteIds(event.message ? [event.message] : []);
       syncMessagesWithCache({ messageIds: changedIds });
+      lastSdkMessagesRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
 
       if (wasAtBottom) {
         followBottomAfterRender(true);
@@ -521,7 +634,6 @@ export function useChannelMessages({
         });
       }
     };
-
     const handleChannelTruncate = () => {
       // Invalidate every pending cache read so stale decrypted messages cannot
       // repopulate the list after clear-history has updated the SDK state.
@@ -530,13 +642,12 @@ export function useChannelMessages({
 
       if (isE2eeChannel(activeChannel, client)) {
         setMessages((prev) =>
-          isCurrentEffect()
-            ? mergeAndFilterE2eeMessages(baseMessages, prev, { includeMissing: false })
-            : prev,
+          isCurrentEffect() ? mergeAndFilterE2eeMessages(baseMessages, prev, { includeMissing: false }) : prev,
         );
       } else {
         setMessages(baseMessages);
       }
+      lastSdkMessagesRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
 
       setReadState({ ...activeChannel.state.read });
     };
@@ -595,22 +706,28 @@ export function useChannelMessages({
 
     const handleRecovery = () => {
       if (activeChannel.cid && queryingChannels.has(activeChannel.cid)) return;
-      // recoverState() only fetches channels with message_limit: 1 (for sidebar previews).
-      // Re-query the active channel with a proper limit to load all missed messages.
+      const syncRecoveredMessages = () => {
+        const nextRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
+        if (nextRevision === lastSdkMessagesRevision) return;
+        lastSdkMessagesRevision = nextRevision;
+        syncMessagesPreservingViewport({ includeStoredWindow: true });
+      };
+
+      // Re-query the active channel with a proper limit, but only update React
+      // when the visible message state actually changed. A no-op query used to
+      // recreate the whole VList and schedule four bottom scrolls.
       activeChannel
         .query({ messages_seq: { limit: 25 } })
         .then(() => {
-          syncMessagesWithCache({ includeStoredWindow: true });
+          syncRecoveredMessages();
           ensureE2eeChannelReady();
           setReadState({ ...activeChannel.state.read });
-          scheduleScrollToBottom(false);
         })
         .catch((err: any) => {
           console.error('Failed to recover channel messages after reconnect', err);
-          // Fallback: sync whatever we have from recoverState
-          syncMessagesWithCache({ includeStoredWindow: true });
+          // The SDK may have fallen back to queryChannels before this event.
+          syncRecoveredMessages();
           ensureE2eeChannelReady();
-          scheduleScrollToBottom(false);
         });
     };
 
@@ -630,6 +747,50 @@ export function useChannelMessages({
         }
         syncStoredE2eeMessages();
       }
+    };
+
+    const getE2eeRepairId = (event: any) =>
+      typeof event?.repair_id === 'string' && event.repair_id ? event.repair_id : `${effectCid}:legacy`;
+
+    const handleE2eeRepairStarted = (event: any) => {
+      if (event?.cid !== activeChannel.cid) return;
+      activeE2eeRepairIds.add(getE2eeRepairId(event));
+      setChannelE2eeRepairing(effectCid, true);
+    };
+
+    const finishE2eeRepairPresentation = async (event: any, completed: boolean) => {
+      if (event?.cid !== activeChannel.cid) return;
+      activeE2eeRepairIds.delete(getE2eeRepairId(event));
+
+      try {
+        if (completed) {
+          await syncStoredE2eeMessages(true);
+        }
+      } catch (error) {
+        console.error('Failed to sync repaired E2EE messages', error);
+      } finally {
+        await waitForRepairPresentationCommit();
+        if (!isCurrentEffect()) return;
+
+        if (completed) {
+          isAtBottomRef.current = true;
+          followBottomAfterRender(true);
+          // Repair can replace many virtualized rows over several frames.
+          scheduleScrollToBottom(false, true);
+        }
+
+        if (activeE2eeRepairIds.size === 0) {
+          setChannelE2eeRepairing(effectCid, false);
+        }
+      }
+    };
+
+    const handleE2eeRepairCompleted = (event: any) => {
+      void finishE2eeRepairPresentation(event, true);
+    };
+
+    const handleE2eeRepairFailed = (event: any) => {
+      void finishE2eeRepairPresentation(event, false);
     };
 
     const eventClient = activeChannel.getClient();
@@ -654,8 +815,14 @@ export function useChannelMessages({
     const sub17 = eventClient.on('e2ee.post_join_sync' as any, handleE2eeRefresh);
     const sub18 = eventClient.on('e2ee.channel_ready' as any, handleE2eeRefresh);
     const sub19 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
+    const sub19a = eventClient.on('e2ee.repair_started' as any, handleE2eeRepairStarted);
+    const sub19b = eventClient.on('e2ee.repair_completed' as any, handleE2eeRepairCompleted);
+    const sub19c = eventClient.on('e2ee.repair_failed' as any, handleE2eeRepairFailed);
     const sub20 = eventClient.on('sync.completed', () => {
-      syncMessagesWithCache({ includeStoredWindow: true });
+      const nextRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
+      if (nextRevision === lastSdkMessagesRevision) return;
+      lastSdkMessagesRevision = nextRevision;
+      syncMessagesPreservingViewport({ includeStoredWindow: true });
     });
     const sub21 = activeChannel.on('pollchoice.new' as any, handleMessageChange);
     const sub22 = activeChannel.on('pollchoice.delete' as any, handleMessageChange);
@@ -664,6 +831,7 @@ export function useChannelMessages({
     return () => {
       disposed = true;
       e2eeCacheSyncVersion += 1;
+      setChannelE2eeRepairing(effectCid, false);
       sub1.unsubscribe();
       sub2.unsubscribe();
       sub3.unsubscribe();
@@ -684,10 +852,25 @@ export function useChannelMessages({
       sub17.unsubscribe();
       sub18.unsubscribe();
       sub19.unsubscribe();
+      sub19a.unsubscribe();
+      sub19b.unsubscribe();
+      sub19c.unsubscribe();
       sub20.unsubscribe();
       sub21.unsubscribe();
       sub22.unsubscribe();
       sub23.unsubscribe();
     };
-  }, [activeChannel, client, scrollToBottom, scheduleScrollToBottom, shouldAutoScroll, followBottomAfterRender, syncMessages, setMessages, onChannelSwitch, setReadState]);
+  }, [
+    activeChannel,
+    client,
+    scrollToBottom,
+    scheduleScrollToBottom,
+    shouldAutoScroll,
+    followBottomAfterRender,
+    syncMessages,
+    setMessages,
+    onChannelSwitch,
+    setReadState,
+    setChannelE2eeRepairing,
+  ]);
 }

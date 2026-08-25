@@ -18,7 +18,7 @@ export function SyncStatusBanner({ syncState }: SyncStatusBannerProps) {
 
   return (
     <div
-      className="flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-medium animate-slide-down bg-sky-500/10 text-sky-700 dark:text-sky-400 border-b border-sky-500/20"
+      className="flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-medium animate-slide-down bg-sky-500/10 text-sky-700 dark:text-sky-400 border-b border-sky-500/20 backdrop-blur-sm"
       role="status"
       aria-live="polite"
     >

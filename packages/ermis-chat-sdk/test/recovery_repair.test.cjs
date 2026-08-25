@@ -375,10 +375,7 @@ test('inherited E2EE topic resolves encryption group from parent channel', () =>
     },
   };
 
-  assert.equal(
-    manager._resolveChannelE2eeGroupId(topicCid, manager.client.activeChannels[topicCid]),
-    parentCid,
-  );
+  assert.equal(manager._resolveChannelE2eeGroupId(topicCid, manager.client.activeChannels[topicCid]), parentCid);
 });
 
 test('inherited E2EE topic decrypt gate follows parent membership', () => {
@@ -610,4 +607,210 @@ test('post-unlock recovery maintenance runs in the background and dedupes', asyn
   await firstWork;
 
   assert.equal(manager._recoveryPostUnlockMaintenancePromise, null);
+});
+
+test('repair republishes already-cached plaintext over an encrypted placeholder', async () => {
+  const manager = new EncryptionManager();
+  const cid = 'messaging:channel-1';
+  const messageId = 'cached-repaired-message';
+  const createdAt = '2026-06-18T00:00:00.000Z';
+  const dispatched = [];
+  const published = [];
+  const storedMessage = {
+    id: messageId,
+    cid,
+    content_type: 'standard',
+    type: 'regular',
+    text: 'restored plaintext',
+    created_at: createdAt,
+    user_id: 'user-2',
+  };
+
+  manager.userId = 'user-1';
+  manager.deviceId = 'device-1';
+  manager._recoveryPrivateKey = new Uint8Array([1]);
+  manager.client = {
+    state: { users: { 'user-2': { id: 'user-2', name: 'User Two' } } },
+    activeChannels: {
+      [cid]: {
+        cid,
+        type: 'messaging',
+        id: 'channel-1',
+        data: { mls_enabled: true },
+        state: {
+          messageSets: [
+            {
+              messages: [
+                {
+                  id: messageId,
+                  cid,
+                  content_type: 'mls',
+                  text: '',
+                  e2ee_status: 'failed',
+                  created_at: createdAt,
+                  mls_epoch: 7,
+                },
+              ],
+            },
+          ],
+          addMessagesSorted(messages) {
+            published.push(...messages);
+            this.messageSets[0].messages = messages;
+          },
+        },
+      },
+    },
+    dispatchEvent(event) {
+      dispatched.push(event);
+    },
+  };
+
+  let progress = manager._upsertRepairIssueInProgress(
+    makeProgress({ status: 'failed' }),
+    {
+      id: messageId,
+      cid,
+      created_at: createdAt,
+      mls_epoch: 7,
+      mls_ciphertext: new Uint8Array([1, 2, 3]),
+    },
+    'decrypt_error',
+  );
+  manager.storage = {
+    loadPendingE2eeSnapshots: async () => [],
+    loadRestoreProgress: async () => progress,
+    saveRestoreProgress: async (next) => {
+      progress = next;
+    },
+    loadMessage: async (id) => (id === messageId ? storedMessage : null),
+  };
+  manager.e2eeClient = {
+    queryEpochArchives: async (_channelType, _channelId, options) =>
+      options.list_epochs
+        ? { epochs: [{ epoch: 7, scope: 'account_owned', blob_id: 'blob-1' }] }
+        : {
+            blobs: [
+              {
+                archive_blob_id: 'blob-1',
+                cid,
+                epoch: 7,
+                archive_scope: 'account_owned',
+                exporter_user_id: 'user-1',
+                exporter_device_id: 'device-1',
+                member_snapshot_hash: 'snapshot-1',
+                encrypted_archive_bytes: new Uint8Array([1]),
+                aead_nonce: new Uint8Array([2]),
+                aead_aad: new Uint8Array([3]),
+                created_at: createdAt,
+              },
+            ],
+            wraps: [
+              {
+                archive_blob_id: 'blob-1',
+                recipient_user_id: 'user-1',
+                recipient_recovery_key_id: 'key-1',
+                hpke_kem_output: new Uint8Array([1]),
+                hpke_ciphertext: new Uint8Array([2]),
+                ciphersuite: 1,
+                hpke_info: new Uint8Array([3]),
+                epoch: 7,
+                created_at: createdAt,
+              },
+            ],
+            snapshots: {},
+          },
+    queryArchiveCiphertexts: async () => ({
+      ciphertexts: [
+        {
+          cid,
+          message_id: messageId,
+          mls_ciphertext: new Uint8Array([4, 5, 6]),
+          mls_epoch: 7,
+          created_at: createdAt,
+          user_id: 'user-2',
+        },
+      ],
+      has_more: false,
+    }),
+  };
+
+  const result = await manager.repairRecoveryChannel('messaging', 'channel-1', {
+    mode: 'recheck_channel',
+    flushPending: false,
+  });
+
+  assert.equal(result.alreadyAvailable, 1);
+  assert.equal(result.stillFailed.length, 0);
+  assert.equal(published.length, 1);
+  assert.equal(published[0].content_type, 'standard');
+  assert.equal(published[0].text, 'restored plaintext');
+  const refreshEvent = dispatched.find((event) => event.type === 'e2ee.local_messages_loaded');
+  assert.ok(refreshEvent);
+  assert.equal(refreshEvent.cid, cid);
+  assert.equal(refreshEvent.messages[0].text, 'restored plaintext');
+
+  manager.client.activeChannels[cid].state.locallyDeletedMessageIds = new Set([messageId]);
+  published.length = 0;
+  dispatched.length = 0;
+  await manager.repairRecoveryChannel('messaging', 'channel-1', {
+    mode: 'recheck_channel',
+    flushPending: false,
+    forceRecheck: true,
+  });
+
+  assert.equal(published.length, 0);
+  assert.equal(
+    dispatched.some((event) => event.type === 'e2ee.local_messages_loaded'),
+    false,
+  );
+});
+test('encrypted channel repair requires recovery setup when the private key is unavailable', async () => {
+  const manager = new EncryptionManager();
+  manager._recoveryPrivateKey = null;
+  manager.getRecoveryStatus = async () => {
+    throw new Error('repair must not fail open when no recovery vault exists');
+  };
+
+  const result = await manager._repairMessagesAfterStateSync('messaging', 'channel-1');
+
+  assert.equal(result.requiresPin, true);
+  assert.equal(result.messageRepair, undefined);
+});
+
+test('encrypted channel repair dispatches a paired started and completed lifecycle', async () => {
+  const manager = new EncryptionManager();
+  const events = [];
+  manager.client = {
+    dispatchEvent: (event) => events.push(event),
+  };
+  const expected = { checked: 3, newlyRepaired: [], stillFailed: [], alreadyAvailable: 3 };
+  manager._replayEncryptedChannelState = async () => expected;
+  manager._withScopeRepairLock = async (_scopeCid, repair) => repair();
+
+  const returned = await manager.repairEncryptedChannel('messaging', 'channel-1');
+
+  assert.deepEqual(returned, expected);
+  assert.deepEqual(events.map((event) => event.type), ['e2ee.repair_started', 'e2ee.repair_completed']);
+  assert.ok(events[0].repair_id);
+  assert.equal(events[1].repair_id, events[0].repair_id);
+});
+
+test('encrypted channel repair dispatches failed with the same repair id before rethrowing', async () => {
+  const manager = new EncryptionManager();
+  const events = [];
+  const expectedError = new Error('repair failed safely');
+  manager.client = {
+    dispatchEvent: (event) => events.push(event),
+  };
+  manager._withScopeRepairLock = async (_scopeCid, repair) => repair();
+  manager._replayEncryptedChannelState = async () => {
+    throw expectedError;
+  };
+
+  await assert.rejects(manager.repairEncryptedChannel('messaging', 'channel-1'), expectedError);
+
+  assert.deepEqual(events.map((event) => event.type), ['e2ee.repair_started', 'e2ee.repair_failed']);
+  assert.ok(events[0].repair_id);
+  assert.equal(events[1].repair_id, events[0].repair_id);
+  assert.equal(events[1].error, expectedError.message);
 });

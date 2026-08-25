@@ -5,9 +5,9 @@ const {
   buildE2eeMessageAadV1,
   canonicalAttachmentIds,
   ciphertextSha256,
+  EncryptionManager,
   e2eeAttachmentMultipartUploadUrlExpiresAtMs,
   encryptAndUploadE2eeAssetMultipart,
-  EncryptionManager,
   estimateE2eeEncryptedAssetSize,
   resolveE2eeAttachmentMultipartUploadConcurrency,
   Sha256,
@@ -171,6 +171,54 @@ function finishXhr(xhr, status, etag) {
   xhr.onload?.();
 }
 
+test('E2EE attachment progress is monotonic and reaches 100 only after complete succeeds', async () => {
+  const manager = new EncryptionManager();
+  manager._attachmentCryptoProvider = fakeAttachmentCryptoProvider();
+  let completeSucceeded = false;
+  manager.e2eeClient = {
+    initAttachment: async () => ({
+      attachment_id: 'attachment-progress',
+      assets: [
+        {
+          asset_id: 'original-progress',
+          kind: 'original',
+          upload_mode: 'single_put',
+          put_url: 'https://storage.example.test/e2ee-progress',
+        },
+      ],
+    }),
+    completeAttachment: async () => {
+      completeSucceeded = true;
+    },
+    deleteAttachment: async () => {},
+  };
+  const progressValues = [];
+  let observedPrematureHundred = false;
+  const fake = installFakeXhr((xhr, body) => {
+    xhr.upload.onprogress?.({ loaded: body.size, total: body.size });
+    finishXhr(xhr, 200);
+  });
+
+  try {
+    const file = new File([new Uint8Array(64)], 'progress.bin', {
+      type: 'application/octet-stream',
+    });
+    await manager.uploadE2eeAttachments('messaging', 'progress', [file], {
+      onProgress: (progress) => {
+        progressValues.push(progress.percentage);
+        if (progress.percentage === 100 && !completeSucceeded) observedPrematureHundred = true;
+      },
+    });
+
+    assert.equal(observedPrematureHundred, false);
+    assert.equal(progressValues.at(-1), 100);
+    assert.ok(progressValues.includes(99));
+    assert.ok(progressValues.every((value, index) => index === 0 || value >= progressValues[index - 1]));
+  } finally {
+    fake.restore();
+  }
+});
+
 test('E2EE multipart upload concurrency option clamps to default and 1..4', () => {
   assert.equal(resolveE2eeAttachmentMultipartUploadConcurrency(), 3);
   assert.equal(resolveE2eeAttachmentMultipartUploadConcurrency(0), 3);
@@ -235,6 +283,51 @@ test('E2EE multipart upload limits in-flight PUTs and returns sorted parts', asy
   }
 });
 
+test('E2EE multipart upload reports encryption progress before the first PUT', async () => {
+  const input = new Blob([new Uint8Array(64)]);
+  const frameSize = 8;
+  const totalCipherSize = estimateE2eeEncryptedAssetSize(input.size, frameSize);
+  const multipart = multipartFor(totalCipherSize, totalCipherSize + 1);
+  const progressEvents = [];
+  let progressBeforeFirstPut = [];
+  let progressBeforePutCompleted = [];
+  const fake = installFakeXhr((xhr, body) => {
+    progressBeforeFirstPut = [...progressEvents];
+    xhr.upload.onprogress?.({ loaded: body.size, total: body.size });
+    progressBeforePutCompleted = [...progressEvents];
+    finishXhr(xhr, 200, 'etag-1');
+  });
+
+  try {
+    await encryptAndUploadE2eeAssetMultipart(input, {
+      kind: 'original',
+      frameSize,
+      multipart,
+      uploadConcurrency: 1,
+      cryptoProvider: fakeAttachmentCryptoProvider(),
+      onProgress: (progress) => progressEvents.push(progress),
+    });
+
+    assert.ok(
+      progressBeforeFirstPut.some(
+        (progress) => progress.phase === 'encrypting' && progress.percentage > 0,
+      ),
+      'expected visible encryption progress before upload starts',
+    );
+    assert.equal(
+      progressBeforePutCompleted.some((progress) => progress.percentage === 100),
+      false,
+    );
+    assert.equal(progressEvents.at(-1).percentage, 100);
+    assert.ok(
+      progressEvents.every(
+        (progress, index) => index === 0 || progress.percentage >= progressEvents[index - 1].percentage,
+      ),
+    );
+  } finally {
+    fake.restore();
+  }
+});
 test('E2EE multipart upload progress remains monotonic across part retry', async () => {
   const input = new Blob([new Uint8Array(40)]);
   const frameSize = 20;
@@ -397,47 +490,158 @@ test('E2EE multipart upload abort cancels all in-flight PUTs', async () => {
   }
 });
 
-test('EncryptionManager schedules attachment cleanup when multipart upload fails after init', async () => {
-  const attachmentId = '11111111-1111-4111-8111-111111111111';
-  const assetId = '22222222-2222-4222-8222-222222222222';
-  const deleted = [];
-  const manager = new EncryptionManager();
-  manager._e2eeAttachmentMultipartEnabled = true;
-  manager._e2eeAttachmentMultipartUploadConcurrency = 1;
-  manager._attachmentCryptoProvider = fakeAttachmentCryptoProvider();
-  manager.e2eeClient = {
-    async initAttachment(_channelType, _channelId, request) {
-      const cipherSizeEstimate = request.assets[0].cipher_size_estimate;
+test('E2EE manager resumes missing multipart parts from a persisted F5 checkpoint', async () => {
+  const file = new File([new Uint8Array(700_000)], 'resume.bin', {
+    type: 'application/octet-stream',
+    lastModified: 1234,
+  });
+  const totalCipherSize = estimateE2eeEncryptedAssetSize(file.size);
+  const multipart = multipartFor(totalCipherSize, 300_000);
+  let initCount = 0;
+  let checkpoint;
+
+  const firstManager = new EncryptionManager();
+  firstManager._attachmentCryptoProvider = fakeAttachmentCryptoProvider();
+  firstManager._e2eeAttachmentMultipartEnabled = true;
+  firstManager._e2eeAttachmentMultipartUploadConcurrency = 1;
+  firstManager.e2eeClient = {
+    initAttachment: async () => {
+      initCount += 1;
       return {
-        attachment_id: attachmentId,
-        status: 'initiated',
-        upload_expires_at: '2030-01-01T00:00:00Z',
-        assets: [
-          {
-            asset_id: assetId,
-            kind: 'original',
-            upload_mode: 'multipart',
-            object_key: 'test/e2ee/v1/object',
-            cipher_size_estimate: cipherSizeEstimate,
-            multipart: multipartFor(cipherSizeEstimate, 64),
-          },
-        ],
+        attachment_id: 'resume-attachment',
+        upload_expires_at: '2030-01-01T00:00:00.000Z',
+        assets: [{
+          asset_id: 'resume-original',
+          kind: 'original',
+          upload_mode: 'multipart',
+          multipart,
+          cipher_size_estimate: totalCipherSize,
+        }],
       };
     },
-    async deleteAttachment(channelType, channelId, id) {
-      deleted.push({ channelType, channelId, id });
-      return { attachment_id: id, status: 'deleted' };
-    },
+    completeAttachment: async () => { throw new Error('complete must not run before all parts upload'); },
+    deleteAttachment: async () => {},
   };
-  const fake = installFakeXhr((xhr) => setTimeout(() => finishXhr(xhr, 500), 1));
 
+  const firstXhr = installFakeXhr((xhr) => {
+    const partNumber = partNumberFromUrl(xhr.url);
+    finishXhr(xhr, partNumber === 2 ? 500 : 200, partNumber === 2 ? undefined : `etag-${partNumber}`);
+  });
   try {
     await assert.rejects(
-      () => manager.uploadE2eeAttachments('team', 'channel-id', [new Blob([new Uint8Array(40)])]),
-      /HTTP 500/,
+      firstManager.uploadE2eeAttachments('messaging', 'resume', [file], {
+        onCheckpointChange: async (_fileIndex, nextCheckpoint) => { checkpoint = structuredClone(nextCheckpoint); },
+      }),
     );
-    assert.deepEqual(deleted, [{ channelType: 'team', channelId: 'channel-id', id: attachmentId }]);
+  } finally {
+    firstXhr.restore();
+  }
+
+  assert.ok(checkpoint);
+  assert.deepEqual(checkpoint.original.completed_parts, [{ part_number: 1, etag: 'etag-1' }]);
+  const persistedLease = checkpoint.completion_lease_id;
+  const persistedKey = checkpoint.original.content_key;
+  let completeRequest;
+
+  const resumedManager = new EncryptionManager();
+  resumedManager._attachmentCryptoProvider = fakeAttachmentCryptoProvider();
+  resumedManager._e2eeAttachmentMultipartEnabled = true;
+  resumedManager._e2eeAttachmentMultipartUploadConcurrency = 1;
+  resumedManager.e2eeClient = {
+    initAttachment: async () => {
+      initCount += 1;
+      throw new Error('resume must reuse the persisted init session');
+    },
+    completeAttachment: async (_channelType, _channelId, _attachmentId, request) => { completeRequest = request; },
+    deleteAttachment: async () => {},
+  };
+
+  const resumedXhr = installFakeXhr((xhr) => {
+    const partNumber = partNumberFromUrl(xhr.url);
+    finishXhr(xhr, 200, `etag-${partNumber}`);
+  });
+  try {
+    const result = await resumedManager.uploadE2eeAttachments('messaging', 'resume', [file], {
+      resumeCheckpoints: [checkpoint],
+      onCheckpointChange: async (_fileIndex, nextCheckpoint) => { checkpoint = structuredClone(nextCheckpoint); },
+    });
+    assert.equal(result.attachments[0].assets[0].content_key, persistedKey);
+  } finally {
+    resumedXhr.restore();
+  }
+
+  assert.equal(initCount, 1);
+  assert.deepEqual(resumedXhr.requests.map((xhr) => partNumberFromUrl(xhr.url)), [2, 3]);
+  assert.equal(completeRequest.completion_lease_id, persistedLease);
+  assert.deepEqual(completeRequest.assets[0].multipart.parts, [
+    { part_number: 1, etag: 'etag-1' },
+    { part_number: 2, etag: 'etag-2' },
+    { part_number: 3, etag: 'etag-3' },
+  ]);
+});
+
+test('E2EE manager discards an expired checkpoint and starts with a fresh session', async () => {
+  const file = new File([new Uint8Array(64)], 'expired.bin', { type: 'application/octet-stream', lastModified: 9 });
+  const totalCipherSize = estimateE2eeEncryptedAssetSize(file.size);
+  const oldMultipart = multipartFor(totalCipherSize, 50);
+  const expiredCheckpoint = {
+    version: 1,
+    file: { name: file.name, size: file.size, type: file.type, last_modified: file.lastModified },
+    attachment_id: 'expired-attachment',
+    upload_expires_at: '2020-01-01T00:00:00.000Z',
+    init: {
+      attachment_id: 'expired-attachment',
+      upload_expires_at: '2020-01-01T00:00:00.000Z',
+      assets: [{ asset_id: 'expired-original', kind: 'original', upload_mode: 'multipart', multipart: oldMultipart }],
+    },
+    original: {
+      content_key: Buffer.alloc(32).toString('base64'),
+      nonce_prefix: Buffer.alloc(8).toString('base64'),
+      frame_size: 256 * 1024,
+      completed_parts: [{ part_number: 1, etag: 'old-etag' }],
+    },
+    completion_lease_id: 'expired-lease',
+  };
+  const deleted = [];
+  const checkpointChanges = [];
+  let initCount = 0;
+  const manager = new EncryptionManager();
+  manager._attachmentCryptoProvider = fakeAttachmentCryptoProvider();
+  manager._e2eeAttachmentMultipartEnabled = true;
+  manager.e2eeClient = {
+    initAttachment: async () => {
+      initCount += 1;
+      return {
+        attachment_id: 'fresh-attachment',
+        upload_expires_at: '2030-01-01T00:00:00.000Z',
+        assets: [{
+          asset_id: 'fresh-original',
+          kind: 'original',
+          upload_mode: 'single_put',
+          put_url: 'https://storage.example.test/fresh-upload',
+          cipher_size_estimate: totalCipherSize,
+        }],
+      };
+    },
+    completeAttachment: async () => {},
+    deleteAttachment: async (_channelType, _channelId, attachmentId) => { deleted.push(attachmentId); },
+  };
+  const fake = installFakeXhr((xhr, body) => {
+    xhr.upload.onprogress?.({ loaded: body.size, total: body.size });
+    finishXhr(xhr, 200);
+  });
+  try {
+    await manager.uploadE2eeAttachments('messaging', 'expired', [file], {
+      resumeCheckpoints: [expiredCheckpoint],
+      onCheckpointChange: async (_fileIndex, checkpoint) => { checkpointChanges.push(checkpoint); },
+    });
   } finally {
     fake.restore();
   }
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(initCount, 1);
+  assert.deepEqual(checkpointChanges, [undefined]);
+  assert.deepEqual(deleted, ['expired-attachment']);
+  assert.deepEqual(fake.requests.map((xhr) => xhr.url), ['https://storage.example.test/fresh-upload']);
 });

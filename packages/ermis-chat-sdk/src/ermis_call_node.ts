@@ -15,6 +15,59 @@ import { MediaStreamSender } from './media_stream_sender';
 import { MediaStreamReceiver } from './media_stream_receiver';
 import { sdkLog } from './logger';
 
+const DEFAULT_CALL_CONNECTION_TIMEOUT_MS = 15_000;
+
+export const CALL_ERROR_CODES = {
+  CANCELLED: 'call_cancelled',
+  CONNECTION_FAILED: 'call_connection_failed',
+  CONNECTION_TIMEOUT: 'call_connection_timeout',
+  FRIENDSHIP_REQUIRED: 'call_friendship_required',
+  MEDIA_ERROR: 'call_media_error',
+  NO_DEVICES: 'call_no_devices',
+  NOT_READY: 'call_not_ready',
+  PERMISSION_DENIED: 'call_permission_denied',
+} as const;
+
+export type CallErrorCode = (typeof CALL_ERROR_CODES)[keyof typeof CALL_ERROR_CODES];
+
+const RETRYABLE_CALL_ERROR_CODES = new Set<CallErrorCode>([
+  CALL_ERROR_CODES.PERMISSION_DENIED,
+  CALL_ERROR_CODES.NO_DEVICES,
+  CALL_ERROR_CODES.MEDIA_ERROR,
+]);
+
+export function isRetryableCallError(errorCode: unknown): errorCode is CallErrorCode {
+  return typeof errorCode === 'string' && RETRYABLE_CALL_ERROR_CODES.has(errorCode as CallErrorCode);
+}
+
+type ConnectionWaiter = {
+  lifecycleId: number;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+class CallOperationError extends Error {
+  constructor(public readonly code: CallErrorCode) {
+    super(code);
+    this.name = 'CallOperationError';
+  }
+}
+
+function getMediaErrorCode(error: any): CallErrorCode {
+  if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError' || error?.name === 'SecurityError') {
+    return CALL_ERROR_CODES.PERMISSION_DENIED;
+  }
+  if (
+    error?.name === 'NotFoundError' ||
+    error?.name === 'DevicesNotFoundError' ||
+    error?.name === 'OverconstrainedError'
+  ) {
+    return CALL_ERROR_CODES.NO_DEVICES;
+  }
+  return CALL_ERROR_CODES.MEDIA_ERROR;
+}
+
 export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   wasmPath: string;
   workerPath: string;
@@ -135,6 +188,14 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   public mediaSender: MediaStreamSender | null = null;
   public mediaReceiver: MediaStreamReceiver | null = null;
 
+  private wasmReadyPromise: Promise<void> | null = null;
+  private initializationPromise: Promise<WasmWorkerProxy> | null = null;
+  private acceptPromise: Promise<void> | null = null;
+  private callLifecycleId = 0;
+  private lastMediaErrorCode: CallErrorCode = CALL_ERROR_CODES.MEDIA_ERROR;
+  private connectionTimeoutMs = DEFAULT_CALL_CONNECTION_TIMEOUT_MS;
+  private connectionWaiters = new Set<ConnectionWaiter>();
+
   constructor(
     client: ErmisChat<ErmisChatGenerics>,
     sessionID: string,
@@ -154,88 +215,106 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
     this.listenSocketEvents();
     this.setupDeviceChangeListener();
-    this.loadWasm();
+    void this.loadWasm().catch(() => {});
   }
 
-  private async loadWasm(): Promise<void> {
+  private loadWasm(): Promise<void> {
+    if (this.wasmReadyPromise) return this.wasmReadyPromise;
+
+    const loadPromise = (async () => {
+      const proxy = new WasmWorkerProxy(new URL(this.workerPath, window.location.origin));
+      this.callNode = proxy;
+      try {
+        await proxy.init(this.wasmPath);
+        if (this.callNode !== proxy) {
+          await proxy.terminate().catch(() => {});
+          throw new CallOperationError(CALL_ERROR_CODES.CANCELLED);
+        }
+      } catch (error) {
+        if (this.callNode === proxy) this.callNode = null;
+        sdkLog('error', 'Failed to load ErmisCall WASM Worker:', error);
+        throw error;
+      }
+    })();
+
+    this.wasmReadyPromise = loadPromise;
+    void loadPromise.catch(() => {
+      if (this.wasmReadyPromise === loadPromise) this.wasmReadyPromise = null;
+    });
+    return loadPromise;
+  }
+
+  private async initialize(): Promise<WasmWorkerProxy> {
+    if (this.mediaSender && this.mediaReceiver && this.callNode) return this.callNode;
+    if (this.initializationPromise) return await this.initializationPromise;
+
+    const initializationPromise = this.initializeTransport();
+    this.initializationPromise = initializationPromise;
     try {
-      // Tạo Worker proxy — WASM chạy hoàn toàn trên Worker thread
-      this.callNode = new WasmWorkerProxy(new URL(this.workerPath, window.location.origin));
-      await this.callNode.init(this.wasmPath);
+      return await initializationPromise;
     } catch (error) {
-      sdkLog('error', 'Failed to load ErmisCall WASM Worker:', error);
+      if (this.initializationPromise === initializationPromise) this.initializationPromise = null;
       throw error;
     }
   }
 
-  private async initialize(): Promise<WasmWorkerProxy> {
+  private async initializeTransport(): Promise<WasmWorkerProxy> {
     try {
-      // Re-create Worker nếu đã bị terminate bởi call trước
-      // (Worker mới nhưng dùng cached Blob URL + compiled WASM Module → rất nhanh)
-      if (!this.callNode) {
-        await this.loadWasm();
-      }
-
-      const proxy = this.callNode!;
+      await this.loadWasm();
+      const proxy = this.callNode;
+      if (!proxy) throw new CallOperationError(CALL_ERROR_CODES.NOT_READY);
 
       await proxy.spawn([this.relayUrl]);
 
-      // 1. Init Sender — proxy implements INodeCall
       this.mediaSender = new MediaStreamSender(proxy as any);
-
-      // 2. Init Receiver — proxy implements INodeCall
       this.mediaReceiver = new MediaStreamReceiver(proxy as any, {
         onConnected: () => {
           this.setCallStatus(CallStatus.CONNECTED);
-          this.connectCall();
+          void this.connectCall();
           if (this.missCallTimeout) {
             clearTimeout(this.missCallTimeout);
             this.missCallTimeout = null;
           }
           if (this.healthCallServerInterval) clearInterval(this.healthCallServerInterval);
           this.healthCallServerInterval = setInterval(() => {
-            this.healthCall();
+            void this.healthCall();
           }, 10000);
 
           const remoteStream = this.mediaReceiver?.getRemoteStream();
-
-          if (remoteStream && this.onRemoteStream) {
-            this.onRemoteStream(remoteStream);
-          }
+          if (remoteStream && this.onRemoteStream) this.onRemoteStream(remoteStream);
         },
-
         onTransceiverState: (state) => {
-          if (typeof this.onDataChannelMessage === 'function') {
-            this.onDataChannelMessage(state);
-          }
+          if (typeof this.onDataChannelMessage === 'function') this.onDataChannelMessage(state);
         },
-
         onRequestConfig: () => {
           sdkLog('info', '📤 Responding to REQUEST_CONFIG by sending configs');
-          this.mediaSender?.sendConfigs();
+          void this.mediaSender?.sendConfigs();
         },
-
         onRequestKeyFrame: () => {
           sdkLog('info', '📤 Responding to REQUEST_KEY_FRAME by forcing key frame');
           this.mediaSender?.requestKeyFrame();
         },
-
         onEndCall: () => {
           sdkLog('info', '📥 Received END_CALL from remote peer');
-          this.destroy();
+          void this.destroy();
         },
       });
 
-      // Bắt đầu recv loop trong Worker
       await proxy.startRecvLoop();
-
       return proxy;
     } catch (error) {
+      this.mediaSender?.stop();
+      this.mediaSender = null;
+      this.mediaReceiver?.stop();
+      this.mediaReceiver = null;
+      const failedProxy = this.callNode;
+      this.callNode = null;
+      this.wasmReadyPromise = null;
+      if (failedProxy) await failedProxy.terminate().catch(() => {});
       sdkLog('error', 'Failed to initialize Ermis SDK:', error);
       throw error;
     }
   }
-
   public async getLocalEndpointAddr(): Promise<string | null> {
     try {
       await this.initialize();
@@ -357,16 +436,17 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     return finalConstraints;
   }
 
-  public async startLocalStream() {
+  public async startLocalStream(options: { reportError?: boolean } = {}) {
     const mediaConstraints = await this.getMediaConstraints();
+    let mediaError: any;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
       return this.applyLocalStream(stream);
     } catch (error: any) {
+      mediaError = error;
       sdkLog('warn', 'Error getting user media:', error?.message);
 
-      // Video call: try fallback to audio-only (camera not available)
       if (this.callType === 'video' && mediaConstraints.video) {
         try {
           const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
@@ -375,19 +455,18 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
           });
           this.setConnectionMessage('Camera not available, using audio only');
           return this.applyLocalStream(audioOnlyStream);
-        } catch {
-          // Audio fallback also failed
+        } catch (fallbackError: any) {
+          mediaError = getMediaErrorCode(error) === CALL_ERROR_CODES.PERMISSION_DENIED ? error : fallbackError;
         }
       }
 
-      // No device found at all — report error
-      if (typeof this.onError === 'function') {
-        this.onError('call_no_devices');
+      this.lastMediaErrorCode = getMediaErrorCode(mediaError);
+      if (options.reportError !== false && typeof this.onError === 'function') {
+        this.onError(this.lastMediaErrorCode);
       }
       return null;
     }
   }
-
   private applyLocalStream(stream: MediaStream) {
     if (this.callStatus === CallStatus.ENDED) {
       stream.getTracks().forEach((track) => track.stop());
@@ -407,8 +486,49 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     }
   }
 
+  private assertCallActive(lifecycleId: number) {
+    if (lifecycleId !== this.callLifecycleId || this.isDestroyed || this.callStatus === CallStatus.ENDED || !this.cid) {
+      throw new CallOperationError(CALL_ERROR_CODES.CANCELLED);
+    }
+  }
+
+  private waitForConnected(lifecycleId: number): Promise<void> {
+    if (this.callStatus === CallStatus.CONNECTED) return Promise.resolve();
+
+    return new Promise<void>((resolve, reject) => {
+      const waiter: ConnectionWaiter = {
+        lifecycleId,
+        resolve,
+        reject,
+        timeout: setTimeout(() => {
+          this.connectionWaiters.delete(waiter);
+          reject(new CallOperationError(CALL_ERROR_CODES.CONNECTION_TIMEOUT));
+        }, this.connectionTimeoutMs),
+      };
+      this.connectionWaiters.add(waiter);
+    });
+  }
+
+  private settleConnectionWaiters(error?: Error) {
+    const waiters = Array.from(this.connectionWaiters);
+    this.connectionWaiters.clear();
+    waiters.forEach((waiter) => {
+      clearTimeout(waiter.timeout);
+      if (error || waiter.lifecycleId !== this.callLifecycleId) {
+        waiter.reject(error || new CallOperationError(CALL_ERROR_CODES.CANCELLED));
+      } else {
+        waiter.resolve();
+      }
+    });
+  }
+
   private setCallStatus(status: CallStatus) {
     this.callStatus = status;
+    if (status === CallStatus.CONNECTED) {
+      this.settleConnectionWaiters();
+    } else if (status === CallStatus.ENDED) {
+      this.settleConnectionWaiters(new CallOperationError(CALL_ERROR_CODES.CANCELLED));
+    }
     if (typeof this.onCallStatus === 'function') {
       this.onCallStatus(status);
     }
@@ -470,6 +590,8 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
             this.destroy();
             return;
           }
+          this.callLifecycleId += 1;
+          this.acceptPromise = null;
           this.isDestroyed = false;
           this.callStatus = '';
           this.callType = is_video ? 'video' : 'audio';
@@ -491,15 +613,18 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
 
           this.setCallStatus(CallStatus.RINGING);
 
-          await this.startLocalStream();
-          if (this.callStatus === CallStatus.ENDED) return;
-
           if (eventUserId !== this.userID) {
-            await this.initialize();
-          }
+            // Warm up the transport while the incoming call rings, but request
+            // camera/microphone only from the explicit Accept user gesture.
+            void this.initialize().catch((error) => {
+              if (this.callStatus === CallStatus.RINGING) {
+                sdkLog('warn', 'Incoming call transport warm-up failed; Accept will retry:', error);
+              }
+            });
+          } else {
+            const localStream = await this.startLocalStream();
+            if (!localStream || this.callStatus === CallStatus.ENDED) return;
 
-          if (eventUserId === this.userID) {
-            // Set missCall timeout if no connection after 60s
             if (this.missCallTimeout) clearTimeout(this.missCallTimeout);
             this.missCallTimeout = setTimeout(async () => {
               await this.missCall();
@@ -515,21 +640,25 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
           }
 
           if (eventUserId !== this.userID && !this.isDestroyed) {
-            // Caller side: establish peer connection FIRST
-            if (this.mediaReceiver && this.mediaSender) {
+            try {
+              if (!this.mediaReceiver || !this.mediaSender || !this.localStream || !this.callType) {
+                throw new CallOperationError(CALL_ERROR_CODES.NOT_READY);
+              }
+
+              // Caller side: establish peer connection FIRST
               await this.mediaReceiver.acceptConnection();
               await this.mediaSender.sendConnected();
-            }
 
-            // Then init encoders/decoders (safe to sendControlFrame now)
-            if (this.localStream && this.mediaSender && this.mediaReceiver && this.callType) {
-              this.mediaSender?.initEncoders(this.localStream);
-              this.mediaReceiver?.initDecoders(this.callType);
-            }
+              // Then init encoders/decoders (safe to sendControlFrame now)
+              this.mediaSender.initEncoders(this.localStream);
+              this.mediaReceiver.initDecoders(this.callType);
 
-            // Re-send configs after encoders have populated them
-            if (this.mediaSender) {
+              // Re-send configs after encoders have populated them
               await this.mediaSender.sendConfigs();
+            } catch (error) {
+              sdkLog('error', 'Failed to establish the accepted call:', error);
+              await this.cleanupCall();
+              this.onError?.(CALL_ERROR_CODES.CONNECTION_FAILED);
             }
           }
           break;
@@ -596,6 +725,11 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
   }
 
   private async cleanupCall() {
+    this.callLifecycleId += 1;
+    this.initializationPromise = null;
+    this.wasmReadyPromise = null;
+    this.settleConnectionWaiters(new CallOperationError(CALL_ERROR_CODES.CANCELLED));
+
     if (this.mediaSender) {
       this.mediaSender?.stop();
       this.mediaSender = null;
@@ -723,47 +857,94 @@ export class ErmisCallNode<ErmisChatGenerics extends ExtendableGenerics = Defaul
     }
   }
 
-  public async acceptCall() {
-    try {
-      await this._sendSignal({ action: CallAction.ACCEPT_CALL });
+  private async performAcceptCall(lifecycleId: number): Promise<void> {
+    this.assertCallActive(lifecycleId);
 
-      // Receiver side: establish peer connection FIRST
-      if (this.mediaSender) {
-        const address = this.metadata?.address || '';
-        await this.mediaSender.connect(address);
-      }
+    const localStream = this.localStream || (await this.startLocalStream({ reportError: false }));
+    this.assertCallActive(lifecycleId);
+    if (!localStream) throw new CallOperationError(this.lastMediaErrorCode);
 
-      // Then init encoders/decoders (safe to sendControlFrame now)
-      if (this.localStream && this.mediaSender && this.mediaReceiver) {
-        this.mediaSender?.initEncoders(this.localStream);
-        this.mediaReceiver?.initDecoders(this.callType || 'audio');
-      }
+    await this.initialize();
+    this.assertCallActive(lifecycleId);
 
-      // Re-send configs after encoders have populated them
-      if (this.mediaSender) {
-        await this.mediaSender.sendConfigs();
-      }
-    } catch (error) {
-      sdkLog('error', 'Failed to accept call:', error);
-      throw error;
+    const sender = this.mediaSender;
+    const receiver = this.mediaReceiver;
+    const address = this.metadata?.address || '';
+    if (!sender || !receiver || !address) {
+      throw new CallOperationError(CALL_ERROR_CODES.NOT_READY);
     }
+
+    await this._sendSignal({ action: CallAction.ACCEPT_CALL });
+    this.assertCallActive(lifecycleId);
+
+    await sender.connect(address);
+    this.assertCallActive(lifecycleId);
+
+    sender.initEncoders(localStream);
+    receiver.initDecoders(this.callType || 'audio');
+    await sender.sendConfigs();
+    await this.waitForConnected(lifecycleId);
+  }
+
+  public acceptCall(): Promise<void> {
+    if (this.acceptPromise) return this.acceptPromise;
+
+    const lifecycleId = this.callLifecycleId;
+    const operation = this.performAcceptCall(lifecycleId);
+    const trackedOperation = operation
+      .catch(async (error) => {
+        const callError =
+          error instanceof CallOperationError ? error : new CallOperationError(CALL_ERROR_CODES.CONNECTION_FAILED);
+        sdkLog('error', 'Failed to accept call:', error);
+
+        if (callError.code !== CALL_ERROR_CODES.CANCELLED) {
+          if (isRetryableCallError(callError.code)) {
+            // Permission/device failures are recoverable. Keep the incoming call
+            // ringing so the user can fix access and press Accept again.
+            this.onError?.(callError.code);
+          } else {
+            try {
+              await this._sendSignal({ action: CallAction.END_CALL });
+            } catch {
+              // The transport may already be unavailable; local cleanup still must run.
+            }
+            await this.cleanupCall();
+            this.onError?.(callError.code);
+          }
+        }
+        throw callError;
+      })
+      .finally(() => {
+        if (this.acceptPromise === trackedOperation) this.acceptPromise = null;
+      });
+
+    this.acceptPromise = trackedOperation;
+    return trackedOperation;
   }
 
   public async endCall() {
-    await this._sendSignal({ action: CallAction.END_CALL });
-    this.destroy();
+    try {
+      await this._sendSignal({ action: CallAction.END_CALL });
+    } finally {
+      await this.destroy();
+    }
   }
 
   public async rejectCall() {
-    await this._sendSignal({ action: CallAction.REJECT_CALL });
-    this.destroy();
+    try {
+      await this._sendSignal({ action: CallAction.REJECT_CALL });
+    } finally {
+      await this.destroy();
+    }
   }
 
   private async missCall() {
-    await this._sendSignal({ action: CallAction.MISS_CALL });
-    this.destroy();
+    try {
+      await this._sendSignal({ action: CallAction.MISS_CALL });
+    } finally {
+      await this.destroy();
+    }
   }
-
   private async connectCall() {
     return await this._sendSignal({ action: CallAction.CONNECT_CALL });
   }

@@ -6,7 +6,13 @@ import {
   SystemMessageTranslations,
   SignalMessageTranslations,
 } from '@ermis-network/ermis-chat-sdk';
-import { isDeletedDisplayMessage } from './messageTypeUtils';
+import {
+  ATTACHMENT_TYPES,
+  isDeletedDisplayMessage,
+  isImage,
+  isVideo,
+  isVoiceRecordingAttachment,
+} from './messageTypeUtils';
 
 /**
  * Remove Vietnamese diacritics (accents) from a string.
@@ -422,23 +428,23 @@ export function getLastMessagePreview(
 
   // Regular / other
   let displayText: React.ReactNode = rawText;
-  if (!displayText && isEncrypted) {
-    displayText =
-      (lastMsg as any).e2ee_status === 'failed'
-        ? (options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable')
-        : (options?.encryptedMessageLabel || 'Encrypted message');
-  }
   if (!displayText && lastMsg.attachments && lastMsg.attachments.length > 0) {
     const att = lastMsg.attachments[0];
-    const type = att.type || '';
+    const type = isImage(att)
+      ? ATTACHMENT_TYPES.IMAGE
+      : isVideo(att)
+        ? ATTACHMENT_TYPES.VIDEO
+        : isVoiceRecordingAttachment(att)
+          ? ATTACHMENT_TYPES.VOICE_RECORDING
+          : ATTACHMENT_TYPES.FILE;
     switch (type) {
-      case 'image':
+      case ATTACHMENT_TYPES.IMAGE:
         displayText = options?.photoMessageLabel || '📷 Photo';
         break;
-      case 'video':
+      case ATTACHMENT_TYPES.VIDEO:
         displayText = options?.videoMessageLabel || '🎬 Video';
         break;
-      case 'voiceRecording':
+      case ATTACHMENT_TYPES.VOICE_RECORDING:
         displayText = options?.voiceRecordingMessageLabel || '🎤 Voice message';
         break;
       default:
@@ -453,6 +459,12 @@ export function getLastMessagePreview(
         displayText = React.createElement(React.Fragment, null, displayText, extraText);
       }
     }
+  }
+  if (!displayText && isEncrypted) {
+    displayText =
+      (lastMsg as any).e2ee_status === 'failed'
+        ? (options?.encryptedMessageUnavailableLabel || 'Encrypted message unavailable')
+        : (options?.encryptedMessageLabel || 'Encrypted message');
   }
 
   // Format mentions if necessary

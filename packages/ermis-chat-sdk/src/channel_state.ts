@@ -71,6 +71,8 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   hiddenMessageSeqs: Set<number>;
   /** Message IDs permanently withdrawn for everyone; blocks query/cache resurrection. */
   unavailableMessageIds: Set<string>;
+  /** Message IDs hidden locally; blocks repaired/cache plaintext from replacing their tombstones. */
+  locallyDeletedMessageIds: Set<string>;
   /** Lower bound msg_seq for truncated/cleared history. Messages at or below this seq are deleted. */
   lastMsgSeqBeforeChatDeleted: number | null;
   constructor(channel: Channel<ErmisChatGenerics>) {
@@ -93,6 +95,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     this.hiddenEventSeqs = new Set();
     this.hiddenMessageSeqs = new Set();
     this.unavailableMessageIds = new Set();
+    this.locallyDeletedMessageIds = new Set();
     this.lastMsgSeqBeforeChatDeleted = null;
   }
 
@@ -183,7 +186,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       }
 
       // Handle display_type from server query responses (Section 5.1)
-      // 'unavailable' messages: don't add to UI state. 
+      // 'unavailable' messages: don't add to UI state.
       // Gap tracking is handled globally by `hiddenMessageSeqs` which is persisted to `sync_state` meta store.
       if (rawMsg.display_type === 'unavailable') {
         if (rawMsg.id) this.unavailableMessageIds.add(rawMsg.id);
@@ -194,6 +197,9 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       }
 
       const isDeletedTombstone = rawMsg.display_type === 'deleted' || rawMsg.type === 'deleted';
+      if (rawMsg.id && this.locallyDeletedMessageIds.has(rawMsg.id) && !isDeletedTombstone) {
+        continue;
+      }
 
       // 'deleted' messages: keep in state with type 'deleted' so the UI can
       // render "This message was deleted" placeholders. Without this, deleted
@@ -202,10 +208,11 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       if (isDeletedTombstone) {
         rawMsg.display_type = 'deleted';
         rawMsg.type = 'deleted';
+        if (rawMsg.id) this.locallyDeletedMessageIds.add(rawMsg.id);
       }
 
-      // hiddenMessageSeqs prevents deleted-for-me plaintext from resurfacing.
-      // An explicit deleted tombstone is safe metadata and must remain visible.
+      // hiddenMessageSeqs prevents the original plaintext from re-entering
+      // after a local delete, while the explicit local tombstone stays visible.
       if (rawMsg.msg_seq && this.hiddenMessageSeqs.has(rawMsg.msg_seq) && !isDeletedTombstone) {
         continue;
       }
@@ -264,51 +271,48 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       // Persist to IndexedDB for offline access (fire-and-forget).
       // Only persist non-E2EE messages here; E2EE messages are already
       // handled by EncryptionManager after decryption.
-      if (
-        this._channel?.cid &&
-        message.id &&
-        !(message as any).content_type?.startsWith?.('mls')
-      ) {
+      const isE2eeChannel = (this._channel as any)?._isEffectiveE2ee?.() === true;
+      if (this._channel?.cid && message.id && !isE2eeChannel && !(message as any).content_type?.startsWith?.('mls')) {
         const client = this._channel.getClient() as any;
         const storage = client?.messageStorage || client?.encryptionManager?.storage;
         if (storage?.saveMessage) {
           const msgAny = message as any;
-          void storage.saveMessage({
-            id: message.id,
-            cid: this._channel.cid,
-            content_type: 'standard',
-            type: msgAny.type || 'regular',
-            text: msgAny.text || '',
-            created_at: message.created_at instanceof Date
-              ? message.created_at.toISOString()
-              : String(message.created_at || ''),
-            updated_at: message.updated_at instanceof Date
-              ? message.updated_at.toISOString()
-              : msgAny.updated_at || undefined,
-            user_id: msgAny.user?.id || '',
-            user: msgAny.user,
-            attachments: msgAny.attachments,
-            msg_seq: msgAny.msg_seq,
-            last_event_seq: msgAny.last_event_seq,
-            display_type: msgAny.display_type,
-            deleted_at: msgAny.deleted_at instanceof Date
-              ? msgAny.deleted_at.toISOString()
-              : msgAny.deleted_at || undefined,
-            parent_id: msgAny.parent_id,
-            quoted_message_id: msgAny.quoted_message_id,
-            reaction_counts: msgAny.reaction_counts,
-            latest_reactions: msgAny.latest_reactions,
-            poll_type: msgAny.poll_type,
-            poll_choice_counts: msgAny.poll_choice_counts,
-            latest_poll_choices: msgAny.latest_poll_choices,
-            allow_change_choice: msgAny.allow_change_choice,
-            poll_closed: msgAny.poll_closed,
-            pinned: msgAny.pinned,
-            pinned_at: msgAny.pinned_at instanceof Date
-              ? msgAny.pinned_at.toISOString()
-              : msgAny.pinned_at || undefined,
-            mentioned_users: msgAny.mentioned_users,
-          }).catch(() => {});
+          void storage
+            .saveMessage({
+              id: message.id,
+              cid: this._channel.cid,
+              content_type: 'standard',
+              type: msgAny.type || 'regular',
+              text: msgAny.text || '',
+              created_at:
+                message.created_at instanceof Date
+                  ? message.created_at.toISOString()
+                  : String(message.created_at || ''),
+              updated_at:
+                message.updated_at instanceof Date ? message.updated_at.toISOString() : msgAny.updated_at || undefined,
+              user_id: msgAny.user?.id || '',
+              user: msgAny.user,
+              attachments: msgAny.attachments,
+              msg_seq: msgAny.msg_seq,
+              last_event_seq: msgAny.last_event_seq,
+              display_type: msgAny.display_type,
+              deleted_at:
+                msgAny.deleted_at instanceof Date ? msgAny.deleted_at.toISOString() : msgAny.deleted_at || undefined,
+              parent_id: msgAny.parent_id,
+              quoted_message_id: msgAny.quoted_message_id,
+              reaction_counts: msgAny.reaction_counts,
+              latest_reactions: msgAny.latest_reactions,
+              poll_type: msgAny.poll_type,
+              poll_choice_counts: msgAny.poll_choice_counts,
+              latest_poll_choices: msgAny.latest_poll_choices,
+              allow_change_choice: msgAny.allow_change_choice,
+              poll_closed: msgAny.poll_closed,
+              pinned: msgAny.pinned,
+              pinned_at:
+                msgAny.pinned_at instanceof Date ? msgAny.pinned_at.toISOString() : msgAny.pinned_at || undefined,
+              mentioned_users: msgAny.mentioned_users,
+            })
+            .catch(() => {});
         }
       }
     }
@@ -532,9 +536,10 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   ) {
     const { persist = true } = options;
     let isRemoved = false;
-    const messageSetIndices = messageToRemove.messageSetIndex !== undefined
-      ? [messageToRemove.messageSetIndex]
-      : this.messageSets.map((_, index) => index);
+    const messageSetIndices =
+      messageToRemove.messageSetIndex !== undefined
+        ? [messageToRemove.messageSetIndex]
+        : this.messageSets.map((_, index) => index);
     for (const messageSetIndex of messageSetIndices) {
       const { removed, result: messages } = this.removeMessageFromArray(
         this.messageSets[messageSetIndex].messages,
@@ -820,9 +825,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     const { persist = true } = options;
     this.lastMsgSeqBeforeChatDeleted = maxSeq;
     this.messageSets.forEach((set) => {
-      set.messages = set.messages.filter(
-        (msg) => !(msg as any).msg_seq || (msg as any).msg_seq > maxSeq,
-      );
+      set.messages = set.messages.filter((msg) => !(msg as any).msg_seq || (msg as any).msg_seq > maxSeq);
     });
 
     // Also delete from IndexedDB (Section 5.5, Rule 1)
@@ -845,28 +848,19 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   removeHiddenMessages(hiddenMsgSeqs: number[]) {
     if (hiddenMsgSeqs.length === 0) return;
     const seqSet = new Set(hiddenMsgSeqs);
-    const isDeletedTombstone = (message: any) =>
-      message?.display_type === 'deleted' || message?.type === 'deleted';
+    const isDeletedTombstone = (message: any) => message?.display_type === 'deleted' || message?.type === 'deleted';
 
     // Remove hidden plaintext, but preserve the content-free deleted tombstone
     // returned by query/realtime so refresh still renders the placeholder.
     const idsToDelete: string[] = [];
     this.messageSets.forEach((set) => {
       set.messages.forEach((msg) => {
-        if (
-          (msg as any).msg_seq &&
-          seqSet.has((msg as any).msg_seq) &&
-          !isDeletedTombstone(msg) &&
-          msg.id
-        ) {
+        if ((msg as any).msg_seq && seqSet.has((msg as any).msg_seq) && !isDeletedTombstone(msg) && msg.id) {
           idsToDelete.push(msg.id);
         }
       });
       set.messages = set.messages.filter(
-        (msg) =>
-          !(msg as any).msg_seq ||
-          !seqSet.has((msg as any).msg_seq) ||
-          isDeletedTombstone(msg),
+        (msg) => !(msg as any).msg_seq || !seqSet.has((msg as any).msg_seq) || isDeletedTombstone(msg),
       );
     });
 
@@ -917,8 +911,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   isFakeMessageGap(seqA: number, seqB: number): boolean {
     for (let seq = seqA + 1; seq < seqB; seq++) {
       const isHidden = this.hiddenMessageSeqs.has(seq);
-      const isTruncated =
-        this.lastMsgSeqBeforeChatDeleted !== null && seq <= this.lastMsgSeqBeforeChatDeleted;
+      const isTruncated = this.lastMsgSeqBeforeChatDeleted !== null && seq <= this.lastMsgSeqBeforeChatDeleted;
       if (!isHidden && !isTruncated) {
         return false; // Real gap — backfill needed
       }

@@ -60,6 +60,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
   const [readState, setReadState] = useState<Record<string, ReadStateEntry>>({});
   const [forwardingMessage, setForwardingMessage] = useState<FormatMessageResponse | null>(null);
   const [jumpToMessageId, setJumpToMessageId] = useState<string | null>(null);
+  const [e2eeRepairingChannelCids, setE2eeRepairingChannelCids] = useState<string[]>([]);
 
   const activeChannel = activeChannelRaw;
   const activeChannelCidRef = useRef<string | null>(null);
@@ -106,6 +107,15 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     draftsRef.current.clear();
   }, []);
 
+  const setChannelE2eeRepairing = useCallback((cid: string, repairing: boolean) => {
+    setE2eeRepairingChannelCids((current) => {
+      const isRepairing = current.includes(cid);
+      if (repairing === isRepairing) return current;
+      if (repairing) return [...current, cid];
+      return current.filter((currentCid) => currentCid !== cid);
+    });
+  }, []);
+
   const coreValue = useMemo<ChatCoreContextValue>(() => ({
     client,
     activeChannel,
@@ -125,7 +135,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({
     syncMessages,
     readState,
     setReadState,
-  }), [messages, syncMessages, readState]);
+    e2eeRepairingChannelCids,
+    setChannelE2eeRepairing,
+  }), [messages, syncMessages, readState, e2eeRepairingChannelCids, setChannelE2eeRepairing]);
 
   const composerValue = useMemo<ChatComposerContextValue>(() => ({
     quotedMessage,

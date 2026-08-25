@@ -423,6 +423,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     if (event.type === 'offline') {
       // mark the connection as down
       this._log('onlineStatusChanged() - Status changing to offline');
+      this.client._abortPendingAttachmentUploads();
       this._setHealth(false);
     } else if (event.type === 'online') {
       // retry right now...

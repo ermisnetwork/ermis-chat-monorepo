@@ -44,6 +44,7 @@ export class MediaStreamSender {
       this.startHealthCallInterval();
     } catch (error) {
       sdkLog('error', 'Error starting MediaStreamSender:', error);
+      throw error;
     }
   }
 

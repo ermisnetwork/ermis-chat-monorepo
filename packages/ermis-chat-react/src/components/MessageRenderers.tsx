@@ -9,21 +9,31 @@ import type {
 import { parseSystemMessage, parseSignalMessage, CallType } from '@ermis-network/ermis-chat-sdk';
 import { useChatCore } from '../hooks/useChatCore';
 import { useDownloadHandler } from '../hooks/useDownloadHandler';
-import { E2EE_PREVIEW_MAX_CONCURRENT, useE2eeAttachmentRenderer } from '../hooks/useE2eeAttachmentRenderer';
+import {
+  scheduleE2eePreviewLoad,
+  useE2eeAttachmentRenderer,
+} from '../hooks/useE2eeAttachmentRenderer';
 import { buildUserMap } from '../utils';
 import { MediaLightbox } from './MediaLightbox';
 import { getFileIcon } from './ChannelInfo/utils';
 import type { AttachmentProps, MessageRendererProps, MessageBubbleProps, MediaLightboxItem } from '../types';
 
 export type { AttachmentProps, MessageRendererProps, MessageBubbleProps } from '../types';
-import { isVoiceRecordingAttachment, isLinkPreviewAttachment, isImage, isVideo, isAudio } from '../messageTypeUtils';
+import {
+  isVoiceRecordingAttachment,
+  isLinkPreviewAttachment,
+  isE2eeAttachmentManifest,
+  isImage,
+  isVideo,
+  isAudio,
+} from '../messageTypeUtils';
 
 /* ----------------------------------------------------------
    Attachment renderers
    ---------------------------------------------------------- */
 const ImageAttachment: React.FC<AttachmentProps> = React.memo(
   ({ attachment, onClick }) => {
-    const src = attachment.image_url || attachment.thumb_url || attachment.url;
+    const src = attachment.image_url || attachment.thumb_url || attachment.url || (attachment as any).asset_url;
     const thumbSrc = attachment.thumb_url;
     if (!src) return null;
 
@@ -97,16 +107,6 @@ const ImageAttachment: React.FC<AttachmentProps> = React.memo(
     );
   },
 );
-
-function isE2eeAttachmentManifest(attachment: unknown): attachment is E2eeAttachmentManifest {
-  return Boolean(
-    attachment &&
-      typeof attachment === 'object' &&
-      (attachment as E2eeAttachmentManifest).version === 1 &&
-      typeof (attachment as E2eeAttachmentManifest).attachment_id === 'string' &&
-      Array.isArray((attachment as E2eeAttachmentManifest).assets),
-  );
-}
 
 function e2eeDisplayString(display: Record<string, unknown> | undefined, key: string): string | undefined {
   const value = display?.[key];
@@ -206,22 +206,6 @@ function E2eePlayIcon() {
       <path d="M8 5v14l11-7z" />
     </svg>
   );
-}
-
-let activeE2eePreviewLoads = 0;
-const queuedE2eePreviewLoads: Array<() => void> = [];
-
-function scheduleE2eePreviewLoad(load: () => Promise<unknown>): void {
-  const run = () => {
-    activeE2eePreviewLoads += 1;
-    void load().finally(() => {
-      activeE2eePreviewLoads = Math.max(0, activeE2eePreviewLoads - 1);
-      const next = queuedE2eePreviewLoads.shift();
-      if (next) next();
-    });
-  };
-  if (activeE2eePreviewLoads < E2EE_PREVIEW_MAX_CONCURRENT) run();
-  else queuedE2eePreviewLoads.push(run);
 }
 
 const E2eeAttachment: React.FC<{ attachment: E2eeAttachmentManifest; grantReady?: boolean }> = React.memo(
@@ -916,7 +900,7 @@ export const AttachmentList: React.FC<{
         if (isImage(att)) {
           return {
             type: 'image' as const,
-            src: att.image_url || att.thumb_url || att.url || '',
+            src: att.image_url || att.thumb_url || att.url || (att as any).asset_url || '',
             alt: att.file_name || att.title,
           };
         }
@@ -1124,7 +1108,9 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
   }) => {
     const { activeChannel } = useChatCore();
 
-    const isEncrypted = message.content_type === 'mls' || Boolean((message as any).mls_ciphertext);
+    const isEncrypted =
+      message.content_type === 'mls' ||
+      (Boolean((message as any).mls_ciphertext) && message.content_type !== 'standard');
     const hasRawAttachments = Boolean(message.attachments?.length);
     const rawText = message.text || '';
     const isEncryptedSentinelText =

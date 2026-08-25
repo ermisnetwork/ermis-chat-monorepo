@@ -2,11 +2,13 @@ import React, { useMemo } from 'react';
 import { useChatCore } from '../hooks/useChatCore';
 import { replaceMentionsForPreview, buildUserMap, getMessageUserId, getUserDisplayName } from '../utils';
 import {
+  isE2eeAttachmentManifest,
+  isImage,
   isStickerMessage,
-  isImageAttachment,
-  isVideoAttachment,
+  isVideo,
 } from '../messageTypeUtils';
 import type { ReplyPreviewProps } from '../types';
+import { E2eeAttachmentThumbnail } from './E2eeAttachmentThumbnail';
 
 const MAX_PREVIEW_LENGTH = 120;
 
@@ -54,11 +56,11 @@ function getThumbnailUrl(message: any): string | undefined {
   const first = attachments[0];
   if (!first) return undefined;
 
-  if (isImageAttachment(first) || first.mime_type?.startsWith('image/')) {
+  if (isImage(first)) {
     return first.thumb_url || first.image_url || first.asset_url || first.url;
   }
 
-  if (isVideoAttachment(first) || first.mime_type?.startsWith('video/')) {
+  if (isVideo(first)) {
     return first.thumb_url || first.image_url;
   }
 
@@ -86,9 +88,13 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
   const isSticker = isStickerMessage(message);
   const attachmentSummary = hasAttachments ? getAttachmentSummary(message.attachments!) : '';
   const thumbnailUrl = useMemo(() => getThumbnailUrl(message), [message]);
+  const e2eeThumbnailManifest = useMemo(() => {
+    const firstAttachment = message.attachments?.[0];
+    return isE2eeAttachmentManifest(firstAttachment) ? firstAttachment : undefined;
+  }, [message.attachments]);
 
-  // Build preview content — skip attachment summary when thumbnail is visible
-  const showAttachmentText = hasAttachments && !thumbnailUrl;
+  // Build preview content — skip attachment summary when a thumbnail is visible.
+  const showAttachmentText = hasAttachments && !thumbnailUrl && !e2eeThumbnailManifest;
   let previewContent: React.ReactNode = null;
   if (isSticker && thumbnailUrl) {
     // Sticker with thumbnail — no text needed
@@ -123,6 +129,12 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = React.memo(({
           alt=""
           loading="lazy"
           draggable={false}
+        />
+      )}
+      {!thumbnailUrl && e2eeThumbnailManifest && (
+        <E2eeAttachmentThumbnail
+          className="ermis-message-input__reply-preview-thumb"
+          manifest={e2eeThumbnailManifest}
         />
       )}
       <button

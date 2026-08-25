@@ -3,13 +3,16 @@ import { useChatCore } from '../hooks/useChatCore';
 import { replaceMentionsForPreview, buildUserMap, getMessageUserId, getUserDisplayName } from '../utils';
 import type { QuotedMessagePreviewProps } from '../types';
 import {
-  isImageAttachment,
+  getAttachmentDisplayName,
+  isE2eeAttachmentManifest,
+  isImage,
   isLinkPreviewAttachment,
   isStickerMessage,
-  isVideoAttachment,
+  isVideo,
   isVoiceRecordingAttachment,
 } from '../messageTypeUtils';
 import { isDeletedDisplayMessage } from '../messageTypeUtils';
+import { E2eeAttachmentThumbnail } from './E2eeAttachmentThumbnail';
 
 export type { QuotedMessagePreviewProps } from '../types';
 
@@ -31,12 +34,11 @@ function getAttachmentPreview(
     return firstAttachment.title;
   }
 
-  if (firstAttachment.title || firstAttachment.file_name) {
-    return firstAttachment.title || firstAttachment.file_name || attachmentLabel;
-  }
+  const displayName = getAttachmentDisplayName(firstAttachment);
+  if (displayName) return displayName;
 
-  if (isImageAttachment(firstAttachment)) return attachmentLabel;
-  if (isVideoAttachment(firstAttachment)) return attachmentLabel;
+  if (isImage(firstAttachment)) return attachmentLabel;
+  if (isVideo(firstAttachment)) return attachmentLabel;
   if (isVoiceRecordingAttachment(firstAttachment)) return attachmentLabel;
 
   return attachmentLabel;
@@ -59,12 +61,12 @@ function getThumbnailUrl(quotedMessage: QuotedMessagePreviewProps['quotedMessage
   if (!first) return undefined;
 
   // Image attachment
-  if (isImageAttachment(first) || first.mime_type?.startsWith('image/')) {
+  if (isImage(first)) {
     return first.thumb_url || first.image_url || first.asset_url || first.url;
   }
 
   // Video attachment — prefer thumb_url for poster frame
-  if (isVideoAttachment(first) || first.mime_type?.startsWith('video/')) {
+  if (isVideo(first)) {
     return first.thumb_url || first.image_url;
   }
 
@@ -111,6 +113,10 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
   );
 
   const thumbnailUrl = useMemo(() => getThumbnailUrl(quotedMessage), [quotedMessage]);
+  const e2eeThumbnailManifest = useMemo(() => {
+    const firstAttachment = quotedMessage.attachments?.[0];
+    return isE2eeAttachmentManifest(firstAttachment) ? firstAttachment : undefined;
+  }, [quotedMessage.attachments]);
 
   const preview = useMemo(() => {
     if (formattedText) {
@@ -181,6 +187,12 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = React.m
           alt=""
           loading="lazy"
           draggable={false}
+        />
+      )}
+      {!thumbnailUrl && e2eeThumbnailManifest && (
+        <E2eeAttachmentThumbnail
+          className="ermis-quoted-message__thumb"
+          manifest={e2eeThumbnailManifest}
         />
       )}
     </div>

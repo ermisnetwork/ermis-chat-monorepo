@@ -12,6 +12,7 @@ import { E2EE_BYTES_HEADER, E2EE_BYTES_WIRE_FORMAT, normalizeE2eeEventBytes } fr
 import { IndexedDBEncryptionStorage } from './encryption/storage';
 import { IndexedDBUserCache } from './user_cache';
 import { getLogger, setSdkLogger } from './logger';
+import { StandardAttachmentUploadStorage } from './standard_attachment_upload_storage';
 
 import { TokenManager } from './token_manager';
 
@@ -193,6 +194,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   /** Message storage for offline persistence. Initialized on connectUser() for ALL channels. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messageStorage?: any;
+  /** Browser persistence for resumable non-E2EE attachment uploads. */
+  standardAttachmentUploadStorage?: StandardAttachmentUploadStorage;
   private userCache?: IndexedDBUserCache<ErmisChatGenerics>;
   private userCacheKey?: string;
   private refreshTokenPromise: Promise<TokenRefreshResult> | null = null;
@@ -517,6 +520,19 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       }
     }
 
+    if (this.browser && !this.standardAttachmentUploadStorage && this.messageStorage) {
+      try {
+        // Reuse the shared ermis_data_{userId} DB — no separate DB created
+        const dbProvider = () => this.messageStorage!.getDB();
+        this.standardAttachmentUploadStorage = new StandardAttachmentUploadStorage(dbProvider, this.logger);
+      } catch (err) {
+        this.logger('warn', 'client:connectUser() - Failed to initialize standard attachment upload storage', {
+          err,
+          tags: ['storage', 'attachment'],
+        });
+      }
+    }
+
     await this._hydrateUserCacheFromStorage();
 
     const setTokenPromise = this._setToken(connectionUser, connectionToken, options.refreshToken);
@@ -553,6 +569,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
           this.logger('error', 'client:connectUser() - failed to fetch full user profile', { err });
         });
 
+      await this._restorePendingStandardAttachmentUploads();
       return result;
     } catch (err) {
       this.disconnectUser();
@@ -712,12 +729,20 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       tags: ['connection', 'client'],
     });
 
+    this._pausePendingStandardAttachmentUploads();
+
+    if (this.standardAttachmentUploadStorage) {
+      // DB lifecycle is managed by messageStorage (IndexedDBEncryptionStorage) — no close() needed
+      this.standardAttachmentUploadStorage = undefined;
+    }
+
+
     const encryptionMgr = this.encryptionManager;
     if (encryptionMgr && typeof encryptionMgr.destroy === 'function') {
       await encryptionMgr.destroy();
       this.encryptionManager = undefined;
     }
-    
+
     if (this.messageStorage && typeof this.messageStorage.close === 'function') {
       await this.messageStorage.close();
     }
@@ -1267,6 +1292,40 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       }
     }
   };
+  private _restorePendingStandardAttachmentUploads = async () => {
+    const storage = this.standardAttachmentUploadStorage;
+    if (!storage) return;
+    try {
+      const records = await storage.list();
+      for (const record of records) {
+        if (!record.channel_type || !record.channel_id || !record.message_id) {
+          await storage.delete(record.message_id).catch(() => undefined);
+          continue;
+        }
+        const channel = this.channel(record.channel_type, record.channel_id);
+        await channel.restorePendingStandardAttachmentUpload(record);
+      }
+    } catch (error) {
+      this.logger('warn', 'Failed to restore pending standard attachment uploads', {
+        err: error,
+        tags: ['storage', 'attachment'],
+      });
+    }
+  };
+
+  _resumePendingStandardAttachmentUploads = async () => {
+    await Promise.all(
+      Object.values(this.activeChannels).map((channel) => channel.resumePendingStandardAttachmentUploads()),
+    );
+  };
+
+  _pausePendingStandardAttachmentUploads = () => {
+    let paused = 0;
+    Object.values(this.activeChannels).forEach((channel) => {
+      paused += channel.pausePendingStandardAttachmentUploads();
+    });
+    return paused;
+  };
 
   _deleteUserMessageReference = (user: UserResponse<ErmisChatGenerics>, hardDelete = false) => {
     const refMap = this.state.userChannelReferences[user.id] || {};
@@ -1278,6 +1337,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       /** deleted the messages from this user. */
       state?.deleteUserMessages(user, hardDelete);
     }
+  };
+
+  _abortPendingAttachmentUploads = () => {
+    Object.values(this.activeChannels).forEach((channel) => {
+      channel.abortPendingAttachmentUploads();
+    });
   };
 
   _handleClientEvent(event: Event<ErmisChatGenerics>) {
@@ -1304,13 +1369,27 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       }
     }
 
+    if (event.type === 'connection.changed' && event.online === false) {
+      this._abortPendingAttachmentUploads();
+    } else if (event.type === 'connection.changed' && event.online === true) {
+      void this._resumePendingStandardAttachmentUploads().catch((error) => {
+        this.logger('warn', 'Failed to resume standard attachment uploads', { err: error });
+      });
+      void this.encryptionManager?.resumePendingE2eeSends().catch((error: unknown) => {
+        this.logger('warn', 'Failed to resume E2EE attachment uploads', { err: error });
+      });
+    }
+
     if ((event.type === 'channel.deleted' || event.type === 'notification.channel_deleted') && event.cid) {
       client.state.deleteAllChannelReference(event.cid);
       this.activeChannels[event.cid]?.state.clearMessages();
       this.activeChannels[event.cid]?.state.resetSyncState();
       this.activeChannels[event.cid]?._disconnect();
       this._clearChannelLocalStorage(event.cid).catch((err) => {
-        this.logger('warn', 'client:_handleClientEvent() - Failed to clear deleted channel storage', { err, cid: event.cid });
+        this.logger('warn', 'client:_handleClientEvent() - Failed to clear deleted channel storage', {
+          err,
+          cid: event.cid,
+        });
       });
 
       postListenerCallbacks.push(() => {
@@ -1345,7 +1424,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         this.activeChannels[event.cid]?.state.resetSyncState();
         this.activeChannels[event.cid]?._disconnect();
         this._clearChannelLocalStorage(event.cid).catch((err) => {
-          this.logger('warn', 'client:_handleClientEvent() - Failed to clear rejected channel storage', { err, cid: event.cid });
+          this.logger('warn', 'client:_handleClientEvent() - Failed to clear rejected channel storage', {
+            err,
+            cid: event.cid,
+          });
         });
 
         postListenerCallbacks.push(() => {
@@ -1881,7 +1963,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     // Hydrate E2EE messages from local cache BEFORE initializing state.
     // Without this, encrypted API messages overwrite decrypted local messages,
     // causing the UI to show "encrypted message" until the user switches channels.
-    if (this.encryptionManager?.storage) {
+    const e2eeStorage = this.encryptionManager?.storage || this.messageStorage;
+    if (e2eeStorage) {
       await Promise.all(
         data.channels.map(async (channelState) => {
           const isE2ee = (channelState.channel as any)?.mls_enabled === true;
@@ -1994,10 +2077,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * @see intergration-guide.md Section 3.2
    */
   async globalSync(request: GlobalSyncRequest): Promise<GlobalSyncResponse<ErmisChatGenerics>> {
-    return await this.post<GlobalSyncResponse<ErmisChatGenerics>>(
-      this.baseURL + '/sync',
-      request,
-    );
+    return await this.post<GlobalSyncResponse<ErmisChatGenerics>>(this.baseURL + '/sync', request);
   }
 
   /**
@@ -2039,26 +2119,26 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this._syncPromise = Promise.all([
       this._performSyncInternal(),
       this.encryptionManager?.initialized ? this.encryptionManager.sync() : Promise.resolve(),
-    ]).then(() => {
-      this._lastSyncCompletedAt = Date.now();
-    }).finally(() => {
-      this._syncInProgress = false;
-      this._syncPromise = null;
-    }) as unknown as Promise<void>;
+    ])
+      .then(() => {
+        this._lastSyncCompletedAt = Date.now();
+      })
+      .finally(() => {
+        this._syncInProgress = false;
+        this._syncPromise = null;
+      }) as unknown as Promise<void>;
 
     return this._syncPromise;
   }
 
   private async _clearChannelLocalStorage(cid: string): Promise<void> {
-    const storages = Array.from(
-      new Set([this.messageStorage, this.encryptionManager?.storage].filter(Boolean)),
-    );
+    const storages = Array.from(new Set([this.messageStorage, this.encryptionManager?.storage].filter(Boolean)));
     await Promise.allSettled(
-      storages.flatMap((storage: any) => [
-        storage.clearMessages?.(cid),
-        storage.deleteSyncState?.(cid),
-        storage.deleteChannelRepairState?.(cid),
-      ].filter(Boolean)),
+      storages.flatMap((storage: any) =>
+        [storage.clearMessages?.(cid), storage.deleteSyncState?.(cid), storage.deleteChannelRepairState?.(cid)].filter(
+          Boolean,
+        ),
+      ),
     );
   }
 
@@ -2155,8 +2235,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
             throw err;
           }
           const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-          this.logger('warn', `client:performSync() - Sync failed, retrying in ${delay}ms (attempt ${attempt}/${maxRetries})`, { err, tags: ['sync'] });
-          await new Promise(resolve => setTimeout(resolve, delay));
+          this.logger(
+            'warn',
+            `client:performSync() - Sync failed, retrying in ${delay}ms (attempt ${attempt}/${maxRetries})`,
+            { err, tags: ['sync'] },
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
 
@@ -2227,7 +2311,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       }
     }
 
-
     this.logger('info', 'client:performSync() - Sync completed', { tags: ['sync'] });
     this.dispatchEvent({
       type: 'sync.completed',
@@ -2256,7 +2339,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         channel.state.hiddenMessageSeqs.size === 0 &&
         channel.state.hiddenEventSeqs.size === 0 &&
         !channel.state.lastMsgSeqBeforeChatDeleted
-      ) continue;
+      )
+        continue;
       records.push({
         version: SYNC_STATE_VERSION,
         cid,

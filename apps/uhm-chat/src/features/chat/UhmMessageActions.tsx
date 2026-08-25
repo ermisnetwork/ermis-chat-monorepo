@@ -168,7 +168,7 @@ export function UhmMessageActions({
     }
     if (!activeChannel) return;
     try {
-      await activeChannel.deleteMessageForMe(message.id!);
+      await activeChannel.deleteMessageForMe(message.id!, message);
     } catch (err) {
       console.error('Failed to delete message for me', err);
     }

@@ -62,8 +62,24 @@
   flex-shrink: 0;
   width: 36px;
   height: 36px;
-  border-radius: var(--ermis-radius-xs, 4px);
+  border-radius: var(--ermis-radius-xs);
   object-fit: cover;
+}
+
+.ermis-quoted-message__thumb--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ermis-bg-hover);
+}
+
+.ermis-e2ee-attachment-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: var(--ermis-radius-full);
+  animation: ermis-spin 0.7s linear infinite;
 }
 
 

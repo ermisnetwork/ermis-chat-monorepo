@@ -1,3 +1,5 @@
+import type { E2eeAttachmentManifest } from '@ermis-network/ermis-chat-sdk';
+
 export const MESSAGE_TYPES = {
   REGULAR: 'regular',
   SYSTEM: 'system',
@@ -19,6 +21,54 @@ export const ATTACHMENT_TYPES = {
 
 export type MessageType = (typeof MESSAGE_TYPES)[keyof typeof MESSAGE_TYPES] | string;
 export type AttachmentType = (typeof ATTACHMENT_TYPES)[keyof typeof ATTACHMENT_TYPES] | string;
+
+export function isE2eeAttachmentManifest(attachment: unknown): attachment is E2eeAttachmentManifest {
+  return Boolean(
+    attachment &&
+      typeof attachment === 'object' &&
+      (attachment as E2eeAttachmentManifest).version === 1 &&
+      typeof (attachment as E2eeAttachmentManifest).attachment_id === 'string' &&
+      Array.isArray((attachment as E2eeAttachmentManifest).assets),
+  );
+}
+
+function getE2eeAttachmentDisplay(attachment: any): Record<string, unknown> | undefined {
+  if (!isE2eeAttachmentManifest(attachment)) return undefined;
+
+  const originalAsset =
+    attachment.assets.find((asset: any) => asset?.kind === 'original') || attachment.assets[0];
+  return originalAsset?.display;
+}
+
+function getAttachmentMetadata(attachment: any): {
+  attachmentType: string;
+  mimeType: string;
+  name: string;
+} {
+  const e2eeDisplay = getE2eeAttachmentDisplay(attachment);
+  const attachmentType =
+    (typeof e2eeDisplay?.attachment_type === 'string' ? e2eeDisplay.attachment_type : undefined) ||
+    attachment?.attachment_type ||
+    attachment?.type ||
+    '';
+  const mimeType =
+    (typeof e2eeDisplay?.mime_type === 'string' ? e2eeDisplay.mime_type : undefined) ||
+    attachment?.mime_type ||
+    attachment?.content_type ||
+    '';
+  const name =
+    (typeof e2eeDisplay?.name === 'string' ? e2eeDisplay.name : undefined) ||
+    attachment?.file_name ||
+    attachment?.title ||
+    attachment?.name ||
+    '';
+
+  return { attachmentType, mimeType, name };
+}
+
+export function getAttachmentDisplayName(attachment: unknown): string {
+  return getAttachmentMetadata(attachment).name;
+}
 
 // Helpers cho message
 export function isSystemMessage(message: any): boolean {
@@ -51,7 +101,7 @@ export function isVideoAttachment(attachment: any): boolean {
 }
 
 export function isVoiceRecordingAttachment(attachment: any): boolean {
-  return attachment?.type === ATTACHMENT_TYPES.VOICE_RECORDING;
+  return getAttachmentMetadata(attachment).attachmentType === ATTACHMENT_TYPES.VOICE_RECORDING;
 }
 
 export function isLinkPreviewAttachment(attachment: any): boolean {
@@ -59,21 +109,20 @@ export function isLinkPreviewAttachment(attachment: any): boolean {
 }
 
 export function isImage(attachment: any): boolean {
-  const mimeType = attachment?.mime_type || attachment?.content_type || '';
+  const { attachmentType, mimeType } = getAttachmentMetadata(attachment);
   return Boolean(
-    isImageAttachment(attachment) ||
+    attachmentType === ATTACHMENT_TYPES.IMAGE ||
       mimeType.startsWith('image/') ||
-      (!attachment?.type && attachment?.image_url),
+      (!attachmentType && attachment?.image_url),
   );
 }
 
 export function isVideo(attachment: any): boolean {
-  const name = attachment?.file_name || attachment?.title || '';
-  const mimeType = attachment?.mime_type || attachment?.content_type || '';
+  const { attachmentType, mimeType, name } = getAttachmentMetadata(attachment);
   return Boolean(
-    isVideoAttachment(attachment) ||
+    attachmentType === ATTACHMENT_TYPES.VIDEO ||
       mimeType.startsWith('video/') ||
-      /\.(3g2|3gp|avi|m4v|mkv|mov|mp4|mpeg|mpg|ogv|webm)$/i.test(name),
+      (!mimeType && /\.(3g2|3gp|avi|m4v|mkv|mov|mp4|mpeg|mpg|ogv|webm)$/i.test(name)),
   );
 }
 
@@ -82,12 +131,12 @@ export function isAudioAttachment(attachment: any): boolean {
 }
 
 export function isAudio(attachment: any): boolean {
+  const { attachmentType, mimeType, name } = getAttachmentMetadata(attachment);
   return !!(
-    isAudioAttachment(attachment) ||
-    isVoiceRecordingAttachment(attachment) ||
-    attachment.mime_type?.startsWith('audio/') ||
-    attachment.file_name?.toLowerCase().endsWith('.mp3') ||
-    attachment.title?.toLowerCase().endsWith('.mp3')
+    attachmentType === ATTACHMENT_TYPES.AUDIO ||
+    attachmentType === ATTACHMENT_TYPES.VOICE_RECORDING ||
+    mimeType.startsWith('audio/') ||
+    name.toLowerCase().endsWith('.mp3')
   );
 }
 

@@ -1,21 +1,29 @@
-import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut, ArrowLeft, X, KeyRound, Database } from 'lucide-react'
-import { useRef, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut, ArrowLeft, X, KeyRound } from 'lucide-react';
+import { useRef, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { useTranslation } from 'react-i18next'
-import { useChatCore, useChatUser, useInviteCount, useContactCount, Avatar, useRecoveryPin, getUserDisplayName } from '@ermis-network/ermis-chat-react'
-import { useUIStore } from '@/store/useUIStore'
-import { STORAGE_KEYS } from '@/utils/constants'
-import { ProfileModal } from '@/features/settings/ProfileModal'
-import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
-import { useState } from 'react'
+} from '@/components/ui/dropdown-menu';
+import { useTranslation } from 'react-i18next';
+import {
+  useChatCore,
+  useChatUser,
+  useInviteCount,
+  useContactCount,
+  Avatar,
+  useRecoveryPin,
+  getUserDisplayName,
+} from '@ermis-network/ermis-chat-react';
+import { useUIStore } from '@/store/useUIStore';
+import { STORAGE_KEYS } from '@/utils/constants';
+import { ProfileModal } from '@/features/settings/ProfileModal';
+import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog';
+import { useState } from 'react';
 
 interface SidebarHeaderProps {
   onNavigate?: (panel: 'contacts' | 'invites') => void;
@@ -35,120 +43,69 @@ export function SidebarHeader({
   onSearchOpen,
   onSearchClose,
 }: SidebarHeaderProps) {
-  const { t, i18n } = useTranslation()
-  const { client, theme, setTheme, clearAllDrafts } = useChatCore()
-  const { user } = useChatUser()
-  const userDisplayName = getUserDisplayName(user, user?.id)
-  const { inviteCount } = useInviteCount()
-  const { contactCount } = useContactCount()
-  const { openCreateChannelModal } = useUIStore()
-  const recovery = useRecoveryPin()
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
-  const [isRecoveryPinOpen, setIsRecoveryPinOpen] = useState(false)
+  const { t, i18n } = useTranslation();
+  const { client, theme, setTheme, clearAllDrafts } = useChatCore();
+  const { user } = useChatUser();
+  const userDisplayName = getUserDisplayName(user, user?.id);
+  const { inviteCount } = useInviteCount();
+  const { contactCount } = useContactCount();
+  const { openCreateChannelModal } = useUIStore();
+  const recovery = useRecoveryPin();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isRecoveryPinOpen, setIsRecoveryPinOpen] = useState(false);
 
   // Auto-focus when entering search mode
   useEffect(() => {
     if (isSearchMode) {
-      const timer = setTimeout(() => searchInputRef.current?.focus(), 50)
-      return () => clearTimeout(timer)
+      const timer = setTimeout(() => searchInputRef.current?.focus(), 50);
+      return () => clearTimeout(timer);
     }
-  }, [isSearchMode])
+  }, [isSearchMode]);
 
   const toggleTheme = () => {
-    const isDark = theme === 'dark'
-    const newTheme = !isDark
+    const isDark = theme === 'dark';
+    const newTheme = !isDark;
     if (newTheme) {
-      document.documentElement.classList.add('dark')
-      localStorage.setItem(STORAGE_KEYS.THEME, 'dark')
-      setTheme('dark')
+      document.documentElement.classList.add('dark');
+      localStorage.setItem(STORAGE_KEYS.THEME, 'dark');
+      setTheme('dark');
     } else {
-      document.documentElement.classList.remove('dark')
-      localStorage.setItem(STORAGE_KEYS.THEME, 'light')
-      setTheme('light')
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem(STORAGE_KEYS.THEME, 'light');
+      setTheme('light');
     }
-  }
+  };
 
   const toggleLocale = () => {
-    const newLang = i18n.language === 'vi' ? 'en' : 'vi'
-    i18n.changeLanguage(newLang)
-    localStorage.setItem(STORAGE_KEYS.LOCALE, newLang)
-  }
+    const newLang = i18n.language === 'vi' ? 'en' : 'vi';
+    i18n.changeLanguage(newLang);
+    localStorage.setItem(STORAGE_KEYS.LOCALE, newLang);
+  };
 
   const handleLogout = async () => {
     try {
       if (client) {
         clearAllDrafts();
-        await client.disconnectUser()
+        await client.disconnectUser();
       }
     } catch (err) {
-      console.error('Logout error', err)
+      console.error('Logout error', err);
     } finally {
-      const savedUserId = client?.userID || localStorage.getItem(STORAGE_KEYS.USER_ID)
+      const savedUserId = client?.userID || localStorage.getItem(STORAGE_KEYS.USER_ID);
       if (savedUserId) {
-        sessionStorage.removeItem(`${STORAGE_KEYS.RECOVERY_GATE_ACKNOWLEDGED_CIDS}:${savedUserId}`)
+        sessionStorage.removeItem(`${STORAGE_KEYS.RECOVERY_GATE_ACKNOWLEDGED_CIDS}:${savedUserId}`);
       }
-      localStorage.removeItem(STORAGE_KEYS.TOKEN)
-      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
-      localStorage.removeItem(STORAGE_KEYS.USER_ID)
-      localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID)
-      window.location.href = '/login'
+      localStorage.removeItem(STORAGE_KEYS.TOKEN);
+      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+      localStorage.removeItem(STORAGE_KEYS.USER_ID);
+      localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID);
+      window.location.href = '/login';
     }
-  }
-
-  const handleClearCache = async () => {
-    if (!window.confirm(t('chat.menu_clear_cache_confirm', 'Are you sure you want to clear all cache data and log out?'))) {
-      return
-    }
-
-    try {
-      if (client?.userID) {
-        // Disconnect to release DB locks
-        await client.disconnectUser()
-
-        // Delete ALL IndexedDB databases for this domain
-        const dbs = await indexedDB.databases()
-        const deletePromises = dbs.map(db => {
-          return new Promise<void>((resolve) => {
-            if (db.name) {
-              const req = indexedDB.deleteDatabase(db.name)
-              req.onsuccess = () => resolve()
-              req.onerror = () => resolve()
-              req.onblocked = () => {
-                console.warn(`Delete database ${db.name} was blocked. Resolving anyway to continue logout.`)
-                resolve()
-              }
-            } else {
-              resolve()
-            }
-          })
-        })
-
-        await Promise.all(deletePromises)
-        console.log(`Successfully deleted all IndexedDB caches`)
-      }
-    } catch (err) {
-      console.error('Clear cache error', err)
-    } finally {
-      // Clear browser-scoped app storage
-      localStorage.clear()
-      sessionStorage.clear()
-
-      // Clear cookies
-      document.cookie.split(';').forEach((c) => {
-        document.cookie = c
-          .replace(/^ +/, '')
-          .replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/')
-      })
-
-      // Redirect to login
-      window.location.href = '/login'
-    }
-  }
+  };
 
   return (
     <div className="flex items-center gap-2 p-4 border-b background-primary backdrop-blur-md sticky top-0 z-10 shrink-0">
-
       {/* Left button: Back (search mode) or Hamburger menu (normal) */}
       {isSearchMode ? (
         <Button
@@ -180,26 +137,22 @@ export function SidebarHeader({
               className="flex items-center gap-3 cursor-pointer transition-colors"
               onClick={() => setIsProfileModalOpen(true)}
             >
-              <Avatar
-                image={user?.avatar}
-                name={userDisplayName}
-                size={32}
-              />
+              <Avatar image={user?.avatar} name={userDisplayName} size={32} />
               <div className="flex flex-col overflow-hidden">
                 <span className="font-medium text-sm truncate">
                   {userDisplayName || t('chat.menu_profile_anonymous', 'Anonymous')}
                 </span>
-                <span
-                  className="text-[10px] text-zinc-500 truncate"
-                  title={user?.email || user?.phone || user?.id}
-                >
+                <span className="text-[10px] text-zinc-500 truncate" title={user?.email || user?.phone || user?.id}>
                   {user?.email || user?.phone || user?.id}
                 </span>
               </div>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={() => onNavigate?.('invites')}>
+            <DropdownMenuItem
+              className="cursor-pointer flex items-center justify-between"
+              onClick={() => onNavigate?.('invites')}
+            >
               <div className="flex items-center">
                 <Inbox className="mr-2 h-4 w-4" />
                 <span>{t('chat.menu_invites', 'Lời mời')}</span>
@@ -211,16 +164,15 @@ export function SidebarHeader({
               )}
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="cursor-pointer flex items-center justify-between" onClick={() => onNavigate?.('contacts')}>
+            <DropdownMenuItem
+              className="cursor-pointer flex items-center justify-between"
+              onClick={() => onNavigate?.('contacts')}
+            >
               <div className="flex items-center">
                 <Users className="mr-2 h-4 w-4" />
                 <span>{t('chat.menu_contacts', 'Danh bạ')}</span>
               </div>
-              {contactCount > 0 && (
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {contactCount}
-                </span>
-              )}
+              {contactCount > 0 && <span className="text-xs text-zinc-500 dark:text-zinc-400">{contactCount}</span>}
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
@@ -240,9 +192,7 @@ export function SidebarHeader({
                 <Globe className="mr-2 h-4 w-4" />
                 <span>{t('chat.menu_locale', 'Ngôn ngữ')}</span>
               </div>
-              <span className="text-base">
-                {i18n.language === 'vi' ? '🇻🇳' : '🇬🇧'}
-              </span>
+              <span className="text-base">{i18n.language === 'vi' ? '🇻🇳' : '🇬🇧'}</span>
             </DropdownMenuItem>
 
             <DropdownMenuItem
@@ -253,30 +203,29 @@ export function SidebarHeader({
                 <KeyRound className="mr-2 h-4 w-4" />
                 <span>{t('recovery_pin.menu_label')}</span>
               </div>
-              <span className={`text-xs ${recovery.recoveryStatus?.unlocked
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-zinc-500 dark:text-zinc-400'
-                }`}>
+              <span
+                className={`text-xs ${
+                  recovery.recoveryStatus?.unlocked
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-zinc-500 dark:text-zinc-400'
+                }`}
+              >
                 {recovery.recoveryStatus === null
                   ? t('recovery_pin.menu_checking')
                   : recovery.recoveryStatus.hasVault === false
-                    ? t('recovery_pin.menu_not_set')
-                    : recovery.recoveryStatus.unlocked
-                      ? t('recovery_pin.menu_active')
-                      : t('recovery_pin.menu_locked')}
+                  ? t('recovery_pin.menu_not_set')
+                  : recovery.recoveryStatus.unlocked
+                  ? t('recovery_pin.menu_active')
+                  : t('recovery_pin.menu_locked')}
               </span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem className="cursor-pointer text-orange-500 focus:text-orange-500 focus:bg-orange-50 dark:focus:bg-orange-950/50" onClick={handleClearCache}>
-              <Database className="h-4 w-4" />
-              <span>{t('chat.menu_clear_cache', 'Clear Cache & Data')}</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            <DropdownMenuItem className="cursor-pointer text-red-500 focus:text-red-500 focus:bg-red-50 dark:focus:bg-red-950/50" onClick={handleLogout}>
+            <DropdownMenuItem
+              className="cursor-pointer text-red-500 focus:text-red-500 focus:bg-red-50 dark:focus:bg-red-950/50"
+              onClick={handleLogout}
+            >
               <LogOut className="h-4 w-4" />
               <span>{t('chat.menu_logout', 'Đăng xuất')}</span>
             </DropdownMenuItem>
@@ -292,11 +241,14 @@ export function SidebarHeader({
           type="text"
           value={isSearchMode ? searchQuery : ''}
           onChange={(e) => onSearchQueryChange?.(e.target.value)}
-          onFocus={() => { if (!isSearchMode) onSearchOpen?.() }}
+          onFocus={() => {
+            if (!isSearchMode) onSearchOpen?.();
+          }}
           readOnly={!isSearchMode}
           placeholder={t('chat.search_channels', 'Tìm kiếm...')}
-          className={`pl-9 h-9 rounded-full bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner text-sm focus-visible:ring-1 focus-visible:ring-primary/50 ${isSearchMode ? 'pr-8' : 'cursor-pointer'
-            }`}
+          className={`pl-9 h-9 rounded-full bg-zinc-100 dark:bg-[#252336] border-none dark:border dark:border-[#3a3555] shadow-inner text-sm focus-visible:ring-1 focus-visible:ring-primary/50 ${
+            isSearchMode ? 'pr-8' : 'cursor-pointer'
+          }`}
         />
         {isSearchMode && searchQuery && (
           <button
@@ -321,14 +273,8 @@ export function SidebarHeader({
       )}
 
       {/* Profile Modal */}
-      <ProfileModal
-        isOpen={isProfileModalOpen}
-        onClose={() => setIsProfileModalOpen(false)}
-      />
-      <UhmRecoveryPinDialog
-        isOpen={isRecoveryPinOpen}
-        onClose={() => setIsRecoveryPinOpen(false)}
-      />
+      <ProfileModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
+      <UhmRecoveryPinDialog isOpen={isRecoveryPinOpen} onClose={() => setIsRecoveryPinOpen(false)} />
     </div>
-  )
+  );
 }

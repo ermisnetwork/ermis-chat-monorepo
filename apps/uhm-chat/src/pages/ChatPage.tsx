@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatCore, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember } from '@ermis-network/ermis-chat-react'
+import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatCore, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember, canStartDirectCall } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
 import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
@@ -71,6 +71,7 @@ export function ChatPage() {
   const { t, i18n } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const { client, activeChannel, setActiveChannel } = useChatCore()
+  const canCallActiveChannel = canStartDirectCall(activeChannel, client?.userID)
   const recovery = useRecoveryPin()
   const recoveryGateAcknowledgement = useRecoveryGateAcknowledgement(client?.userID)
   const { status, retryConnection } = useConnectionStatus(client)
@@ -78,13 +79,12 @@ export function ChatPage() {
   useNotification(activeChannel)
   const syncState = useSyncStatus(client)
 
-  // Event Sourcing: cold start + offline→online sync only.
+  // Event Sourcing: run the initial hydrated sync here. Reconnect recovery is
+  // owned by the SDK recoverStateOnReconnect option so it is not triggered twice.
   useEffect(() => {
     if (!client) return
 
     let didSyncAfterChannelHydration = false
-    let wasOffline = false
-
     const runSync = (label: string, force = false) => {
       client.restoreSyncState()
         .then(() => client.performSync(force))
@@ -101,17 +101,6 @@ export function ChatPage() {
 
     const channelsQueriedSub = client.on('channels.queried', runHydratedColdStartSync)
 
-    const connectionSub = client.on('connection.changed', (event: any) => {
-      if (event.online) {
-        if (wasOffline) {
-          wasOffline = false
-          runSync('Offline recovery sync')
-        }
-      } else {
-        wasOffline = true
-      }
-    })
-
     // If channels were hydrated before this effect mounted, run immediately.
     // Otherwise wait for the first channels.queried event so cold start sends
     // exactly one sync request with real cursors.
@@ -121,7 +110,6 @@ export function ChatPage() {
 
     return () => {
       channelsQueriedSub.unsubscribe()
-      connectionSub.unsubscribe()
     }
   }, [client])
   // Directly update browser tab title with unread count (more reliable than Helmet)
@@ -716,43 +704,51 @@ export function ChatPage() {
     </Tooltip.Provider>
   )
 
-  const handleCallWithDeviceCheck = async (type: 'audio' | 'video', onClick: () => void) => {
-    try {
-      const isLinux = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
-      if (isLinux) {
-        alert(t('call.linux_coming_soon', 'Coming soon: Calls are not yet supported on Linux.'));
-        return;
+  const handleCallWithDeviceCheck = useCallback(
+    async (type: 'audio' | 'video', onClick: () => void) => {
+      if (!canCallActiveChannel) {
+        toast.error(t('chat.call.friendship_required', 'You need to be friends before starting a call.'))
+        return
       }
 
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        toast.error(t('call.unsupported', 'Your browser does not support media devices.'));
-        return;
-      }
-
-      // Try to acquire the media first to verify devices actually exist and permissions are granted
-      const constraints = type === 'video' ? { video: true, audio: true } : { audio: true };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
-      // Stop the tracks immediately, we just wanted to check availability
-      stream.getTracks().forEach(track => track.stop());
-
-      // If successful, proceed with the actual call
-      onClick();
-    } catch (error: any) {
-      console.error('Failed to check media devices:', error);
-      if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-        if (type === 'video') {
-          toast.error(t('call.no_cam_mic', 'No camera or microphone found. Cannot start video call.'));
-        } else {
-          toast.error(t('call.no_mic', 'No microphone found.'));
+      try {
+        const isLinux = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
+        if (isLinux) {
+          alert(t('call.linux_coming_soon', 'Coming soon: Calls are not yet supported on Linux.'));
+          return;
         }
-      } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        toast.error(t('call.permission_denied', 'Permission to access camera/microphone was denied.'));
-      } else {
-        toast.error(t('call.device_error', 'Could not access media devices.'));
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          toast.error(t('call.unsupported', 'Your browser does not support media devices.'));
+          return;
+        }
+
+        // Try to acquire the media first to verify devices actually exist and permissions are granted
+        const constraints = type === 'video' ? { video: true, audio: true } : { audio: true };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        // Stop the tracks immediately, we just wanted to check availability
+        stream.getTracks().forEach(track => track.stop());
+
+        // If successful, proceed with the actual call
+        onClick();
+      } catch (error: any) {
+        console.error('Failed to check media devices:', error);
+        if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+          if (type === 'video') {
+            toast.error(t('call.no_cam_mic', 'No camera or microphone found. Cannot start video call.'));
+          } else {
+            toast.error(t('call.no_mic', 'No microphone found.'));
+          }
+        } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+          toast.error(t('call.permission_denied', 'Permission to access camera/microphone was denied.'));
+        } else {
+          toast.error(t('call.device_error', 'Could not access media devices.'));
+        }
       }
-    }
-  };
+    },
+    [canCallActiveChannel, t],
+  )
 
   /** Audio call button injected into ChannelHeader */
   const renderAudioCallButton = useCallback(
@@ -769,7 +765,7 @@ export function ChatPage() {
       )
       return isSafari ? withSafariTooltip(btn) : btn
     },
-    [t, safariCallTooltip],
+    [handleCallWithDeviceCheck, t, safariCallTooltip],
   )
 
   /** Video call button injected into ChannelHeader */
@@ -787,7 +783,7 @@ export function ChatPage() {
       )
       return isSafari ? withSafariTooltip(btn) : btn
     },
-    [t, safariCallTooltip],
+    [handleCallWithDeviceCheck, t, safariCallTooltip],
   )
 
   // Reset UI state when leaving a channel or channel is deleted
@@ -1078,10 +1074,12 @@ export function ChatPage() {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col relative min-w-0">
-        {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
-        <ConnectionStatusBanner status={status} onRetry={retryConnection} />
-        {/* Sync Progress Banner — shows during active sync */}
-        <SyncStatusBanner syncState={syncState} />
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-30">
+          {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
+          <ConnectionStatusBanner status={status} onRetry={retryConnection} />
+          {/* Sync Progress Banner — shows during active sync */}
+          <SyncStatusBanner syncState={syncState} />
+        </div>
 
         {e2eeBootstrapRunning && e2eeBootstrapTotal > 0 && (
           <div className="mx-4 mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-[12px] font-semibold text-violet-800 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200">
@@ -1134,6 +1132,8 @@ export function ChatPage() {
             emptyTitle={t('chat.empty_title')}
             emptySubtitle={t('chat.empty_subtitle')}
             jumpToLatestLabel={t('overlays.jumpToLatest')}
+            repairingOverlayTitle={t('encrypted_history.repair_overlay_title')}
+            repairingOverlaySubtitle={t('encrypted_history.repair_overlay_description')}
             GapIndicatorComponent={MessageGapIndicator}
             blockedOverlayTitle={t('overlays.blockedTitle')}
             blockedOverlaySubtitle={t('overlays.blockedSubtitle')}

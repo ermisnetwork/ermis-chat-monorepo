@@ -1,9 +1,21 @@
 import { ChannelState } from './channel_state';
 import { normalizeFileName, isVideoFile, buildAttachmentPayload } from './attachment_utils';
 import type { VoiceRecordingMeta } from './attachment_utils';
-import { getPresignedUploadSize, uploadMultipartPresignedFile, uploadSinglePresignedFile } from './presigned_upload';
-import type { StandardPresignedUploadResponse } from './presigned_upload';
+import {
+  getPresignedUploadSize,
+  isPresignedUploadExpiredError,
+  uploadMultipartPresignedFile,
+  uploadSinglePresignedFile,
+} from './presigned_upload';
+import type { StandardPresignedUploadResponse, PendingUploadSession } from './presigned_upload';
+import type {
+  PendingStandardAttachmentUploadRecord,
+  StandardAttachmentFileState,
+  StandardUploadSession,
+} from './standard_attachment_upload_storage';
 import { encodeEncryptionChannelFields } from './encryption/encoding';
+import type { PendingE2eeSendRecord } from './encryption/types';
+import { resolvePendingE2eeAttachmentDisplayProgress } from './encryption/attachment_resume_progress';
 import {
   enrichWithUserInfo,
   ensureMembersUserInfoLoaded,
@@ -52,6 +64,16 @@ import {
   SyncEventType,
   ChannelQuerySeqOptions,
 } from './types';
+
+type OptimisticMessageDeleteSnapshot<ErmisChatGenerics extends ExtendableGenerics> = {
+  message: MessageResponse<ErmisChatGenerics> | FormatMessageResponse<ErmisChatGenerics>;
+  messageSeq: number;
+  wasHidden: boolean;
+  wasUnavailable: boolean;
+  wasPinned: boolean;
+  deleteToken: symbol;
+};
+
 /**
  * Represents a Channel in the Sub2s.
  * Channels handle chat sessions, livestream messages, teams, or video calls.
@@ -74,17 +96,28 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   disconnected: boolean;
   /** Timer handle for debounced IndexedDB persist of sync cursor on WS events */
   private _persistSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private _optimisticMessageDeleteTokens = new Map<string, symbol>();
   private _pendingStandardAttachmentSends = new Map<
     string,
     {
       message: Message<ErmisChatGenerics>;
       files: File[];
       localAttachments: any[];
+      fileStates: StandardAttachmentFileState[];
+      createdAt: string;
+      paused?: boolean;
       displayOverrides?: Map<number, Record<string, unknown>>;
       abortController: AbortController;
       phase: 'uploading' | 'sending';
       cancelled?: boolean;
       inFlight?: Promise<SendMessageAPIResponse<ErmisChatGenerics>>;
+    }
+  >();
+  private _pendingE2eeAttachmentSends = new Map<
+    string,
+    {
+      localAttachments: any[];
+      phase: 'generating_preview' | 'encrypting' | 'uploading' | 'completing' | 'sending';
     }
   >();
 
@@ -187,8 +220,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     let createdAtTime = Date.now();
     // Ensure optimistic message timestamp is strictly greater than the last message
     // to prevent UI jumping when client clock is slightly behind server clock.
-    if (lastMessage?.created_at && lastMessage.created_at.getTime() >= createdAtTime) {
-      createdAtTime = lastMessage.created_at.getTime() + 1;
+    const lastMessageTime = lastMessage?.created_at
+      ? lastMessage.created_at instanceof Date
+        ? lastMessage.created_at.getTime()
+        : new Date(lastMessage.created_at).getTime()
+      : 0;
+    if (Number.isFinite(lastMessageTime) && lastMessageTime >= createdAtTime) {
+      createdAtTime = lastMessageTime + 1;
     }
     const createdAtIso = new Date(createdAtTime).toISOString();
 
@@ -390,6 +428,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   private _dispatchLocalMessageStateEvent(
     type: 'message.new' | 'message.updated' | 'message.deleted' | 'message.pinned' | 'message.unpinned',
     message?: MessageResponse<ErmisChatGenerics> | FormatMessageResponse<ErmisChatGenerics>,
+    stateAlreadyApplied = false,
   ) {
     if (!message) return;
     const user = (message as any).user || this.getClient().user;
@@ -405,7 +444,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     } as unknown as Event<ErmisChatGenerics>;
 
     this._callChannelListeners(event);
-    this.getClient().dispatchEvent(event);
+    if (stateAlreadyApplied) {
+      this.getClient()._callClientListeners(event);
+    } else {
+      this.getClient().dispatchEvent(event);
+    }
   }
 
   private _setLocalMessagePinState(
@@ -434,6 +477,178 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return updated;
   }
 
+  restorePendingE2eeAttachmentUpload(record: PendingE2eeSendRecord): void {
+    if (
+      record.cid !== this.cid ||
+      !record.message_id ||
+      !record.files?.length
+    ) {
+      return;
+    }
+
+    const displayOverrides = record.display_overrides
+      ? new Map<number, Record<string, unknown>>(
+          record.display_overrides.map((value, index) => [index, value || {}]),
+        )
+      : undefined;
+    const existingPendingSend = this._pendingE2eeAttachmentSends.get(record.message_id);
+    const localAttachments =
+      existingPendingSend?.localAttachments || this._buildPendingLocalAttachments(record.files, displayOverrides);
+    const phase =
+      record.status === 'generating_preview' ||
+      record.status === 'encrypting' ||
+      record.status === 'uploading' ||
+      record.status === 'sending'
+        ? record.status
+        : 'uploading';
+    const progressByAttachment = localAttachments.map((_, index) =>
+      resolvePendingE2eeAttachmentDisplayProgress(record, index),
+    );
+    if (existingPendingSend) existingPendingSend.phase = phase;
+    else this._pendingE2eeAttachmentSends.set(record.message_id, { localAttachments, phase });
+
+    const existing = this._findLocalMessageById(record.message_id);
+    if (existing) {
+      this.state.updateMessageById(record.message_id, (message) => ({
+        ...message,
+        status: 'sending',
+        attachments: ((message.attachments?.length || 0) === localAttachments.length
+          ? message.attachments || []
+          : localAttachments
+        ).map((attachment: any, index: number) => ({
+          ...attachment,
+          upload_status: phase,
+          upload_progress: Math.max(attachment.upload_progress || 0, progressByAttachment[index] || 0),
+        })),
+      }));
+      this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(record.message_id) as any, true);
+      return;
+    }
+    const metadata = record.aad_metadata || {};
+    const createdAt =
+      typeof metadata.local_created_at === 'string'
+        ? metadata.local_created_at
+        : new Date(record.created_at || Date.now()).toISOString();
+    const quotedMessageId =
+      typeof metadata.quoted_message_id === 'string' ? metadata.quoted_message_id : undefined;
+    const optimisticMessage = {
+      id: record.message_id,
+      cid: record.cid,
+      text: record.text || '',
+      attachments: localAttachments.map((attachment, index) => ({
+        ...attachment,
+        upload_status: phase,
+        upload_progress: progressByAttachment[index] || 0,
+      })),
+      status: 'sending',
+      created_at: createdAt,
+      updated_at: createdAt,
+      user: this.getClient().user,
+      user_id: this.getClient().userID,
+      type: 'regular',
+      parent_id: typeof metadata.parent_id === 'string' ? metadata.parent_id : undefined,
+      quoted_message_id: quotedMessageId,
+      quoted_message: quotedMessageId ? this.state.findMessage(quotedMessageId) : undefined,
+      mentioned_users: Array.isArray(metadata.mentioned_users) ? metadata.mentioned_users : undefined,
+      mentioned_all: metadata.mentioned_all === true,
+      forward_cid: typeof metadata.forward_cid === 'string' ? metadata.forward_cid : undefined,
+      forward_message_id:
+        typeof metadata.forward_message_id === 'string' ? metadata.forward_message_id : undefined,
+      forward_parent_cid:
+        typeof metadata.forward_parent_cid === 'string' ? metadata.forward_parent_cid : undefined,
+    } as unknown as MessageResponse<ErmisChatGenerics>;
+
+    this.state.addMessageSorted(optimisticMessage);
+    this._dispatchLocalMessageStateEvent(
+      'message.new',
+      this._findLocalMessageById(record.message_id) as any,
+      true,
+    );
+  }
+
+  updatePendingE2eeAttachmentUpload(messageId: string, progress: any): void {
+    const pendingSend = this._pendingE2eeAttachmentSends.get(messageId);
+    if (pendingSend) pendingSend.phase = progress.phase;
+    const rawFileIndex = Number.isInteger(progress?.fileIndex) ? progress.fileIndex : undefined;
+    const attachmentCount = pendingSend?.localAttachments.length || 0;
+    const fallbackToAllAttachments = rawFileIndex === undefined && attachmentCount > 1;
+    const fileIndex = rawFileIndex ?? 0;
+    const percentage = Math.max(0, Math.min(100, Math.round(progress.percentage)));
+    this.state.updateMessageById(messageId, (message) => ({
+      ...message,
+      status: 'sending',
+      attachments: (message.attachments || []).map((attachment: any, index: number) =>
+        fallbackToAllAttachments || index === fileIndex
+          ? {
+              ...attachment,
+              upload_status: progress.phase,
+              upload_progress: Math.max(attachment.upload_progress || 0, percentage),
+            }
+          : attachment,
+      ),
+    }));
+    this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any, true);
+  }
+
+  completePendingE2eeAttachmentUpload(messageId: string, response: any): void {
+    const pendingSend = this._pendingE2eeAttachmentSends.get(messageId);
+    this._pendingE2eeAttachmentSends.delete(messageId);
+    this._revokePendingLocalAttachments(pendingSend?.localAttachments || []);
+    const responseMessage = response?.message;
+    const isEncryptedEnvelope =
+      responseMessage?.content_type === 'mls' || Boolean(responseMessage?.mls_ciphertext);
+    if (responseMessage && !isEncryptedEnvelope) {
+      const responseUserId =
+        responseMessage.user?.id || responseMessage.user_id || this.getClient().userID || '';
+      const confirmedMessage = {
+        ...responseMessage,
+        id: responseMessage.id || messageId,
+        status: 'received',
+        user: pickUserWithDisplayName(
+          responseUserId,
+          responseMessage.user,
+          this.getClient().state.users[responseUserId],
+          this.getClient().user,
+        ),
+      } as MessageResponse<ErmisChatGenerics>;
+      if (responseMessage.id && responseMessage.id !== messageId) {
+        this._removeLocalMessageById(messageId);
+      }
+      this.state.addMessageSorted(confirmedMessage, true, true, 'current');
+      this._dispatchLocalMessageStateEvent('message.updated', confirmedMessage, true);
+      return;
+    }
+
+    this.state.updateMessageById(messageId, (message) => ({
+      ...message,
+      status: 'received',
+      attachments: (message.attachments || []).map((attachment: any) => ({
+        ...attachment,
+        upload_status: 'sent',
+        upload_progress: 100,
+      })),
+    }));
+    this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any, true);
+  }
+
+  failPendingE2eeAttachmentUpload(messageId: string, error: unknown): void {
+    const typedError = error as { code?: string; isWSFailure?: boolean; message?: string };
+    const isOffline =
+      typedError?.code === 'ERR_NETWORK' ||
+      typedError?.isWSFailure === true ||
+      typedError?.message?.toLowerCase().includes('network error') === true ||
+      this.getClient().wsConnection?.isHealthy === false;
+    this.state.updateMessageById(messageId, (message) => ({
+      ...message,
+      status: isOffline ? 'failed_offline' : 'error',
+      attachments: (message.attachments || []).map((attachment: any) => ({
+        ...attachment,
+        upload_status: isOffline ? 'paused' : 'failed',
+      })),
+    }));
+    this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any, true);
+  }
+
   async enqueueE2eeAttachmentMessage(
     message: Message<ErmisChatGenerics>,
     files: Blob[],
@@ -454,7 +669,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       (message as any).quoted_message ||
       (message.quoted_message_id ? this.state.findMessage(message.quoted_message_id) : undefined);
     const localAttachments = this._buildPendingLocalAttachments(files, options.displayOverrides);
-    const now = new Date().toISOString();
+    const lastMessage = this.state.messages[this.state.messages.length - 1];
+    const lastMessageTime = lastMessage?.created_at
+      ? lastMessage.created_at instanceof Date
+        ? lastMessage.created_at.getTime()
+        : new Date(lastMessage.created_at).getTime()
+      : 0;
+    const now = new Date(Math.max(Date.now(), (Number.isFinite(lastMessageTime) ? lastMessageTime : 0) + 1)).toISOString();
     const optimisticMessage = {
       ...message,
       id: messageId,
@@ -468,8 +689,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       type: message.type || 'regular',
     } as unknown as MessageResponse<ErmisChatGenerics>;
 
+    this._pendingE2eeAttachmentSends.set(messageId, {
+      localAttachments,
+      phase: 'uploading',
+    });
     this.state.addMessageSorted(optimisticMessage);
-    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any, true);
 
     void encryptionMgr.enqueueE2eeAttachmentMessage({
       channelType: this.type,
@@ -490,56 +715,111 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       },
       displayOverrides: options.displayOverrides,
       localAttachments,
-      onProgress: (progress: any) => {
-        const rawFileIndex = Number.isInteger(progress?.fileIndex) ? progress.fileIndex : undefined;
-        const fallbackToAllAttachments = rawFileIndex === undefined && localAttachments.length > 1;
-        const fileIndex = rawFileIndex ?? 0;
-        const percentage = Math.max(0, Math.min(100, Math.round(progress.percentage)));
-        this.state.updateMessageById(messageId, (msg) => ({
-          ...msg,
-          status: 'sending',
-          attachments: (msg.attachments || []).map((attachment: any, index: number) =>
-            fallbackToAllAttachments || index === fileIndex
-              ? { ...attachment, upload_status: progress.phase, upload_progress: percentage }
-              : attachment,
-          ),
-        }));
-        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
-      },
-      onSuccess: (response: any) => {
-        this._revokePendingLocalAttachments(localAttachments);
-        if (response?.message) {
-          const responseUserId =
-            response.message.user?.id || (response.message as any).user_id || this.getClient().userID || '';
-          const confirmedMessage = {
-            ...response.message,
-            status: 'received',
-            user: pickUserWithDisplayName(
-              responseUserId,
-              response.message.user,
-              this.getClient().state.users[responseUserId],
-              this.getClient().user,
-            ),
-          } as MessageResponse<ErmisChatGenerics>;
-          this._removeLocalMessageById(messageId);
-          this.state.addMessageSorted(confirmedMessage, true, true, 'current');
-          this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
-        }
-      },
-      onError: () => {
-        this.state.updateMessageById(messageId, (msg) => ({
-          ...msg,
-          status: 'error',
-          attachments: (msg.attachments || []).map((attachment: any) => ({
-            ...attachment,
-            upload_status: 'failed',
-          })),
-        }));
-        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
-      },
+      onProgress: (progress: any) => this.updatePendingE2eeAttachmentUpload(messageId, progress),
+      onSuccess: (response: any) => this.completePendingE2eeAttachmentUpload(messageId, response),
+      onError: (error: unknown) => this.failPendingE2eeAttachmentUpload(messageId, error),
     });
 
     return { message: optimisticMessage };
+  }
+
+  private _pendingStandardAttachmentRecord(messageId: string): PendingStandardAttachmentUploadRecord | undefined {
+    const pending = this._pendingStandardAttachmentSends.get(messageId);
+    if (!pending || !this.id) return undefined;
+    return {
+      version: 1,
+      message_id: messageId,
+      cid: this.cid,
+      channel_type: this.type,
+      channel_id: this.id,
+      created_at: pending.createdAt,
+      message: pending.message as Message,
+      files: pending.files,
+      display_overrides: pending.displayOverrides ? Array.from(pending.displayOverrides.entries()) : undefined,
+      file_states: pending.fileStates,
+    };
+  }
+
+  private async _persistPendingStandardAttachment(messageId: string): Promise<void> {
+    const storage = this.getClient().standardAttachmentUploadStorage;
+    const persisted = this._pendingStandardAttachmentRecord(messageId);
+    if (!storage || !persisted) return;
+    try {
+      await storage.save(persisted);
+    } catch (error) {
+      this.getClient().logger('warn', 'Failed to persist pending standard attachment upload', {
+        cid: this.cid,
+        messageId,
+        err: error,
+        tags: ['storage', 'attachment'],
+      });
+    }
+  }
+
+  private async _deletePersistedStandardAttachment(messageId: string): Promise<void> {
+    try {
+      await this.getClient().standardAttachmentUploadStorage?.delete(messageId);
+    } catch (error) {
+      this.getClient().logger('warn', 'Failed to delete pending standard attachment upload', {
+        cid: this.cid,
+        messageId,
+        err: error,
+        tags: ['storage', 'attachment'],
+      });
+    }
+  }
+
+  async restorePendingStandardAttachmentUpload(persisted: PendingStandardAttachmentUploadRecord): Promise<void> {
+    if (
+      persisted.version !== 1 ||
+      persisted.cid !== this.cid ||
+      !Array.isArray(persisted.files) ||
+      persisted.files.length === 0 ||
+      this._pendingStandardAttachmentSends.has(persisted.message_id)
+    ) {
+      return;
+    }
+
+    const displayOverrides = persisted.display_overrides
+      ? new Map<number, Record<string, unknown>>(persisted.display_overrides)
+      : undefined;
+    const localAttachments = this._buildPendingLocalAttachments(persisted.files, displayOverrides);
+    const fileStates = persisted.files.map((_, index) => ({
+      progress: Math.max(0, Math.min(100, persisted.file_states?.[index]?.progress || 0)),
+      session: persisted.file_states?.[index]?.session,
+      attachment: persisted.file_states?.[index]?.attachment,
+    }));
+    const optimisticMessage = {
+      ...(persisted.message as Message<ErmisChatGenerics>),
+      id: persisted.message_id,
+      attachments: localAttachments.map((attachment, index) => ({
+        ...attachment,
+        upload_status: fileStates[index].attachment ? 'uploaded' : 'paused',
+        upload_progress: fileStates[index].attachment ? 100 : Math.min(99, fileStates[index].progress),
+      })),
+      status: 'failed_offline',
+      created_at: persisted.created_at,
+      updated_at: persisted.created_at,
+      user: this.getClient().user,
+      user_id: this.getClient().userID,
+    } as unknown as MessageResponse<ErmisChatGenerics>;
+
+    this._pendingStandardAttachmentSends.set(persisted.message_id, {
+      message: persisted.message as Message<ErmisChatGenerics>,
+      files: persisted.files,
+      localAttachments,
+      fileStates,
+      createdAt: persisted.created_at,
+      displayOverrides,
+      abortController: new AbortController(),
+      phase: 'uploading',
+      paused: true,
+    });
+    this.state.addMessageSorted(optimisticMessage);
+    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(persisted.message_id) as any);
+    if (this.getClient().wsConnection?.isHealthy) {
+      void this.resumePendingStandardAttachmentUploads();
+    }
   }
 
   /**
@@ -589,12 +869,31 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       displayOverrides: options.displayOverrides,
       abortController: new AbortController(),
       phase: 'uploading',
+      fileStates: files.map(() => ({ progress: 0 })),
+      createdAt: now,
     });
     this.state.addMessageSorted(optimisticMessage);
     this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+    await this._persistPendingStandardAttachment(messageId);
 
     void this._processStandardAttachmentMessage(messageId).catch(() => undefined);
     return { message: optimisticMessage };
+  }
+
+  /**
+   * Returns true when a file stored in IndexedDB can no longer be read from the filesystem.
+   * This happens after app restart if the file was renamed, moved, or deleted by the user
+   * between sessions. In this case the pending upload must be permanently aborted
+   * (not retried as an offline error) to avoid an infinite failed_offline loop.
+   */
+  private _isFileNotReadableError(error: unknown): boolean {
+    if (error instanceof DOMException) {
+      // Standard name from the File API spec
+      return error.name === 'NotReadableError' || error.name === 'NotFoundError';
+    }
+    // Some runtimes/browsers wrap or forward the error as a generic Error
+    const msg = (error as any)?.message?.toLowerCase() || '';
+    return msg.includes('notreadable') || msg.includes('file not found') || msg.includes('no such file');
   }
 
   private async _processStandardAttachmentMessage(
@@ -605,6 +904,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (record.inFlight) return await record.inFlight;
 
     record.phase = 'uploading';
+    if (record.abortController.signal.aborted) {
+      record.abortController = new AbortController();
+    }
+    record.paused = false;
     record.cancelled = false;
     const signal = record.abortController.signal;
     const throwIfCancelled = () => {
@@ -621,7 +924,21 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         for (let index = 0; index < record.files.length; index += 1) {
           throwIfCancelled();
           const originalFile = record.files[index];
-          let lastProgressPercentage = -1;
+          const fileState = record.fileStates[index] || { progress: 0 };
+          record.fileStates[index] = fileState;
+          if (fileState.attachment) {
+            attachments[index] = fileState.attachment;
+            this.state.updateMessageById(messageId, (msg) => ({
+              ...msg,
+              attachments: (msg.attachments || []).map((attachment: any, attachmentIndex: number) =>
+                attachmentIndex === index
+                  ? { ...attachment, upload_status: 'uploaded', upload_progress: 100 }
+                  : attachment,
+              ),
+            }));
+            continue;
+          }
+          let lastProgressPercentage = fileState.progress;
           let lastProgressAt = 0;
           const normalizedName = normalizeFileName(originalFile.name);
           const file =
@@ -637,45 +954,86 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             status: 'sending',
             attachments: (msg.attachments || []).map((attachment: any, attachmentIndex: number) =>
               attachmentIndex === index
-                ? { ...attachment, upload_status: 'uploading', upload_progress: 0 }
+                ? { ...attachment, upload_status: 'uploading', upload_progress: Math.min(99, fileState.progress) }
                 : attachment,
             ),
           }));
           this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
 
-          const uploadResponse = await this.uploadFilePresigned(
-            file,
-            file.name,
-            file.type || 'application/octet-stream',
-            (progress) => {
-              if (record.cancelled || signal.aborted) return;
-              const percentage = Math.max(0, Math.min(100, Math.round(progress.percentage)));
-              const now = Date.now();
-              if (
-                percentage === lastProgressPercentage ||
-                (percentage < 100 && lastProgressPercentage >= 0 && now - lastProgressAt < 50)
-              ) {
-                return;
+          let uploadResponse: { file: string } | undefined;
+          for (let presignAttempt = 0; presignAttempt < 2 && !uploadResponse; presignAttempt += 1) {
+            uploadResponse = await this.uploadFilePresigned(
+              file,
+              file.name,
+              file.type || 'application/octet-stream',
+              (progress) => {
+                if (record.cancelled || signal.aborted) return;
+                const percentage = Math.max(
+                  fileState.progress,
+                  Math.max(0, Math.min(99, Math.round(progress.percentage))),
+                );
+                const now = Date.now();
+                if (
+                  percentage === lastProgressPercentage ||
+                  (percentage < 100 && lastProgressPercentage >= 0 && now - lastProgressAt < 50)
+                ) {
+                  return;
+                }
+                fileState.progress = percentage;
+                lastProgressPercentage = percentage;
+                lastProgressAt = now;
+                this.state.updateMessageById(messageId, (msg) => ({
+                  ...msg,
+                  status: 'sending',
+                  attachments: (msg.attachments || []).map((attachment: any, attachmentIndex: number) =>
+                    attachmentIndex === index
+                      ? {
+                          ...attachment,
+                          upload_status: 'uploading',
+                          upload_progress: percentage,
+                        }
+                      : attachment,
+                  ),
+                }));
+                this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+              },
+              signal,
+              {
+                session: fileState.session,
+                onSession: async (session) => {
+                  fileState.session = session;
+                  await this._persistPendingStandardAttachment(messageId);
+                },
+                onPartCompleted: async () => {
+                  await this._persistPendingStandardAttachment(messageId);
+                },
+              },
+            ).catch(async (error: unknown) => {
+              if (presignAttempt === 0 && isPresignedUploadExpiredError(error)) {
+                // Spec section 7.1: refresh presigned URLs via GET /upload-sessions
+                // KHÔNG tạo session mới — tránh orphaned multipart sessions trên S3
+                const refreshed = await this._refreshUploadSession(
+                  fileState.session?.presign.attachment_id,
+                );
+                fileState.session = refreshed; // undefined → next attempt POST /presign
+                await this._persistPendingStandardAttachment(messageId);
+                return undefined;
               }
-              lastProgressPercentage = percentage;
-              lastProgressAt = now;
-              this.state.updateMessageById(messageId, (msg) => ({
-                ...msg,
-                status: 'sending',
-                attachments: (msg.attachments || []).map((attachment: any, attachmentIndex: number) =>
-                  attachmentIndex === index
-                    ? {
-                        ...attachment,
-                        upload_status: 'uploading',
-                        upload_progress: percentage,
-                      }
-                    : attachment,
-                ),
-              }));
-              this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
-            },
-            signal,
-          );
+              throw error;
+            });
+          }
+          if (!uploadResponse) throw new Error('Unable to obtain a valid presigned upload session');
+          this.state.updateMessageById(messageId, (msg) => ({
+            ...msg,
+            attachments: (msg.attachments || []).map((attachment: any, attachmentIndex: number) =>
+              attachmentIndex === index
+                ? { ...attachment, upload_status: 'uploaded', upload_progress: 100 }
+                : attachment,
+            ),
+          }));
+          this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+
+          fileState.progress = 100;
 
           throwIfCancelled();
           let thumbUrl = '';
@@ -706,10 +1064,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                   duration: Number((override as any).duration) || 0,
                 }
               : undefined;
-          attachments.push({
+          const preparedAttachment = {
             ...buildAttachmentPayload(file, uploadResponse.file, thumbUrl, voiceMeta),
             ...override,
-          } as Attachment);
+          } as Attachment;
+          attachments[index] = preparedAttachment;
+          fileState.attachment = preparedAttachment;
+          fileState.session = undefined;
+          await this._persistPendingStandardAttachment(messageId);
         }
 
         throwIfCancelled();
@@ -747,11 +1109,38 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         this._revokePendingLocalAttachments(record.localAttachments);
         this._pendingStandardAttachmentSends.delete(messageId);
+        await this._deletePersistedStandardAttachment(messageId);
         return response;
       } catch (error: any) {
-        if (record.cancelled || signal.aborted) throw error;
+        if (record.cancelled) throw error;
+
+        // File was renamed, moved, or deleted since it was stored in IndexedDB.
+        // There is no way to recover — abort permanently and clean up IDB.
+        if (this._isFileNotReadableError(error)) {
+          record.cancelled = true;
+          this._revokePendingLocalAttachments(record.localAttachments);
+          this._pendingStandardAttachmentSends.delete(messageId);
+          await this._deletePersistedStandardAttachment(messageId);
+          const stateMessage = this._findLocalMessageById(messageId);
+          if (stateMessage) {
+            this.state.updateMessageById(messageId, (msg) => ({
+              ...msg,
+              status: 'error',
+              attachments: (msg.attachments || []).map((attachment: any) => ({
+                ...attachment,
+                upload_status: 'failed',
+              })),
+            }));
+            this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+          }
+          throw error;
+        }
+
+        const paused = record.paused || signal.aborted;
+        const isPresignedHttpError = typeof error?.status === 'number';
         const isOfflineError =
-          !error.response ||
+          paused ||
+          (!isPresignedHttpError && !error.response) ||
           error.code === 'ERR_NETWORK' ||
           error.isWSFailure ||
           !this.getClient().wsConnection?.isHealthy;
@@ -760,10 +1149,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           status: isOfflineError ? 'failed_offline' : 'error',
           attachments: (msg.attachments || []).map((attachment: any) => ({
             ...attachment,
-            upload_status: 'failed',
+            upload_status: isOfflineError ? 'paused' : 'failed',
           })),
         }));
         this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+        if (isOfflineError) await this._persistPendingStandardAttachment(messageId);
         throw error;
       }
     };
@@ -787,6 +1177,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     pendingStandardSend.abortController.abort();
     this._pendingStandardAttachmentSends.delete(messageId);
     this._revokePendingLocalAttachments(pendingStandardSend.localAttachments);
+    await this._deletePersistedStandardAttachment(messageId);
 
     const stateMessage = this._findLocalMessageById(messageId);
     if (stateMessage) {
@@ -797,12 +1188,89 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
   async cancelPendingE2eeSend(messageId: string) {
     const stateMsg = this.state.messages.find((message) => message.id === messageId);
-    this._revokePendingLocalAttachments(((stateMsg as any)?.attachments || []) as any[]);
-    await this.getClient().encryptionManager?.cancelPendingE2eeSend(messageId);
+    const pendingSend = this._pendingE2eeAttachmentSends.get(messageId);
+    this._pendingE2eeAttachmentSends.delete(messageId);
+    this._revokePendingLocalAttachments(
+      pendingSend?.localAttachments || (((stateMsg as any)?.attachments || []) as any[]),
+    );
+    const cancellation = this.getClient().encryptionManager?.cancelPendingE2eeSend(messageId);
     if (stateMsg) {
       this._removeLocalMessageById(messageId);
       this._dispatchLocalMessageStateEvent('message.deleted', stateMsg as any);
     }
+    await cancellation;
+  }
+
+  pausePendingStandardAttachmentUploads(): number {
+    const pendingEntries = Array.from(this._pendingStandardAttachmentSends.entries()).filter(
+      ([, pending]) => pending.phase === 'uploading' && !pending.paused,
+    );
+    pendingEntries.forEach(([messageId, pending]) => {
+      pending.paused = true;
+      pending.abortController.abort();
+      this.state.updateMessageById(messageId, (message) => ({
+        ...message,
+        status: 'failed_offline',
+        attachments: (message.attachments || []).map((attachment: any) => ({
+          ...attachment,
+          upload_status: attachment.upload_progress === 100 ? 'uploaded' : 'paused',
+        })),
+      }));
+      this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+      void this._persistPendingStandardAttachment(messageId);
+    });
+    return pendingEntries.length;
+  }
+
+  async resumePendingStandardAttachmentUploads(): Promise<number> {
+    const messageIds = Array.from(this._pendingStandardAttachmentSends.entries())
+      .filter(([, pending]) => pending.paused || !pending.inFlight)
+      .map(([messageId]) => messageId);
+
+    await Promise.all(
+      messageIds.map(async (messageId) => {
+        const pending = this._pendingStandardAttachmentSends.get(messageId);
+        if (!pending) return;
+        if (pending.inFlight) {
+          await pending.inFlight.catch(() => undefined);
+        }
+        if (this._pendingStandardAttachmentSends.get(messageId) !== pending) return;
+        pending.paused = false;
+        this.state.updateMessageById(messageId, (message) => ({
+          ...message,
+          status: 'sending',
+          attachments: (message.attachments || []).map((attachment: any, index: number) => ({
+            ...attachment,
+            upload_status: pending.fileStates[index]?.attachment ? 'uploaded' : 'uploading',
+            upload_progress: pending.fileStates[index]?.attachment
+              ? 100
+              : Math.min(99, pending.fileStates[index]?.progress || 0),
+          })),
+        }));
+        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+        await this._processStandardAttachmentMessage(messageId).catch((error) => {
+          if (pending.paused) return;
+          this.getClient().logger('warn', 'Failed to resume pending standard attachment upload', {
+            cid: this.cid,
+            messageId,
+            err: error,
+          });
+        });
+      }),
+    );
+    return messageIds.length;
+  }
+
+  /**
+   * Pause standard uploads. E2EE pending jobs stay durable so Khoa's
+   * resumePendingE2eeSends flow can restart them after reconnect.
+   */
+  abortPendingAttachmentUploads() {
+    const standardIds = Array.from(this._pendingStandardAttachmentSends.entries())
+      .filter(([, pending]) => pending.phase === 'uploading')
+      .map(([messageId]) => messageId);
+    this.pausePendingStandardAttachmentUploads();
+    return standardIds.length;
   }
 
   async retryMessage(messageId: string) {
@@ -813,10 +1281,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       this.state.updateMessageById(messageId, (msg) => ({
         ...msg,
         status: 'sending',
-        attachments: (msg.attachments || []).map((attachment: any) => ({
+        attachments: (msg.attachments || []).map((attachment: any, index: number) => ({
           ...attachment,
-          upload_status: 'uploading',
-          upload_progress: 0,
+          upload_status: this._pendingStandardAttachmentSends.get(messageId)?.fileStates[index]?.attachment
+            ? 'uploaded'
+            : 'uploading',
+          upload_progress: attachment.upload_progress,
         })),
       }));
       this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
@@ -1078,13 +1548,61 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   /**
+   * Fetches fresh presigned URLs for a pending multipart upload session.
+   *
+   * Called when a chunk upload fails with HTTP 403 (presigned URL expired).
+   * Per spec section 7.1: instead of creating a new upload session via POST /presign,
+   * the client should call GET /upload-sessions to obtain refreshed URLs for
+   * remaining parts without losing already-completed parts.
+   *
+   * @returns A refreshed StandardUploadSession, or undefined if the session has expired/not found.
+   */
+  private async _refreshUploadSession(
+    attachmentId: string | undefined,
+  ): Promise<StandardUploadSession | undefined> {
+    if (!attachmentId) return undefined;
+    try {
+      const resp = await this.getClient().get<{ sessions: PendingUploadSession[] }>(
+        `${this._channelURL()}/file/upload-sessions`,
+      );
+      const serverSession = (resp.sessions || []).find(
+        (s) => s.attachment_id === attachmentId,
+      );
+      if (!serverSession) {
+        // Session expired or cleaned up on server (spec section 7.2)
+        return undefined;
+      }
+      const ttlSecs = serverSession.ttl_secs ?? 900;
+      return {
+        presign: {
+          attachment_id: serverSession.attachment_id,
+          upload_mode: 'multipart',
+          upload_url: null,
+          multipart: {
+            upload_id: serverSession.upload_id,
+            part_size: serverSession.part_size,
+            part_count: serverSession.part_count,
+            parts: serverSession.remaining_parts,
+            completed_parts: serverSession.completed_parts,
+          },
+        },
+        expires_at: Date.now() + ttlSecs * 1000,
+        completed_parts: serverSession.completed_parts,
+      };
+    } catch {
+      // Network error or unexpected response — fall back to new presign on next attempt
+      return undefined;
+    }
+  }
+
+  /**
    * Uploads a file directly to the storage bucket via a presigned URL, bypassing the server.
    * This reduces server bandwidth and latency for file uploads.
    *
-   * @param file       - The File or Blob to upload
-   * @param name       - The file name
+   * @param file        - The File or Blob to upload
+   * @param name        - The file name
    * @param contentType - The MIME type of the file
-   * @param onProgress - Optional callback for upload progress (browser only)
+   * @param onProgress  - Optional callback for upload progress (browser only)
    */
   async uploadFilePresigned(
     file: File | Blob | Buffer,
@@ -1092,15 +1610,40 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     contentType: string,
     onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void,
     signal?: AbortSignal,
+    options: {
+      session?: StandardUploadSession;
+      onSession?: (session: StandardUploadSession) => void | Promise<void>;
+      onPartCompleted?: (session: StandardUploadSession) => void | Promise<void>;
+    } = {},
   ): Promise<{ file: string }> {
-    const presignResp = await this.getClient().post<StandardPresignedUploadResponse>(
-      `${this._channelURL()}/file/presign`,
-      {
-        file_name: name,
-        content_type: contentType,
-        file_size: getPresignedUploadSize(file),
-      },
-    );
+    const sessionSafetyWindowMs = 60_000;
+    const totalSize = getPresignedUploadSize(file);
+    const uploadProgress = onProgress
+      ? (progress: { loaded: number; total: number; percentage: number }) =>
+          onProgress({ ...progress, percentage: Math.min(99, progress.percentage) })
+      : undefined;
+
+    let session =
+      options.session && options.session.expires_at > Date.now() + sessionSafetyWindowMs ? options.session : undefined;
+    if (!session) {
+      const presign = await this.getClient().post<StandardPresignedUploadResponse>(
+        `${this._channelURL()}/file/presign`,
+        {
+          file_name: name,
+          content_type: contentType,
+          file_size: totalSize,
+        },
+      );
+      const ttlSeconds = presign.ttl_secs ?? 900;
+      session = {
+        presign,
+        expires_at: Date.now() + Math.max(0, ttlSeconds) * 1000,
+        completed_parts: [],
+      };
+      await options.onSession?.(session);
+    }
+
+    const presignResp = session.presign;
 
     const confirmPayload: Record<string, unknown> = {
       attachment_id: presignResp.attachment_id,
@@ -1110,17 +1653,32 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     if (presignResp.upload_mode === 'multipart') {
       const multipart = presignResp.multipart;
-      const multipartUploadId = multipart?.upload_id || multipart?.multipart_upload_id;
+      const multipartUploadId = multipart?.upload_id;
       if (!multipart || !multipartUploadId) {
         throw new Error('Presigned multipart response does not contain an upload ID');
       }
       confirmPayload.multipart_upload_id = multipartUploadId;
-      confirmPayload.parts = await uploadMultipartPresignedFile(file, multipart, onProgress, undefined, signal);
+      confirmPayload.parts = await uploadMultipartPresignedFile(
+        file,
+        multipart,
+        uploadProgress,
+        undefined,
+        signal,
+        session.completed_parts,
+        async (completedPart) => {
+          const completedByNumber = new Map(session.completed_parts.map((part) => [part.part_number, part] as const));
+          completedByNumber.set(completedPart.part_number, completedPart);
+          session.completed_parts = Array.from(completedByNumber.values()).sort(
+            (left, right) => left.part_number - right.part_number,
+          );
+          await options.onPartCompleted?.(session);
+        },
+      );
     } else {
       if (!presignResp.upload_url) {
         throw new Error('Presigned single upload response does not contain an upload URL');
       }
-      await uploadSinglePresignedFile(presignResp.upload_url, file, contentType, onProgress, signal);
+      await uploadSinglePresignedFile(presignResp.upload_url, file, contentType, uploadProgress, signal);
     }
 
     if (signal?.aborted) {
@@ -1129,7 +1687,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       throw error;
     }
 
-    return await this.getClient().post<{ file: string }>(`${this._channelURL()}/file/confirm`, confirmPayload);
+    const response = await this.getClient().post<{ file: string }>(
+      `${this._channelURL()}/file/confirm`,
+      confirmPayload,
+    );
+    onProgress?.({ loaded: totalSize, total: totalSize, percentage: 100 });
+    return response;
   }
 
   /**
@@ -2113,17 +2676,179 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return state.messages;
   }
 
-  async deleteMessage(messageId: string) {
-    return await this.getClient().delete<APIResponse & { message: MessageResponse<ErmisChatGenerics> }>(
-      this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageId}`,
-    );
+  private async _applyOptimisticMessageDelete(
+    messageId: string,
+    forMe: boolean,
+    fallbackMessage?: MessageResponse<ErmisChatGenerics> | FormatMessageResponse<ErmisChatGenerics>,
+  ): Promise<OptimisticMessageDeleteSnapshot<ErmisChatGenerics> | null> {
+    const isE2ee = this._isEffectiveE2ee();
+    if (!forMe && !isE2ee) return null;
+
+    const storage = isE2ee ? this.getClient().encryptionManager?.storage : this._client.messageStorage;
+    const message =
+      this.state.findMessage(messageId) ||
+      fallbackMessage ||
+      (storage?.loadMessage ? await storage.loadMessage(messageId).catch(() => null) : null);
+    if (!message || (!forMe && this.state.unavailableMessageIds.has(messageId))) return null;
+
+    const messageSeq = Number((message as any).msg_seq) || 0;
+    const wasHidden = messageSeq > 0 && this.state.hiddenMessageSeqs.has(messageSeq);
+    const wasUnavailable = this.state.unavailableMessageIds.has(messageId);
+    const wasPinned = this.state.pinnedMessages.some((item) => item.id === messageId);
+    const deleteToken = Symbol(messageId);
+    this._optimisticMessageDeleteTokens.set(messageId, deleteToken);
+
+    const deletedAt = new Date().toISOString();
+    const deletedMessage = {
+      ...message,
+      type: 'deleted',
+      display_type: forMe ? 'deleted' : 'unavailable',
+      text: '',
+      html: '',
+      attachments: [],
+      sticker_url: undefined,
+      quoted_message: undefined,
+      quoted_message_id: undefined,
+      old_texts: undefined,
+      mls_ciphertext: undefined,
+      deleted_at: deletedAt,
+      status: 'received',
+      pinned: false,
+      pinned_at: null,
+      updated_at: null,
+    } as unknown as MessageResponse<ErmisChatGenerics>;
+
+    if (messageSeq > 0) this.state.hiddenMessageSeqs.add(messageSeq);
+    this.state.removeMessage({ id: messageId }, { persist: false });
+    if (forMe) {
+      this.state.unavailableMessageIds.delete(messageId);
+      this.state.addMessageSorted(deletedMessage);
+    } else {
+      this.state.unavailableMessageIds.add(messageId);
+    }
+    this.state.removeQuotedMessageReferences(deletedMessage);
+    this.state.removePinnedMessage(message as unknown as MessageResponse<ErmisChatGenerics>);
+
+    this._callChannelListeners({
+      type: forMe ? 'message.deleted_for_me' : 'message.deleted',
+      cid: this.cid,
+      channel_id: this.id,
+      channel_type: this.type,
+      message_id: messageId,
+      hard_delete: !forMe,
+      message: deletedMessage,
+    } as unknown as Event<ErmisChatGenerics>);
+
+    await Promise.all([
+      forMe && storage?.saveMessage
+        ? storage.saveMessage(deletedMessage as any).catch((error: unknown) => {
+            this.getClient().logger('warn', '[Encryption] Failed to save optimistic message tombstone', {
+              err: error,
+              message_id: messageId,
+            });
+          })
+        : storage?.deleteMessage
+        ? storage.deleteMessage(messageId).catch((error: unknown) => {
+            this.getClient().logger('warn', '[Encryption] Failed to delete optimistic message cache', {
+              err: error,
+              message_id: messageId,
+            });
+          })
+        : Promise.resolve(),
+      this.getClient()
+        .persistSyncState()
+        .catch((error: unknown) => {
+          this.getClient().logger('warn', '[Encryption] Failed to persist optimistic message deletion', {
+            err: error,
+            message_id: messageId,
+          });
+        }),
+    ]);
+
+    return { message, messageSeq, wasHidden, wasUnavailable, wasPinned, deleteToken };
   }
 
-  async deleteMessageForMe(messageId: string) {
-    return await this.getClient().delete<APIResponse & { message: MessageResponse<ErmisChatGenerics> }>(
+  private async _rollbackOptimisticMessageDelete(snapshot: OptimisticMessageDeleteSnapshot<ErmisChatGenerics>) {
+    const { message, messageSeq, wasHidden, wasUnavailable, wasPinned, deleteToken } = snapshot;
+
+    if (this._optimisticMessageDeleteTokens.get(message.id) !== deleteToken) return;
+    this._optimisticMessageDeleteTokens.delete(message.id);
+
+    if (messageSeq > 0 && !wasHidden) this.state.hiddenMessageSeqs.delete(messageSeq);
+    if (!wasUnavailable) this.state.unavailableMessageIds.delete(message.id);
+    this.state.locallyDeletedMessageIds.delete(message.id);
+    this.state.removeMessage({ id: message.id }, { persist: false });
+    this.state.addMessagesSorted([message as unknown as MessageResponse<ErmisChatGenerics>], false, true, true);
+    if (wasPinned) this.state.addPinnedMessage(message as unknown as MessageResponse<ErmisChatGenerics>);
+
+    const storage = this._isEffectiveE2ee() ? this.getClient().encryptionManager?.storage : this._client.messageStorage;
+    this._callChannelListeners({
+      type: 'message.updated',
+      cid: this.cid,
+      channel_id: this.id,
+      channel_type: this.type,
+      message,
+    } as unknown as Event<ErmisChatGenerics>);
+
+    await Promise.all([
+      storage?.saveMessage
+        ? (async () => {
+            if (storage.deleteMessage) await storage.deleteMessage(message.id);
+            await storage.saveMessage(message as any);
+          })().catch((error: unknown) => {
+            this.getClient().logger('warn', '[Encryption] Failed to restore rolled-back message cache', {
+              err: error,
+              message_id: message.id,
+            });
+          })
+        : Promise.resolve(),
+      this.getClient()
+        .persistSyncState()
+        .catch((error: unknown) => {
+          this.getClient().logger('warn', '[Encryption] Failed to persist message deletion rollback', {
+            err: error,
+            message_id: message.id,
+          });
+        }),
+    ]);
+  }
+
+  private async _deleteMessageWithOptimisticState(
+    messageId: string,
+    forMe: boolean,
+    fallbackMessage?: MessageResponse<ErmisChatGenerics> | FormatMessageResponse<ErmisChatGenerics>,
+  ) {
+    const request = this.getClient().delete<APIResponse & { message: MessageResponse<ErmisChatGenerics> }>(
       this.getClient().baseURL + `/messages/${this.type}/${this.id}/${messageId}`,
-      { for_me: true },
+      forMe ? { for_me: true } : undefined,
     );
+    const settledRequest = request.then(
+      (response) => ({ ok: true as const, response }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    const snapshot = await this._applyOptimisticMessageDelete(messageId, forMe, fallbackMessage);
+    const result = await settledRequest;
+
+    if (!result.ok) {
+      if (snapshot) await this._rollbackOptimisticMessageDelete(snapshot);
+      throw result.error;
+    }
+
+    if (snapshot && this._optimisticMessageDeleteTokens.get(messageId) === snapshot.deleteToken) {
+      this._optimisticMessageDeleteTokens.delete(messageId);
+    }
+    return result.response;
+  }
+
+  async deleteMessage(messageId: string) {
+    return await this._deleteMessageWithOptimisticState(messageId, false);
+  }
+
+  async deleteMessageForMe(
+    messageId: string,
+    fallbackMessage?: MessageResponse<ErmisChatGenerics> | FormatMessageResponse<ErmisChatGenerics>,
+  ) {
+    return await this._deleteMessageWithOptimisticState(messageId, true, fallbackMessage);
   }
 
   async getThumbBlobVideo(file: File): Promise<Blob | null> {
@@ -2484,11 +3209,34 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           delete channelState.watchers[event.user.id];
         }
         break;
-      case 'message.deleted':
+
+      case 'message.deleted': {
+        const eventMessageId = event.message?.id || event.message_id;
+        if (eventMessageId) {
+          this._optimisticMessageDeleteTokens.delete(eventMessageId);
+        }
+        const hasMessagePayload = Boolean(event.message);
+        if (!event.message && eventMessageId) {
+          event.message = {
+            ...(channelState.findMessage(eventMessageId) || {}),
+            id: eventMessageId,
+          } as MessageResponse<ErmisChatGenerics>;
+        }
         if (event.message) {
           this._extendEventWithOwnReactions(event);
           const existing = channelState.findMessage(event.message.id);
-          const isUnavailable = event.hard_delete === true || event.message.display_type === 'unavailable';
+          const messageSeq = Number(event.message.msg_seq || existing?.msg_seq) || 0;
+          const isLocalForMeTombstone =
+            existing?.display_type === 'deleted' &&
+            messageSeq > 0 &&
+            channelState.hiddenMessageSeqs.has(messageSeq) &&
+            !channelState.unavailableMessageIds.has(event.message.id);
+          const isUnavailable =
+            event.hard_delete === true ||
+            event.message.display_type === 'unavailable' ||
+            channelState.unavailableMessageIds.has(event.message.id) ||
+            !isLocalForMeTombstone ||
+            (!hasMessagePayload && Boolean(eventMessageId));
 
           if (isUnavailable) {
             const unavailableMessage = {
@@ -2538,21 +3286,19 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               user_id: event.message.user_id || existing?.user_id,
             } as MessageResponse<ErmisChatGenerics>;
 
-            event.message = deletedMessage;
-            if (existing) {
-              channelState.updateMessageById(event.message.id, () => deletedMessage as any);
-            } else {
-              channelState.addMessageSorted(deletedMessage);
-            }
+            channelState.removeMessage({ id: deletedMessage.id }, { persist: false });
+            channelState.addMessageSorted(deletedMessage);
+            const formattedDeletedMessage = channelState.findMessage(deletedMessage.id) || deletedMessage;
+            event.message = formattedDeletedMessage as MessageResponse<ErmisChatGenerics>;
 
             const encryptionMgrDel = this.getClient().encryptionManager;
             const isE2ee = this._isEffectiveE2ee();
             if (isE2ee && encryptionMgrDel?.initialized && event.message.id) {
-              encryptionMgrDel.storage.saveMessage(deletedMessage as any).catch(() => {});
+              encryptionMgrDel.storage.saveMessage(formattedDeletedMessage as any).catch(() => {});
             } else {
               const storage = this._client?.messageStorage;
               if (storage?.saveMessage) {
-                storage.saveMessage(deletedMessage as any).catch(() => {});
+                storage.saveMessage(formattedDeletedMessage as any).catch(() => {});
               }
             }
           } else {
@@ -2627,63 +3373,71 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           }
         }
         break;
-      case 'message.deleted_for_me':
-        if (event.message) {
-          // Xoá thông tin user trong event này vì nó là thông tin người thực hiện xoá (chính mình),
-          // tránh việc ghi đè lên tác giả gốc của tin nhắn dẫn đến sai lệch layout.
-          delete event.message.user;
-          delete (event.message as any).user_id;
+      }
 
-          const existing = channelState.findMessage(event.message.id);
-          const deletedAt = event.message.deleted_at || event.created_at || new Date().toISOString();
-          const deletedMessage = {
-            ...(existing || {}),
-            ...event.message,
-            type: 'deleted',
-            display_type: 'deleted',
-            text: '',
-            html: '',
-            attachments: [],
-            sticker_url: undefined,
-            quoted_message: undefined,
-            quoted_message_id: undefined,
-            old_texts: undefined,
-            mls_ciphertext: undefined,
-            deleted_at: deletedAt,
-            status: 'received',
-            pinned: false,
-            pinned_at: null,
-            updated_at: null,
-            user: existing?.user,
-            user_id: existing?.user_id,
-          } as MessageResponse<ErmisChatGenerics>;
+      case 'message.deleted_for_me': {
+        const eventMessageId = event.message?.id || event.message_id;
+        if (!eventMessageId) break;
+        this._optimisticMessageDeleteTokens.delete(eventMessageId);
 
-          event.message = deletedMessage;
-          if (existing) {
-            channelState.updateMessageById(event.message.id, () => deletedMessage as any);
-          } else {
-            channelState.addMessageSorted(deletedMessage);
-          }
+        const existing = channelState.findMessage(eventMessageId);
+        const deletedMessage = {
+          ...(existing || {}),
+          ...(event.message || {}),
+          id: eventMessageId,
+          type: 'deleted',
+          display_type: 'deleted',
+          text: '',
+          html: '',
+          attachments: [],
+          sticker_url: undefined,
+          quoted_message: undefined,
+          quoted_message_id: undefined,
+          old_texts: undefined,
+          mls_ciphertext: undefined,
+          deleted_at: event.message?.deleted_at || event.created_at || new Date().toISOString(),
+          status: 'received',
+          pinned: false,
+          pinned_at: null,
+          updated_at: null,
+          user: existing?.user,
+          user_id: existing?.user_id,
+        } as unknown as MessageResponse<ErmisChatGenerics>;
 
-          // Also save it to DB so it persists across reloads
-          const encryptionMgrDel = this.getClient().encryptionManager;
-          const isE2ee = this._isEffectiveE2ee();
-          if (isE2ee && encryptionMgrDel?.initialized && event.message.id) {
-            encryptionMgrDel.storage.saveMessage(deletedMessage as any).catch(() => {});
-          } else {
-            const storage = this._client?.messageStorage;
-            if (storage?.saveMessage) {
-              storage.saveMessage(deletedMessage as any).catch(() => {});
-            }
-          }
+        event.message = deletedMessage;
+        const messageSeq = Number(deletedMessage.msg_seq) || 0;
+        if (messageSeq > 0) channelState.hiddenMessageSeqs.add(messageSeq);
+        channelState.removeMessage({ id: eventMessageId }, { persist: false });
+        channelState.unavailableMessageIds.delete(eventMessageId);
+        channelState.addMessageSorted(deletedMessage);
+        const formattedDeletedMessage = channelState.findMessage(eventMessageId) || deletedMessage;
+        event.message = formattedDeletedMessage as MessageResponse<ErmisChatGenerics>;
+        channelState.removeQuotedMessageReferences(
+          formattedDeletedMessage as unknown as MessageResponse<ErmisChatGenerics>,
+        );
+        channelState.removePinnedMessage(formattedDeletedMessage as unknown as MessageResponse<ErmisChatGenerics>);
 
-          channelState.removeQuotedMessageReferences(event.message);
-
-          if ([...channelState.pinnedMessages].some((msg) => msg.id === event.message?.id)) {
-            channelState.removePinnedMessage(event.message);
-          }
+        const storage = this._isEffectiveE2ee()
+          ? this.getClient().encryptionManager?.storage
+          : this._client.messageStorage;
+        if (storage?.saveMessage) {
+          await storage.saveMessage(deletedMessage as any).catch((error: unknown) => {
+            this.getClient().logger('warn', 'Failed to save message-for-me tombstone to local cache', {
+              err: error,
+              message_id: eventMessageId,
+            });
+          });
         }
+        await this.getClient()
+          .persistSyncState()
+          .catch((error: unknown) => {
+            this.getClient().logger('warn', 'Failed to persist message-for-me deletion', {
+              err: error,
+              message_id: eventMessageId,
+            });
+          });
         break;
+      }
       case 'message.new':
         if (event.message) {
           /* if message belongs to current user, always assume timestamp is changed to filter it out and add again to avoid duplication */
@@ -2737,13 +3491,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             } else {
               let existingLocalMsg = channelState.findMessage(event.message.id);
               if (!existingLocalMsg) {
-                existingLocalMsg = channelState.latestMessages.find(
-                  (m) =>
-                    (m.status === 'sending' || m.status === 'received') &&
-                    (m.user?.id?.toLowerCase() === clientUserId.toLowerCase() ||
-                      (m as any).user_id?.toLowerCase() === clientUserId.toLowerCase()),
-                );
-                if (existingLocalMsg?.id) {
+                // Look for the most recent pending optimistic send from this user
+                for (let idx = channelState.latestMessages.length - 1; idx >= 0; idx--) {
+                  const m = channelState.latestMessages[idx];
+                  const mUserId = m.user?.id || (m as any).user_id;
+                  if (m.status === 'sending' && mUserId?.toLowerCase() === clientUserId?.toLowerCase()) {
+                    existingLocalMsg = m;
+                    break;
+                  }
+                }
+                if (existingLocalMsg?.id && existingLocalMsg.id !== event.message.id) {
                   this._removeLocalMessageById(existingLocalMsg.id);
                 }
               }
@@ -2771,6 +3528,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                     .catch(() => {});
                 }
                 this._dispatchLocalMessageStateEvent('message.updated', updatedMsg as any);
+              } else {
+                channelState.addMessageSorted(event.message, ownMessage);
               }
             }
           }
@@ -3498,7 +4257,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     channelData?: ChannelResponse<ErmisChatGenerics> | ChannelData<ErmisChatGenerics>,
   ): Promise<MessageResponse<ErmisChatGenerics>[]> {
     const isE2ee = this._isE2eeChannelData(channelData);
-    const storage = this.getClient().encryptionManager?.storage;
+    const storage = this.getClient().encryptionManager?.storage || (this.getClient() as any).messageStorage;
     if (!isE2ee || !storage || messages.length === 0) return messages;
 
     const lookupIds = messages.flatMap((message: any) => {
@@ -4129,73 +4888,77 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         case 'message.deleted_for_me': {
           const msgId = event.message?.id || (event as any).message_id;
           if (msgId) {
+            const storage = this._isEffectiveE2ee()
+              ? this._client.encryptionManager?.storage
+              : this._client.messageStorage;
             const msg = channelState.findMessage(msgId);
-            const isUnavailable = event.type === 'message.deleted' && event.hard_delete === true;
+            const storedMsg = msg || (storage?.loadMessage ? await storage.loadMessage(msgId).catch(() => null) : null);
+            const lastEventSeq = Number((storedMsg as any)?.last_event_seq) || 0;
+
+            if (eventSeq > 0 && eventSeq < lastEventSeq) break;
+
+            const baseMessage = {
+              ...(storedMsg || {}),
+              ...(event.message || {}),
+              id: msgId,
+            } as MessageResponse<ErmisChatGenerics>;
+            const messageSeq = Number((baseMessage as any).msg_seq) || 0;
+            const deleteForMe = event.type === 'message.deleted_for_me';
+            const isLocalForMeTombstone =
+              baseMessage.display_type === 'deleted' &&
+              messageSeq > 0 &&
+              channelState.hiddenMessageSeqs.has(messageSeq) &&
+              !channelState.unavailableMessageIds.has(msgId);
+            const isUnavailable =
+              channelState.unavailableMessageIds.has(msgId) ||
+              (!deleteForMe && (event.hard_delete === true || !isLocalForMeTombstone));
+
+            if (messageSeq > 0 && !channelState.hiddenMessageSeqs.has(messageSeq)) {
+              channelState.hiddenMessageSeqs.add(messageSeq);
+              syncMetadataChanged = true;
+            }
+
+            channelState.removeMessage({ id: msgId }, { persist: false });
+            channelState.removePinnedMessage({ id: msgId } as MessageResponse<ErmisChatGenerics>);
 
             if (isUnavailable) {
-              const storage = this._client.messageStorage || this._client.encryptionManager?.storage;
-              const storedMsg =
-                msg || (storage?.loadMessage ? await storage.loadMessage(msgId).catch(() => null) : null);
-              const lastEventSeq = Number((storedMsg as any)?.last_event_seq) || 0;
-
-              if (eventSeq > 0 && eventSeq < lastEventSeq) break;
-
-              const messageSeq = Number((msg as any)?.msg_seq ?? (storedMsg as any)?.msg_seq) || 0;
-              if (messageSeq > 0 && !channelState.hiddenMessageSeqs.has(messageSeq)) {
-                channelState.hiddenMessageSeqs.add(messageSeq);
-                syncMetadataChanged = true;
-              }
               channelState.unavailableMessageIds.add(msgId);
-              channelState.removeMessage({ id: msgId }, { persist: false });
-              channelState.removePinnedMessage({ id: msgId } as MessageResponse<ErmisChatGenerics>);
-
               if (storage?.deleteMessage) await storage.deleteMessage(msgId).catch(() => {});
               break;
             }
 
-            if (msg && ((msg as any).last_event_seq ?? 0) < eventSeq) {
-              let updatedMsg: any;
-              channelState.updateMessageById(msgId, (m) => {
-                updatedMsg = {
-                  ...m,
-                  type: 'deleted',
-                  display_type: 'deleted',
-                  updated_at: event.created_at || new Date().toISOString(),
-                  deleted_at: event.created_at || new Date().toISOString(),
-                  text: '',
-                  last_event_seq: eventSeq,
-                };
-                return updatedMsg;
-              });
+            const deletedAt = event.created_at || new Date().toISOString();
+            const tombstone = {
+              ...baseMessage,
+              type: 'deleted',
+              display_type: 'deleted',
+              text: '',
+              html: '',
+              attachments: [],
+              sticker_url: undefined,
+              quoted_message: undefined,
+              quoted_message_id: undefined,
+              old_texts: undefined,
+              mls_ciphertext: undefined,
+              updated_at: null,
+              deleted_at: deletedAt,
+              last_event_seq: eventSeq || lastEventSeq,
+              status: 'received',
+              pinned: false,
+              pinned_at: null,
+            } as MessageResponse<ErmisChatGenerics>;
 
-              // Soft delete it in storage, preserving the rest of the fields
-              if (updatedMsg && this._client.messageStorage?.saveMessage) {
-                this._client.messageStorage.saveMessage(updatedMsg).catch(() => {});
-              }
-            } else if (!msg && this._client.messageStorage?.loadMessage) {
-              // Message is not in RAM, but we must update it in IndexedDB so it's deleted when user scrolls up
-              this._client.messageStorage
-                .loadMessage(msgId)
-                .then((storedMsg: any) => {
-                  if (storedMsg && ((storedMsg as any).last_event_seq ?? 0) < eventSeq) {
-                    const updatedMsg = {
-                      ...storedMsg,
-                      type: 'deleted',
-                      display_type: 'deleted',
-                      updated_at: event.created_at || new Date().toISOString(),
-                      deleted_at: event.created_at || new Date().toISOString(),
-                      text: '',
-                      last_event_seq: eventSeq,
-                    };
-                    this._client.messageStorage?.saveMessage(updatedMsg).catch(() => {});
-                  }
-                })
-                .catch(() => {});
-            }
+            channelState.unavailableMessageIds.delete(msgId);
+            channelState.addMessageSorted(tombstone);
+            const formattedTombstone = channelState.findMessage(msgId) || tombstone;
+            event.message = formattedTombstone as MessageResponse<ErmisChatGenerics>;
+            channelState.removeQuotedMessageReferences(
+              formattedTombstone as unknown as MessageResponse<ErmisChatGenerics>,
+            );
+            if (storage?.saveMessage) await storage.saveMessage(formattedTombstone as any).catch(() => {});
           }
           break;
         }
-
         case 'reaction.new':
         case 'reaction.updated':
         case 'reaction.deleted':

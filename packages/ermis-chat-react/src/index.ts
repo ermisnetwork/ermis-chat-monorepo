@@ -127,6 +127,7 @@ export {
   isSkippedMember,
   isOwnerMember,
   isFriendChannel,
+  canStartDirectCall,
   canManageChannel,
   canRemoveTargetMember,
   canBanTargetMember,
@@ -147,6 +148,8 @@ export {
   isVideoAttachment,
   isVoiceRecordingAttachment,
   isLinkPreviewAttachment,
+  isE2eeAttachmentManifest,
+  getAttachmentDisplayName,
   isImage,
   isVideo,
   MESSAGE_DISPLAY_TYPES,
@@ -203,7 +206,12 @@ export type { UseChannelMessagesOptions } from './hooks/useChannelMessages';
 
 export { useForwardMessage } from './hooks/useForwardMessage';
 export { useRecoveryPin } from './hooks/useRecoveryPin';
-export type { UseRecoveryPinReturn, RecoveryPinStatus, RecoveryRestoredMessage, RecoveryStatusInfo } from './hooks/useRecoveryPin';
+export type {
+  UseRecoveryPinReturn,
+  RecoveryPinStatus,
+  RecoveryRestoredMessage,
+  RecoveryStatusInfo,
+} from './hooks/useRecoveryPin';
 
 export { QuotedMessagePreview } from './components/QuotedMessagePreview';
 export type { QuotedMessagePreviewProps } from './components/QuotedMessagePreview';

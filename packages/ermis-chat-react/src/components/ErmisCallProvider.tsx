@@ -1,7 +1,15 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { CallStatus, ErmisCallNode, type UserCallInfo, type CallEventData } from '@ermis-network/ermis-chat-sdk';
+import {
+  CALL_ERROR_CODES,
+  CallStatus,
+  ErmisCallNode,
+  isRetryableCallError,
+  type UserCallInfo,
+  type CallEventData,
+} from '@ermis-network/ermis-chat-sdk';
 import { ErmisCallContext } from '../context/ErmisCallContext';
 import type { ErmisCallProviderProps } from '../types';
+import { canStartDirectCall } from '../channelRoleUtils';
 
 export type { ErmisCallProviderProps } from '../types';
 
@@ -94,8 +102,10 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     };
 
     node.onError = (error: string) => {
-      setErrorMessage(error);
-      // C1: Lifecycle callback — error
+      setIsAccepting(false);
+      const keepIncomingCallRinging = node.callStatus === CallStatus.RINGING && isRetryableCallError(error);
+      setErrorMessage(keepIncomingCallRinging ? null : error);
+      // C1: Lifecycle callback - error
       onCallError?.(error);
     };
     node.onDeviceChange = (audio, video) => {
@@ -104,7 +114,7 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
       const selected = node.getSelectedDevices();
       if (selected.audioDevice) setSelectedAudioDeviceId(selected.audioDevice.deviceId);
       else if (audio.length > 0) setSelectedAudioDeviceId(audio[0].deviceId);
-      
+
       if (selected.videoDevice) setSelectedVideoDeviceId(selected.videoDevice.deviceId);
       else if (video.length > 0) setSelectedVideoDeviceId(video[0].deviceId);
     };
@@ -117,7 +127,7 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
       const selected = node.getSelectedDevices();
       if (selected.audioDevice) setSelectedAudioDeviceId(selected.audioDevice.deviceId);
       else if (a.length > 0) setSelectedAudioDeviceId(a[0].deviceId);
-      
+
       if (selected.videoDevice) setSelectedVideoDeviceId(selected.videoDevice.deviceId);
       else if (v.length > 0) setSelectedVideoDeviceId(v[0].deviceId);
     });
@@ -164,38 +174,51 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
       const cleanup = async () => {
         try {
           await node.endCall();
-        } catch (e) { } // ignore during unmount
+        } catch (e) {} // ignore during unmount
       };
       cleanup();
     };
   }, [client, sessionId, wasmPath, relayUrl, onIncomingCall, onCallError]);
 
-  const createCall = useCallback(async (type: 'audio' | 'video', cid: string) => {
-    if (!callNode) return;
-    setCallType(type);
-    setIsIncoming(false);
-    
-    // Tận dụng Local Cache: Phân giải thông tin đồng bộ ngay trước khi bật modal
-    callNode.prefillUserInfo(cid);
-    setCallerInfo(callNode.callerInfo);
-    setReceiverInfo(callNode.receiverInfo);
+  const createCall = useCallback(
+    async (type: 'audio' | 'video', cid: string) => {
+      if (!callNode) return;
+      const channel = client.activeChannels[cid];
+      if (channel?.type === 'messaging' && !canStartDirectCall(channel, client.userID)) {
+        onCallError?.(CALL_ERROR_CODES.FRIENDSHIP_REQUIRED);
+        return;
+      }
+      setCallType(type);
+      setIsIncoming(false);
 
-    setCallStatus(CallStatus.PREPARING);
-    await callNode.createCall(type, cid);
-    // C1: Lifecycle callback — call started
-    onCallStart?.(type, cid);
-  }, [callNode, onCallStart]);
+      // Tận dụng Local Cache: Phân giải thông tin đồng bộ ngay trước khi bật modal
+      callNode.prefillUserInfo(cid);
+      setCallerInfo(callNode.callerInfo);
+      setReceiverInfo(callNode.receiverInfo);
+
+      setCallStatus(CallStatus.PREPARING);
+      await callNode.createCall(type, cid);
+      // C1: Lifecycle callback — call started
+      onCallStart?.(type, cid);
+    },
+    [callNode, client, onCallError, onCallStart],
+  );
 
   const acceptCall = useCallback(async () => {
-    if (!callNode) return;
+    if (!callNode || isAccepting) return;
     setIsAccepting(true);
     try {
       await callNode.acceptCall();
       onCallAccepted?.();
-    } catch (e) {
+    } catch (error) {
+      const errorCode = error instanceof Error ? error.message : 'call_connection_failed';
+      if (errorCode !== CALL_ERROR_CODES.CANCELLED && !isRetryableCallError(errorCode)) {
+        setErrorMessage((current) => current || errorCode);
+      }
+    } finally {
       setIsAccepting(false);
     }
-  }, [callNode, onCallAccepted]);
+  }, [callNode, isAccepting, onCallAccepted]);
 
   const rejectCall = useCallback(async () => {
     if (!callNode) return;
@@ -235,17 +258,23 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     }
   }, [callNode, isScreenSharing]);
 
-  const switchAudioDevice = useCallback(async (deviceId: string) => {
-    if (!callNode) return;
-    const success = await callNode.switchAudioDevice(deviceId);
-    if (success) setSelectedAudioDeviceId(deviceId);
-  }, [callNode]);
+  const switchAudioDevice = useCallback(
+    async (deviceId: string) => {
+      if (!callNode) return;
+      const success = await callNode.switchAudioDevice(deviceId);
+      if (success) setSelectedAudioDeviceId(deviceId);
+    },
+    [callNode],
+  );
 
-  const switchVideoDevice = useCallback(async (deviceId: string) => {
-    if (!callNode) return;
-    const success = await callNode.switchVideoDevice(deviceId);
-    if (success) setSelectedVideoDeviceId(deviceId);
-  }, [callNode]);
+  const switchVideoDevice = useCallback(
+    async (deviceId: string) => {
+      if (!callNode) return;
+      const success = await callNode.switchVideoDevice(deviceId);
+      if (success) setSelectedVideoDeviceId(deviceId);
+    },
+    [callNode],
+  );
 
   const clearError = useCallback(() => setErrorMessage(null), []);
   const resetCall = useCallback(() => {
@@ -255,6 +284,9 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     setIsIncoming(false);
     setCallDuration(0);
     setCallType('audio');
+    setIsAccepting(false);
+    setIsRejecting(false);
+    setIsEnding(false);
   }, [callNode]);
 
   const upgradeCall = useCallback(async () => {
@@ -324,11 +356,7 @@ export const ErmisCallProvider: React.FC<ErmisCallProviderProps> = ({
     resetCall,
   };
 
-  return (
-    <ErmisCallContext.Provider value={value}>
-      {children}
-    </ErmisCallContext.Provider>
-  );
+  return <ErmisCallContext.Provider value={value}>{children}</ErmisCallContext.Provider>;
 };
 
 ErmisCallProvider.displayName = 'ErmisCallProvider';
