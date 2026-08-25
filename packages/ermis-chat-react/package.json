@@ -1,6 +1,6 @@
 {
   "name": "@ermis-network/ermis-chat-react",
-  "version": "2.1.0-external.3",
+  "version": "2.1.0-external.4",
   "description": "React UI components for Ermis Chat",
   "author": "Ermis",
   "homepage": "https://ermis.network/",
@@ -24,7 +24,7 @@
     "tag": "external"
   },
   "dependencies": {
-    "@ermis-network/ermis-chat-sdk": "2.1.0-external.3",
+    "@ermis-network/ermis-chat-sdk": "2.1.0-external.4",
     "react-ts-audio-recorder": "^1.1.4",
     "virtua": "^0.48.8",
     "frimousse": "^0.3.0",
