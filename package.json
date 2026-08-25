@@ -26,9 +26,9 @@
     "lint": "yarn prettier && yarn eslint",
     "lint-fix": "yarn prettier-fix && yarn eslint-fix",
     "bump": "node scripts/bump-version.js",
-    "publish:packages": "bash scripts/publish-packages.sh",
-    "publish:sdk": "bash scripts/publish-one-package.sh sdk",
-    "publish:react": "bash scripts/publish-one-package.sh react"
+    "publish:packages": "node scripts/publish-packages.js all",
+    "publish:sdk": "node scripts/publish-packages.js sdk",
+    "publish:react": "node scripts/publish-packages.js react"
   },
   "devDependencies": {
     "eslint": "7.21.0",
