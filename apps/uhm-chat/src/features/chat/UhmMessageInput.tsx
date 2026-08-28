@@ -23,6 +23,7 @@ import {
 } from '@ermis-network/ermis-chat-react';
 import { Cat, Mic, Plus, SendHorizonal, Smile, Trash2, BarChart2, Film } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { MultiRecorder } from 'react-ts-audio-recorder';
 import pcmWorkletUrl from 'react-ts-audio-recorder/assets/pcm-worklet.js?url';
@@ -358,6 +359,84 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     },
     [canSendMessage, editingMessage, handleFilesSelected],
   );
+
+  // --- Code Format Context Menu ---
+  const CODE_LANGUAGES = [
+    { label: 'Plain', value: '' },
+    { label: 'JavaScript', value: 'javascript' },
+    { label: 'TypeScript', value: 'typescript' },
+    { label: 'Python', value: 'python' },
+    { label: 'JSON', value: 'json' },
+    { label: 'HTML/CSS', value: 'html' },
+    { label: 'Bash', value: 'bash' },
+    { label: 'SQL', value: 'sql' },
+    { label: 'Go', value: 'go' },
+    { label: 'Rust', value: 'rust' },
+    { label: 'Java', value: 'java' },
+    { label: 'C/C++', value: 'cpp' },
+  ] as const;
+
+  const [codeMenu, setCodeMenu] = useState<{ x: number; y: number; selectedText: string; range: Range } | null>(null);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      const selection = window.getSelection();
+      const selectedText = selection?.toString() || '';
+      if (!selectedText.trim()) return; // Only show when text is selected
+
+      e.preventDefault();
+      const range = selection!.getRangeAt(0).cloneRange();
+      setCodeMenu({ x: e.clientX, y: e.clientY, selectedText, range });
+    },
+    [],
+  );
+
+  const handleFormatAsCode = useCallback(
+    (lang: string) => {
+      if (!codeMenu || !editableRef.current) {
+        setCodeMenu(null);
+        return;
+      }
+
+      const { selectedText, range } = codeMenu;
+      const codeText = `\`\`\`${lang}\n${selectedText}\n\`\`\``;
+
+      // Restore selection and replace
+      const selection = window.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+        selection.addRange(range);
+        // Delete the selected content and insert formatted text
+        range.deleteContents();
+        const textNode = document.createTextNode(codeText);
+        range.insertNode(textNode);
+        // Move cursor to end
+        range.setStartAfter(textNode);
+        range.setEndAfter(textNode);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+
+      setCodeMenu(null);
+      handleInput();
+    },
+    [codeMenu, handleInput],
+  );
+
+  // Close code menu on outside click
+  useEffect(() => {
+    if (!codeMenu) return;
+    const handleClickOutside = () => setCodeMenu(null);
+    const handleEscKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCodeMenu(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscKey);
+    };
+  }, [codeMenu]);
 
   const handleEmojiSelect = useCallback(
     (emojiNative: string) => {
@@ -771,8 +850,37 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                     onInput={handleInput}
                     onKeyDown={handleKeyDown}
                     onPaste={handlePaste}
+                    onContextMenu={handleContextMenu}
                     suppressContentEditableWarning
                   />
+
+                  {/* Code Format Context Menu */}
+                  {codeMenu && ReactDOM.createPortal(
+                    <div
+                      className="fixed z-[9999] min-w-[180px] py-1.5 bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-zinc-200 dark:border-zinc-700 animate-in fade-in zoom-in-95 duration-100 max-h-[400px] overflow-y-auto"
+                      style={{ left: Math.min(codeMenu.x, window.innerWidth - 200), bottom: window.innerHeight - codeMenu.y + 4 }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <div className="px-3 py-1.5 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                        {t('chat.formatAsCode', 'Format as Code')}
+                      </div>
+                      {CODE_LANGUAGES.map((lang) => (
+                        <button
+                          key={lang.value}
+                          type="button"
+                          className="w-full text-left px-3 py-1.5 text-[13px] text-zinc-700 dark:text-zinc-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors flex items-center gap-2"
+                          onClick={() => handleFormatAsCode(lang.value)}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-50">
+                            <polyline points="16 18 22 12 16 6" />
+                            <polyline points="8 6 2 12 8 18" />
+                          </svg>
+                          {lang.label}
+                        </button>
+                      ))}
+                    </div>,
+                    document.body,
+                  )}
                 </div>
 
                 {/* Right Actions */}

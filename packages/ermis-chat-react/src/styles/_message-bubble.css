@@ -1579,3 +1579,303 @@
   white-space: nowrap;
   line-height: 1.2;
 }
+
+/* ============================================================
+   Code Blocks & Inline Code
+   ============================================================ */
+
+/* --- Inline Code --- */
+.ermis-code-inline {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.8125em;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #f0a8d0;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.ermis-chat--light .ermis-code-inline {
+  background-color: rgba(0, 0, 0, 0.06);
+  color: #c41a68;
+}
+
+.ermis-message-bubble--own .ermis-code-inline {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* --- Fenced Code Block (always dark — Tokyo Night style) --- */
+.ermis-code-block {
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 6px 0;
+  background-color: #1a1b26;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  max-width: 100%;
+}
+
+.ermis-chat--light .ermis-code-block {
+  background-color: #1a1b26;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.ermis-message-bubble--own .ermis-code-block {
+  background-color: #1a1b26;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* --- Code Block Header --- */
+.ermis-code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 28px;
+}
+
+.ermis-chat--light .ermis-code-block__header {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+.ermis-message-bubble--own .ermis-code-block__header {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+/* --- Language Label --- */
+.ermis-code-block__lang {
+  font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.ermis-chat--light .ermis-code-block__lang {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.ermis-message-bubble--own .ermis-code-block__lang {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* --- Copy Button --- */
+.ermis-code-block__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.ermis-code-block__copy:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.ermis-code-block__copy--copied {
+  color: #22c55e;
+}
+
+.ermis-code-block__copy--copied:hover {
+  color: #22c55e;
+}
+
+.ermis-chat--light .ermis-code-block__copy {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.ermis-chat--light .ermis-code-block__copy:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.ermis-message-bubble--own .ermis-code-block__copy {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.ermis-message-bubble--own .ermis-code-block__copy:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* --- Code Block Body --- */
+.ermis-code-block__pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Custom scrollbar for code blocks */
+.ermis-code-block__pre::-webkit-scrollbar {
+  height: 4px;
+}
+
+.ermis-code-block__pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ermis-code-block__pre::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.ermis-chat--light .ermis-code-block__pre::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.ermis-code-block__code {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: inherit;
+  line-height: inherit;
+  color: #a9b1d6;
+  white-space: pre;
+  word-break: normal;
+  word-wrap: normal;
+  tab-size: 2;
+}
+
+.ermis-chat--light .ermis-code-block__code {
+  color: #a9b1d6;
+}
+
+.ermis-message-bubble--own .ermis-code-block__code {
+  color: #a9b1d6;
+}
+
+/* --- Disable white-space: pre-wrap on message text when it contains code blocks --- */
+.ermis-message-list__item-text:has(.ermis-code-block) {
+  white-space: normal;
+}
+
+/* ============================================================
+   Syntax Highlighting Theme — Tokyo Night (always dark)
+   Code blocks always have a dark background, so one theme for all.
+   ============================================================ */
+
+.ermis-code-block__code .hljs-comment,
+.ermis-code-block__code .hljs-quote {
+  color: #565f89;
+  font-style: italic;
+}
+
+.ermis-code-block__code .hljs-keyword,
+.ermis-code-block__code .hljs-selector-tag {
+  color: #bb9af7;
+}
+
+.ermis-code-block__code .hljs-string,
+.ermis-code-block__code .hljs-addition {
+  color: #9ece6a;
+}
+
+.ermis-code-block__code .hljs-number,
+.ermis-code-block__code .hljs-literal {
+  color: #ff9e64;
+}
+
+.ermis-code-block__code .hljs-built_in,
+.ermis-code-block__code .hljs-type {
+  color: #e0af68;
+}
+
+.ermis-code-block__code .hljs-function,
+.ermis-code-block__code .hljs-title {
+  color: #7aa2f7;
+}
+
+.ermis-code-block__code .hljs-title.function_ {
+  color: #7aa2f7;
+}
+
+.ermis-code-block__code .hljs-params {
+  color: #c0caf5;
+}
+
+.ermis-code-block__code .hljs-variable,
+.ermis-code-block__code .hljs-attr {
+  color: #f7768e;
+}
+
+.ermis-code-block__code .hljs-property {
+  color: #7dcfff;
+}
+
+.ermis-code-block__code .hljs-regexp {
+  color: #b4f9f8;
+}
+
+.ermis-code-block__code .hljs-operator {
+  color: #89ddff;
+}
+
+.ermis-code-block__code .hljs-meta,
+.ermis-code-block__code .hljs-tag {
+  color: #73daca;
+}
+
+.ermis-code-block__code .hljs-selector-class,
+.ermis-code-block__code .hljs-selector-id {
+  color: #7dcfff;
+}
+
+.ermis-code-block__code .hljs-deletion {
+  color: #f7768e;
+  background-color: rgba(247, 118, 142, 0.1);
+}
+
+.ermis-code-block__code .hljs-addition {
+  background-color: rgba(158, 206, 106, 0.1);
+}
+
+.ermis-code-block__code .hljs-emphasis {
+  font-style: italic;
+}
+
+.ermis-code-block__code .hljs-strong {
+  font-weight: bold;
+}
+
+.ermis-code-block__code .hljs-section {
+  color: #7aa2f7;
+  font-weight: bold;
+}
+
+.ermis-code-block__code .hljs-bullet {
+  color: #73daca;
+}
+
+.ermis-code-block__code .hljs-link {
+  color: #7aa2f7;
+  text-decoration: underline;
+}
+
+.ermis-code-block__code .hljs-subst {
+  color: #a9b1d6;
+}
+
+.ermis-code-block__code .hljs-symbol {
+  color: #73daca;
+}
+
+.ermis-code-block__code .hljs-template-variable {
+  color: #f7768e;
+}

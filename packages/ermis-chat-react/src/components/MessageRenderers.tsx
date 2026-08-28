@@ -1191,6 +1191,226 @@ export const AttachmentList: React.FC<{
    Message renderers by MessageLabel type
    ---------------------------------------------------------- */
 
+/* ----------------------------------------------------------
+   Code block parsing + syntax highlighting (highlight.js)
+   ---------------------------------------------------------- */
+
+import hljs from 'highlight.js/lib/core';
+
+// Pre-register common languages for auto-detection
+import langJavascript from 'highlight.js/lib/languages/javascript';
+import langTypescript from 'highlight.js/lib/languages/typescript';
+import langPython from 'highlight.js/lib/languages/python';
+import langCss from 'highlight.js/lib/languages/css';
+import langXml from 'highlight.js/lib/languages/xml';
+import langJson from 'highlight.js/lib/languages/json';
+import langBash from 'highlight.js/lib/languages/bash';
+import langJava from 'highlight.js/lib/languages/java';
+import langGo from 'highlight.js/lib/languages/go';
+import langRust from 'highlight.js/lib/languages/rust';
+import langCpp from 'highlight.js/lib/languages/cpp';
+import langC from 'highlight.js/lib/languages/c';
+import langSql from 'highlight.js/lib/languages/sql';
+import langPhp from 'highlight.js/lib/languages/php';
+import langRuby from 'highlight.js/lib/languages/ruby';
+import langSwift from 'highlight.js/lib/languages/swift';
+import langKotlin from 'highlight.js/lib/languages/kotlin';
+import langYaml from 'highlight.js/lib/languages/yaml';
+import langMarkdown from 'highlight.js/lib/languages/markdown';
+import langDiff from 'highlight.js/lib/languages/diff';
+
+hljs.registerLanguage('javascript', langJavascript);
+hljs.registerLanguage('js', langJavascript);
+hljs.registerLanguage('typescript', langTypescript);
+hljs.registerLanguage('ts', langTypescript);
+hljs.registerLanguage('python', langPython);
+hljs.registerLanguage('py', langPython);
+hljs.registerLanguage('css', langCss);
+hljs.registerLanguage('html', langXml);
+hljs.registerLanguage('xml', langXml);
+hljs.registerLanguage('json', langJson);
+hljs.registerLanguage('bash', langBash);
+hljs.registerLanguage('sh', langBash);
+hljs.registerLanguage('shell', langBash);
+hljs.registerLanguage('java', langJava);
+hljs.registerLanguage('go', langGo);
+hljs.registerLanguage('golang', langGo);
+hljs.registerLanguage('rust', langRust);
+hljs.registerLanguage('rs', langRust);
+hljs.registerLanguage('cpp', langCpp);
+hljs.registerLanguage('c++', langCpp);
+hljs.registerLanguage('c', langC);
+hljs.registerLanguage('sql', langSql);
+hljs.registerLanguage('php', langPhp);
+hljs.registerLanguage('ruby', langRuby);
+hljs.registerLanguage('rb', langRuby);
+hljs.registerLanguage('swift', langSwift);
+hljs.registerLanguage('kotlin', langKotlin);
+hljs.registerLanguage('kt', langKotlin);
+hljs.registerLanguage('yaml', langYaml);
+hljs.registerLanguage('yml', langYaml);
+hljs.registerLanguage('markdown', langMarkdown);
+hljs.registerLanguage('md', langMarkdown);
+hljs.registerLanguage('diff', langDiff);
+hljs.registerLanguage('jsx', langJavascript);
+hljs.registerLanguage('tsx', langTypescript);
+
+/** Segment types produced by parseCodeBlocks */
+type CodeSegment =
+  | { type: 'text'; content: string }
+  | { type: 'code-block'; code: string; lang: string }
+  | { type: 'code-inline'; code: string };
+
+/**
+ * Parse text into segments: fenced code blocks, inline code, and plain text.
+ * Fenced blocks: ```lang\n...\n``` (lang is optional)
+ * Inline code: `...`
+ */
+function parseCodeBlocks(text: string): CodeSegment[] {
+  const segments: CodeSegment[] = [];
+  // Match fenced code blocks (```lang\n...\n```) and inline code (`...`)
+  // Fenced must be matched first (greedy triple-backtick before single)
+  const CODE_REGEX = /```(\w*)\n([\s\S]*?)```|`([^`\n]+?)`/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = CODE_REGEX.exec(text)) !== null) {
+    // Push any text before this match
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', content: text.slice(lastIndex, match.index) });
+    }
+
+    if (match[2] !== undefined) {
+      // Fenced code block
+      segments.push({
+        type: 'code-block',
+        code: match[2].replace(/\n$/, ''), // strip trailing newline
+        lang: (match[1] || '').toLowerCase(),
+      });
+    } else if (match[3] !== undefined) {
+      // Inline code
+      segments.push({ type: 'code-inline', code: match[3] });
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Push any remaining text
+  if (lastIndex < text.length) {
+    segments.push({ type: 'text', content: text.slice(lastIndex) });
+  }
+
+  return segments;
+}
+
+/** Highlight code using hljs. Returns HTML string. */
+function highlightCode(code: string, lang: string): string {
+  if (lang && hljs.getLanguage(lang)) {
+    try {
+      return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    } catch {
+      // fall through to auto
+    }
+  }
+  // Auto-detect from registered languages
+  try {
+    return hljs.highlightAuto(code).value;
+  } catch {
+    return code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+}
+
+/** Copy-to-clipboard button for code blocks */
+const CopyCodeButton: React.FC<{ code: string }> = React.memo(({ code }) => {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
+    });
+  }, [code]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  return (
+    <button
+      className={`ermis-code-block__copy${copied ? ' ermis-code-block__copy--copied' : ''}`}
+      onClick={handleCopy}
+      type="button"
+      aria-label="Copy code"
+    >
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+    </button>
+  );
+});
+CopyCodeButton.displayName = 'CopyCodeButton';
+
+/** Language display name mapping */
+const LANG_DISPLAY_NAMES: Record<string, string> = {
+  js: 'JavaScript', javascript: 'JavaScript', jsx: 'JSX',
+  ts: 'TypeScript', typescript: 'TypeScript', tsx: 'TSX',
+  py: 'Python', python: 'Python',
+  css: 'CSS', html: 'HTML', xml: 'XML',
+  json: 'JSON', yaml: 'YAML', yml: 'YAML',
+  bash: 'Bash', sh: 'Shell', shell: 'Shell',
+  java: 'Java', go: 'Go', golang: 'Go',
+  rust: 'Rust', rs: 'Rust',
+  cpp: 'C++', 'c++': 'C++', c: 'C',
+  sql: 'SQL', php: 'PHP',
+  ruby: 'Ruby', rb: 'Ruby',
+  swift: 'Swift', kotlin: 'Kotlin', kt: 'Kotlin',
+  md: 'Markdown', markdown: 'Markdown', diff: 'Diff',
+};
+
+/** Fenced code block with syntax highlighting */
+const CodeBlock: React.FC<{ code: string; lang: string; keyProp: string }> = React.memo(
+  ({ code, lang, keyProp }) => {
+    const highlightedHtml = useMemo(() => highlightCode(code, lang), [code, lang]);
+    const displayLang = lang ? (LANG_DISPLAY_NAMES[lang] || lang) : '';
+
+    return (
+      <div className="ermis-code-block" key={keyProp}>
+        <div className="ermis-code-block__header">
+          <span className="ermis-code-block__lang">{displayLang}</span>
+          <CopyCodeButton code={code} />
+        </div>
+        <pre className="ermis-code-block__pre">
+          <code
+            className="ermis-code-block__code"
+            dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+          />
+        </pre>
+      </div>
+    );
+  },
+);
+CodeBlock.displayName = 'CodeBlock';
+
+/** Inline code element */
+const InlineCode: React.FC<{ code: string; keyProp: string }> = React.memo(({ code, keyProp }) => (
+  <code key={keyProp} className="ermis-code-inline">{code}</code>
+));
+InlineCode.displayName = 'InlineCode';
+
 /**
  * Detect URLs and emails in plain text, wrapping them in <a> tags.
  * Returns an array of React nodes (strings and link elements).
@@ -1227,21 +1447,20 @@ function linkifyText(text: string, keyPrefix: string): React.ReactNode[] {
 }
 
 /**
- * Parse message text: render @mentions as highlighted spans,
- * and auto-detect URLs/emails in non-mention text parts.
+ * Render a plain-text segment with @mentions and URL linkification.
+ * Used for text segments that are NOT inside code blocks.
  */
-function renderTextWithMentions(
+function renderPlainTextWithMentions(
   text: string,
-  message: FormatMessageResponse,
+  mentionedUsers: any[],
+  mentionedAll: boolean,
   userMap: Record<string, string>,
-  onMentionClick?: (userId: string) => void,
-): React.ReactNode {
-  const mentionedUsers: any[] = (message as any).mentioned_users ?? [];
-  const mentionedAll: boolean = (message as any).mentioned_all ?? false;
-
+  onMentionClick: ((userId: string) => void) | undefined,
+  keyPrefix: string,
+): React.ReactNode[] {
   // If no mentions, just linkify the text
   if (mentionedUsers.length === 0 && !mentionedAll) {
-    return linkifyText(text, 'txt');
+    return linkifyText(text, keyPrefix);
   }
 
   // Build a list of patterns to replace: @userId → @userName
@@ -1281,7 +1500,7 @@ function renderTextWithMentions(
       // Mention — render as span, do NOT linkify
       return (
         <span
-          key={`mention-${i}`}
+          key={`${keyPrefix}-mention-${i}`}
           className={`ermis-mention${onMentionClick && info.id !== 'all' ? ' ermis-mention--clickable' : ''}`}
           onClick={
             onMentionClick && info.id !== 'all'
@@ -1297,7 +1516,55 @@ function renderTextWithMentions(
       );
     }
     // Non-mention text — linkify URLs/emails
-    return linkifyText(part, `p${i}`);
+    return linkifyText(part, `${keyPrefix}-p${i}`);
+  });
+}
+
+/**
+ * Parse message text: extract code blocks first, then render @mentions
+ * and auto-detect URLs/emails in remaining plain text parts.
+ */
+function renderTextWithMentions(
+  text: string,
+  message: FormatMessageResponse,
+  userMap: Record<string, string>,
+  onMentionClick?: (userId: string) => void,
+): React.ReactNode {
+  const mentionedUsers: any[] = (message as any).mentioned_users ?? [];
+  const mentionedAll: boolean = (message as any).mentioned_all ?? false;
+
+  // Step 1: Parse code blocks
+  const segments = parseCodeBlocks(text);
+
+  // If no code blocks found, fast path — same as before
+  if (segments.length === 1 && segments[0].type === 'text') {
+    return renderPlainTextWithMentions(
+      segments[0].content,
+      mentionedUsers,
+      mentionedAll,
+      userMap,
+      onMentionClick,
+      'txt',
+    );
+  }
+
+  // Step 2: Render each segment
+  return segments.flatMap((segment, i) => {
+    if (segment.type === 'code-block') {
+      return <CodeBlock key={`cb-${i}`} code={segment.code} lang={segment.lang} keyProp={`cb-${i}`} />;
+    }
+    if (segment.type === 'code-inline') {
+      return <InlineCode key={`ci-${i}`} code={segment.code} keyProp={`ci-${i}`} />;
+    }
+    // Plain text — apply mentions + linkification
+    return renderPlainTextWithMentions(
+      segment.content,
+      mentionedUsers,
+      mentionedAll,
+      userMap,
+      onMentionClick,
+      `seg-${i}`,
+    );
   });
 }
 
@@ -1327,8 +1594,12 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
       return buildUserMap(activeChannel?.state);
     }, [activeChannel?.state]);
 
+    const hasCodeBlocks = rawText.includes('`');
     const textContent =
       rawText && !isEncryptedSentinelText ? renderTextWithMentions(rawText, message, userMap, onMentionClick) : null;
+    // Use <div> wrapper when code blocks are present (they contain block-level elements like <pre> and <button>)
+    // Using <span> would be invalid HTML and break button click events
+    const TextWrapper = hasCodeBlocks ? 'div' : 'span';
 
     const attachmentsToRender = useMemo(() => {
       if (!message.attachments || message.attachments.length === 0) return [];
@@ -1360,7 +1631,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
     if (hasAttachments) {
       return (
         <div className="ermis-message-content--with-attachments">
-          {textContent && <span className="ermis-message-list__item-text">{textContent}</span>}
+          {textContent && <TextWrapper className="ermis-message-list__item-text">{textContent}</TextWrapper>}
           {encryptedPlaceholder}
           <AttachmentList attachments={attachmentsToRender} e2eeGrantReady={e2eeGrantReady} />
         </div>
@@ -1369,7 +1640,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
 
     return (
       <>
-        {textContent && <span className="ermis-message-list__item-text">{textContent}</span>}
+        {textContent && <TextWrapper className="ermis-message-list__item-text">{textContent}</TextWrapper>}
         {encryptedPlaceholder}
       </>
     );
