@@ -880,21 +880,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return { message: optimisticMessage };
   }
 
-  /**
-   * Returns true when a file stored in IndexedDB can no longer be read from the filesystem.
-   * This happens after app restart if the file was renamed, moved, or deleted by the user
-   * between sessions. In this case the pending upload must be permanently aborted
-   * (not retried as an offline error) to avoid an infinite failed_offline loop.
-   */
-  private _isFileNotReadableError(error: unknown): boolean {
-    if (error instanceof DOMException) {
-      // Standard name from the File API spec
-      return error.name === 'NotReadableError' || error.name === 'NotFoundError';
-    }
-    // Some runtimes/browsers wrap or forward the error as a generic Error
-    const msg = (error as any)?.message?.toLowerCase() || '';
-    return msg.includes('notreadable') || msg.includes('file not found') || msg.includes('no such file');
-  }
+
 
   private async _processStandardAttachmentMessage(
     messageId: string,
@@ -1114,46 +1100,44 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       } catch (error: any) {
         if (record.cancelled) throw error;
 
-        // File was renamed, moved, or deleted since it was stored in IndexedDB.
-        // There is no way to recover — abort permanently and clean up IDB.
-        if (this._isFileNotReadableError(error)) {
+        const paused = record.paused || signal.aborted;
+        // Genuine offline/network error — safe to retry on reconnect
+        const isOfflineError =
+          paused ||
+          error.code === 'ERR_NETWORK' ||
+          error.isWSFailure ||
+          (!error.response && typeof error?.status !== 'number' && !(error instanceof DOMException)) ||
+          !this.getClient().wsConnection?.isHealthy;
+
+        if (isOfflineError) {
+          // Keep in IDB so we can resume after reconnect
+          this.state.updateMessageById(messageId, (msg) => ({
+            ...msg,
+            status: 'failed_offline',
+            attachments: (msg.attachments || []).map((attachment: any) => ({
+              ...attachment,
+              upload_status: 'paused',
+            })),
+          }));
+          this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
+          await this._persistPendingStandardAttachment(messageId);
+        } else {
+          // Any non-offline error (API rejection, stale file, presign error, etc.)
+          // is unrecoverable — abort permanently and clean up IDB.
           record.cancelled = true;
           this._revokePendingLocalAttachments(record.localAttachments);
           this._pendingStandardAttachmentSends.delete(messageId);
           await this._deletePersistedStandardAttachment(messageId);
-          const stateMessage = this._findLocalMessageById(messageId);
-          if (stateMessage) {
-            this.state.updateMessageById(messageId, (msg) => ({
-              ...msg,
-              status: 'error',
-              attachments: (msg.attachments || []).map((attachment: any) => ({
-                ...attachment,
-                upload_status: 'failed',
-              })),
-            }));
-            this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
-          }
-          throw error;
+          this.state.updateMessageById(messageId, (msg) => ({
+            ...msg,
+            status: 'error',
+            attachments: (msg.attachments || []).map((attachment: any) => ({
+              ...attachment,
+              upload_status: 'failed',
+            })),
+          }));
+          this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
         }
-
-        const paused = record.paused || signal.aborted;
-        const isPresignedHttpError = typeof error?.status === 'number';
-        const isOfflineError =
-          paused ||
-          (!isPresignedHttpError && !error.response) ||
-          error.code === 'ERR_NETWORK' ||
-          error.isWSFailure ||
-          !this.getClient().wsConnection?.isHealthy;
-        this.state.updateMessageById(messageId, (msg) => ({
-          ...msg,
-          status: isOfflineError ? 'failed_offline' : 'error',
-          attachments: (msg.attachments || []).map((attachment: any) => ({
-            ...attachment,
-            upload_status: isOfflineError ? 'paused' : 'failed',
-          })),
-        }));
-        this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
-        if (isOfflineError) await this._persistPendingStandardAttachment(messageId);
         throw error;
       }
     };
@@ -1618,6 +1602,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   ): Promise<{ file: string }> {
     const sessionSafetyWindowMs = 60_000;
     const totalSize = getPresignedUploadSize(file);
+
+    // Stale File objects restored from IndexedDB after page reload can report size 0.
+    // Reject immediately to avoid a presign API error that would loop forever.
+    if (totalSize <= 0) {
+      throw new DOMException(
+        'File has zero bytes and cannot be uploaded (stale File reference after reload)',
+        'NotReadableError',
+      );
+    }
+
     const uploadProgress = onProgress
       ? (progress: { loaded: number; total: number; percentage: number }) =>
           onProgress({ ...progress, percentage: Math.min(99, progress.percentage) })
