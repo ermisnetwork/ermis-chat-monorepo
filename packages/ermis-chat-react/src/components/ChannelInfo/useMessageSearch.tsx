@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
 import { buildUserMap } from '../../utils';
+import { useChatCore } from '../../hooks/useChatCore';
 import type { SearchResultMessage } from '../../types';
 
 export type UseMessageSearchProps = {
@@ -116,15 +117,17 @@ export const useMessageSearch = ({ channel, isOpen, debounceMs = 500 }: UseMessa
     }
   }, [handleLoadMore]);
 
+  const { client } = useChatCore();
+
   // Derived userMap for resolving mentions, with a lowercase variant for fast lookup
   const userMaps = useMemo(() => {
-    const original = buildUserMap(channel.state);
+    const original = buildUserMap(channel.state, client?.state?.users);
     const lower: typeof original = {};
     for (const [id, name] of Object.entries(original)) {
       lower[id.toLowerCase()] = name;
     }
     return { original, lower };
-  }, [channel.state]);
+  }, [channel.state, client?.state?.users]);
 
   return {
     query,

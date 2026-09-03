@@ -1577,7 +1577,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
     encryptedMessageFailedLabel = 'Encrypted message could not be decrypted',
     encryptedMessageDecryptingLabel = 'Decrypting encrypted message...',
   }) => {
-    const { activeChannel } = useChatCore();
+    const { activeChannel, client } = useChatCore();
 
     const isEncrypted =
       message.content_type === 'mls' ||
@@ -1591,8 +1591,8 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
         rawText === encryptedMessageLabel);
 
     const userMap = useMemo<Record<string, string>>(() => {
-      return buildUserMap(activeChannel?.state);
-    }, [activeChannel?.state]);
+      return buildUserMap(activeChannel?.state, client?.state?.users);
+    }, [activeChannel?.state, client?.state?.users]);
 
     const hasCodeBlocks = rawText.includes('`');
     const textContent =
@@ -1660,13 +1660,114 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
 );
 RegularMessage.displayName = 'RegularMessage';
 
+/**
+ * ── Centralized batch user resolver ──────────────────────────────────
+ * All SystemMessage instances funnel missing user IDs through this
+ * module-level resolver. It debounces requests (80 ms) and fires a
+ * single `getBatchUsers` call, permanently caching the results.
+ *
+ * Flow:
+ *   1. Component calls `requestUserResolve(ids, client, callback)`
+ *   2. IDs not already resolved are queued in `_fetchQueue`
+ *   3. After 80 ms of quiet, `_flushQueue` fires one batch API call
+ *   4. Results are cached in `_resolvedCache`; all subscriber callbacks
+ *      are invoked so listening components re-render with resolved names.
+ */
+const _resolvedCache = new Map<string, string>();   // id → displayName (permanent)
+const _fetchQueue = new Set<string>();              // IDs waiting for next batch
+const _subscribers = new Set<() => void>();         // notify on resolution
+let _flushTimer: ReturnType<typeof setTimeout> | null = null;
+let _clientRef: any = null;
+
+function _flushQueue() {
+  _flushTimer = null;
+  const batch = [..._fetchQueue];
+  _fetchQueue.clear();
+  if (batch.length === 0 || !_clientRef) return;
+
+  _clientRef
+    .getBatchUsers(batch)
+    .then((users: any[]) => {
+      for (const u of users) {
+        if (u?.id) _resolvedCache.set(u.id, u.name || u.id);
+      }
+      // Mark IDs the API didn't return as permanently resolved (to their own ID)
+      // to prevent infinite re-fetching for users with no server-side record.
+      for (const id of batch) {
+        if (!_resolvedCache.has(id)) _resolvedCache.set(id, id);
+      }
+      _subscribers.forEach((fn) => fn());
+    })
+    .catch(() => {
+      // On failure, mark all as self-resolved to prevent retry storms
+      for (const id of batch) {
+        if (!_resolvedCache.has(id)) _resolvedCache.set(id, id);
+      }
+    });
+}
+
+function requestUserResolve(ids: string[], client: any, onResolved: () => void): () => void {
+  _clientRef = client;
+  _subscribers.add(onResolved);
+
+  let queued = false;
+  for (const id of ids) {
+    if (id && !_resolvedCache.has(id)) {
+      _fetchQueue.add(id);
+      queued = true;
+    }
+  }
+
+  if (queued) {
+    if (_flushTimer) clearTimeout(_flushTimer);
+    _flushTimer = setTimeout(_flushQueue, 80);
+  }
+
+  // Return unsubscribe function
+  return () => { _subscribers.delete(onResolved); };
+}
+
+/**
+ * Extract user IDs referenced in a raw system message.
+ * Format: "<formatId> <userId> [<param1> <param2> ...]"
+ * Format 18 (admin transfer) has two user IDs at positions 1 and 2.
+ */
+function extractSystemMessageUserIds(rawText: string): string[] {
+  if (!rawText) return [];
+  const parts = rawText.trim().split(' ');
+  const formatId = parts[0];
+  const ids: string[] = [];
+  if (parts[1]) ids.push(parts[1]);
+  if (formatId === '18' && parts[2]) ids.push(parts[2]);
+  return ids;
+}
+
 /** System message: centered info text, parsed from raw format */
 export const SystemMessage: React.FC<MessageRendererProps> = ({ message, systemMessageTranslations }) => {
-  const { activeChannel } = useChatCore();
+  const { activeChannel, client } = useChatCore();
+  const [resolveEpoch, setResolveEpoch] = useState(0);
 
   const userMap = useMemo<Record<string, string>>(() => {
-    return buildUserMap(activeChannel?.state);
-  }, [activeChannel?.state]);
+    const base = buildUserMap(activeChannel?.state, client?.state?.users);
+    // Overlay any lazily-resolved names from the batch cache
+    _resolvedCache.forEach((name, id) => {
+      if (!base[id] || base[id] === id) base[id] = name;
+    });
+    return base;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChannel?.state, client?.state?.users, resolveEpoch]);
+
+  // Request resolution for any user IDs not yet in the map (runs once per message)
+  useEffect(() => {
+    if (!message.text || !client) return;
+
+    const ids = extractSystemMessageUserIds(message.text);
+    const missing = ids.filter((id) => id && !_resolvedCache.has(id));
+
+    if (missing.length === 0) return;
+
+    return requestUserResolve(missing, client, () => setResolveEpoch((n) => n + 1));
+  }, [message.text, client]); // intentionally excludes userMap to prevent loops
 
   const parsedText = useMemo(
     () => (message.text ? parseSystemMessage(message.text, userMap, systemMessageTranslations) : ''),

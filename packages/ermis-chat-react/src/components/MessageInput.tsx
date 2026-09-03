@@ -246,7 +246,7 @@ export const MessageInput: React.FC<MessageInputProps> = React.memo(({
       const rawText = editingMessage.text || '';
 
       // Extract user map locally since we have `activeChannel.state.members`
-      const userMap = buildUserMap(activeChannel?.state);
+      const userMap = buildUserMap(activeChannel?.state, client?.state?.users);
 
       const htmlText = rawText
         .replace(/&/g, '&amp;')
