@@ -20,8 +20,9 @@ import {
   useMessageSend,
   usePendingState,
   usePreviewState,
+  isGroupChannel,
 } from '@ermis-network/ermis-chat-react';
-import { Cat, Mic, Plus, SendHorizonal, Smile, Trash2, BarChart2, Film } from 'lucide-react';
+import { Cat, Mic, Plus, SendHorizonal, Smile, Trash2, BarChart2, Film, Play, Pause, SkipForward, Music } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -30,6 +31,7 @@ import pcmWorkletUrl from 'react-ts-audio-recorder/assets/pcm-worklet.js?url';
 
 import { UhmDragAndDropOverlay } from './UhmDragAndDropOverlay';
 import { UhmCreatePollModal } from './UhmCreatePollModal';
+import { UhmSlashCommandSuggestions, type SlashCommandItem } from './UhmSlashCommandSuggestions';
 
 export type UhmMessageInputProps = {
   dragAndDropLabel?: string;
@@ -78,6 +80,104 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   // Poll creation modal state
   const [isPollOpen, setIsPollOpen] = useState(false);
+
+  // Slash command autocomplete & suggestions state
+  const [slashQuery, setSlashQuery] = useState<string | null>(null);
+  const [slashHighlightIndex, setSlashHighlightIndex] = useState(0);
+
+  const slashCommands = useMemo<SlashCommandItem[]>(
+    () => [
+      {
+        command: '/start',
+        label: t('music.cmd_start_label', 'Bắt đầu / Tiếp tục phát'),
+        description: t('music.cmd_start_desc', 'Bắt đầu hoặc tiếp tục phát nhạc'),
+        icon: Play,
+        action: 'send',
+      },
+      {
+        command: '/stop',
+        label: t('music.cmd_stop_label', 'Tạm dừng nhạc'),
+        description: t('music.cmd_stop_desc', 'Tạm dừng bài hát đang phát'),
+        icon: Pause,
+        action: 'send',
+      },
+      {
+        command: '/next',
+        label: t('music.cmd_next_label', 'Chuyển bài tiếp theo'),
+        description: t('music.cmd_next_desc', 'Bỏ qua và phát bài tiếp theo'),
+        icon: SkipForward,
+        action: 'send',
+      },
+      {
+        command: '/play',
+        label: t('music.cmd_play_label', 'Phát nhạc'),
+        description: t('music.cmd_play_desc', 'Tiếp tục phát nhạc'),
+        icon: Music,
+        action: 'send',
+      },
+      {
+        command: '/poll',
+        label: t('music.cmd_poll_label', 'Tạo bình chọn'),
+        description: t('music.cmd_poll_desc', 'Tạo cuộc bình chọn mới'),
+        icon: BarChart2,
+        action: 'poll',
+      },
+    ],
+    [t],
+  );
+
+  const filteredSlashCommands = useMemo(() => {
+    if (slashQuery === null) return [];
+    if (!slashQuery) return slashCommands;
+    return slashCommands.filter(
+      (c) =>
+        c.command.slice(1).toLowerCase().startsWith(slashQuery) ||
+        c.label.toLowerCase().includes(slashQuery) ||
+        c.command.toLowerCase().includes(slashQuery),
+    );
+  }, [slashQuery, slashCommands]);
+
+  const handleSelectSlashCommand = useCallback(
+    async (cmd: SlashCommandItem, mode: 'send' | 'fill') => {
+      setSlashQuery(null);
+
+      if (cmd.action === 'poll') {
+        if (editableRef.current) editableRef.current.innerHTML = '';
+        setHasContent(false);
+        setIsPollOpen(true);
+        return;
+      }
+
+      if (mode === 'send') {
+        if (editableRef.current) editableRef.current.innerHTML = '';
+        setHasContent(false);
+        if (activeChannel) {
+          try {
+            await activeChannel.sendMessage({
+              text: cmd.command,
+            });
+            syncMessages();
+          } catch (err) {
+            console.error('Failed to send slash command:', err);
+          }
+        }
+        if (editableRef.current) editableRef.current.focus();
+      } else {
+        if (editableRef.current) {
+          editableRef.current.textContent = cmd.command;
+          setHasContent(true);
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(editableRef.current);
+          range.collapse(false);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+          editableRef.current.focus();
+        }
+      }
+    },
+    [activeChannel, syncMessages],
+  );
 
   useEffect(() => {
     return () => {
@@ -295,6 +395,15 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       setErrorType(null);
     }
 
+    // Slash command detection for group channels
+    if (activeChannel && isGroupChannel(activeChannel) && content.startsWith('/') && !content.includes(' ')) {
+      const q = content.slice(1).toLowerCase();
+      setSlashQuery(q);
+      setSlashHighlightIndex(0);
+    } else {
+      setSlashQuery(null);
+    }
+
     mentionHandleInput();
     activeChannel?.keystroke();
   }, [mentionHandleInput, files.length, activeChannel, t, errorType]);
@@ -304,6 +413,10 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       if (e.nativeEvent.isComposing) return;
 
       if (e.key === 'Escape') {
+        if (slashQuery !== null) {
+          setSlashQuery(null);
+          return;
+        }
         if (editingMessage) {
           setEditingMessage(null);
           cleanupFiles();
@@ -321,6 +434,41 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       const consumed = mentionHandleKeyDown(e);
       if (consumed) return;
 
+      // Slash command navigation
+      if (slashQuery !== null && filteredSlashCommands.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSlashHighlightIndex((prev) => (prev < filteredSlashCommands.length - 1 ? prev + 1 : 0));
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSlashHighlightIndex((prev) => (prev > 0 ? prev - 1 : filteredSlashCommands.length - 1));
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const targetCmd = filteredSlashCommands[slashHighlightIndex] || filteredSlashCommands[0];
+          if (targetCmd) {
+            handleSelectSlashCommand(targetCmd, 'send');
+          }
+          return;
+        }
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          const targetCmd = filteredSlashCommands[slashHighlightIndex] || filteredSlashCommands[0];
+          if (targetCmd) {
+            handleSelectSlashCommand(targetCmd, 'fill');
+          }
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setSlashQuery(null);
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (!keywordError) {
@@ -330,6 +478,10 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     },
     [
       mentionHandleKeyDown,
+      slashQuery,
+      filteredSlashCommands,
+      slashHighlightIndex,
+      handleSelectSlashCommand,
       handleSend,
       editingMessage,
       quotedMessage,
@@ -480,6 +632,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
     // Clear attachments, mentions, pickers, and recording from previous channel
     resetMentions();
+    setSlashQuery(null);
     closePickers();
     cancelRecording();
     // Do not revoke Object URLs here since we save files in drafts and need previews when returning
@@ -713,6 +866,15 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                     members={filteredMembers}
                     highlightIndex={highlightIndex}
                     onSelect={selectMention}
+                  />
+                )}
+
+                {slashQuery !== null && filteredSlashCommands.length > 0 && (
+                  <UhmSlashCommandSuggestions
+                    commands={filteredSlashCommands}
+                    highlightIndex={slashHighlightIndex}
+                    onHighlight={setSlashHighlightIndex}
+                    onSelect={handleSelectSlashCommand}
                   />
                 )}
 

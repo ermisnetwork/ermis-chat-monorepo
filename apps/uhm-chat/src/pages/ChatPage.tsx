@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatCore, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember, canStartDirectCall } from '@ermis-network/ermis-chat-react'
 import type { Channel as ChannelType, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
-import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash } from 'lucide-react'
+import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash, Music } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
+import { UhmMusicRoomPlayer } from '@/features/chat/UhmMusicRoomPlayer'
 import { SidebarHeader } from '@/components/SidebarHeader'
 import { ContactsPanel } from '@/features/chat/ContactsPanel'
 import { InvitesPanel } from '@/features/chat/InvitesPanel'
@@ -138,6 +139,7 @@ export function ChatPage() {
     }
   }, [activeChannel, drillDownChannel])
   const [showChannelInfo, setShowChannelInfo] = useState(false)
+  const [showMusicRoom, setShowMusicRoom] = useState(false)
   const [hasOpenedInfo, setHasOpenedInfo] = useState(false)
   const [infoChannel, setInfoChannel] = useState<ChannelType | null>(null)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
@@ -673,6 +675,22 @@ export function ChatPage() {
               <RotateCw className={`w-[17px] h-[17px] ${rotating ? 'animate-spin' : ''}`} />
             </button>
           )}
+          {/* Music Room Toggle Button for Group Channels */}
+          {isGroupChannel(channel) && (
+            <button
+              className={`inline-flex items-center justify-center w-8 h-8 rounded-full transition-all active:scale-95 ${
+                showMusicRoom
+                  ? 'bg-violet-100 dark:bg-violet-950/60 text-violet-600 dark:text-violet-300'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200'
+              }`}
+              onClick={() => setShowMusicRoom((prev) => !prev)}
+              title={t('music.room_title')}
+              aria-label={t('music.room_title')}
+              disabled={actionDisabled}
+            >
+              <Music className="w-[17px] h-[17px]" />
+            </button>
+          )}
           <button
             className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95"
             onClick={toggleChannelInfo}
@@ -685,7 +703,7 @@ export function ChatPage() {
         </>
       )
     },
-    [client, getRestoreBadge, rotatingKeyCid, t, toggleChannelInfo],
+    [client, getRestoreBadge, rotatingKeyCid, showMusicRoom, t, toggleChannelInfo],
   )
 
   const safariCallTooltip = t('safari_call.tooltip', 'Calls are not supported on Safari. Please use Chrome or Firefox.')
@@ -1089,6 +1107,17 @@ export function ChatPage() {
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
+
+          {/* Music Room Player for Group Channels */}
+          {activeChannel && isGroupChannel(activeChannel) && (
+            <UhmMusicRoomPlayer
+              channel={activeChannel}
+              clientUserId={client?.userID}
+              isOpen={showMusicRoom}
+              onClose={() => setShowMusicRoom(false)}
+              onOpen={() => setShowMusicRoom(true)}
+            />
+          )}
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
