@@ -10,7 +10,7 @@ import {
 import { chatCodes, randomId, retryInterval, sleep } from './utils';
 import https from 'https';
 import { isErrorResponse } from './errors';
-import { getLogger, setSdkLogger } from './logger';
+import { apiErrorLogDetails, getLogger, sanitizeUrlForLog, setSdkLogger } from './logger';
 import {
   createEndUserAuthApi,
   resolveEndUserApiMode,
@@ -147,36 +147,31 @@ export class ErmisAuthProvider {
       config?: AxiosRequestConfig & { maxBodyLength?: number };
     },
   ) {
-    this.logger(
-      'info',
-      `client: ${type} - Request - ${url}- ${JSON.stringify(data)} - ${JSON.stringify(config.params)}`,
-      {
-        tags: ['api', 'api_request', 'client'],
-        url,
-        payload: data,
-        config,
-      },
-    );
-  }
-
-  _logApiResponse<T>(type: string, url: string, response: AxiosResponse<T>) {
-    this.logger('info', `client:${type} - Response - url: ${url} > status ${response.status}`, {
-      tags: ['api', 'api_response', 'client'],
-      url,
-      response,
+    const loggedUrl = sanitizeUrlForLog(url);
+    this.logger('info', `client:${type} - Request - url: ${loggedUrl}`, {
+      tags: ['api', 'api_request', 'client'],
+      url: loggedUrl,
     });
   }
 
-  _logApiError(type: string, url: string, error: unknown, options: unknown) {
-    this.logger(
-      'error',
-      `client:${type} - Error: ${JSON.stringify(error)} - url: ${url} - options: ${JSON.stringify(options)}`,
-      {
-        tags: ['api', 'api_response', 'client'],
-        url,
-        error,
-      },
-    );
+  _logApiResponse<T>(type: string, url: string, response: AxiosResponse<T>) {
+    const loggedUrl = sanitizeUrlForLog(url);
+    this.logger('info', `client:${type} - Response - url: ${loggedUrl} > status ${response.status}`, {
+      tags: ['api', 'api_response', 'client'],
+      url: loggedUrl,
+      status: response.status,
+    });
+  }
+
+  _logApiError(type: string, url: string, error: unknown, _options: unknown) {
+    const loggedUrl = sanitizeUrlForLog(url);
+    const details = apiErrorLogDetails(error);
+    const statusSuffix = details.status === undefined ? '' : ` - status: ${details.status}`;
+    this.logger('error', `client:${type} - Error - url: ${loggedUrl} - category: ${details.category}${statusSuffix}`, {
+      tags: ['api', 'api_response', 'client'],
+      url: loggedUrl,
+      ...details,
+    });
   }
 
   doAxiosRequest = async <T>(

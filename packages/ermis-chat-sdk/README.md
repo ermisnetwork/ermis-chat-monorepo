@@ -2,6 +2,9 @@
 
 The official core SDK for Ermis Chat.
 
+MLS source/artifact upgrade and TEST adoption:
+[repository handoff runbook](../../MLS_UPGRADE_HANDOFF.md).
+
 ## Public Module Structure
 
 - Customer integrations should import from the package root, for example `import { ErmisChat, EncryptionManager, loadOpenMlsWasm } from '@ermis-network/ermis-chat-sdk'`.
@@ -19,6 +22,28 @@ npm install @ermis-network/ermis-chat-react@2.1.0
 ```
 
 Backend contract selection is runtime configuration through `endUserApiMode`, not an npm channel or an API probe. Existing `self-host` and `user-service` dist-tags may remain available for older releases, but new integrations should use the unified `2.x` line.
+
+## Durable GroupInfo repair
+
+The SDK treats `group_info.refresh_requested` and `group_info.uploaded` as
+best-effort wake-ups over Bellboy's authoritative PostgreSQL refresh state. The
+default IndexedDB adapter persists metadata-only refresh requests, reconciles
+every local MLS group on initialization or reconnect, and allows one
+claim/export/upload flow per `cid`. A repair upload always carries the server
+`request_id` and short `lease_token`; matching or older local work is removed
+only after an uploaded event or a successful HTTP persistence/reconcile cycle.
+
+Custom `EncryptionStorageAdapter` implementations are eligible to repair only
+when they implement `listGroupInfoRefreshRequests`,
+`saveGroupInfoRefreshRequest`, and `deleteGroupInfoRefreshRequests`. Otherwise
+the SDK emits `e2ee.group_info_repair_state` with
+`repair_status="unsupported"` and never performs an unleased repair upload.
+
+On external-join `group_info_stale` or `group_info_invalid`, the SDK reports
+the exact observed epoch/hash and fetches a fresh GroupInfo using at most three
+bounded jittered backoffs. Applications should render that state as “Secure
+session is being refreshed” and keep user retry available. They must not reuse
+or retry an external commit already accepted by Bellboy.
 
 ## Client Configuration
 
@@ -57,6 +82,31 @@ const client = ErmisChat.getInstance({
 - `searchUsers(query, limit)` is the preferred overload. The legacy `searchUsers(page, page_size, name)` overload maps to `q=name&limit=page_size` and ignores `page`.
 - The SDK no longer preloads all users after `connectUser()`. Browser cache hydration remains local-only, and cache entries are refreshed by `queryUser`, `getBatchUsers`, `searchUsers`, message/member enrichment, `updateProfile`, and `uploadAvatar`.
 - For external auth, exchange the external identity through a trusted backend calling `/uss/v1/auth/external`, then pass the returned `access_token` to `connectUser(user, access_token)`.
+
+## Durable GroupInfo repair
+
+The SDK treats `group_info.refresh_requested` and `group_info.uploaded` as
+best-effort wake-ups over Bellboy's PostgreSQL state. The default IndexedDB
+adapter persists metadata-only refresh requests, reconciles every local MLS
+group on initialization/reconnect, and allows one claim/export/upload flow per
+`cid`. A repair upload always carries the server `request_id` and short
+`lease_token`; matching or older local work is removed only after an uploaded
+event or a successful HTTP persistence/reconcile cycle.
+
+Custom `EncryptionStorageAdapter` implementations are eligible to repair only
+when they implement `listGroupInfoRefreshRequests`,
+`saveGroupInfoRefreshRequest`, and `deleteGroupInfoRefreshRequests`. Otherwise
+the SDK emits `e2ee.group_info_repair_state` with
+`repair_status="unsupported"` and never performs an unleased upload.
+
+On external-join `group_info_stale`/`group_info_invalid`, the SDK reports the
+exact observed epoch/hash, emits `repair_status="retryable"`, and fetches a
+fresh GroupInfo after a newer upload hint or at most three bounded jittered
+backoffs. Applications should render that state as “Secure session is being
+refreshed” and keep user retry available; they must not reuse or retry an
+accepted external commit.
+
+## Publishing
 
 ### `connectUser` migration in 2.1.0
 

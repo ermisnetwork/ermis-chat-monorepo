@@ -103,7 +103,54 @@ export interface ChannelRepairState {
   last_error?: string;
   updated_at: number;
 }
+export type ExternalJoinReadinessStatus = 'pending_external_join' | 'joined_external';
+export interface ExternalJoinReadinessState {
+  cid: string;
+  status: ExternalJoinReadinessStatus;
+  reason: 'NoMatchingKeyPackage' | 'active_member_recovery' | 'manual_external_join';
+  welcome_epoch?: number;
+  welcome_event_cursor?: EventCursor;
+  first_decryptable_epoch?: number;
+  updated_at: number;
+}
+export interface JoinPersistenceCheckpoint {
+  user_id: string;
+  device_id: string;
+  provider_bytes: Uint8Array;
+  cid: string;
+  /** `null` means a successful Welcome cleared any earlier fallback state. */
+  readiness: ExternalJoinReadinessState | null;
+  generation?: MlsGroupGenerationMarker;
+}
 
+export interface MlsGroupGenerationMarker {
+  cid: string;
+  group_generation: number;
+  group_id: Uint8Array | null;
+  current_epoch: number;
+  status: 'active' | 'candidate' | 'historical';
+  operation_id?: string;
+  updated_at: number;
+}
+
+export interface MlsRebootstrapCandidateCheckpoint {
+  user_id: string;
+  device_id: string;
+  provider_bytes: Uint8Array;
+  marker: MlsGroupGenerationMarker;
+  claim: MlsRebootstrapClaimResponse;
+  completion: CompleteMlsRebootstrapRequest;
+}
+export interface MlsRebootstrapClaimIntent {
+  user_id: string;
+  device_id: string;
+  cid: string;
+  operation_key: string;
+  expected_generation: number;
+  expected_epoch: number;
+  protocol_version: 1;
+  created_at: number;
+}
 export interface EncryptionSyncCheckpoint {
   user_id: string;
   device_id: string;
@@ -117,6 +164,7 @@ export type ArchiveScope = 'account_owned' | 'group_sponsored';
 
 export interface PendingArchiveUpload {
   cid: string;
+  group_generation: number;
   channel_type: string;
   channel_id: string;
   epoch: number;
@@ -128,6 +176,7 @@ export interface PendingArchiveUpload {
 
 export interface PendingDeferredArchive {
   cid: string;
+  group_generation: number;
   channel_type: string;
   channel_id: string;
   epoch: number;
@@ -155,6 +204,7 @@ export type ArchiveAckStatus = 'uploaded' | 'idempotent' | 'duplicate_cap';
 
 export interface ArchiveAckRecord {
   cid: string;
+  group_generation: number;
   epoch: number;
   scope: ArchiveScope;
   coverage_key: string;
@@ -169,6 +219,8 @@ export type ArchiveMaterializationStatus = 'pending' | 'uploaded' | 'terminal' |
 
 export interface EpochArchiveCheckpoint {
   scope_cid: string;
+  /** Missing legacy checkpoints are generation 0. */
+  group_generation: number;
   channel_type: string;
   channel_id: string;
   epoch: number;
@@ -228,6 +280,7 @@ export interface RepairIssue {
 export interface RestoreProgressRecord {
   device_id: string;
   cid: string;
+  group_generation: number;
   user_id: string;
   channel_type: string;
   channel_id: string;
@@ -321,6 +374,23 @@ export interface EncryptionStorageAdapter {
   loadChannelRepairState?(scopeCid: string): Promise<ChannelRepairState | null>;
   saveChannelRepairState?(state: ChannelRepairState): Promise<void>;
   deleteChannelRepairState?(scopeCid: string): Promise<void>;
+  loadExternalJoinReadiness(cid: string): Promise<ExternalJoinReadinessState | null>;
+  saveExternalJoinReadiness(state: ExternalJoinReadinessState): Promise<void>;
+  deleteExternalJoinReadiness(cid: string): Promise<void>;
+  listGroupInfoRefreshRequests?(): Promise<StoredGroupInfoRefreshRequest[]>;
+  saveGroupInfoRefreshRequest?(request: StoredGroupInfoRefreshRequest): Promise<void>;
+  deleteGroupInfoRefreshRequests?(cid: string, throughEpoch?: number, requestId?: string): Promise<void>;
+  /**
+   * Atomically persist provider bytes, the group marker, and the device-local
+   * JOIN readiness boundary. External join requires this crash-safe primitive.
+   */
+  saveJoinCheckpoint(checkpoint: JoinPersistenceCheckpoint): Promise<void>;
+  saveRebootstrapClaimIntent?(intent: MlsRebootstrapClaimIntent): Promise<void>;
+  loadRebootstrapClaimIntent?(cid: string): Promise<MlsRebootstrapClaimIntent | null>;
+  deleteRebootstrapClaimIntent?(cid: string): Promise<void>;
+  saveRebootstrapCandidateCheckpoint?(checkpoint: MlsRebootstrapCandidateCheckpoint): Promise<void>;
+  loadRebootstrapCandidateCheckpoint?(cid: string): Promise<MlsRebootstrapCandidateCheckpoint | null>;
+  deleteRebootstrapCandidateCheckpoint?(cid: string): Promise<void>;
   saveEncryptionSyncCheckpoint?(checkpoint: EncryptionSyncCheckpoint): Promise<void>;
   tryAcquireRepairLock?(scopeCid: string, ownerId: string, ttlMs: number): Promise<boolean>;
   releaseRepairLock?(scopeCid: string, ownerId: string): Promise<void>;
@@ -339,21 +409,26 @@ export interface EncryptionStorageAdapter {
   // ---- PIN Epoch Archive recovery ----
   saveArchiveUpload(upload: PendingArchiveUpload): Promise<void>;
   loadPendingArchiveUploads(): Promise<PendingArchiveUpload[]>;
-  deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
+  deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string, groupGeneration?: number): Promise<void>;
   saveDeferredArchive(archive: PendingDeferredArchive): Promise<void>;
   loadPendingDeferredArchives(): Promise<PendingDeferredArchive[]>;
-  deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void>;
+  deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string, groupGeneration?: number): Promise<void>;
   saveArchiveAck(record: ArchiveAckRecord): Promise<void>;
   loadArchiveAck(
     cid: string,
+    groupGeneration: number,
     epoch: number,
     scope: ArchiveScope,
     coverageKey: string,
   ): Promise<ArchiveAckRecord | null>;
   saveEpochArchiveCheckpoint(checkpoint: EpochArchiveCheckpoint): Promise<void>;
-  loadEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<EpochArchiveCheckpoint | null>;
+  loadEpochArchiveCheckpoint(
+    scopeCid: string,
+    epoch: number,
+    groupGeneration?: number,
+  ): Promise<EpochArchiveCheckpoint | null>;
   loadEpochArchiveCheckpoints(): Promise<EpochArchiveCheckpoint[]>;
-  deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<void>;
+  deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number, groupGeneration?: number): Promise<void>;
   saveArchiveStashKey(key: CryptoKey): Promise<void>;
   loadArchiveStashKey(): Promise<CryptoKey | null>;
   saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void>;
@@ -361,10 +436,15 @@ export interface EncryptionStorageAdapter {
 
   // ---- Restore Progress (required SDK contract) ----
   saveRestoreProgress(record: RestoreProgressRecord): Promise<void>;
-  loadRestoreProgress(userId: string, deviceId: string, cid: string): Promise<RestoreProgressRecord | null>;
+  loadRestoreProgress(
+    userId: string,
+    deviceId: string,
+    cid: string,
+    groupGeneration?: number,
+  ): Promise<RestoreProgressRecord | null>;
   loadIncompleteRestores(userId: string, deviceId: string): Promise<RestoreProgressRecord[]>;
   loadRestoresWithPermanentGaps(userId: string, deviceId: string): Promise<RestoreProgressRecord[]>;
-  deleteRestoreProgress(userId: string, deviceId: string, cid: string): Promise<void>;
+  deleteRestoreProgress(userId: string, deviceId: string, cid: string, groupGeneration?: number): Promise<void>;
 }
 
 // ============================================================
@@ -379,10 +459,18 @@ export interface UploadKeyPackagesRequest {
 export interface UploadKeyPackagesResponse extends APIResponse {
   stored: number;
   total_remaining: number;
+  target?: number;
+  low_watermark?: number;
+  requested_delta?: number;
+  refill_generation?: number | null;
 }
 
 export interface KeyPackageCountResponse extends APIResponse {
   remaining: number;
+  target?: number;
+  low_watermark?: number;
+  requested_delta?: number;
+  refill_generation?: number | null;
 }
 
 export interface DeviceKeyPackage {
@@ -400,9 +488,25 @@ export interface MemberKeyPackages {
   user_id: string;
   key_packages: DeviceKeyPackage[];
 }
-
+export type KeyPackageConsumeOutcome = 'selected' | 'empty' | 'only_near_expiry' | 'expiry_unknown' | 'contended';
+export interface DeviceKeyPackageOutcome {
+  device_id: string;
+  outcome: KeyPackageConsumeOutcome;
+  requested: number;
+  selected: number;
+}
+export interface MemberKeyPackageOutcome {
+  user_id: string;
+  outcome: KeyPackageConsumeOutcome;
+  devices: DeviceKeyPackageOutcome[];
+  truncated: boolean;
+}
 export interface GetKeyPackagesByCidResponse extends APIResponse {
   members: MemberKeyPackages[];
+  outcomes: MemberKeyPackageOutcome[];
+  trusted_now: string;
+  usable_after: string;
+  minimum_remaining_lifetime_secs: number;
 }
 
 // NOTE: AddMembersRequest has been removed — add_members is now handled
@@ -448,13 +552,27 @@ export interface UploadGroupInfoRequest {
   /** TLS-serialized GroupInfo bytes from WASM export_group_info */
   group_info: Uint8Array;
   epoch: number;
+  request_id?: string;
+  lease_token?: string;
+}
+export interface UploadGroupInfoResponse extends EncryptionOperationResponse {
+  request_id?: string | null;
+  epoch: number;
+  hash: string;
+  idempotent: boolean;
 }
 
 export interface GetGroupInfoResponse extends APIResponse {
   group_info: Uint8Array;
+  group_generation?: number;
+  group_id?: Uint8Array | null;
   epoch: number;
+  hash: string;
   /** true if stored GroupInfo is older than channel.mls_epoch. */
   is_stale?: boolean;
+  external_join_prerequisite?: {
+    reason: 'active_member_recovery';
+  };
   channel?: unknown;
   messages?: unknown[];
   pinned_messages?: unknown[];
@@ -464,10 +582,181 @@ export interface GetGroupInfoResponse extends APIResponse {
   is_pinned?: boolean;
 }
 
+export type MlsRebootstrapState =
+  | 'repairing'
+  | 'eligible'
+  | 'preparing'
+  | 'activated'
+  | 'cancelled_repair_won'
+  | 'preparation_failed_retryable'
+  | 'delivery_failed_retryable'
+  | 'upgrade_required'
+  | 'incompatible_server_client';
+
+export type MlsRebootstrapReason =
+  | 'group_info_missing'
+  | 'group_info_stale'
+  | 'group_info_invalid'
+  | 'repair_window_open'
+  | 'repair_timeout_elapsed'
+  | 'repair_won_race'
+  | 'lease_unavailable'
+  | 'lease_expired'
+  | 'membership_changed'
+  | 'generation_changed'
+  | 'operation_conflict'
+  | 'feature_disabled'
+  | 'client_upgrade_required'
+  | 'unsupported_protocol_version'
+  | 'invalid_request'
+  | 'infrastructure_unavailable'
+  | 'delivery_pending'
+  | 'history_incomplete';
+
+export interface MlsGenerationStateResponse extends APIResponse {
+  group_generation: number;
+  group_id: Uint8Array | null;
+  current_epoch: number;
+  membership_version: string;
+  state: MlsRebootstrapState;
+  reason: MlsRebootstrapReason;
+  retryable: boolean;
+  first_unresolved_at?: string | null;
+  incident_deadline_at?: string | null;
+  capability: {
+    protocol_version: number;
+    automatic_enabled: boolean;
+    repair_timeout_seconds: number;
+    max_group_info_bytes: number;
+    max_ratchet_tree_bytes: number;
+    max_welcome_recipients: number;
+    max_welcome_bytes: number;
+  };
+}
+
+export interface MlsRebootstrapClaimResponse extends APIResponse {
+  operation_id: string;
+  operation_key: string;
+  expected_generation: number;
+  next_generation: number;
+  expected_epoch: number;
+  membership_version: string;
+  lease_token: string;
+  lease_expires_at: string;
+  incident_deadline_at: string;
+  state: MlsRebootstrapState;
+  reason: MlsRebootstrapReason;
+  retryable: boolean;
+  recipient_key_packages: Array<{
+    key_package_id: string;
+    user_id: string;
+    device_id: string;
+    key_package: Uint8Array;
+  }>;
+}
+
+export interface CompleteMlsRebootstrapRequest {
+  operation_id: string;
+  operation_key: string;
+  lease_token: string;
+  expected_generation: number;
+  expected_epoch: number;
+  new_generation: number;
+  new_epoch: 0 | 1;
+  membership_version: string;
+  group_id: Uint8Array;
+  group_info: Uint8Array;
+  ratchet_tree: Uint8Array;
+  welcome?: Uint8Array;
+  recipients: Array<{
+    user_id: string;
+    device_id: string;
+    key_package_id: string;
+  }>;
+}
+
+export interface MlsRebootstrapReceipt extends APIResponse {
+  operation_id: string;
+  operation_key: string;
+  state: MlsRebootstrapState;
+  reason: MlsRebootstrapReason;
+  expected_generation: number;
+  current_generation: number;
+  current_epoch: number;
+  group_id: Uint8Array | null;
+  membership_version: string;
+  activated_at?: string | null;
+  delivery_pending: number;
+  retryable: boolean;
+}
+
+export interface MlsGenerationRecoveryResult {
+  cid: string;
+  generation: number;
+  epoch: number;
+  status:
+    | 'waiting_for_repair'
+    | 'preparing'
+    | 'recovered'
+    | 'history_incomplete'
+    | 'client_upgrade_required'
+    | 'retryable_infrastructure_failure';
+  reason: MlsRebootstrapReason;
+  retryable: boolean;
+  retry_at?: string;
+  delivery_pending?: number;
+}
+export type GroupInfoRepairReason = 'external_join_deadline' | 'group_info_stale' | 'group_info_invalid';
+export interface GroupInfoRefreshRequest {
+  request_id: string;
+  minimum_epoch: number;
+  deadline_at: string;
+  expires_at: string;
+  reason: GroupInfoRepairReason;
+  attempt_count: number;
+  lease_token?: string | null;
+  lease_expires_at?: string | null;
+}
+export interface StoredGroupInfoRefreshRequest extends GroupInfoRefreshRequest {
+  cid: string;
+}
+export interface GroupInfoRefreshResponse extends APIResponse {
+  request: GroupInfoRefreshRequest | null;
+}
+export interface ReportGroupInfoFailureRequest {
+  reason: 'group_info_stale' | 'group_info_invalid';
+  observed_epoch: number;
+  observed_hash: string;
+}
+export interface GroupInfoRefreshRequestedEvent extends GroupInfoRefreshRequest {
+  type: 'group_info.refresh_requested';
+  cid: string;
+  version: number;
+}
+export interface GroupInfoUploadedEvent {
+  type: 'group_info.uploaded';
+  cid: string;
+  request_id: string;
+  epoch: number;
+  hash: string;
+  version: number;
+}
+export type GroupInfoRepairStatus = 'refreshing' | 'retryable' | 'ready' | 'removed' | 'unsupported';
+export interface GroupInfoRepairState {
+  cid: string;
+  status: GroupInfoRepairStatus;
+  request_id?: string;
+  minimum_epoch?: number;
+  reason?: string;
+  retry_after_ms?: number;
+  deadline_at?: string;
+}
 export interface ExternalJoinRequest {
   /** External commit bytes from WASM Group.join_external */
   commit: Uint8Array;
   epoch: number;
+  group_generation?: number;
+  group_id?: Uint8Array;
   /**
    * GroupInfo bytes from joiner — optional because export_group_info() is
    * only valid AFTER merge_pending_commit(). The joiner uploads GroupInfo
@@ -505,6 +794,8 @@ export interface SendE2eeMessageRequest {
     /** Encrypted message ciphertext from WASM `group.create_message()` */
     mls_ciphertext: Uint8Array;
     mls_epoch: number;
+    /** Missing is generation 0 for old clients. */
+    group_generation?: number;
     /** encryption group used to encrypt this message. Non-gated topics use the parent channel CID. */
     e2ee_group_id?: string;
     mentioned_all?: boolean;
@@ -700,6 +991,8 @@ export interface PendingE2eeSendRecord {
   mls_ciphertext?: Uint8Array;
   mls_ciphertext_sha256?: string;
   mls_epoch?: number;
+  /** Missing on legacy records means generation 0. */
+  group_generation?: number;
   e2ee_attachment_ids?: string[];
   aad_metadata?: Record<string, unknown>;
   send_envelope?: Record<string, unknown>;
@@ -720,6 +1013,8 @@ export interface UpdateE2eeMessageRequest {
     /** Encrypted message ciphertext from WASM `group.create_message()` */
     mls_ciphertext: Uint8Array;
     mls_epoch: number;
+    /** Missing is generation 0 for old clients. */
+    group_generation?: number;
     /** encryption group used to encrypt this message. Non-gated topics use the parent channel CID. */
     e2ee_group_id?: string;
     mentioned_all?: boolean;
@@ -757,6 +1052,7 @@ export interface RecoveryPublicKeyResponse extends APIResponse {
 }
 
 export interface UploadEpochArchiveRequest {
+  group_generation: number;
   epoch: number;
   archive_blob_id: string;
   idempotency_key: string;
@@ -805,12 +1101,14 @@ export interface QuerySponsoredArchiveRecipientsResponse extends APIResponse {
 }
 
 export interface EpochIndexEntry {
+  group_generation: number;
   epoch: number;
   scope: string;
   blob_id: string;
 }
 
 export interface ArchiveBlobRecord {
+  group_generation: number;
   archive_blob_id: string;
   cid: string;
   epoch: number;
@@ -825,6 +1123,7 @@ export interface ArchiveBlobRecord {
 }
 
 export interface ArchiveKeyWrapRecord {
+  group_generation: number;
   archive_blob_id: string;
   recipient_user_id: string;
   recipient_recovery_key_id: string;
@@ -837,6 +1136,7 @@ export interface ArchiveKeyWrapRecord {
 }
 
 export interface MemberSnapshotRecord {
+  group_generation: number;
   snapshot_hash: string;
   cid: string;
   first_seen_epoch: number;
@@ -846,6 +1146,7 @@ export interface MemberSnapshotRecord {
 }
 
 export interface QueryEpochArchivesRequest {
+  group_generation?: number;
   list_epochs?: boolean;
   epoch_from?: number;
   epoch_to?: number;
@@ -867,6 +1168,7 @@ export interface ListArchiveAvailabilityResponse extends APIResponse {
 }
 
 export interface QueryArchiveMaterialRequest {
+  group_generation?: number;
   epoch_from: number;
   epoch_to: number;
   include_snapshots?: boolean;
@@ -884,6 +1186,7 @@ export interface HistoricalCiphertext {
   message_id: string;
   mls_ciphertext: Uint8Array;
   mls_epoch: number;
+  group_generation: number;
   created_at: string;
   updated_at?: string;
   type?: string;
@@ -911,6 +1214,8 @@ export type ProtocolType = 'commit' | 'welcome' | 'proposal' | 'external_commit'
 /** Protocol message (commit, welcome, or proposal) */
 export interface ProtocolMessage {
   epoch: number;
+  group_generation?: number;
+  group_id?: Uint8Array;
   user: { id: string; [key: string]: unknown };
   type: ProtocolType;
   commit?: Uint8Array;
@@ -918,6 +1223,7 @@ export interface ProtocolMessage {
   ratchet_tree?: Uint8Array;
   proposal?: Uint8Array;
   target_user_ids?: string[];
+  target_device_ids?: string[];
 }
 
 /** A single item in a sync response — either a protocol event or an app message */
@@ -931,6 +1237,7 @@ export type E2eeSyncEvent =
         content_type: string;
         mls_ciphertext?: Uint8Array;
         mls_epoch?: number;
+        group_generation?: number;
         [key: string]: unknown;
       };
     }
@@ -939,6 +1246,8 @@ export type E2eeSyncEvent =
       /** Encryption protocol payload — `created_at` is at `data.created_at` (consistent with application variant) */
       data: {
         epoch: number;
+        group_generation?: number;
+        group_id?: Uint8Array;
         user: { id: string; [key: string]: unknown };
         /** `commit` | `welcome` | `proposal` | `external_commit` */
         type: ProtocolType;
@@ -947,6 +1256,7 @@ export type E2eeSyncEvent =
         ratchet_tree?: Uint8Array;
         proposal?: Uint8Array;
         target_user_ids?: string[];
+        target_device_ids?: string[];
         /** Timestamp when this event was stored — same location as Application.data.created_at */
         created_at: string;
       };
@@ -1052,6 +1362,34 @@ export interface ScopeSyncResult {
   next_cursor?: EventCursor;
 }
 
+/** Generation snapshot returned by POST /v1/e2ee/mls/recovery/discover. */
+export type MlsRecoveryDiscoveryGeneration = Omit<MlsGenerationStateResponse, 'capability'>;
+
+export interface MlsRecoveryDiscoveryState {
+  result: 'state';
+  generation: MlsRecoveryDiscoveryGeneration;
+  group_info_refresh: GroupInfoRefreshRequest | null;
+}
+
+export interface MlsRecoveryDiscoveryError {
+  result: 'error';
+  reason: 'not_authorized' | 'state_unavailable' | 'infrastructure_unavailable';
+  retryable: boolean;
+}
+
+export type MlsRecoveryDiscoveryItem = MlsRecoveryDiscoveryState | MlsRecoveryDiscoveryError;
+
+/** @internal Discovery state after applying the top-level capability to each generation. */
+export type MlsRecoveryDiscoveryAppliedItem =
+  | MlsRecoveryDiscoveryError
+  | (Omit<MlsRecoveryDiscoveryState, 'generation'> & { generation: MlsGenerationStateResponse });
+
+export interface MlsRecoveryDiscoveryResponse extends APIResponse {
+  protocol_version: number;
+  capability: MlsGenerationStateResponse['capability'];
+  states: Record<string, MlsRecoveryDiscoveryItem>;
+}
+
 export interface RemovedChannelSyncData {
   event_id: string;
   cid: string;
@@ -1127,6 +1465,22 @@ export interface BatchTopicResponse extends APIResponse {
 // Types
 // ============================================================
 
+export type MlsRolloutMetricObservation =
+  | {
+      name: 'external_join_fallback';
+      outcome: 'attempt' | 'success' | 'failure' | 'disabled';
+      reason: 'no_matching_key_package' | 'active_member_recovery' | 'rollout_disabled';
+    }
+  | {
+      name: 'delayed_commit';
+      outcome: 'failure' | 'disabled';
+      reason: 'process_error' | 'historical_replay_disabled';
+    };
+
+export interface MlsRolloutTelemetryResponse extends APIResponse {
+  accepted: number;
+}
+
 export interface EncryptionManagerOptions {
   /** Custom storage adapter. Defaults to IndexedDBEncryptionStorage. */
   storage?: EncryptionStorageAdapter;
@@ -1160,6 +1514,16 @@ export interface EncryptionManagerOptions {
    * sequential upload behavior.
    */
   e2eeAttachmentMultipartUploadConcurrency?: number;
+  /** Process ordered commits returned by reconnect/scope sync. Defaults to true. */
+  enableHistoricalReplay?: boolean;
+  /** Allow typed NoMatchingKeyPackage Welcome failures to trigger external join. Defaults to true. */
+  enablePartialWelcomeFallback?: boolean;
+  /** Run GroupInfo repair requests, claims, and retries. Defaults to true. */
+  enableGroupInfoRepair?: boolean;
+  /** Receives bounded rollout observations with no user, device, channel, or payload data. */
+  onMlsRolloutMetric?: (observation: MlsRolloutMetricObservation) => void;
+  /** Upload bounded rollout observations through the authenticated E2EE transport. Defaults to false. */
+  enableMlsRolloutTelemetry?: boolean;
 }
 
 /**
@@ -1210,6 +1574,7 @@ export type E2eeSyncStatus =
   | 'ready'
   | 'joined_welcome'
   | 'joined_external'
+  | 'pending_external_join'
   | 'stale_group_info'
   | 'skipped'
   | 'failed';
@@ -1252,6 +1617,14 @@ export interface E2eeBootstrapProgress {
 export interface BootstrapKnownE2eeChannelsOptions {
   source?: 'startup' | 'channels_queried' | 'manual' | string;
   priorityActiveCid?: string;
+  /** @internal Authoritative state captured after the final scope_sync page. */
+  recoveryDiscoveryStates?: Record<string, MlsRecoveryDiscoveryAppliedItem>;
+  /** @internal The server does not implement batch discovery for this session. */
+  recoveryDiscoveryUnsupported?: boolean;
+  /** @internal Restrict a scheduled deadline retry to these channels. */
+  targetCids?: string[];
+  /** @internal Scopes whose initial event page was already handled by the batch scope_sync. */
+  scopeSyncedCids?: string[];
 }
 
 export interface BootstrapKnownE2eeChannelsResult extends E2eeBootstrapProgress {

@@ -13,6 +13,7 @@
  */
 
 import { E2eeClient } from './api';
+import { classifyMlsRebootstrapFailure, resolveMlsRebootstrapClaimIntent } from './generation_rebootstrap';
 import { IndexedDBEncryptionStorage } from './storage';
 import type {
   ArchiveBlobRecord,
@@ -37,6 +38,18 @@ import type {
   EventCursor,
   HistoricalCiphertext,
   EncryptionManagerOptions,
+  MlsRolloutMetricObservation,
+  MlsGenerationRecoveryResult,
+  MlsGenerationStateResponse,
+  MlsRecoveryDiscoveryAppliedItem,
+  MlsGroupGenerationMarker,
+  MlsRebootstrapCandidateCheckpoint,
+  MlsRebootstrapClaimResponse,
+  MlsRebootstrapReceipt,
+  GetGroupInfoResponse,
+  GroupInfoRefreshRequestedEvent,
+  GroupInfoRepairState,
+  GroupInfoUploadedEvent,
   PendingE2eeAttachmentUploadCheckpoint,
   EncryptionStorageAdapter,
   PendingArchiveUpload,
@@ -65,8 +78,11 @@ import type {
   RestoreTransientFailureReason,
   RestoredMessage,
   UploadEpochArchiveRequest,
+  UploadKeyPackagesResponse,
   WaterfallResult,
 } from './types';
+import { GroupInfoRepairCoordinator } from './group_info_repair';
+import { emitMlsRolloutMetricSafely, resolveMlsRolloutControls } from './rollout_controls';
 import { buildE2eeMessageAadV1, bytesEqual, canonicalAttachmentIds, hasE2eeAadMetadata } from './aad';
 import {
   buildAttachmentManifest,
@@ -100,10 +116,16 @@ import {
   type E2eeMediaStreamWorkerOptions,
 } from './e2ee_media_stream';
 import type { ErmisChat } from '../client';
-import type { ExtendableGenerics, DefaultGenerics, E2eeRecoveryPolicy } from '../types';
+import type { ExtendableGenerics, DefaultGenerics, E2eeRecoveryPolicy, KeyPackageRefillEvent } from '../types';
 import { sdkLog } from '../logger';
 import { getUserInfo, pickUserWithDisplayName } from '../utils';
-
+import {
+  ACTIVE_MEMBER_RECOVERY,
+  NO_MATCHING_KEY_PACKAGE,
+  PartialWelcomeJoinCoordinator,
+  WelcomeJoinFailure,
+  selectedWelcomeLeaves,
+} from './join_recovery';
 // ============================================================
 // Epoch-stale error detection
 // ============================================================
@@ -155,7 +177,6 @@ function getApiErrorMessage(err: any): string {
   return String(err?.response?.data?.message || err?.message || err || '');
 }
 
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getApiErrorCode(err: any): number | undefined {
   const raw = err?.response?.data?.ermis_code ?? err?.response?.data?.code ?? err?.ermis_code ?? err?.code;
@@ -201,6 +222,20 @@ function compareRfc3339Cursor(a?: string | null, b?: string | null): number {
 }
 
 const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
+const GENERATION_RECOVERY_RETRY_FALLBACK_MS = 5_000;
+const GENERATION_RECOVERY_TIMER_GRACE_MS = 250;
+const MAX_SAFE_TIMER_DELAY_MS = 2_147_000_000;
+const MLS_RECOVERY_DISCOVERY_CHUNK_SIZE = 200;
+
+function isMlsRecoveryDiscoveryUnsupported(error: unknown): boolean {
+  const candidate = error as {
+    status?: number;
+    response?: { status?: number; data?: { reason?: unknown } };
+  };
+  const status = candidate?.response?.status ?? candidate?.status;
+  const reason = candidate?.response?.data?.reason;
+  return status === 404 || status === 405 || status === 501 || reason === 'unsupported_protocol_version';
+}
 
 function compareEventCursor(a?: EventCursor | null, b?: EventCursor | null): number {
   if (!a && !b) return 0;
@@ -222,12 +257,18 @@ function isRemovedCursorAfter(next: RemovedSyncCursor, current?: RemovedSyncCurs
 function staleGroupInfoError(cid: string): Error & { code: string } {
   const err = new Error(
     `[Encryption] GroupInfo is stale for ${cid}; retry after an existing member uploads fresh GroupInfo`,
-  ) as Error & { code: string };
-  err.code = 'stale_group_info';
+  ) as Error & {
+    code: string;
+  };
+  err.code = 'group_info_stale';
   return err;
 }
 
 const KEY_PACKAGE_POOL_TARGET = 100;
+const KEY_PACKAGE_POOL_LOW_WATERMARK = 50;
+const KEY_PACKAGE_REFILL_MAX_ATTEMPTS = 5;
+const KEY_PACKAGE_REFILL_RETRY_BASE_MS = 250;
+const KEY_PACKAGE_REFILL_RETRY_CAP_MS = 4000;
 const RESTORE_EPOCH_BATCH_SIZE = 25;
 const RESTORE_EPOCH_MAX_SPAN = 100;
 const RESTORE_DECRYPT_MAX_RETRIES = 3;
@@ -300,10 +341,15 @@ interface RestoreQueueEntry {
   channelType: string;
   channelId: string;
   priority: 'active' | 'background';
-  options?: { fromEpoch?: number; toEpoch?: number };
+  options?: { groupGeneration?: number; fromEpoch?: number; toEpoch?: number };
+}
+
+interface GenerationRecoveryRetry {
+  retryAt: number;
 }
 
 interface RestoreExecutionOptions {
+  groupGeneration?: number;
   fromEpoch?: number;
   toEpoch?: number;
   forceRecheck?: boolean;
@@ -320,7 +366,13 @@ interface ChannelProcessResult {
   decrypted: StoredMessage[];
   maxObservedEpoch?: number;
 }
-
+interface KeyPackageRefillHint {
+  remaining: number;
+  target: number;
+  lowWatermark: number;
+  generation?: number;
+  confirmed: boolean;
+}
 type ActiveMessageEnvelope = Record<string, unknown> & {
   id: string;
   user?: { id: string; [key: string]: unknown };
@@ -409,6 +461,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   /** cid → Group (WASM object) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   groups: Map<string, any> = new Map();
+  private _groupGenerations: Map<string, MlsGroupGenerationMarker> = new Map();
 
   /** Whether Provider was restored from storage (vs newly created) */
   private _providerRestored = false;
@@ -420,7 +473,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _syncing = false;
   private _syncPromise: Promise<void> | null = null;
   private _syncWorkPromise: Promise<void> | null = null;
-  private _keyPackageUploadPromise: Promise<void> | null = null;
+  private _keyPackageTopUpPromise: Promise<void> | null = null;
+  private _pendingKeyPackageRefill: KeyPackageRefillHint | null = null;
+  private _completedKeyPackageRefillGeneration = 0;
+  private _keyPackageRefillSleep = delay;
+  private _keyPackageRefillRandom = Math.random;
   private _syncGateResolve: (() => void) | null = null;
   private _lastSyncStates: Map<string, E2eeSyncState> = new Map();
   private _scopeRepairLocks: Map<string, Promise<EncryptedChannelRepairResult>> = new Map();
@@ -429,6 +486,25 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _scopeSyncRequestedAfterRepair: Set<string> = new Set();
   private readonly _repairLockOwnerId = `repair-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   private _channelReadyLocks: Map<string, Promise<EnsureE2eeChannelResult>> = new Map();
+  private _generationRecoveryAttempted: Set<string> = new Set();
+  private _generationRecoveryPending: Map<string, MlsGenerationRecoveryResult> = new Map();
+  private _generationRecoveryRetries: Map<string, GenerationRecoveryRetry> = new Map();
+  private _legacyGroupInfoRepairDeadlines: Map<string, number> = new Map();
+  private _generationRecoveryRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private _generationRecoveryRetryTimerAt: number | null = null;
+  private _generationRecoveryNow = (): number => Date.now();
+  private _generationRecoverySetTimeout = (callback: () => void, delayMs: number): ReturnType<typeof setTimeout> =>
+    setTimeout(callback, delayMs);
+  private _generationRecoveryClearTimeout = (timer: ReturnType<typeof setTimeout>): void => clearTimeout(timer);
+  private _partialWelcomeJoin: PartialWelcomeJoinCoordinator | null = null;
+  private _groupInfoRepair: GroupInfoRepairCoordinator | null = null;
+  private _historicalReplayEnabled = true;
+  private _partialWelcomeFallbackEnabled = true;
+  private _groupInfoRepairEnabled = true;
+  private _onMlsRolloutMetric: ((observation: MlsRolloutMetricObservation) => void) | null = null;
+  private _mlsRolloutTelemetryEnabled = false;
+  private _mlsRolloutTelemetryInFlight = false;
+  private _mlsRolloutTelemetryQueue: MlsRolloutMetricObservation[] = [];
   private _channelReadyUntil: Map<string, number> = new Map();
   private readonly _channelReadyCacheMs = 30_000;
   private _recoveryPrivateKey: Uint8Array | null = null;
@@ -463,7 +539,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _restoreQueueRunning = false;
   private _restoreInflight = new Map<string, Promise<RestoredMessage[]>>();
   private _bootstrapKnownChannelsPromise: Promise<BootstrapKnownE2eeChannelsResult> | null = null;
-  private _channelBootstrapSub: { unsubscribe?: () => void } | null = null;
+  private _mlsRecoveryDiscoverySupported: boolean | null = null;
   private _e2eeBootstrapProgress: E2eeBootstrapProgress = {
     total: 0,
     completed: 0,
@@ -514,6 +590,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     this.client = client;
     this.userId = userId;
+    const rollout = resolveMlsRolloutControls(options);
+    this._historicalReplayEnabled = rollout.historicalReplay;
+    this._partialWelcomeFallbackEnabled = rollout.partialWelcomeFallback;
+    this._groupInfoRepairEnabled = rollout.groupInfoRepair;
+    this._mlsRolloutTelemetryEnabled = rollout.clientTelemetry;
+    this._onMlsRolloutMetric = rollout.emitMetric;
 
     if (options?.storage) {
       this.storage = options.storage;
@@ -521,6 +603,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       // User-scoped storage: each user gets their own IndexedDB database
       this.storage = new IndexedDBEncryptionStorage(userId);
     }
+    this._partialWelcomeJoin = new PartialWelcomeJoinCoordinator(this.storage);
     if (options?.wasmPath) {
       this._wasmPath = options.wasmPath;
     }
@@ -556,7 +639,6 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     // 3. Create E2eeClient
     this.e2eeClient = new E2eeClient<ErmisChatGenerics>(client);
-
     // Load public recovery metadata before sync so this device can upload
     // account-owned archives without requiring the user to enter the PIN first.
     await this._loadRecoveryPublicMetadata().catch((err) => {
@@ -566,6 +648,18 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // Normalize interrupted restore jobs before status/UI checks.
     await this._normalizeStaleRestoreProgress();
 
+    if (this._groupInfoRepairEnabled) {
+      this._groupInfoRepair = new GroupInfoRepairCoordinator(this.storage, this.e2eeClient, {
+        localEpoch: (cid) => (this.groups.has(cid) ? this.getEpoch(cid) : null),
+        exportGroupInfo: (cid) => {
+          const group = this.groups.get(cid);
+          if (!group) return new Uint8Array();
+          return group.export_group_info(this.provider, this.identity, true);
+        },
+        isEligible: (cid) => this.groups.has(cid),
+        emit: (state) => this._emitGroupInfoRepairState(state),
+      });
+    }
     // 4. Top up this device's server-side KeyPackage pool on every init.
     //    Prefer the latest health.check count when it arrived before encryption init;
     //    only query the count endpoint when no health.check count is cached.
@@ -580,9 +674,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // 7. Register this manager on the client so event handlers can access it
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (this.client as any).encryptionManager = this;
-    this._registerKnownChannelBootstrapListener();
 
     this.initialized = true;
+    const cachedGroupInfoEvents = Array.isArray((this.client as any).pendingGroupInfoRefreshEvents)
+      ? ((this.client as any).pendingGroupInfoRefreshEvents as GroupInfoRefreshRequestedEvent[])
+      : [];
+    (this.client as any).pendingGroupInfoRefreshEvents = [];
+    // Restore only durable/cached repair obligations here. Authoritative empty
+    // states arrive in the single batched scope_sync; probing every CID here
+    // would recreate the startup request fan-out.
+    await this._groupInfoRepair?.start([], cachedGroupInfoEvents);
     void this._resumeEpochArchiveCheckpoints();
     // Await durable-record discovery/UI restoration, not the background uploads
     // themselves (resumePendingE2eeSends only schedules processing jobs).
@@ -592,6 +693,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       user_id: this.userId,
       device_id: this.deviceId,
     } as any);
+    (this.client as any)?._scheduleHydratedColdStartSync?.();
     sdkLog('info', '[Encryption] Manager initialized', {
       userId: this.userId,
       deviceId: this.deviceId,
@@ -599,6 +701,75 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     });
   }
 
+  private _emitGroupInfoRepairState(state: GroupInfoRepairState): void {
+    if (state.status === 'ready' || state.status === 'removed') {
+      this._legacyGroupInfoRepairDeadlines.delete(state.cid);
+    } else if (state.deadline_at) {
+      const deadline = Date.parse(state.deadline_at);
+      if (Number.isFinite(deadline)) {
+        this._legacyGroupInfoRepairDeadlines.set(state.cid, deadline);
+        if (this._mlsRecoveryDiscoverySupported === false && !this.groups.has(state.cid)) {
+          this._scheduleGenerationRecoveryRetry(state.cid, state.deadline_at);
+        }
+      }
+    }
+    const { status, ...metadata } = state;
+    (this.client as any)?.dispatchEvent?.({
+      type: 'e2ee.group_info_repair_state',
+      repair_status: status,
+      ...metadata,
+    } as any);
+  }
+
+  private _emitMlsRolloutMetric(observation: MlsRolloutMetricObservation): void {
+    emitMlsRolloutMetricSafely(this._onMlsRolloutMetric, observation, (category) => {
+      sdkLog('warn', `[Encryption] MLS rollout metric callback failed: ${category}`);
+    });
+    if (!this._mlsRolloutTelemetryEnabled || !this.e2eeClient) return;
+    if (this._mlsRolloutTelemetryQueue.length >= 32) {
+      sdkLog('warn', '[Encryption] MLS rollout telemetry dropped: queue_full');
+      return;
+    }
+    this._mlsRolloutTelemetryQueue.push(observation);
+    this._flushMlsRolloutTelemetry();
+  }
+
+  private _flushMlsRolloutTelemetry(): void {
+    if (this._mlsRolloutTelemetryInFlight || !this.e2eeClient || this._mlsRolloutTelemetryQueue.length === 0) {
+      return;
+    }
+    const batch = this._mlsRolloutTelemetryQueue.splice(0, 16);
+    this._mlsRolloutTelemetryInFlight = true;
+    void this.e2eeClient
+      .reportMlsRolloutTelemetry(batch)
+      .catch(() => {
+        sdkLog('warn', '[Encryption] MLS rollout telemetry delivery failed: transport_error');
+      })
+      .finally(() => {
+        this._mlsRolloutTelemetryInFlight = false;
+        this._flushMlsRolloutTelemetry();
+      });
+  }
+
+  async handleGroupInfoRefreshRequested(event: GroupInfoRefreshRequestedEvent): Promise<void> {
+    await this._groupInfoRepair?.handleRequested(event);
+  }
+
+  async handleGroupInfoUploaded(event: GroupInfoUploadedEvent): Promise<void> {
+    await this._groupInfoRepair?.handleUploaded(event);
+  }
+
+  async reconcileGroupInfoRefresh(cid: string): Promise<void> {
+    await this._groupInfoRepair?.reconcile(cid);
+  }
+
+  async reconcileAllGroupInfoRefresh(): Promise<void> {
+    await Promise.all(Array.from(this.groups.keys(), (cid) => this._groupInfoRepair?.reconcile(cid)));
+  }
+
+  async handleGroupInfoChannelRemoved(cid: string): Promise<void> {
+    await this._groupInfoRepair?.handleRemoved(cid);
+  }
   /**
    * Load WASM module and restore or create Provider.
    *
@@ -664,27 +835,20 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * Upload N key packages to the server.
    * Called internally during init (fresh provider) or from ensureKeyPackages (health.check top-up).
    */
-  private async _uploadKeyPackages(count: number): Promise<void> {
+  private async _uploadKeyPackages(count: number): Promise<UploadKeyPackagesResponse> {
     const uploadCount = Math.max(0, Math.min(KEY_PACKAGE_POOL_TARGET, Math.floor(count)));
-    if (uploadCount === 0) return;
-    if (this._keyPackageUploadPromise) return this._keyPackageUploadPromise;
-
-    this._keyPackageUploadPromise = (async () => {
-      try {
-        const kps = this.identity.key_packages(this.provider, uploadCount);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const serialized = kps.map((kp: any) => kp.to_bytes());
-        await this.e2eeClient!.uploadKeyPackages({ key_packages: serialized });
-        await this._persistProvider();
-        sdkLog('info', `[Encryption] Uploaded ${uploadCount} key packages`);
-      } catch (err) {
-        sdkLog('warn', '[Encryption] Failed to upload key packages:', err);
-      } finally {
-        this._keyPackageUploadPromise = null;
-      }
-    })();
-
-    return this._keyPackageUploadPromise;
+    if (uploadCount === 0) {
+      throw new Error('[Encryption] KeyPackage upload count must be positive');
+    }
+    const kps = this.identity.key_packages(this.provider, uploadCount);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const serialized = kps.map((kp: any) => kp.to_bytes());
+    // Persist generated private material before the network request. If Bellboy
+    // accepts the upload but the response is lost, the matching keys survive.
+    await this._persistProviderStrict();
+    const response = await this.e2eeClient!.uploadKeyPackages({ key_packages: serialized });
+    sdkLog('info', `[Encryption] Uploaded ${uploadCount} key packages`);
+    return response;
   }
 
   /**
@@ -692,29 +856,171 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * Called from health.check event in _handleClientEvent with the server-reported remaining count.
    * @param knownRemaining - remaining count from health.check event's me.key_packages_remaining
    */
-  async ensureKeyPackages(knownRemaining: number): Promise<void> {
+  async ensureKeyPackages(
+    knownRemaining: number,
+    knownTarget?: number,
+    knownLowWatermark?: number,
+    generation?: number,
+    confirmed = false,
+  ): Promise<void> {
     if (!Number.isFinite(knownRemaining)) return;
     const remaining = Math.max(0, Math.floor(knownRemaining));
-    if (remaining >= KEY_PACKAGE_POOL_TARGET) return;
+    const target = Math.max(
+      1,
+      Math.min(
+        KEY_PACKAGE_POOL_TARGET,
+        Number.isFinite(knownTarget) ? Math.floor(knownTarget as number) : KEY_PACKAGE_POOL_TARGET,
+      ),
+    );
+    const lowWatermark = Math.max(
+      0,
+      Math.min(
+        target - 1,
+        Number.isFinite(knownLowWatermark) ? Math.floor(knownLowWatermark as number) : KEY_PACKAGE_POOL_LOW_WATERMARK,
+      ),
+    );
+    const normalizedGeneration = Number.isFinite(generation)
+      ? Math.max(1, Math.floor(generation as number))
+      : undefined;
+    if (normalizedGeneration && normalizedGeneration <= this._completedKeyPackageRefillGeneration) return;
+    if (!this._keyPackageTopUpPromise && !normalizedGeneration && remaining > lowWatermark) return;
 
-    const toUpload = KEY_PACKAGE_POOL_TARGET - remaining;
+    const next: KeyPackageRefillHint = {
+      remaining,
+      target,
+      lowWatermark,
+      generation: normalizedGeneration,
+      confirmed,
+    };
+    const pending = this._pendingKeyPackageRefill;
+    if (!pending || (next.generation || 0) > (pending.generation || 0)) {
+      this._pendingKeyPackageRefill = next;
+    } else {
+      this._pendingKeyPackageRefill = {
+        remaining: Math.min(pending.remaining, next.remaining),
+        target: Math.max(pending.target, next.target),
+        lowWatermark: Math.min(pending.lowWatermark, next.lowWatermark),
+        generation: pending.generation || next.generation,
+        confirmed: pending.confirmed && next.confirmed,
+      };
+    }
+
+    if (this._keyPackageTopUpPromise) return this._keyPackageTopUpPromise;
     sdkLog(
       'info',
-      `[Encryption] Key packages below target (${remaining}/${KEY_PACKAGE_POOL_TARGET}), topping up ${toUpload}...`,
+      `[Encryption] Key packages reached refill watermark (${remaining}/${target}), scheduling single-flight top-up...`,
     );
-    await this._uploadKeyPackages(toUpload);
+    this._keyPackageTopUpPromise = this._runKeyPackageRefill().finally(() => {
+      this._keyPackageTopUpPromise = null;
+    });
+    return this._keyPackageTopUpPromise;
   }
+  private async _runKeyPackageRefill(): Promise<void> {
+    while (this._pendingKeyPackageRefill) {
+      let hint = this._pendingKeyPackageRefill;
+      this._pendingKeyPackageRefill = null;
+      if (hint.generation && hint.generation <= this._completedKeyPackageRefillGeneration) continue;
 
-  async ensureKeyPackagesFromServer(): Promise<void> {
+      let attempt = 0;
+      while (attempt < KEY_PACKAGE_REFILL_MAX_ATTEMPTS) {
+        attempt += 1;
+        try {
+          if (!hint.confirmed || attempt > 1) {
+            const count = await this.e2eeClient!.getKeyPackageCount('manual');
+            hint = {
+              remaining: Math.max(0, Math.floor(count.remaining)),
+              target: Math.max(1, Math.min(KEY_PACKAGE_POOL_TARGET, Math.floor(count.target || hint.target))),
+              lowWatermark: Math.max(
+                0,
+                Math.min(
+                  Math.floor((count.target || hint.target) - 1),
+                  Math.floor(count.low_watermark ?? hint.lowWatermark),
+                ),
+              ),
+              generation: count.refill_generation || hint.generation,
+              confirmed: true,
+            };
+          }
+          if (hint.remaining >= hint.target) {
+            if (hint.generation) {
+              this._completedKeyPackageRefillGeneration = Math.max(
+                this._completedKeyPackageRefillGeneration,
+                hint.generation,
+              );
+            }
+            break;
+          }
+          const response = await this._uploadKeyPackages(hint.target - hint.remaining);
+          hint = {
+            ...hint,
+            remaining: Math.max(0, Math.floor(response.total_remaining)),
+            target: Math.max(1, Math.min(KEY_PACKAGE_POOL_TARGET, Math.floor(response.target || hint.target))),
+            lowWatermark: Math.max(
+              0,
+              Math.min(
+                Math.floor((response.target || hint.target) - 1),
+                Math.floor(response.low_watermark ?? hint.lowWatermark),
+              ),
+            ),
+            generation: response.refill_generation || hint.generation,
+            confirmed: true,
+          };
+          if (hint.remaining >= hint.target) {
+            if (hint.generation) {
+              this._completedKeyPackageRefillGeneration = Math.max(
+                this._completedKeyPackageRefillGeneration,
+                hint.generation,
+              );
+            }
+            break;
+          }
+        } catch (err) {
+          if (attempt >= KEY_PACKAGE_REFILL_MAX_ATTEMPTS) {
+            sdkLog('warn', '[Encryption] KeyPackage refill exhausted jittered retries:', err);
+            break;
+          }
+        }
+        if (attempt >= KEY_PACKAGE_REFILL_MAX_ATTEMPTS) {
+          sdkLog('warn', '[Encryption] KeyPackage refill remained below target after bounded attempts');
+          break;
+        }
+        const cap = Math.min(KEY_PACKAGE_REFILL_RETRY_CAP_MS, KEY_PACKAGE_REFILL_RETRY_BASE_MS * 2 ** (attempt - 1));
+        const jitterMs = Math.floor(this._keyPackageRefillRandom() * (cap + 1));
+        await this._keyPackageRefillSleep(jitterMs);
+      }
+    }
+  }
+  async handleKeyPackageRefill(event: KeyPackageRefillEvent): Promise<void> {
+    if (event.device_id !== this.deviceId) return;
+    await this.ensureKeyPackages(
+      event.usable_count,
+      event.target,
+      Math.min(KEY_PACKAGE_POOL_LOW_WATERMARK, event.target - 1),
+      event.generation,
+      false,
+    );
+  }
+  async ensureKeyPackagesFromServer(reason: 'manual' | 'group_join' = 'manual'): Promise<void> {
     try {
-      const response = await this.e2eeClient!.getKeyPackageCount();
-      await this.ensureKeyPackages(response.remaining);
+      const response = await this.e2eeClient!.getKeyPackageCount(reason);
+      await this.ensureKeyPackages(
+        response.remaining,
+        response.target,
+        response.low_watermark,
+        response.refill_generation || undefined,
+        true,
+      );
     } catch (err) {
       sdkLog('warn', '[Encryption] Failed to check key package count:', err);
     }
   }
 
   private async ensureKeyPackagesFromCachedHealthOrServer(): Promise<void> {
+    const cachedRefill = (this.client as any)?.latestKeyPackageRefill as KeyPackageRefillEvent | undefined;
+    if (cachedRefill) {
+      await this.handleKeyPackageRefill(cachedRefill);
+      return;
+    }
     const cachedRemaining = (this.client as any)?.latestKeyPackagesRemaining;
     if (typeof cachedRemaining === 'number') {
       await this.ensureKeyPackages(cachedRemaining);
@@ -729,13 +1035,15 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    */
   private async _persistProvider(): Promise<void> {
     try {
-      const bytes = this.provider.to_bytes();
-      await this.storage.saveProviderState(this.userId!, this.deviceId!, bytes);
+      await this._persistProviderStrict();
     } catch (err) {
       sdkLog('warn', '[Encryption] Failed to persist Provider:', err);
     }
   }
-
+  private async _persistProviderStrict(): Promise<void> {
+    const bytes = this.provider.to_bytes();
+    await this.storage.saveProviderState(this.userId!, this.deviceId!, bytes);
+  }
   private async _saveEncryptionSyncCheckpoint(
     options: {
       scopeCursors?: Record<string, EventCursor>;
@@ -1053,7 +1361,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (!group) return;
     const epochBigInt = toEpochBigInt(group.epoch());
     const epoch = Number(epochBigInt);
-    const existing = await this.storage.loadEpochArchiveCheckpoint(cid, epoch);
+    const groupGeneration = this._groupGenerations.get(cid)?.group_generation || 0;
+    const existing = await this.storage.loadEpochArchiveCheckpoint(cid, epoch, groupGeneration);
     if (existing) {
       void this._materializeEpochArchiveCheckpoint(existing);
       return;
@@ -1064,6 +1373,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const now = Date.now();
     const checkpoint: EpochArchiveCheckpoint = {
       scope_cid: cid,
+      group_generation: groupGeneration,
       channel_type: channelType,
       channel_id: channelId,
       epoch,
@@ -1094,8 +1404,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const archiveBytes = await this._decryptArchiveStashBytes(checkpoint.encrypted_archive_bytes);
     const epochBigInt = BigInt(checkpoint.epoch);
     const archiveBlobId = newArchiveBlobId();
-    const aad = new wasmModule.ArchiveBlobAad(
+    const aad = wasmModule.ArchiveBlobAad.forGeneration(
       checkpoint.scope_cid,
+      BigInt(checkpoint.group_generation || 0),
       epochBigInt,
       scope,
       archiveBlobId,
@@ -1103,8 +1414,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     );
     const encrypted = wasmModule.encrypt_archive_blob(this.provider, archiveBytes, aad);
     const wraps = recipients.map((recipient) => {
-      const info = new wasmModule.ArchiveKeyWrapInfo(
+      const info = wasmModule.ArchiveKeyWrapInfo.forGeneration(
         checkpoint.scope_cid,
+        BigInt(checkpoint.group_generation || 0),
         epochBigInt,
         scope,
         archiveBlobId,
@@ -1127,6 +1439,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       };
     });
     return {
+      group_generation: checkpoint.group_generation || 0,
       epoch: checkpoint.epoch,
       archive_blob_id: archiveBlobId,
       idempotency_key: `${checkpoint.epoch}:${scope}:${this.deviceId || 'web'}:${archiveBlobId}`,
@@ -1158,12 +1471,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const completed = Object.values(next.materialization).every(
       (value) => value === 'uploaded' || value === 'terminal' || value === 'unsupported',
     );
-    if (completed) await this.storage.deleteEpochArchiveCheckpoint(next.scope_cid, next.epoch);
+    if (completed) {
+      await this.storage.deleteEpochArchiveCheckpoint(next.scope_cid, next.epoch, next.group_generation || 0);
+    }
     return next;
   }
 
   private _materializeEpochArchiveCheckpoint(checkpoint: EpochArchiveCheckpoint): Promise<void> {
-    const key = `${checkpoint.scope_cid}:${checkpoint.epoch}`;
+    const key = `${checkpoint.scope_cid}:${checkpoint.group_generation || 0}:${checkpoint.epoch}`;
     const existing = this._archiveCheckpointMaterializations.get(key);
     if (existing) return existing;
     const job = this._runEpochArchiveCheckpointMaterialization(checkpoint).finally(() => {
@@ -1182,14 +1497,26 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         current.materialization.account_owned === 'pending' &&
         this._recoveryPublicKey &&
         this._recoveryKeyId &&
-        !(await this._hasArchiveAcknowledged(current.scope_cid, current.epoch, 'account_owned', this._recoveryKeyId)) &&
-        !(await this._hasPendingArchiveWork(current.scope_cid, current.epoch, 'account_owned'))
+        !(await this._hasArchiveAcknowledged(
+          current.scope_cid,
+          current.group_generation || 0,
+          current.epoch,
+          'account_owned',
+          this._recoveryKeyId,
+        )) &&
+        !(await this._hasPendingArchiveWork(
+          current.scope_cid,
+          current.group_generation || 0,
+          current.epoch,
+          'account_owned',
+        ))
       ) {
         const upload = await this._materializeArchiveUpload(current, 'account_owned', [
           { user_id: this.userId!, recovery_key_id: this._recoveryKeyId, public_key: this._recoveryPublicKey },
         ]);
         await this._enqueueArchiveUpload({
           cid: current.scope_cid,
+          group_generation: current.group_generation || 0,
           channel_type: current.channel_type,
           channel_id: current.channel_id,
           epoch: current.epoch,
@@ -1216,6 +1543,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         const recipients = await this.e2eeClient!.querySponsoredArchiveRecipients(
           current.channel_type,
           current.channel_id,
+          current.group_generation || 0,
           current.epoch,
         );
         if (recipients.matching_candidate_exists) {
@@ -1230,11 +1558,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         } else if (
           !(await this._hasArchiveAcknowledged(
             current.scope_cid,
+            current.group_generation || 0,
             current.epoch,
             'group_sponsored',
             recipients.recipient_set_hash,
           )) &&
-          !(await this._hasPendingArchiveWork(current.scope_cid, current.epoch, 'group_sponsored'))
+          !(await this._hasPendingArchiveWork(
+            current.scope_cid,
+            current.group_generation || 0,
+            current.epoch,
+            'group_sponsored',
+          ))
         ) {
           const upload = await this._materializeArchiveUpload(
             current,
@@ -1244,6 +1578,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           );
           await this._enqueueArchiveUpload({
             cid: current.scope_cid,
+            group_generation: current.group_generation || 0,
             channel_type: current.channel_type,
             channel_id: current.channel_id,
             epoch: current.epoch,
@@ -1305,23 +1640,38 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private async _hasArchiveAcknowledged(
     cid: string,
+    groupGeneration: number,
     epoch: number,
     scope: ArchiveScope = 'account_owned',
     coverageKey?: string,
   ): Promise<boolean> {
     const key = coverageKey || (scope === 'account_owned' ? this._recoveryKeyId : null);
     if (!key) return false;
-    return !!(await this.storage.loadArchiveAck(cid, epoch, scope, key));
+    return !!(await this.storage.loadArchiveAck(cid, groupGeneration, epoch, scope, key));
   }
 
-  private async _hasPendingArchiveWork(cid: string, epoch: number, scope: ArchiveScope): Promise<boolean> {
+  private async _hasPendingArchiveWork(
+    cid: string,
+    groupGeneration: number,
+    epoch: number,
+    scope: ArchiveScope,
+  ): Promise<boolean> {
     const [uploads, deferred] = await Promise.all([
       this.storage.loadPendingArchiveUploads(),
       this.storage.loadPendingDeferredArchives(),
     ]);
     return (
-      uploads.some((item) => item.cid === cid && item.epoch === epoch && item.scope === scope) ||
-      (scope === 'account_owned' && deferred.some((item) => item.cid === cid && item.epoch === epoch))
+      uploads.some(
+        (item) =>
+          item.cid === cid &&
+          (item.group_generation || 0) === groupGeneration &&
+          item.epoch === epoch &&
+          item.scope === scope,
+      ) ||
+      (scope === 'account_owned' &&
+        deferred.some(
+          (item) => item.cid === cid && (item.group_generation || 0) === groupGeneration && item.epoch === epoch,
+        ))
     );
   }
 
@@ -1415,10 +1765,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const activeChannel = this._getActiveChannel(channel.cid);
     if (this._isRecentMembership(activeChannel)) return;
 
-    const existing = await this.storage.loadRestoreProgress(this.userId, this.deviceId, channel.cid);
+    const groupGeneration = this._groupGenerations.get(channel.cid)?.group_generation || 0;
+    const existing = await this.storage.loadRestoreProgress(this.userId, this.deviceId, channel.cid, groupGeneration);
     const progress = existing
       ? this._normalizeProgress(existing)
-      : this._newRestoreProgressRecord(channel.channelType, channel.channelId);
+      : this._newRestoreProgressRecord(channel.channelType, channel.channelId, groupGeneration);
     if (progress.status === 'done' || progress.status === 'done_with_gaps') return;
     if (this._isUserGatedRestoreProgress(progress)) return;
 
@@ -1449,12 +1800,130 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     } as any);
   }
 
-  private _registerKnownChannelBootstrapListener(): void {
-    if (this._channelBootstrapSub || !(this.client as any)?.on) return;
-    this._channelBootstrapSub = (this.client as any).on('channels.queried', () => {
-      void this.bootstrapKnownE2eeChannels({ source: 'channels_queried' });
-      void this._restorePendingE2eeAttachmentPresentations();
-    });
+  private _generationRecoveryRetryAt(delayMs = GENERATION_RECOVERY_RETRY_FALLBACK_MS): string {
+    return new Date(this._generationRecoveryNow() + delayMs).toISOString();
+  }
+
+  private _scheduleGenerationRecoveryRetry(cid: string, retryAt: string): void {
+    const parsedRetryAt = Date.parse(retryAt);
+    if (!Number.isFinite(parsedRetryAt)) return;
+    const target = Math.max(parsedRetryAt, this._generationRecoveryNow() + GENERATION_RECOVERY_TIMER_GRACE_MS);
+    const current = this._generationRecoveryRetries.get(cid);
+    if (current && current.retryAt <= target) return;
+    this._generationRecoveryRetries.set(cid, { retryAt: target });
+    if (this._generationRecoveryRetryTimerAt !== null && this._generationRecoveryRetryTimerAt <= target) return;
+    if (this._generationRecoveryRetryTimer) {
+      this._generationRecoveryClearTimeout(this._generationRecoveryRetryTimer);
+      this._generationRecoveryRetryTimer = null;
+      this._generationRecoveryRetryTimerAt = null;
+    }
+    this._armGenerationRecoveryRetryTimer();
+  }
+
+  private _armGenerationRecoveryRetryTimer(): void {
+    if (this._generationRecoveryRetryTimer || this._generationRecoveryRetries.size === 0) return;
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const retry of this._generationRecoveryRetries.values()) {
+      earliest = Math.min(earliest, retry.retryAt);
+    }
+    if (!Number.isFinite(earliest)) return;
+    const delayMs = Math.min(
+      Math.max(earliest - this._generationRecoveryNow(), GENERATION_RECOVERY_TIMER_GRACE_MS),
+      MAX_SAFE_TIMER_DELAY_MS,
+    );
+    this._generationRecoveryRetryTimerAt = earliest;
+    const timer = this._generationRecoverySetTimeout(() => {
+      this._generationRecoveryRetryTimer = null;
+      this._generationRecoveryRetryTimerAt = null;
+      const now = this._generationRecoveryNow();
+      const due: string[] = [];
+      for (const [cid, retry] of this._generationRecoveryRetries) {
+        if (retry.retryAt <= now) due.push(cid);
+      }
+      if (due.length === 0) {
+        this._armGenerationRecoveryRetryTimer();
+        return;
+      }
+      if (this._bootstrapKnownChannelsPromise) {
+        const retryAt = now + GENERATION_RECOVERY_RETRY_FALLBACK_MS;
+        for (const cid of due) {
+          const retry = this._generationRecoveryRetries.get(cid);
+          if (retry) retry.retryAt = retryAt;
+        }
+        this._armGenerationRecoveryRetryTimer();
+        return;
+      }
+      for (const cid of due) {
+        this._generationRecoveryRetries.delete(cid);
+        this._generationRecoveryPending.delete(cid);
+        this._generationRecoveryAttempted.delete(cid);
+      }
+      this._armGenerationRecoveryRetryTimer();
+      void (async () => {
+        for (const cid of due) {
+          await this.bootstrapKnownE2eeChannels({
+            source: 'generation_recovery_timer',
+            targetCids: [cid],
+          });
+        }
+      })().catch((error) => {
+        sdkLog('warn', '[Encryption] Timed MLS generation recovery retry failed:', error);
+      });
+    }, delayMs);
+    this._generationRecoveryRetryTimer = timer;
+    const nodeTimer = timer as ReturnType<typeof setTimeout> & { unref?: () => void };
+    nodeTimer.unref?.();
+  }
+
+  private _clearGenerationRecoveryRetry(cid: string): void {
+    this._generationRecoveryRetries.delete(cid);
+    this._generationRecoveryPending.delete(cid);
+  }
+
+  private async _discoverMlsRecoveryStates(cids: string[]): Promise<{
+    states: Record<string, MlsRecoveryDiscoveryAppliedItem>;
+    unsupported: boolean;
+  }> {
+    const uniqueCids = Array.from(new Set(cids)).sort();
+    if (uniqueCids.length === 0) return { states: {}, unsupported: false };
+    if (this._mlsRecoveryDiscoverySupported === false) {
+      return { states: {}, unsupported: true };
+    }
+
+    const states: Record<string, MlsRecoveryDiscoveryAppliedItem> = {};
+    for (let offset = 0; offset < uniqueCids.length; offset += MLS_RECOVERY_DISCOVERY_CHUNK_SIZE) {
+      const chunk = uniqueCids.slice(offset, offset + MLS_RECOVERY_DISCOVERY_CHUNK_SIZE);
+      try {
+        const response = await this.e2eeClient!.discoverMlsRecovery(chunk, 1);
+        this._mlsRecoveryDiscoverySupported = true;
+        for (const [cid, item] of Object.entries(response.states || {})) {
+          states[cid] =
+            item.result === 'state'
+              ? {
+                  ...item,
+                  generation: { ...item.generation, capability: response.capability },
+                }
+              : item;
+        }
+        for (const cid of chunk) {
+          if (states[cid]) continue;
+          states[cid] = { result: 'error', reason: 'state_unavailable', retryable: true };
+        }
+      } catch (error) {
+        if (isMlsRecoveryDiscoveryUnsupported(error)) {
+          this._mlsRecoveryDiscoverySupported = false;
+          return { states: {}, unsupported: true };
+        }
+        for (const cid of chunk) {
+          states[cid] = {
+            result: 'error',
+            reason: 'infrastructure_unavailable',
+            retryable: true,
+          };
+        }
+      }
+    }
+    return { states, unsupported: false };
   }
 
   async bootstrapKnownE2eeChannels(
@@ -1468,8 +1937,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
 
     const work = (async (): Promise<BootstrapKnownE2eeChannelsResult> => {
-      const knownChannels = this._listKnownE2eeChannels();
-      let channels = knownChannels.filter((channel) => !this.groups.has(channel.cid));
+      const allKnownChannels = this._listKnownE2eeChannels();
+      const targetCids = options.targetCids ? new Set(options.targetCids) : null;
+      const knownChannels = targetCids
+        ? allKnownChannels.filter((channel) => targetCids.has(channel.cid))
+        : allKnownChannels;
+      let channels = knownChannels;
       if (options.priorityActiveCid) {
         channels = [
           ...channels.filter((channel) => channel.cid === options.priorityActiveCid),
@@ -1497,8 +1970,68 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         });
 
         try {
+          const pendingRecovery = this._generationRecoveryPending.get(channel.cid);
+          if (pendingRecovery) {
+            const failed = pendingRecovery.status === 'client_upgrade_required';
+            results.push({
+              cid: channel.cid,
+              status: failed ? 'failed' : 'needs_retry',
+              epoch: pendingRecovery.epoch,
+              error: pendingRecovery.status,
+            });
+            failedCids.push(channel.cid);
+            continue;
+          }
+          if (!this._generationRecoveryAttempted.has(channel.cid)) {
+            this._generationRecoveryAttempted.add(channel.cid);
+            const discoveryItem = options.recoveryDiscoveryStates?.[channel.cid];
+            const recovery =
+              discoveryItem?.result === 'error'
+                ? {
+                    cid: channel.cid,
+                    generation: this._groupGenerations.get(channel.cid)?.group_generation || 0,
+                    epoch: this.getEpoch(channel.cid),
+                    status: 'retryable_infrastructure_failure' as const,
+                    reason: 'infrastructure_unavailable' as const,
+                    retryable: discoveryItem.retryable,
+                    retry_at: discoveryItem.retryable ? this._generationRecoveryRetryAt() : undefined,
+                  }
+                : await this.recoverMlsGeneration(
+                    channel.channelType,
+                    channel.channelId,
+                    channel.cid,
+                    discoveryItem?.generation,
+                    options.recoveryDiscoveryUnsupported === true,
+                  );
+            (this.client as any)?.dispatchEvent?.({
+              type: 'e2ee.mls_generation_recovery_state',
+              ...recovery,
+            } as any);
+            if (
+              recovery.status === 'waiting_for_repair' ||
+              recovery.status === 'preparing' ||
+              recovery.status === 'retryable_infrastructure_failure' ||
+              recovery.status === 'client_upgrade_required'
+            ) {
+              this._generationRecoveryPending.set(channel.cid, recovery);
+              if (recovery.retry_at) {
+                this._scheduleGenerationRecoveryRetry(channel.cid, recovery.retry_at);
+              }
+              const failed = recovery.status === 'client_upgrade_required';
+              results.push({
+                cid: channel.cid,
+                status: failed ? 'failed' : 'needs_retry',
+                epoch: recovery.epoch,
+                error: recovery.status,
+              });
+              failedCids.push(channel.cid);
+              continue;
+            }
+            this._clearGenerationRecoveryRetry(channel.cid);
+          }
           const result = await this.ensureChannelReady(channel.channelType, channel.channelId, channel.cid, {
             source: options.source || 'startup',
+            initialScopeSyncCompleted: options.scopeSyncedCids?.includes(channel.cid) === true,
           });
           results.push(result);
           if (result.status === 'failed' || result.status === 'stale_group_info') {
@@ -1634,8 +2167,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const deferred = await this.storage.loadPendingDeferredArchives();
     for (const record of deferred) {
       try {
-        if (await this._hasArchiveAcknowledged(record.cid, record.epoch)) {
-          await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+        if (await this._hasArchiveAcknowledged(record.cid, record.group_generation || 0, record.epoch)) {
+          await this.storage.deleteDeferredArchive(
+            record.cid,
+            record.epoch,
+            record.archive_blob_id,
+            record.group_generation || 0,
+          );
           continue;
         }
 
@@ -1643,18 +2181,29 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         const alreadyQueued = pendingUploads.some(
           (item) =>
             item.cid === record.cid &&
+            (item.group_generation || 0) === (record.group_generation || 0) &&
             item.epoch === record.epoch &&
             item.scope === 'account_owned' &&
             (item.upload as UploadEpochArchiveRequest)?.archive_blob_id === record.archive_blob_id,
         );
         if (alreadyQueued) {
-          await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+          await this.storage.deleteDeferredArchive(
+            record.cid,
+            record.epoch,
+            record.archive_blob_id,
+            record.group_generation || 0,
+          );
           continue;
         }
 
         const adk = await this._decryptArchiveStashBytes(record.encrypted_adk);
         await this._enqueueArchiveUploadFromDeferred(record, adk);
-        await this.storage.deleteDeferredArchive(record.cid, record.epoch, record.archive_blob_id);
+        await this.storage.deleteDeferredArchive(
+          record.cid,
+          record.epoch,
+          record.archive_blob_id,
+          record.group_generation || 0,
+        );
       } catch (err) {
         await this.storage.saveDeferredArchive({
           ...record,
@@ -1672,8 +2221,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       throw new Error('Recovery public key is not available.');
     }
     const epochBigInt = BigInt(record.epoch);
-    const info = new wasmModule.ArchiveKeyWrapInfo(
+    const info = wasmModule.ArchiveKeyWrapInfo.forGeneration(
       record.cid,
+      BigInt(record.group_generation || 0),
       epochBigInt,
       record.scope,
       record.archive_blob_id,
@@ -1682,6 +2232,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     );
     const wrappedAdk = wasmModule.wrap_archive_data_key(this.provider, adk, this._recoveryPublicKey, info);
     const upload: UploadEpochArchiveRequest = {
+      group_generation: record.group_generation || 0,
       epoch: record.epoch,
       archive_blob_id: record.archive_blob_id,
       idempotency_key: `${record.epoch}:account_owned:${this.deviceId || 'web'}:${record.archive_blob_id}`,
@@ -1701,6 +2252,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     };
     await this._enqueueArchiveUpload({
       cid: record.cid,
+      group_generation: record.group_generation || 0,
       channel_type: record.channel_type,
       channel_id: record.channel_id,
       epoch: record.epoch,
@@ -1722,6 +2274,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const status = reason === 'duplicate_cap' ? 'duplicate_cap' : reason === 'idempotent' ? 'idempotent' : 'uploaded';
     await this.storage.saveArchiveAck({
       cid: item.cid,
+      group_generation: upload.group_generation || item.group_generation || 0,
       epoch: item.epoch,
       scope: upload.scope,
       coverage_key: coverageKey,
@@ -1730,7 +2283,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       archive_blob_id: upload.archive_blob_id,
       updated_at: Date.now(),
     });
-    const checkpoint = await this.storage.loadEpochArchiveCheckpoint(item.cid, item.epoch);
+    const checkpoint = await this.storage.loadEpochArchiveCheckpoint(
+      item.cid,
+      item.epoch,
+      upload.group_generation || item.group_generation || 0,
+    );
     if (checkpoint) {
       await this._saveCheckpointMaterialization(checkpoint, upload.scope, 'uploaded');
     }
@@ -1742,9 +2299,18 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const upload = item.upload as UploadEpochArchiveRequest;
       try {
         const response = await this.e2eeClient!.uploadEpochArchive(item.channel_type, item.channel_id, upload);
-        await this.storage.deleteArchiveUpload(item.cid, item.epoch, upload.archive_blob_id);
+        await this.storage.deleteArchiveUpload(
+          item.cid,
+          item.epoch,
+          upload.archive_blob_id,
+          upload.group_generation || item.group_generation || 0,
+        );
         if (response.reason_code === 'recipient_set_stale' && upload.scope === 'group_sponsored') {
-          const checkpoint = await this.storage.loadEpochArchiveCheckpoint(item.cid, item.epoch);
+          const checkpoint = await this.storage.loadEpochArchiveCheckpoint(
+            item.cid,
+            item.epoch,
+            upload.group_generation || item.group_generation || 0,
+          );
           if (checkpoint && (checkpoint.sponsored_rewrap_count || 0) < 2) {
             const next = {
               ...checkpoint,
@@ -1772,8 +2338,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       } catch (err) {
         const ermisCode = getApiErrorCode(err);
         if (!isRetryableRecoveryNetworkError(err)) {
-          await this.storage.deleteArchiveUpload(item.cid, item.epoch, upload.archive_blob_id);
-          const checkpoint = await this.storage.loadEpochArchiveCheckpoint(item.cid, item.epoch);
+          await this.storage.deleteArchiveUpload(
+            item.cid,
+            item.epoch,
+            upload.archive_blob_id,
+            upload.group_generation || item.group_generation || 0,
+          );
+          const checkpoint = await this.storage.loadEpochArchiveCheckpoint(
+            item.cid,
+            item.epoch,
+            upload.group_generation || item.group_generation || 0,
+          );
           if (checkpoint) {
             const unsupportedSponsored =
               upload.scope === 'group_sponsored' &&
@@ -1804,11 +2379,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
   }
 
-  private _newRestoreProgressRecord(channelType: string, channelId: string): RestoreProgressRecord {
+  private _newRestoreProgressRecord(
+    channelType: string,
+    channelId: string,
+    groupGeneration = 0,
+  ): RestoreProgressRecord {
     const now = Date.now();
     return {
       device_id: this.deviceId!,
       cid: cidFromParts(channelType, channelId),
+      group_generation: groupGeneration,
       user_id: this.userId!,
       channel_type: channelType,
       channel_id: channelId,
@@ -1876,6 +2456,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
     return {
       ...record,
+      group_generation: record.group_generation || 0,
       completed_epochs: completed,
       permanent_gaps: Array.from(permanentByEpoch.values()).sort((a, b) => a.epoch - b.epoch),
       transient_failures: Array.from(transientByEpoch.values()).sort((a, b) => a.epoch - b.epoch),
@@ -2069,10 +2650,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     await this._saveRestoreProgress(progress, this._finalRestoreStatus(progress));
   }
 
-  private async _loadOrCreateRestoreProgress(channelType: string, channelId: string): Promise<RestoreProgressRecord> {
+  private async _loadOrCreateRestoreProgress(
+    channelType: string,
+    channelId: string,
+    groupGeneration?: number,
+  ): Promise<RestoreProgressRecord> {
     const cid = cidFromParts(channelType, channelId);
-    const existing = await this.storage.loadRestoreProgress(this.userId!, this.deviceId!, cid);
-    return this._normalizeProgress(existing || this._newRestoreProgressRecord(channelType, channelId));
+    const resolvedGeneration = groupGeneration ?? this._groupGenerations.get(cid)?.group_generation ?? 0;
+    const existing = await this.storage.loadRestoreProgress(this.userId!, this.deviceId!, cid, resolvedGeneration);
+    return this._normalizeProgress(
+      existing || this._newRestoreProgressRecord(channelType, channelId, resolvedGeneration),
+    );
   }
 
   private async _saveRestoreProgress(
@@ -2199,12 +2787,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   async getRestoreProgress(channelType: string, channelId: string): Promise<RestoreProgressRecord | null> {
     if (!this.userId || !this.deviceId) return null;
     const cid = cidFromParts(channelType, channelId);
-    const record = await this.storage.loadRestoreProgress(this.userId, this.deviceId, cid);
+    const groupGeneration = this._groupGenerations.get(cid)?.group_generation || 0;
+    const record = await this.storage.loadRestoreProgress(this.userId, this.deviceId, cid, groupGeneration);
     return record ? this._normalizeProgress(record) : null;
   }
 
-  private _restoreRequestKey(cid: string, options?: { fromEpoch?: number; toEpoch?: number }): string {
-    return `${cid}:${options?.fromEpoch ?? ''}:${options?.toEpoch ?? ''}`;
+  private _restoreRequestKey(
+    cid: string,
+    options?: { groupGeneration?: number; fromEpoch?: number; toEpoch?: number },
+  ): string {
+    return `${cid}:${options?.groupGeneration ?? ''}:${options?.fromEpoch ?? ''}:${options?.toEpoch ?? ''}`;
   }
 
   private _hasInflightRestoreForCid(cid: string): boolean {
@@ -2217,14 +2809,15 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private async _shouldSkipRestoreEnqueue(
     cid: string,
-    options?: { fromEpoch?: number; toEpoch?: number },
+    options?: { groupGeneration?: number; fromEpoch?: number; toEpoch?: number },
   ): Promise<boolean> {
     if (options?.fromEpoch !== undefined || options?.toEpoch !== undefined) return false;
     if (this._hasInflightRestoreForCid(cid)) return true;
     if (!this.userId || !this.deviceId) return false;
 
     try {
-      const record = await this.storage.loadRestoreProgress(this.userId, this.deviceId, cid);
+      const groupGeneration = options?.groupGeneration ?? this._groupGenerations.get(cid)?.group_generation ?? 0;
+      const record = await this.storage.loadRestoreProgress(this.userId, this.deviceId, cid, groupGeneration);
       if (!record) return false;
       const status = this._normalizeProgress(record).status;
       return status === 'done' || status === 'done_with_gaps';
@@ -2318,7 +2911,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   async restoreHistoricalMessages(
     channelType: string,
     channelId: string,
-    options?: { fromEpoch?: number; toEpoch?: number },
+    options?: { groupGeneration?: number; fromEpoch?: number; toEpoch?: number },
   ): Promise<RestoredMessage[]> {
     if (!this._recoveryPrivateKey) {
       throw new Error('Recovery vault not unlocked.');
@@ -2807,15 +3400,23 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const requestedChannel = this._getActiveChannel(requestedCid);
     const archiveCid = this._resolveChannelE2eeGroupId(requestedCid, requestedChannel);
     const archiveParts = channelPartsFromCid(archiveCid) || { channelType, channelId };
+    const restoreGeneration = options?.groupGeneration ?? this._groupGenerations.get(archiveCid)?.group_generation ?? 0;
     const restoreSingleTimeline = requestedCid !== archiveCid || options?.timelineOnly === true;
-    let progress = await this._loadOrCreateRestoreProgress(channelType, channelId);
+    let progress = await this._loadOrCreateRestoreProgress(channelType, channelId, restoreGeneration);
     const epochListResponse = await this._withRecoveryNetworkRetry(() =>
       this.e2eeClient!.queryEpochArchives(archiveParts.channelType, archiveParts.channelId, {
+        group_generation: restoreGeneration,
         list_epochs: true,
       }),
     );
     const selectedEpochs = options?.targetEpochs ? new Set(options.targetEpochs) : null;
-    const serverEpochs = Array.from(new Set((epochListResponse.epochs || []).map((entry) => entry.epoch)))
+    const serverEpochs = Array.from(
+      new Set(
+        (epochListResponse.epochs || [])
+          .filter((entry) => (entry.group_generation || 0) === restoreGeneration)
+          .map((entry) => entry.epoch),
+      ),
+    )
       .filter(
         (epoch) =>
           (!selectedEpochs || selectedEpochs.has(epoch)) &&
@@ -2888,27 +3489,41 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       try {
         material = await this._withRecoveryNetworkRetry(() =>
           this.e2eeClient!.queryEpochArchives(archiveParts.channelType, archiveParts.channelId, {
+            group_generation: restoreGeneration,
             epoch_from: epochFrom,
             epoch_to: epochTo,
             include_snapshots: true,
             include_wraps: true,
           }),
         );
+        const mismatchedMaterial = [
+          ...(material.blobs || []),
+          ...(material.wraps || []),
+          ...Object.values(material.snapshots || {}),
+        ].some((record) => (record.group_generation || 0) !== restoreGeneration);
+        if (mismatchedMaterial) {
+          throw new Error('Archive material belongs to another MLS group generation');
+        }
 
         let cursor: CiphertextCursor | undefined;
         do {
           const batch = await this._withRecoveryNetworkRetry(() =>
             this.e2eeClient!.queryArchiveCiphertexts(archiveParts.channelType, archiveParts.channelId, {
+              group_generation: restoreGeneration,
               epoch_from: epochFrom,
               epoch_to: epochTo,
               cursor,
               limit: 500,
             }),
           );
+          if (batch.ciphertexts.some((ciphertext) => (ciphertext.group_generation || 0) !== restoreGeneration)) {
+            throw new Error('Historical ciphertext belongs to another MLS group generation');
+          }
+          const generationCiphertexts = batch.ciphertexts;
           allCiphertexts.push(
             ...(restoreSingleTimeline
-              ? batch.ciphertexts.filter((ciphertext) => (ciphertext.cid || archiveCid) === requestedCid)
-              : batch.ciphertexts
+              ? generationCiphertexts.filter((ciphertext) => (ciphertext.cid || archiveCid) === requestedCid)
+              : generationCiphertexts
             ).filter((ciphertext) => !options?.messageIds || options.messageIds.has(ciphertext.message_id)),
           );
           cursor = batch.has_more ? batch.next_cursor : undefined;
@@ -3867,6 +4482,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     return this._syncWorkPromise;
   }
 
+  /** @internal Client-owned channel hydration hook; it never starts sync. */
+  handleChannelsHydrated(): void {
+    void this._restorePendingE2eeAttachmentPresentations();
+  }
+
   /** Whether an encryption sync is currently in progress (reconnect catch-up). */
   isSyncing(): boolean {
     return this._syncing;
@@ -3894,8 +4514,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       for (const cid of savedCids) {
         if (this.groups.has(cid)) continue;
         try {
-          const group = wasmModule.Group.load(this.provider, cid);
+          const storedMarker = await this.storage.loadGroupState(cid);
+          const marker = this._normalizeGenerationMarker(cid, storedMarker);
+          const group =
+            marker.group_generation > 0 && marker.group_id
+              ? wasmModule.Group.load_with_group_id(this.provider, new Uint8Array(marker.group_id))
+              : wasmModule.Group.load(this.provider, cid);
           this.groups.set(cid, group);
+          this._groupGenerations.set(cid, marker);
           sdkLog('info', '[Encryption] Restored group:', cid);
         } catch (err) {
           sdkLog('warn', '[Encryption] Failed to restore group:', cid, err);
@@ -3928,7 +4554,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       // Step 2: Sync all encryption scopes via scope_sync.
       const savedCursors = await this._loadAllScopeSyncCursors();
       let removedCursor = await this.storage.loadRemovedSyncCursor();
-      const groupCids = Array.from(this.groups.keys());
+      const knownChannels = this._listKnownE2eeChannels();
+      const groupCids = new Set([...this.groups.keys(), ...knownChannels.map((channel) => channel.cid)]);
 
       // Build cursor map bounded by the current membership. On re-invite this
       // prevents replaying protocol events from the old membership.
@@ -3945,7 +4572,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
       // Paginated sync loop. It also carries removed_cursor, so keep calling
       // even when no channel cursor exists locally.
-      let hasMore = true;
+      // A request with neither scope cursors nor a removed-channel cursor cannot
+      // return useful work. Known channels without a local group are handled by
+      // the shared bootstrap below.
+      let hasMore = Object.keys(syncCursors).length > 0 || removedCursor != null;
+      const scopeSyncCompletedCids = new Set<string>();
       while (hasMore) {
         hasMore = false;
         const response = await this.e2eeClient!.scopeSync(syncCursors, 100, removedCursor ?? null);
@@ -3988,7 +4619,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               ),
             );
             if (channelResult.has_more) {
+              scopeSyncCompletedCids.delete(scopeCid);
               hasMore = true;
+            } else {
+              scopeSyncCompletedCids.add(scopeCid);
             }
             continue;
           }
@@ -4033,10 +4667,32 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           if (channelResult.has_more && !cursorLagged) {
             hasMore = true;
           }
+          if (retryNeeded) {
+            scopeSyncCompletedCids.delete(scopeCid);
+          } else {
+            scopeSyncCompletedCids.add(scopeCid);
+          }
         }
       }
 
       await this._saveEncryptionSyncCheckpoint({ scopeCursors: syncCursors });
+
+      const recoveryDiscovery = await this._discoverMlsRecoveryStates(
+        knownChannels.map((channel) => channel.cid),
+      );
+
+      if (this._groupInfoRepair) {
+        const refreshSnapshot = Object.fromEntries(
+          Object.entries(recoveryDiscovery.states)
+            .filter((entry): entry is [string, Extract<MlsRecoveryDiscoveryAppliedItem, { result: 'state' }>] => {
+              return entry[1].result === 'state';
+            })
+            .map(([cid, state]) => [cid, state.group_info_refresh]),
+        );
+        if (Object.keys(refreshSnapshot).length > 0) {
+          await this._groupInfoRepair.applyAuthoritativeSnapshot(refreshSnapshot);
+        }
+      }
 
       sdkLog('info', `[Encryption] Sync complete. Groups: ${this.groups.size}`);
 
@@ -4044,36 +4700,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       // commit bundles them through _collectPendingGhosts(); sync itself must
       // not submit commit_eviction immediately after an invite reject.
 
-      // Step 3: Multi-device — external join for E2EE channels without local group
-      // On a new device, no groups are restored from storage.
-      // Scan all activeChannels and external join any E2EE channel missing a local group.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const activeChannels = (this.client as any)?.activeChannels as Record<string, any> | undefined;
-      if (activeChannels) {
-        const missingCids: Array<{ cid: string; type: string; id: string }> = [];
-        for (const [cid, channel] of Object.entries(activeChannels)) {
-          if (
-            this._isE2eeChannelData(channel?.data || channel) &&
-            this._resolveChannelE2eeGroupId(cid, channel) === cid &&
-            !this.groups.has(cid)
-          ) {
-            missingCids.push({ cid, type: channel.type, id: channel.id });
-          }
-        }
-
-        if (missingCids.length > 0) {
-          sdkLog('info', `[Encryption] Multi-device: ${missingCids.length} E2EE channel(s) need external join`);
-          // External join sequentially to avoid race conditions on Provider snapshot
-          for (const { cid, type, id } of missingCids) {
-            try {
-              const result = await this.syncNewChannel(type, id, cid);
-              sdkLog('info', '[Encryption] Multi-device ensure completed:', cid, result.status);
-            } catch (err) {
-              sdkLog('warn', '[Encryption] Multi-device external join failed:', cid, err);
-            }
-          }
-        }
-      }
+      // Step 3: let this sync owner bootstrap every missing group from the one
+      // authoritative discovery snapshot. UI/render paths never enter here.
+      await this.bootstrapKnownE2eeChannels({
+        source: 'sync',
+        recoveryDiscoveryStates: recoveryDiscovery.states,
+        recoveryDiscoveryUnsupported: recoveryDiscovery.unsupported,
+        scopeSyncedCids: Array.from(scopeSyncCompletedCids),
+      });
     } catch (err) {
       sdkLog('warn', '[Encryption] Failed to sync and restore groups:', err);
     }
@@ -4196,16 +4830,42 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           switch (typeField) {
             case 'welcome': {
               const targetUserIds = (protoMsg.target_user_ids as string[]) || [];
-              if (targetUserIds.includes(this.userId!) && !this.groups.has(protocolCid)) {
+              const targetDeviceIds = (protoMsg.target_device_ids as string[]) || [];
+              const targetsThisDevice =
+                targetUserIds.includes(this.userId!) &&
+                (targetDeviceIds.length === 0 || targetDeviceIds.includes(this.deviceId!));
+              const incomingGeneration = Number(protoMsg.group_generation || 0);
+              const localGeneration = this._groupGenerations.get(protocolCid)?.group_generation || 0;
+              if (targetsThisDevice && (!this.groups.has(protocolCid) || incomingGeneration > localGeneration)) {
                 try {
                   await this.joinGroup(
                     protoMsg.welcome as Uint8Array,
                     protoMsg.ratchet_tree as Uint8Array | undefined,
                     protoMsg.user?.id,
+                    incomingGeneration > 0 && protoMsg.group_id
+                      ? {
+                          cid: protocolCid,
+                          group_generation: incomingGeneration,
+                          group_id: new Uint8Array(protoMsg.group_id),
+                        }
+                      : undefined,
                   );
                 } catch (err) {
-                  if (this._isMissingKeyPackageError(err)) {
-                    sdkLog('warn', '[Encryption] Skipping stale welcome with no local KeyPackage:', protocolCid, err);
+                  const pendingExternalJoin = await this._partialWelcomeJoin?.recordWelcomeFailure(
+                    protocolCid,
+                    err,
+                    typeof protoMsg.epoch === 'number' ? protoMsg.epoch : undefined,
+                    eventCursor,
+                  );
+                  if (pendingExternalJoin) {
+                    sdkLog(
+                      'info',
+                      '[Encryption] Welcome has no KeyPackage for this device; external join is pending:',
+                      {
+                        cid: protocolCid,
+                        epoch: protoMsg.epoch,
+                      },
+                    );
                     break;
                   }
                   throw err;
@@ -4215,8 +4875,19 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             }
             case 'commit':
             case 'external_commit': {
+              // A disabled historical-replay control freezes every commit disposition. Neither
+              // an own-device marker nor a missing group proves that the durable event was
+              // already applied, so both must remain behind the exact cursor.
+              this._requireHistoricalReplayEnabled();
               const protoDeviceId = protoMsg.device_id;
               const protoUserId = protoMsg.user?.id;
+              const incomingGeneration = Number(protoMsg.group_generation || 0);
+              const localGeneration = this._groupGenerations.get(protocolCid)?.group_generation || 0;
+              if (incomingGeneration !== localGeneration) {
+                // Never feed ciphertext or commits from a different generation
+                // into the current provider. Current state discovery owns recovery.
+                break;
+              }
               const isOwnDeviceCommit =
                 protoUserId === this.userId && !!protoDeviceId && protoDeviceId === this.deviceId;
 
@@ -4230,26 +4901,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
                 break;
               }
 
-              // Pre-check: if group epoch already advanced past this commit's epoch,
-              // the commit was already applied (e.g. we merged it before last reload).
-              // Do NOT call group.process_message() — for ExternalCommit, OpenMLS
-              // returns an AEAD error (not epoch mismatch) which corrupts ratchet state.
               const commitEventEpoch: number = protoMsg.epoch ?? -1;
-              const currentGroup = this.groups.get(protocolCid);
-              if (currentGroup && commitEventEpoch >= 0) {
-                const groupEpoch = Number(currentGroup.epoch());
-                if (groupEpoch >= commitEventEpoch) {
-                  sdkLog(
-                    'info',
-                    `[Encryption] processCommit: commit at epoch ${commitEventEpoch} already applied (group at ${groupEpoch}), skipping:`,
-                    protocolCid,
-                  );
-                  break;
-                }
-              }
               const commit = protoMsg.commit;
               await this.processCommit(protocolCid, commit as Uint8Array, commitEventEpoch, protoUserId, {
                 flushPending: false,
+                historicalReplay: true,
+                serverAcceptedAt: event?.created_at,
               });
               break;
             }
@@ -4787,7 +5444,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * Sync a new E2EE channel that doesn't have a local group yet.
    * Uses scope sync with a single scope cursor.
    */
-  async syncNewChannel(channelType: string, channelId: string, cid: string): Promise<EnsureE2eeChannelResult> {
+  async syncNewChannel(
+    channelType: string,
+    channelId: string,
+    cid: string,
+    options: { initialScopeSyncCompleted?: boolean } = {},
+  ): Promise<EnsureE2eeChannelResult> {
     if (this.groups.has(cid)) {
       return { cid, status: 'ready', epoch: this.getEpoch(cid), sync_state: this.getSyncState(cid) || undefined };
     }
@@ -4797,15 +5459,67 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const savedCursor = await this._loadScopeSyncCursor(cid);
     const since = this._membershipBoundedEventCursor(channel, savedCursor);
 
-    const syncState = await this._syncChannelFromCursor(cid, since, 100);
+    const syncState = options.initialScopeSyncCompleted
+      ? this.getSyncState(cid) || this._makeSyncState(cid, 'ready', since, since)
+      : await this._syncChannelFromCursor(cid, since, 100);
 
     if (!this.groups.has(cid)) {
-      // Multi-device fallback: no welcome found (consumed by another device) → external join
-      sdkLog('info', '[Encryption] No welcome found for:', cid, '→ attempting external join');
+      let readiness = await this._partialWelcomeJoin?.getState(cid);
+      let recoveryGroupInfo: GetGroupInfoResponse | undefined;
+      if (readiness?.status !== 'pending_external_join') {
+        try {
+          recoveryGroupInfo = await this.e2eeClient!.getGroupInfo(channelType, channelId);
+          const recorded = await this._partialWelcomeJoin?.recordActiveMemberRecovery(
+            cid,
+            recoveryGroupInfo.external_join_prerequisite,
+          );
+          if (recorded) readiness = await this._partialWelcomeJoin?.getState(cid);
+        } catch (_error) {
+          recoveryGroupInfo = undefined;
+        }
+      }
+      if (readiness?.status !== 'pending_external_join') {
+        const state = this._makeSyncState(cid, 'needs_retry', since, syncState.processed_event_cursor || since, {
+          ...syncState,
+          status: 'needs_retry',
+          needs_retry: true,
+          error: 'No typed external-join prerequisite was observed; automatic external join is disabled.',
+        });
+        this._emitSyncState(state);
+        return { cid, status: 'needs_retry', sync_state: state, error: state.error };
+      }
+      if (!this._partialWelcomeFallbackEnabled) {
+        this._emitMlsRolloutMetric({
+          name: 'external_join_fallback',
+          outcome: 'disabled',
+          reason: 'rollout_disabled',
+        });
+        const state = this._makeSyncState(cid, 'needs_retry', since, syncState.processed_event_cursor || since, {
+          ...syncState,
+          status: 'needs_retry',
+          needs_retry: true,
+          error: 'Typed partial-Welcome fallback is disabled by rollout control.',
+        });
+        this._emitSyncState(state);
+        return { cid, status: 'needs_retry', sync_state: state, error: state.error };
+      }
+      sdkLog('info', '[Encryption] Typed prerequisite permits external join fallback');
+      const metricReason =
+        readiness.reason === ACTIVE_MEMBER_RECOVERY ? 'active_member_recovery' : 'no_matching_key_package';
+      this._emitMlsRolloutMetric({
+        name: 'external_join_fallback',
+        outcome: 'attempt',
+        reason: metricReason,
+      });
       try {
-        const joinResult = await this.joinExternal(channelType, channelId, cid);
+        const joinResult = await this.joinExternal(channelType, channelId, cid, recoveryGroupInfo);
         const postJoinState = await this.syncAfterExternalJoin(channelType, channelId, cid);
-        sdkLog('info', '[Encryption] External join fallback succeeded:', cid);
+        this._emitMlsRolloutMetric({
+          name: 'external_join_fallback',
+          outcome: 'success',
+          reason: metricReason,
+        });
+        sdkLog('info', '[Encryption] External join fallback succeeded');
         return {
           cid,
           status: postJoinState.status === 'needs_retry' ? 'needs_retry' : 'joined_external',
@@ -4813,16 +5527,35 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           sync_state: postJoinState.sync_state,
         };
       } catch (err) {
-        sdkLog('warn', '[Encryption] External join fallback failed:', cid, err);
-        if ((err as any)?.code === 'stale_group_info') {
+        this._emitMlsRolloutMetric({
+          name: 'external_join_fallback',
+          outcome: 'failure',
+          reason: metricReason,
+        });
+        sdkLog('warn', '[Encryption] External join fallback failed: external_join_error');
+        if ((err as any)?.code === 'group_info_stale') {
+          const safeError = 'group_info_stale';
           const state = this._makeSyncState(cid, 'stale_group_info', since.created_at, syncState.processed_cursor, {
             needs_retry: true,
-            error: (err as Error).message,
+            error: safeError,
           });
           this._emitSyncState(state);
-          return { cid, status: 'stale_group_info', sync_state: state, error: (err as Error).message };
+          return { cid, status: 'stale_group_info', sync_state: state, error: safeError };
         }
-        return { cid, status: 'failed', sync_state: syncState, error: (err as Error).message };
+        const state = this._makeSyncState(
+          cid,
+          'pending_external_join',
+          since,
+          syncState.processed_event_cursor || since,
+          {
+            ...syncState,
+            status: 'pending_external_join',
+            needs_retry: true,
+            error: 'external_join_error',
+          },
+        );
+        this._emitSyncState(state);
+        return { cid, status: 'pending_external_join', sync_state: state, error: state.error };
       }
     }
 
@@ -4875,16 +5608,22 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     channelType: string,
     channelId: string,
     cid: string,
-    _options: { source?: 'startup' | 'reconnect' | 'channel_updated' | 'invite_accepted' | 'open' | string } = {},
+    _options: {
+      source?: 'startup' | 'reconnect' | 'channel_updated' | 'invite_accepted' | 'open' | string;
+      initialScopeSyncCompleted?: boolean;
+    } = {},
   ): Promise<EnsureE2eeChannelResult> {
     const source = _options.source;
     if (!this.initialized) {
       return { cid, status: 'failed', error: '[Encryption] Not initialized' };
     }
 
-    if (source === 'open' && (await this._isScopeReadyForOpen(cid))) {
-      await this._flushPendingSnapshotsForScope(cid);
-      return { cid, status: 'ready', epoch: this.getEpoch(cid), sync_state: this.getSyncState(cid) || undefined };
+    if (source === 'open') {
+      await this.client?._waitForHydratedColdStartSync?.();
+      if (await this._isScopeReadyForOpen(cid)) {
+        await this._flushPendingSnapshotsForScope(cid);
+        return { cid, status: 'ready', epoch: this.getEpoch(cid), sync_state: this.getSyncState(cid) || undefined };
+      }
     }
 
     const existing = this._channelReadyLocks.get(cid);
@@ -4916,7 +5655,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }
 
       if (!this.groups.has(cid)) {
-        const result = await this.syncNewChannel(channelType, channelId, cid);
+        const result = await this.syncNewChannel(channelType, channelId, cid, {
+          initialScopeSyncCompleted: _options.initialScopeSyncCompleted,
+        });
         if (
           result.sync_state &&
           !result.sync_state.needs_retry &&
@@ -4967,6 +5708,24 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (source === 'open' && (await this._isScopeReadyForOpen(cid, savedCursorRecord, channel))) {
         await this._flushPendingSnapshotsForScope(cid);
         return { cid, status: 'ready', epoch: this.getEpoch(cid), sync_state: this.getSyncState(cid) || undefined };
+      }
+
+      const completedInitialSyncState = _options.initialScopeSyncCompleted ? this.getSyncState(cid) : undefined;
+      if (completedInitialSyncState && !completedInitialSyncState.has_more && !completedInitialSyncState.needs_retry) {
+        await this._flushPendingSnapshotsForScope(cid);
+        const result: EnsureE2eeChannelResult = {
+          cid,
+          status: 'ready',
+          epoch: this.getEpoch(cid),
+          sync_state: completedInitialSyncState,
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (this.client as any)?.dispatchEvent?.({
+          type: 'e2ee.channel_ready',
+          cid,
+          sync_state: completedInitialSyncState,
+        } as any);
+        return result;
       }
 
       const since = this._membershipBoundedEventCursor(channel, savedCursorRecord);
@@ -5026,8 +5785,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   createGroup(cid: string): any {
     const group = wasmModule.Group.create_with_cid(this.provider, this.identity, cid);
     this.groups.set(cid, group);
+    const marker: MlsGroupGenerationMarker = {
+      cid,
+      group_generation: 0,
+      group_id: null,
+      current_epoch: Number(group.epoch()),
+      status: 'active',
+      updated_at: Date.now(),
+    };
+    this._groupGenerations.set(cid, marker);
     // Persist group CID marker to storage
-    this._saveGroup(cid);
+    this._saveGroup(cid, marker);
     sdkLog('info', '[Encryption] Group created:', cid);
     return group;
   }
@@ -5036,12 +5804,49 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * Join a group via Welcome message
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async joinGroup(welcomeBytes: Uint8Array, ratchetTreeBytes?: Uint8Array, primaryUserId?: string): Promise<any> {
+  async joinGroup(
+    welcomeBytes: Uint8Array,
+    ratchetTreeBytes?: Uint8Array,
+    primaryUserId?: string,
+    generationIdentity?: { cid: string; group_generation: number; group_id: Uint8Array },
+  ): Promise<any> {
+    if (typeof this.storage.saveJoinCheckpoint !== 'function') {
+      throw new Error('[Encryption] Storage adapter does not support durable JOIN checkpoints');
+    }
+    const providerSnapshot = this.provider.to_bytes();
     const ratchetTree = ratchetTreeBytes ? wasmModule.RatchetTree.from_bytes(new Uint8Array(ratchetTreeBytes)) : null;
-
-    const group = wasmModule.Group.join_with_welcome(this.provider, new Uint8Array(welcomeBytes), ratchetTree);
-
-    const cid = group.cid();
+    const typedJoin = wasmModule.Group.join_with_welcome_typed;
+    let group;
+    try {
+      group =
+        typeof typedJoin === 'function'
+          ? typedJoin.call(wasmModule.Group, this.provider, new Uint8Array(welcomeBytes), ratchetTree)
+          : wasmModule.Group.join_with_welcome(this.provider, new Uint8Array(welcomeBytes), ratchetTree);
+    } catch (error) {
+      const codeName =
+        typeof (error as { code_name?: unknown })?.code_name === 'function'
+          ? (error as { code_name: () => unknown }).code_name()
+          : (error as { code_name?: unknown })?.code_name;
+      const typedCode = wasmModule.MlsErrorCode?.NoMatchingKeyPackage;
+      const numericCode = (error as { code?: unknown })?.code;
+      if (
+        typeof typedJoin === 'function' &&
+        (codeName === NO_MATCHING_KEY_PACKAGE || (typedCode !== undefined && numericCode === typedCode))
+      ) {
+        throw new WelcomeJoinFailure();
+      }
+      throw error;
+    }
+    const cid = generationIdentity?.cid || group.cid();
+    if (generationIdentity) {
+      const actualGroupId = new Uint8Array(group.group_id());
+      if (!bytesEqual(actualGroupId, generationIdentity.group_id)) {
+        group.free();
+        this.provider.free();
+        this.provider = wasmModule.Provider.from_bytes(new Uint8Array(providerSnapshot));
+        throw new Error('[Encryption] Welcome GroupId does not match authoritative generation state');
+      }
+    }
 
     // Skip if we already have this group (e.g. we're the creator)
     if (this.groups.has(cid)) {
@@ -5051,25 +5856,80 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
 
     this.groups.set(cid, group);
-    await this._saveGroup(cid);
-    await this._persistProvider();
+    if (!this._partialWelcomeJoin) {
+      this._partialWelcomeJoin = new PartialWelcomeJoinCoordinator(this.storage);
+    }
+    try {
+      const marker: MlsGroupGenerationMarker = generationIdentity
+        ? {
+            cid,
+            group_generation: generationIdentity.group_generation,
+            group_id: new Uint8Array(generationIdentity.group_id),
+            current_epoch: Number(group.epoch()),
+            status: 'active',
+            updated_at: Date.now(),
+          }
+        : {
+            cid,
+            group_generation: 0,
+            group_id: null,
+            current_epoch: Number(group.epoch()),
+            status: 'active',
+            updated_at: Date.now(),
+          };
+      await this.storage.saveJoinCheckpoint({
+        user_id: this.userId!,
+        device_id: this.deviceId!,
+        provider_bytes: this.provider.to_bytes(),
+        cid,
+        readiness: null,
+        generation: marker,
+      });
+      this._groupGenerations.set(cid, marker);
+    } catch (error) {
+      this.groups.delete(cid);
+      group.free();
+      this.provider.free();
+      this.provider = wasmModule.Provider.from_bytes(new Uint8Array(providerSnapshot));
+      throw error;
+    }
     await this.safeArchiveCurrentEpochForCid(cid, 'backup', primaryUserId);
     sdkLog('info', '[Encryption] Joined group via Welcome:', cid);
+    void this.ensureKeyPackagesFromServer('group_join');
     return group;
   }
-
-  private _isMissingKeyPackageError(err: unknown): boolean {
-    const message = String((err as Error)?.message || err || '').toLowerCase();
-    return message.includes('no matching key package') || message.includes('key package was found');
-  }
-
   /**
    * Save group CID marker to storage.
    * Group state lives inside Provider storage, not serialized separately.
    */
-  private async _saveGroup(cid: string): Promise<void> {
+  private _normalizeGenerationMarker(cid: string, stored: unknown): MlsGroupGenerationMarker {
+    if (stored && typeof stored === 'object') {
+      const value = stored as Partial<MlsGroupGenerationMarker>;
+      if (value.cid === cid && Number.isSafeInteger(value.group_generation) && (value.group_generation || 0) >= 0) {
+        return {
+          cid,
+          group_generation: value.group_generation || 0,
+          group_id: value.group_id ? new Uint8Array(value.group_id) : null,
+          current_epoch: Number.isSafeInteger(value.current_epoch) ? value.current_epoch! : 0,
+          status: value.status === 'historical' ? 'historical' : 'active',
+          operation_id: value.operation_id,
+          updated_at: Number.isFinite(value.updated_at) ? value.updated_at! : Date.now(),
+        };
+      }
+    }
+    return {
+      cid,
+      group_generation: 0,
+      group_id: null,
+      current_epoch: 0,
+      status: 'active',
+      updated_at: Date.now(),
+    };
+  }
+
+  private async _saveGroup(cid: string, marker?: MlsGroupGenerationMarker): Promise<void> {
     try {
-      await this.storage.saveGroupState(cid, true);
+      await this.storage.saveGroupState(cid, marker || this._groupGenerations.get(cid) || true);
     } catch (err) {
       sdkLog('warn', '[Encryption] Failed to save group CID:', cid, err);
     }
@@ -5420,16 +6280,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (!group) throw new Error(`[Encryption] No group for cid: ${cid}`);
 
     // 1. Fetch KPs via channel-based API (single call, sender auto-excluded)
-    const { members } = await this.e2eeClient!.getKeyPackagesByUserIds(newUserIds);
+    const keyPackageResponse = await this.e2eeClient!.getKeyPackagesByUserIds(newUserIds);
     // 2. Flatten and deserialize all KPs
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const allKeyPackages: any[] = [];
-    for (const member of members) {
-      for (const kpData of member.key_packages) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const kp = wasmModule.KeyPackage.from_bytes(new Uint8Array(kpData.key_package));
-        allKeyPackages.push({ userId: member.user_id, kp });
-      }
+    for (const leaf of selectedWelcomeLeaves(keyPackageResponse)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const kp = wasmModule.KeyPackage.from_bytes(new Uint8Array(leaf.keyPackage));
+      allKeyPackages.push({ userId: leaf.userId, kp });
     }
 
     if (allKeyPackages.length === 0) {
@@ -5660,6 +6518,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // already-consumed Welcome and fail with "No matching key package".
     this._persistProvider().catch((err) => sdkLog('warn', err));
     this.storage.deleteGroup?.(cid).catch?.((err) => sdkLog('warn', err));
+    this._groupInfoRepair
+      ?.handleRemoved(cid)
+      .catch((err) => sdkLog('warn', '[Encryption] leaveGroup: failed to clear GroupInfo repair state', cid, err));
     this._saveScopeSyncCursor(cid, { created_at: removedCursor, event_id: ZERO_EVENT_ID }).catch((err) =>
       sdkLog('warn', err),
     );
@@ -5684,6 +6545,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     for (const cid of orphans) {
       this.groups.delete(cid);
       await this.storage.deleteGroup?.(cid);
+      await this._groupInfoRepair?.handleRemoved(cid);
       sdkLog('info', '[Encryption] cleanupOrphanedGroups: removed orphaned group', cid);
     }
     if (orphans.length > 0) {
@@ -5772,9 +6634,6 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       return;
     sdkLog('info', '[Encryption] Deferred encryption event until channel state is ready:', {
       reason,
-      cid: routeCid,
-      groupCid,
-      messageId,
     });
   }
 
@@ -6032,6 +6891,392 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   // External Join
   // ============================================================
 
+  private async _joinAuthoritativeGeneration(
+    channelType: string,
+    channelId: string,
+    cid: string,
+  ): Promise<{ epoch: number; status?: E2eeSyncStatus }> {
+    const previousMarker = this._groupGenerations.get(cid);
+    const previous = this.groups.get(cid);
+    this.groups.delete(cid);
+    previous?.free?.();
+    try {
+      return await this.joinExternal(channelType, channelId, cid);
+    } catch (error) {
+      try {
+        const restored =
+          previousMarker?.group_generation && previousMarker.group_id
+            ? wasmModule.Group.load_with_group_id(this.provider, new Uint8Array(previousMarker.group_id))
+            : wasmModule.Group.load(this.provider, cid);
+        this.groups.set(cid, restored);
+      } catch {
+        // The caller remains non-ready; authoritative discovery will retry.
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Reconcile or prepare the server-authorized current MLS generation.
+   * This method is deliberately explicit: rendering, typing and send retries
+   * must never invoke it implicitly.
+   */
+  async recoverMlsGeneration(
+    channelType: string,
+    channelId: string,
+    cid: string,
+    discoveredState?: MlsGenerationStateResponse,
+    discoveryUnsupported = false,
+  ): Promise<MlsGenerationRecoveryResult> {
+    if (!this.initialized || !this.e2eeClient || !this.userId || !this.deviceId) {
+      throw new Error('[Encryption] Not initialized');
+    }
+    const checkpoint = await this.storage.loadRebootstrapCandidateCheckpoint?.(cid);
+    if (checkpoint) {
+      try {
+        const receipt = await this.e2eeClient.getMlsRebootstrapReceipt(
+          channelType,
+          channelId,
+          checkpoint.claim.operation_id,
+        );
+        return await this._reconcileRebootstrapReceipt(cid, checkpoint, receipt);
+      } catch {
+        try {
+          const receipt = await this.e2eeClient.completeMlsRebootstrap(channelType, channelId, checkpoint.completion);
+          return await this._reconcileRebootstrapReceipt(cid, checkpoint, receipt);
+        } catch (error) {
+          const failure = classifyMlsRebootstrapFailure(
+            error,
+            cid,
+            checkpoint.claim.expected_generation,
+            checkpoint.claim.expected_epoch,
+          );
+          if (
+            failure.reason === 'lease_expired' ||
+            failure.reason === 'membership_changed' ||
+            failure.reason === 'generation_changed' ||
+            failure.reason === 'repair_won_race'
+          ) {
+            await this.storage.deleteRebootstrapCandidateCheckpoint?.(cid);
+            await this.storage.deleteRebootstrapClaimIntent?.(cid);
+            return { ...failure, retry_at: this._generationRecoveryRetryAt() };
+          }
+          return failure.retryable ? { ...failure, retry_at: this._generationRecoveryRetryAt() } : failure;
+        }
+      }
+    }
+
+    const local = this._groupGenerations.get(cid);
+    const unsupportedDiscoveryResult = (): MlsGenerationRecoveryResult => {
+      const legacyRepairDeadline = this._legacyGroupInfoRepairDeadlines.get(cid);
+      const serverUpgradeRequired =
+        (local?.group_generation || 0) > 0 ||
+        (!this.groups.has(cid) &&
+          legacyRepairDeadline !== undefined &&
+          legacyRepairDeadline <= this._generationRecoveryNow());
+      return {
+        cid,
+        generation: local?.group_generation || 0,
+        epoch: this.getEpoch(cid),
+        status: serverUpgradeRequired ? 'client_upgrade_required' : 'recovered',
+        reason: 'unsupported_protocol_version',
+        retryable: false,
+      };
+    };
+    if (discoveryUnsupported) {
+      return unsupportedDiscoveryResult();
+    }
+
+    let state = discoveredState;
+    if (!state) {
+      const discovery = await this._discoverMlsRecoveryStates([cid]);
+      if (discovery.unsupported) {
+        return unsupportedDiscoveryResult();
+      }
+      const item = discovery.states[cid];
+      if (!item || item.result === 'error') {
+        const retryable = item?.retryable !== false;
+        return {
+          cid,
+          generation: local?.group_generation || 0,
+          epoch: this.getEpoch(cid),
+          status: 'retryable_infrastructure_failure',
+          reason: 'infrastructure_unavailable',
+          retryable,
+          retry_at: retryable ? this._generationRecoveryRetryAt() : undefined,
+        };
+      }
+      state = item.generation;
+    }
+    if (local?.group_generation === state.group_generation && this.groups.has(cid)) {
+      return {
+        cid,
+        generation: state.group_generation,
+        epoch: this.getEpoch(cid),
+        status: state.reason === 'history_incomplete' ? 'history_incomplete' : 'recovered',
+        reason: state.reason,
+        retryable: state.retryable,
+      };
+    }
+    if (state.state === 'upgrade_required' || state.state === 'incompatible_server_client') {
+      return {
+        cid,
+        generation: state.group_generation,
+        epoch: state.current_epoch,
+        status: 'client_upgrade_required',
+        reason: state.reason,
+        retryable: false,
+      };
+    }
+    if (state.state === 'repairing' || state.state === 'preparing') {
+      return {
+        cid,
+        generation: state.group_generation,
+        epoch: state.current_epoch,
+        status: state.state === 'preparing' ? 'preparing' : 'waiting_for_repair',
+        reason: state.reason,
+        retryable: true,
+        retry_at:
+          state.state === 'repairing' && state.incident_deadline_at
+            ? state.incident_deadline_at
+            : this._generationRecoveryRetryAt(),
+      };
+    }
+    if (state.state === 'activated' && state.group_id) {
+      await this.storage.deleteRebootstrapClaimIntent?.(cid);
+      const joined = await this._joinAuthoritativeGeneration(channelType, channelId, cid);
+      return {
+        cid,
+        generation: state.group_generation,
+        epoch: joined.epoch,
+        status: 'recovered',
+        reason: state.reason,
+        retryable: false,
+      };
+    }
+    if (state.state === 'activated' && state.group_generation === 0) {
+      return {
+        cid,
+        generation: 0,
+        epoch: state.current_epoch,
+        status: 'recovered',
+        reason: state.reason,
+        retryable: false,
+      };
+    }
+    if (state.state !== 'eligible' || !state.capability.automatic_enabled) {
+      return {
+        cid,
+        generation: state.group_generation,
+        epoch: state.current_epoch,
+        status: 'waiting_for_repair',
+        reason: state.reason,
+        retryable: state.retryable,
+        ...(state.retryable && state.capability.automatic_enabled
+          ? { retry_at: this._generationRecoveryRetryAt() }
+          : {}),
+      };
+    }
+    if (
+      !this.storage.saveRebootstrapClaimIntent ||
+      !this.storage.loadRebootstrapClaimIntent ||
+      !this.storage.deleteRebootstrapClaimIntent ||
+      !this.storage.saveRebootstrapCandidateCheckpoint
+    ) {
+      return {
+        cid,
+        generation: state.group_generation,
+        epoch: state.current_epoch,
+        status: 'client_upgrade_required',
+        reason: 'client_upgrade_required',
+        retryable: false,
+      };
+    }
+
+    const claimIntent = await resolveMlsRebootstrapClaimIntent(
+      this.storage,
+      {
+        user_id: this.userId,
+        device_id: this.deviceId,
+        cid,
+        expected_generation: state.group_generation,
+        expected_epoch: state.current_epoch,
+      },
+      newUuid,
+    );
+
+    let claim: MlsRebootstrapClaimResponse;
+    try {
+      claim = await this.e2eeClient.claimMlsRebootstrap(channelType, channelId, {
+        operation_key: claimIntent.operation_key,
+        expected_generation: state.group_generation,
+        expected_epoch: state.current_epoch,
+        protocol_version: 1,
+      });
+    } catch (error) {
+      const failure = classifyMlsRebootstrapFailure(error, cid, state.group_generation, state.current_epoch);
+      return failure.retryable ? { ...failure, retry_at: this._generationRecoveryRetryAt() } : failure;
+    }
+    if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+      throw new Error('[Encryption] secure randomness is unavailable for MLS GroupId creation');
+    }
+    let recipients = claim.recipient_key_packages.slice(0, state.capability.max_welcome_recipients);
+    let groupId: Uint8Array;
+    let candidateProvider: InstanceType<typeof wasmModule.Provider>;
+    let candidate: InstanceType<typeof wasmModule.Group>;
+    let welcome: Uint8Array | undefined;
+    let groupInfo: Uint8Array;
+    let ratchetTree: Uint8Array;
+    for (;;) {
+      groupId = crypto.getRandomValues(new Uint8Array(32));
+      candidateProvider = wasmModule.Provider.from_bytes(this.provider.to_bytes());
+      candidate = wasmModule.Group.create_with_group_id(candidateProvider, this.identity, groupId);
+      const keyPackages = recipients.map((recipient) =>
+        wasmModule.KeyPackage.from_bytes(new Uint8Array(recipient.key_package)),
+      );
+      welcome = undefined;
+      if (keyPackages.length > 0) {
+        const bundle = candidate.add_members(candidateProvider, this.identity, keyPackages);
+        welcome = bundle.welcome ? new Uint8Array(bundle.welcome) : undefined;
+        if (!welcome?.length) throw new Error('[Encryption] rebootstrap Add did not produce a Welcome');
+        candidate.merge_pending_commit(candidateProvider);
+      }
+      groupInfo = new Uint8Array(candidate.export_group_info(candidateProvider, this.identity, true));
+      ratchetTree = new Uint8Array(candidate.export_ratchet_tree().to_bytes());
+      const withinLimits =
+        groupInfo.length <= state.capability.max_group_info_bytes &&
+        ratchetTree.length <= state.capability.max_ratchet_tree_bytes &&
+        (welcome?.length || 0) <= state.capability.max_welcome_bytes;
+      if (withinLimits) break;
+      candidate.free();
+      candidateProvider.free();
+      if (recipients.length === 0) {
+        throw new Error('[Encryption] rebootstrap public artifacts exceed negotiated payload limits');
+      }
+      recipients = recipients.slice(0, Math.max(0, recipients.length - Math.max(1, Math.ceil(recipients.length / 4))));
+    }
+    candidate.save_state(candidateProvider);
+    const completion = {
+      operation_id: claim.operation_id,
+      operation_key: claim.operation_key,
+      lease_token: claim.lease_token,
+      expected_generation: claim.expected_generation,
+      expected_epoch: claim.expected_epoch,
+      new_generation: claim.next_generation,
+      new_epoch: (recipients.length > 0 ? 1 : 0) as 0 | 1,
+      membership_version: claim.membership_version,
+      group_id: groupId,
+      group_info: groupInfo,
+      ratchet_tree: ratchetTree,
+      ...(welcome ? { welcome } : {}),
+      recipients: recipients.map((recipient) => ({
+        user_id: recipient.user_id,
+        device_id: recipient.device_id,
+        key_package_id: recipient.key_package_id,
+      })),
+    };
+    const candidateCheckpoint: MlsRebootstrapCandidateCheckpoint = {
+      user_id: this.userId,
+      device_id: this.deviceId,
+      provider_bytes: candidateProvider.to_bytes(),
+      marker: {
+        cid,
+        group_generation: claim.next_generation,
+        group_id: groupId,
+        current_epoch: completion.new_epoch,
+        status: 'candidate',
+        operation_id: claim.operation_id,
+        updated_at: Date.now(),
+      },
+      claim,
+      completion,
+    };
+    await this.storage.saveRebootstrapCandidateCheckpoint(candidateCheckpoint);
+    try {
+      const receipt = await this.e2eeClient.completeMlsRebootstrap(channelType, channelId, completion);
+      return await this._reconcileRebootstrapReceipt(cid, candidateCheckpoint, receipt);
+    } catch (error) {
+      try {
+        const receipt = await this.e2eeClient.getMlsRebootstrapReceipt(channelType, channelId, claim.operation_id);
+        return await this._reconcileRebootstrapReceipt(cid, candidateCheckpoint, receipt);
+      } catch {
+        const failure = classifyMlsRebootstrapFailure(
+          error,
+          cid,
+          candidateCheckpoint.claim.expected_generation,
+          candidateCheckpoint.claim.expected_epoch,
+        );
+        return failure.retryable ? { ...failure, retry_at: this._generationRecoveryRetryAt() } : failure;
+      }
+    }
+  }
+
+  private async _reconcileRebootstrapReceipt(
+    cid: string,
+    checkpoint: MlsRebootstrapCandidateCheckpoint,
+    receipt: MlsRebootstrapReceipt,
+  ): Promise<MlsGenerationRecoveryResult> {
+    if (receipt.state === 'cancelled_repair_won') {
+      await this.storage.deleteRebootstrapClaimIntent?.(cid);
+      await this.storage.deleteRebootstrapCandidateCheckpoint?.(cid);
+      return {
+        cid,
+        generation: receipt.current_generation,
+        epoch: receipt.current_epoch,
+        status: 'waiting_for_repair',
+        reason: receipt.reason,
+        retryable: receipt.retryable,
+        ...(receipt.retryable ? { retry_at: this._generationRecoveryRetryAt() } : {}),
+      };
+    }
+    if (receipt.state !== 'activated' && receipt.state !== 'delivery_failed_retryable') {
+      return {
+        cid,
+        generation: receipt.current_generation,
+        epoch: receipt.current_epoch,
+        status: 'retryable_infrastructure_failure',
+        reason: receipt.reason,
+        retryable: receipt.retryable,
+      };
+    }
+    if (!receipt.group_id || !bytesEqual(receipt.group_id, checkpoint.marker.group_id || new Uint8Array())) {
+      throw new Error('[Encryption] rebootstrap receipt GroupId does not match durable candidate');
+    }
+    const nextProvider = wasmModule.Provider.from_bytes(new Uint8Array(checkpoint.provider_bytes));
+    const group = wasmModule.Group.load_with_group_id(nextProvider, new Uint8Array(receipt.group_id));
+    const marker: MlsGroupGenerationMarker = {
+      ...checkpoint.marker,
+      current_epoch: receipt.current_epoch,
+      status: 'active',
+      updated_at: Date.now(),
+    };
+    await this.storage.saveJoinCheckpoint({
+      user_id: checkpoint.user_id,
+      device_id: checkpoint.device_id,
+      provider_bytes: nextProvider.to_bytes(),
+      cid,
+      readiness: null,
+      generation: marker,
+    });
+    this.provider.free();
+    this.provider = nextProvider;
+    const previous = this.groups.get(cid);
+    previous?.free?.();
+    this.groups.set(cid, group);
+    this._groupGenerations.set(cid, marker);
+    await this.storage.deleteRebootstrapClaimIntent?.(cid);
+    await this.storage.deleteRebootstrapCandidateCheckpoint?.(cid);
+    return {
+      cid,
+      generation: receipt.current_generation,
+      epoch: receipt.current_epoch,
+      status: receipt.reason === 'history_incomplete' ? 'history_incomplete' : 'recovered',
+      reason: receipt.reason,
+      retryable: receipt.retryable,
+      delivery_pending: receipt.delivery_pending,
+    };
+  }
+
   /**
    * Join an existing E2EE group via External Commit.
    * Use cases: multi-device (same user, new device) or public channel join.
@@ -6042,26 +7287,90 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     channelType: string,
     channelId: string,
     cid: string,
+    initialGroupInfo?: GetGroupInfoResponse,
   ): Promise<{ epoch: number; status?: E2eeSyncStatus }> {
     if (!this.initialized) throw new Error('[Encryption] Not initialized');
-
-    for (let attempt = 0; attempt < 2; attempt++) {
+    if (this.groups.has(cid)) {
+      return { epoch: this.getEpoch(cid), status: 'ready' };
+    }
+    if (!this._partialWelcomeJoin) {
+      this._partialWelcomeJoin = new PartialWelcomeJoinCoordinator(this.storage);
+    }
+    if (typeof this.storage.saveJoinCheckpoint !== 'function') {
+      throw new Error('[Encryption] Storage adapter does not support durable JOIN checkpoints');
+    }
+    return this._partialWelcomeJoin.runExternalJoin(cid, () =>
+      this._joinExternalCore(channelType, channelId, cid, initialGroupInfo),
+    );
+  }
+  private async _joinExternalCore(
+    channelType: string,
+    channelId: string,
+    cid: string,
+    initialGroupInfo?: GetGroupInfoResponse,
+  ): Promise<{
+    epoch: number;
+    status?: E2eeSyncStatus;
+  }> {
+    let prefetchedGroupInfo = initialGroupInfo;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const providerSnapshot = this.provider.to_bytes();
       // 1. Get GroupInfo from server
-      const groupInfoResponse = await this.e2eeClient!.getGroupInfo(channelType, channelId);
+      let groupInfoResponse = prefetchedGroupInfo || (await this.e2eeClient!.getGroupInfo(channelType, channelId));
+      prefetchedGroupInfo = undefined;
       if (groupInfoResponse.is_stale) {
-        throw staleGroupInfoError(cid);
+        await this._groupInfoRepair?.reportExternalJoinFailure(cid, {
+          reason: 'group_info_stale',
+          observed_epoch: groupInfoResponse.epoch,
+          observed_hash: groupInfoResponse.hash,
+        });
+        const refreshed = await this._groupInfoRepair?.waitForNewerGroupInfo(
+          cid,
+          groupInfoResponse.epoch,
+          groupInfoResponse.hash,
+        );
+        if (!refreshed) throw staleGroupInfoError(cid);
+        groupInfoResponse = refreshed;
       }
 
       // 2. WASM: External join → produces group + commit
-      const result = wasmModule.Group.join_external(
-        this.provider,
-        this.identity,
-        new Uint8Array(groupInfoResponse.group_info),
-        null, // ratchet_tree is included in group_info (with_ratchet_tree=true)
-      );
-
+      let result;
+      try {
+        result = wasmModule.Group.join_external(
+          this.provider,
+          this.identity,
+          new Uint8Array(groupInfoResponse.group_info),
+          null,
+        );
+      } catch (error) {
+        this.provider.free();
+        this.provider = wasmModule.Provider.from_bytes(new Uint8Array(providerSnapshot));
+        await this._groupInfoRepair?.reportExternalJoinFailure(cid, {
+          reason: 'group_info_invalid',
+          observed_epoch: groupInfoResponse.epoch,
+          observed_hash: groupInfoResponse.hash,
+        });
+        const refreshed = await this._groupInfoRepair?.waitForNewerGroupInfo(
+          cid,
+          groupInfoResponse.epoch,
+          groupInfoResponse.hash,
+        );
+        if (refreshed && attempt < 2) continue;
+        const invalid = new Error(`[Encryption] GroupInfo is invalid for ${cid}`) as Error & { code: string };
+        invalid.code = 'group_info_invalid';
+        throw invalid;
+      }
       const group = result.group;
       if (!group) throw new Error('[Encryption] External join failed: no group returned');
+      if (
+        (groupInfoResponse.group_generation || 0) > 0 &&
+        (!groupInfoResponse.group_id || !bytesEqual(group.group_id(), groupInfoResponse.group_id))
+      ) {
+        group.free();
+        this.provider.free();
+        this.provider = wasmModule.Provider.from_bytes(new Uint8Array(providerSnapshot));
+        throw new Error('[Encryption] external-join GroupId does not match authoritative generation');
+      }
 
       // 3. Send external join commit to server FIRST.
       // NOTE: group_info CANNOT be inlined here — export_group_info() is only valid
@@ -6073,6 +7382,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           // group.epoch() = N+1 (OpenMLS auto-stages the pending commit).
           // Server external_join_handler expects post-merge epoch and handles CAS internally.
           epoch: Number(group.epoch()),
+          group_generation: groupInfoResponse.group_generation || 0,
+          ...(groupInfoResponse.group_id ? { group_id: groupInfoResponse.group_id } : {}),
           // No group_info here — will upload separately after merge below.
         });
       } catch (err) {
@@ -6087,19 +7398,47 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
       // 4. Server OK → merge pending commit locally
       group.merge_pending_commit(this.provider);
-
-      // 5. Cache group + persist
+      const joinedEpoch = Number(group.epoch());
+      // 5. Atomically persist provider state, group marker, and the exact
+      //    first-decryptable epoch before publishing local readiness.
+      try {
+        const generationMarker: MlsGroupGenerationMarker = {
+          cid,
+          group_generation: groupInfoResponse.group_generation || 0,
+          group_id: groupInfoResponse.group_id ? new Uint8Array(groupInfoResponse.group_id) : null,
+          current_epoch: joinedEpoch,
+          status: 'active',
+          updated_at: Date.now(),
+        };
+        await this._partialWelcomeJoin!.persistExternalJoin(
+          cid,
+          joinedEpoch,
+          this.userId!,
+          this.deviceId!,
+          this.provider.to_bytes(),
+          generationMarker,
+        );
+        this._groupGenerations.set(cid, generationMarker);
+      } catch (error) {
+        group.free();
+        this.provider.free();
+        this.provider = wasmModule.Provider.from_bytes(new Uint8Array(providerSnapshot));
+        throw error;
+      }
       this.groups.set(cid, group);
-      await this._saveGroup(cid);
-      await this._persistProvider();
-
       // 6. Upload GroupInfo AFTER merge — this is the only correct timing for external join.
       //    The joiner's N+1 state is now fully committed, so export_group_info() is valid.
-      await this._uploadGroupInfo(channelType, channelId, group);
+      //    A failed upload cannot roll back the accepted external commit or the
+      //    now-durable local group. GROUPINFO repair owns that later retry.
+      try {
+        await this._uploadGroupInfo(channelType, channelId, group, true);
+      } catch (error) {
+        sdkLog('warn', '[Encryption] External join persisted; GroupInfo upload requires repair:', cid, error);
+      }
       await this.safeArchiveCurrentEpoch(channelType, channelId);
-
-      sdkLog('info', '[Encryption] External join completed for:', cid, 'epoch:', Number(group.epoch()));
-      return { epoch: Number(group.epoch()), status: 'joined_external' };
+      sdkLog('info', '[Encryption] External join completed for:', cid, 'epoch:', joinedEpoch);
+      void this.ensureKeyPackagesFromServer('group_join');
+      return { epoch: joinedEpoch, status: 'joined_external' };
     }
 
     throw new Error('[Encryption] External join failed after retry');
@@ -6190,7 +7529,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * by OpenMLS for the new epoch (N+1) and can be sent inline with the commit.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async _uploadGroupInfo(channelType: string, channelId: string, group: any): Promise<void> {
+  private async _uploadGroupInfo(
+    channelType: string,
+    channelId: string,
+    group: any,
+    throwOnFailure = false,
+  ): Promise<void> {
     try {
       const groupInfoBytes = group.export_group_info(this.provider, this.identity, true);
       sdkLog('info', '[Encryption] Exported group_info for:', channelType, channelId, 'epoch:', Number(group.epoch()));
@@ -6204,8 +7548,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       });
       sdkLog('info', '[Encryption] GroupInfo uploaded for:', channelType, channelId, 'epoch:', Number(group.epoch()));
     } catch (err) {
-      // Non-fatal: GroupInfo upload failure shouldn't block the commit flow
       sdkLog('error', '[Encryption] Failed to upload GroupInfo for:', channelType, channelId, err);
+      if (throwOnFailure) throw err;
     }
   }
 
@@ -6325,8 +7669,26 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     commitBytes: Uint8Array,
     eventEpoch?: number,
     primaryUserId?: string,
-    options: { flushPending?: boolean } = {},
+    options: { flushPending?: boolean; historicalReplay?: boolean; serverAcceptedAt?: string } = {},
   ): Promise<any | null> {
+    if (options.historicalReplay) this._requireHistoricalReplayEnabled();
+
+    let serverAcceptedAtSeconds: bigint | undefined;
+    if (options.historicalReplay) {
+      const acceptedAt = options.serverAcceptedAt;
+      const rfc3339 =
+        typeof acceptedAt === 'string' &&
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(acceptedAt);
+      const acceptedAtMilliseconds = rfc3339 ? Date.parse(acceptedAt) : Number.NaN;
+      if (!Number.isFinite(acceptedAtMilliseconds) || acceptedAtMilliseconds < 0) {
+        const invalidTimestamp = new Error(
+          '[Encryption] Historical MLS replay requires a valid server acceptance timestamp',
+        ) as Error & { code?: string };
+        invalidTimestamp.code = 'historical_acceptance_time_invalid';
+        throw invalidTimestamp;
+      }
+      serverAcceptedAtSeconds = BigInt(Math.floor(acceptedAtMilliseconds / 1000));
+    }
     if (this.isChannelEncryptionSyncBlocked(cid)) {
       this._logDeferredEncryptionEventOnce('pending_invite_commit', cid, cid);
       return null;
@@ -6334,8 +7696,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     const group = this.groups.get(cid);
     if (!group) {
-      sdkLog('warn', '[Encryption] processCommit: no group for', cid);
+      sdkLog('warn', '[Encryption] processCommit: no local group');
       return null;
+    }
+
+    const processHistorical = (group as { process_message_at?: Function }).process_message_at;
+    if (options.historicalReplay && typeof processHistorical !== 'function') {
+      const unsupported = new Error(
+        '[Encryption] OpenMLS artifact does not support trusted historical processing',
+      ) as Error & { code?: string };
+      unsupported.code = 'historical_replay_unsupported';
+      throw unsupported;
     }
 
     // Pre-check: if group epoch already surpassed the commit's epoch,
@@ -6344,13 +7715,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     // which can corrupt ratchet state.
     if (eventEpoch !== undefined && eventEpoch >= 0) {
       const groupEpoch = Number(group.epoch());
-      sdkLog('info', '[Encryption] processCommit: group epoch:', groupEpoch, 'event epoch:', eventEpoch);
+      sdkLog('info', '[Encryption] processCommit epoch comparison', { groupEpoch, eventEpoch });
       if (groupEpoch >= eventEpoch) {
-        sdkLog(
-          'info',
-          `[Encryption] processCommit: commit at epoch ${eventEpoch} already applied (group at ${groupEpoch}), skipping:`,
-          cid,
-        );
+        sdkLog('info', '[Encryption] processCommit: commit already applied');
         return null;
       }
     }
@@ -6360,9 +7727,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const snapshot = this.provider.to_bytes();
 
     try {
-      const processed = group.process_message(this.provider, new Uint8Array(commitBytes));
+      const processed = options.historicalReplay
+        ? processHistorical!.call(group, this.provider, new Uint8Array(commitBytes), serverAcceptedAtSeconds)
+        : group.process_message(this.provider, new Uint8Array(commitBytes));
 
-      sdkLog('info', '[Encryption] Commit processed for:', cid, 'epoch:', Number(group.epoch()));
+      sdkLog('info', '[Encryption] Commit processed', { epoch: Number(group.epoch()) });
       await this._persistProvider();
       await this.safeArchiveCurrentEpochForCid(cid, 'backup', primaryUserId);
 
@@ -6395,10 +7764,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
       return processed;
     } catch (err) {
+      if (options.historicalReplay) {
+        this._emitMlsRolloutMetric({
+          name: 'delayed_commit',
+          outcome: 'failure',
+          reason: 'process_error',
+        });
+      }
       const errMsg = (err as Error).message || '';
       if (errMsg.includes('epoch differs')) {
         // Likely a duplicate commit already processed during sync — safe to ignore
-        sdkLog('warn', '[Encryption] processCommit: commit already applied (epoch mismatch), skipping:', cid);
+        sdkLog('warn', '[Encryption] processCommit: commit already applied after epoch mismatch');
         return null;
       }
 
@@ -6407,11 +7783,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       // Do not auto-advance the sync cursor here. Channel Repair can replay first,
       // then offer a user-confirmed local reset if replay keeps failing.
       if (errMsg.includes('missing a proposal')) {
-        sdkLog('warn', '[Encryption] processCommit: missing proposal — repair reset required for', cid);
+        sdkLog('warn', '[Encryption] processCommit: missing proposal; repair reset required');
         this.provider = wasmModule.Provider.from_bytes(new Uint8Array(snapshot));
-        const missingProposalError = new Error(
-          `[Encryption] Missing proposal while processing commit for ${cid}`,
-        ) as Error & {
+        const missingProposalError = new Error('[Encryption] Missing proposal while processing commit') as Error & {
           code?: string;
         };
         missingProposalError.code = 'missing_proposal';
@@ -6419,10 +7793,24 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }
 
       // ROLLBACK: restore Provider from snapshot (commits modify Provider via as_mut)
-      sdkLog('warn', '[Encryption] processCommit failed, rolling back Provider snapshot:', errMsg);
+      sdkLog('warn', '[Encryption] processCommit failed; Provider snapshot restored: process_error');
       this.provider = wasmModule.Provider.from_bytes(new Uint8Array(snapshot));
       throw err;
     }
+  }
+
+  private _requireHistoricalReplayEnabled(): void {
+    if (this._historicalReplayEnabled) return;
+    this._emitMlsRolloutMetric({
+      name: 'delayed_commit',
+      outcome: 'disabled',
+      reason: 'historical_replay_disabled',
+    });
+    const disabled = new Error('[Encryption] Historical MLS replay is disabled by rollout control') as Error & {
+      code?: string;
+    };
+    disabled.code = 'historical_replay_disabled';
+    throw disabled;
   }
 
   /**
@@ -6764,6 +8152,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       created_at?: string;
       updated_at?: string;
       mls_epoch?: number;
+      group_generation?: number;
       e2ee_group_id?: string;
       [key: string]: unknown;
     },
@@ -6773,6 +8162,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const versionKey = this._messageVersionKey(message);
     const routeCid = (typeof message.cid === 'string' && message.cid) || cid;
     const groupCid = this._resolveMessageE2eeGroupId(message, cid);
+    const incomingGeneration = Number(message.group_generation || 0);
+    const localGeneration = this._groupGenerations.get(groupCid)?.group_generation || 0;
+    if (incomingGeneration !== localGeneration) {
+      sdkLog('info', '[Encryption] Skipping ciphertext outside the installed MLS generation', {
+        cid: routeCid,
+        incoming_generation: incomingGeneration,
+        local_generation: localGeneration,
+      });
+      return null;
+    }
 
     if (this._isEncryptionProcessingBlockedForRoute(routeCid, groupCid)) {
       await this._rememberPendingE2eeSnapshot(routeCid, message);
@@ -7032,7 +8431,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }) => void;
       displayOverrides?: Map<number, Record<string, unknown>>;
       resumeCheckpoints?: Array<PendingE2eeAttachmentUploadCheckpoint | undefined>;
-      onCheckpointChange?: (fileIndex: number, checkpoint: PendingE2eeAttachmentUploadCheckpoint | undefined) => Promise<void> | void;
+      onCheckpointChange?: (
+        fileIndex: number,
+        checkpoint: PendingE2eeAttachmentUploadCheckpoint | undefined,
+      ) => Promise<void> | void;
       signal?: AbortSignal;
       /** Per-file progress to seed from on resume so the UI doesn't jump back to 0% after F5. */
       initialProgressByFile?: number[];
@@ -7076,7 +8478,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         lastProgressPercentage = percentage;
         options.onProgress?.({ fileIndex: index, ...progress, percentage });
       };
-      const mapProgress = (start: number, end: number) =>
+      const mapProgress =
+        (start: number, end: number) =>
         (progress: {
           phase: 'generating_preview' | 'encrypting' | 'uploading' | 'completing';
           loaded: number;
@@ -7174,10 +8577,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               };
               await options.onCheckpointChange?.(index, activeCheckpoint);
             },
-            onProgress: mapProgress(
-              E2EE_ATTACHMENT_ORIGINAL_PROGRESS_START,
-              E2EE_ATTACHMENT_ORIGINAL_PROGRESS_END,
-            ),
+            onProgress: mapProgress(E2EE_ATTACHMENT_ORIGINAL_PROGRESS_START, E2EE_ATTACHMENT_ORIGINAL_PROGRESS_END),
             signal: options.signal,
           });
           return {
@@ -7238,8 +8638,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           await options.onCheckpointChange?.(index, undefined);
           void e2eeClient.deleteAttachment(channelType, channelId, abandonedAttachmentId).catch(() => undefined);
         }
-        const init = activeCheckpoint?.init ||
-          await e2eeClient.initAttachment(
+        const init =
+          activeCheckpoint?.init ||
+          (await e2eeClient.initAttachment(
             channelType,
             channelId,
             {
@@ -7247,7 +8648,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               assets: [{ kind: 'original', cipher_size_estimate: originalCipherSizeEstimate }],
             },
             { multipart: multipartEnabled },
-          );
+          ));
         const initAsset = init.assets.find((asset) => asset.kind === 'original');
         if (!initAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
         const uploadedOriginal = await uploadOriginalAsset(initAsset, init);
@@ -7258,8 +8659,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           percentage: 99,
         });
         const completeRequest: CompleteE2eeAttachmentRequest = {
-          completion_lease_id:
-            activeCheckpoint?.completion_lease_id || newUuid(this._attachmentCryptoProvider),
+          completion_lease_id: activeCheckpoint?.completion_lease_id || newUuid(this._attachmentCryptoProvider),
           ...(uploadedOriginal.completeAsset ? { assets: [uploadedOriginal.completeAsset] } : {}),
         };
         await completeAttachmentWithRetry(init.attachment_id, completeRequest);
@@ -7275,7 +8675,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         });
       };
 
-      if (!previewEncrypted || (activeCheckpoint && !activeCheckpoint.init.assets.some((asset) => asset.kind === 'preview'))) {
+      if (
+        !previewEncrypted ||
+        (activeCheckpoint && !activeCheckpoint.init.assets.some((asset) => asset.kind === 'preview'))
+      ) {
         const manifest = await completeOriginalOnly();
         attachments.push(manifest);
         ids.push(manifest.attachment_id);
@@ -7285,8 +8688,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const checkpointPreviewAsset = activeCheckpoint?.init.assets?.find((asset) => asset.kind === 'preview');
       const canResumePreviewSession = Boolean(
         activeCheckpoint &&
-        checkpointPreviewAsset?.put_url &&
-        checkpointPreviewAsset.cipher_size_estimate === previewEncrypted.cipher_size
+          checkpointPreviewAsset?.put_url &&
+          checkpointPreviewAsset.cipher_size_estimate === previewEncrypted.cipher_size,
       );
       if (activeCheckpoint && !canResumePreviewSession) {
         const abandonedAttachmentId = activeCheckpoint.attachment_id;
@@ -7294,20 +8697,21 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         await options.onCheckpointChange?.(index, undefined);
         void e2eeClient.deleteAttachment(channelType, channelId, abandonedAttachmentId).catch(() => undefined);
       }
-      const init = canResumePreviewSession && activeCheckpoint
-        ? activeCheckpoint.init
-        : await e2eeClient.initAttachment(
-            channelType,
-            channelId,
-            {
-              idempotency_key: newUuid(this._attachmentCryptoProvider),
-              assets: [
-                { kind: 'original', cipher_size_estimate: originalCipherSizeEstimate },
-                { kind: 'preview', cipher_size_estimate: previewEncrypted.cipher_size },
-              ],
-            },
-            { multipart: multipartEnabled },
-          );
+      const init =
+        canResumePreviewSession && activeCheckpoint
+          ? activeCheckpoint.init
+          : await e2eeClient.initAttachment(
+              channelType,
+              channelId,
+              {
+                idempotency_key: newUuid(this._attachmentCryptoProvider),
+                assets: [
+                  { kind: 'original', cipher_size_estimate: originalCipherSizeEstimate },
+                  { kind: 'preview', cipher_size_estimate: previewEncrypted.cipher_size },
+                ],
+              },
+              { multipart: multipartEnabled },
+            );
       const originalInitAsset = init.assets.find((asset) => asset.kind === 'original');
       const previewInitAsset = init.assets.find((asset) => asset.kind === 'preview');
       if (!originalInitAsset) throw new Error('[Encryption] E2EE attachment init did not return original asset');
@@ -7340,8 +8744,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         percentage: 99,
       });
       const completeRequest: CompleteE2eeAttachmentRequest = {
-        completion_lease_id:
-          activeCheckpoint?.completion_lease_id || newUuid(this._attachmentCryptoProvider),
+        completion_lease_id: activeCheckpoint?.completion_lease_id || newUuid(this._attachmentCryptoProvider),
         ...(uploadedOriginal.completeAsset ? { assets: [uploadedOriginal.completeAsset] } : {}),
       };
       await completeAttachmentWithRetry(init.attachment_id, completeRequest);
@@ -7543,9 +8946,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     return map;
   }
 
-  private _liveParamsForPendingE2eeSend(
-    record: PendingE2eeSendRecord,
-  ): QueuedE2eeAttachmentSendParams | undefined {
+  private _liveParamsForPendingE2eeSend(record: PendingE2eeSendRecord): QueuedE2eeAttachmentSendParams | undefined {
     if (!this.client || !record.channel_type || !record.channel_id) return undefined;
     const channel = this.client.channel(record.channel_type, record.channel_id);
     channel.restorePendingE2eeAttachmentUpload(record);
@@ -7558,10 +8959,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       files: record.files || [],
       options: record.aad_metadata as QueuedE2eeAttachmentSendParams['options'],
       displayOverrides: this._displayOverridesArrayToMap(record.display_overrides),
-      onProgress: (progress) =>
-        channel.updatePendingE2eeAttachmentUpload(record.message_id, progress),
-      onSuccess: (response) =>
-        channel.completePendingE2eeAttachmentUpload(record.message_id, response),
+      onProgress: (progress) => channel.updatePendingE2eeAttachmentUpload(record.message_id, progress),
+      onSuccess: (response) => channel.completePendingE2eeAttachmentUpload(record.message_id, response),
       onError: (error) => channel.failPendingE2eeAttachmentUpload(record.message_id, error),
     };
   }
@@ -7577,6 +8976,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       message_id: params.messageId,
       cid: params.cid,
       e2ee_group_id: e2eeGroupId,
+      group_generation: this._groupGenerations.get(e2eeGroupId)?.group_generation || 0,
       channel_type: params.channelType,
       channel_id: params.channelId,
       text: params.text,
@@ -7680,6 +9080,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (!record.channel_type || !record.channel_id || !record.mls_ciphertext || record.mls_epoch === undefined) {
       throw new Error('Pending E2EE send is missing persisted send material');
     }
+    const currentGeneration = this._groupGenerations.get(record.e2ee_group_id)?.group_generation || 0;
+    if ((record.group_generation || 0) !== currentGeneration) {
+      const error = new Error('Pending E2EE ciphertext belongs to an inactive MLS generation') as Error & {
+        code?: string;
+      };
+      error.code = 'old_group_generation';
+      throw error;
+    }
     const envelopeOptions = {
       ...(record.send_envelope || {}),
       ...(record.e2ee_attachment_ids?.length ? { e2ee_attachment_ids: record.e2ee_attachment_ids } : {}),
@@ -7693,6 +9101,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         id: record.message_id,
         mls_ciphertext: record.mls_ciphertext,
         mls_epoch: record.mls_epoch,
+        group_generation: record.group_generation || 0,
         e2ee_group_id: record.e2ee_group_id,
         ...envelopeOptions,
       },
@@ -7703,8 +9112,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         ? (rawResponse.message as Record<string, any>)
         : {};
     const metadata = { ...(record.aad_metadata || {}), ...(record.send_envelope || {}) };
-    const userId =
-      this.userId || serverMessage.user?.id || serverMessage.user_id || this.client?.userID || '';
+    const userId = this.userId || serverMessage.user?.id || serverMessage.user_id || this.client?.userID || '';
     const createdAt =
       this._dateishToIso(metadata.local_created_at) ||
       this._dateishToIso(serverMessage.created_at) ||
@@ -7728,14 +9136,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       created_at: createdAt,
       updated_at: this._dateishToIso(serverMessage.updated_at),
       msg_seq: Number.isFinite(serverMsgSeq) && serverMsgSeq > 0 ? serverMsgSeq : undefined,
-      last_event_seq:
-        Number.isFinite(serverLastEventSeq) && serverLastEventSeq > 0
-          ? serverLastEventSeq
-          : undefined,
+      last_event_seq: Number.isFinite(serverLastEventSeq) && serverLastEventSeq > 0 ? serverLastEventSeq : undefined,
       type: serverMessage.type || 'regular',
       parent_id: typeof metadata.parent_id === 'string' ? metadata.parent_id : undefined,
-      quoted_message_id:
-        typeof metadata.quoted_message_id === 'string' ? metadata.quoted_message_id : undefined,
+      quoted_message_id: typeof metadata.quoted_message_id === 'string' ? metadata.quoted_message_id : undefined,
       mentioned_users: Array.isArray(metadata.mentioned_users) ? metadata.mentioned_users : undefined,
       mentioned_all: metadata.mentioned_all === true,
       forward_cid: record.forward_cid,
@@ -7777,9 +9181,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (isCanceled()) return;
       record = { ...record, ...patch, updated_at: Date.now() };
       const snapshot = record;
-      const operation = pendingSaveChain
-        .catch(() => undefined)
-        .then(() => this.storage.savePendingE2eeSend(snapshot));
+      const operation = pendingSaveChain.catch(() => undefined).then(() => this.storage.savePendingE2eeSend(snapshot));
       pendingSaveChain = operation;
       await operation;
     };
@@ -7792,10 +9194,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       files?.forEach((_, fileIndex) => {
         lastProgressPercentByFile.set(fileIndex, resolvePendingE2eeAttachmentDisplayProgress(record, fileIndex));
       });
-      if (
-        (record.status === 'sending' || record.status === 'failed_retryable') &&
-        record.mls_ciphertext
-      ) {
+      if ((record.status === 'sending' || record.status === 'failed_retryable') && record.mls_ciphertext) {
         await savePatch({
           status: 'sending',
           local_progress: 99,
@@ -7842,8 +9241,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           last_error: undefined,
         });
         prepared = await this.uploadE2eeAttachments(channelType, channelId, files, {
-          displayOverrides:
-            liveParams?.displayOverrides || this._displayOverridesArrayToMap(record.display_overrides),
+          displayOverrides: liveParams?.displayOverrides || this._displayOverridesArrayToMap(record.display_overrides),
           signal: abortController?.signal,
           resumeCheckpoints: record.attachment_upload_checkpoints,
           // Pass restored progress so uploadE2eeAttachments seeds lastProgressPercentage
@@ -7865,10 +9263,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             // 100% means the encrypted message was accepted, not merely that
             // the attachment PUT/complete call finished.
             const previousProgress = lastProgressPercentByFile.get(progress.fileIndex) || 0;
-            const nextProgress = Math.max(
-              previousProgress,
-              Math.max(0, Math.min(99, Math.round(progress.percentage))),
-            );
+            const nextProgress = Math.max(previousProgress, Math.max(0, Math.min(99, Math.round(progress.percentage))));
             const now = Date.now();
             const lastProgressEmittedAt = lastProgressEmittedAtByFile.get(progress.fileIndex) || 0;
             const lastProgressPersistedAt = lastProgressPersistedAtByFile.get(progress.fileIndex) || 0;
@@ -7942,7 +9337,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         await this.storage.deletePendingE2eeSend(record.message_id).catch(() => undefined);
         return;
       }
-      const isTerminal = isE2eeAttachmentInvalidError(err);
+      const isTerminal =
+        isE2eeAttachmentInvalidError(err) ||
+        (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'old_group_generation');
       const latestRecord = await this.storage.loadPendingE2eeSend(record.message_id).catch(() => null);
       if (latestRecord) {
         record = latestRecord;
@@ -7962,11 +9359,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         void this.storage
           .loadPendingE2eeSend(initialRecord.message_id)
           .then((latestRecord) => {
-            if (
-              !latestRecord ||
-              latestRecord.status === 'failed_terminal' ||
-              latestRecord.status === 'canceled'
-            )
+            if (!latestRecord || latestRecord.status === 'failed_terminal' || latestRecord.status === 'canceled')
               return;
             const resumedLiveParams = this._liveParamsForPendingE2eeSend(latestRecord);
             void this._processQueuedE2eeAttachmentMessage(latestRecord, resumedLiveParams);
@@ -7979,11 +9372,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   /** Replace only the stale MLS group, preserving plaintext/message caches. */
-  private async _rejoinEpochStaleGroup(
-    channelType: string,
-    channelId: string,
-    e2eeGroupId: string,
-  ): Promise<number> {
+  private async _rejoinEpochStaleGroup(channelType: string, channelId: string, e2eeGroupId: string): Promise<number> {
     const providerSnapshot = this.provider.to_bytes();
     const groupSnapshot = this.groups.get(e2eeGroupId) || null;
     const groupMarkerSnapshot = await this.storage.loadGroupState(e2eeGroupId);
@@ -8235,6 +9624,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     let ciphertext = this.encryptMessage(e2eeGroupId, payload, aad);
     let group = this.getGroup(e2eeGroupId)!;
+    let groupGeneration = this._groupGenerations.get(e2eeGroupId)?.group_generation || 0;
     let response: any;
     const nowForPending = Date.now();
     const durableQueueRecord =
@@ -8252,6 +9642,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       mls_ciphertext: ciphertext,
       mls_ciphertext_sha256: ciphertextSha256(ciphertext, this._attachmentCryptoProvider),
       mls_epoch: Number(group.epoch()),
+      group_generation: groupGeneration,
       e2ee_attachment_ids: e2eeAttachmentIds,
       aad_metadata: {
         ...(durableQueueRecord?.aad_metadata || {}),
@@ -8277,6 +9668,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           id: messageId,
           mls_ciphertext: ciphertext,
           mls_epoch: Number(group.epoch()),
+          group_generation: groupGeneration,
           e2ee_group_id: e2eeGroupId,
           ...(e2eeAttachmentIds.length > 0 ? { e2ee_attachment_ids: e2eeAttachmentIds } : {}),
           ...envelopeOptions,
@@ -8289,6 +9681,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         // Re-encrypt with updated epoch after sync
         ciphertext = this.encryptMessage(e2eeGroupId, payload, aad);
         group = this.getGroup(e2eeGroupId)!;
+        groupGeneration = this._groupGenerations.get(e2eeGroupId)?.group_generation || 0;
         await this._persistProvider();
         if (typeof this.storage?.savePendingE2eeSend === 'function') {
           await this.storage.savePendingE2eeSend({
@@ -8296,6 +9689,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             mls_ciphertext: ciphertext,
             mls_ciphertext_sha256: ciphertextSha256(ciphertext, this._attachmentCryptoProvider),
             mls_epoch: Number(group.epoch()),
+            group_generation: groupGeneration,
             retry_count: pendingRecordBase.retry_count + 1,
             updated_at: Date.now(),
           });
@@ -8306,6 +9700,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               id: messageId,
               mls_ciphertext: ciphertext,
               mls_epoch: Number(group.epoch()),
+              group_generation: groupGeneration,
               e2ee_group_id: e2eeGroupId,
               ...(e2eeAttachmentIds.length > 0 ? { e2ee_attachment_ids: e2eeAttachmentIds } : {}),
               ...envelopeOptions,
@@ -8497,12 +9892,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
     let ciphertext = this.encryptMessage(e2eeGroupId, payload);
     let group = this.getGroup(e2eeGroupId)!;
+    let groupGeneration = this._groupGenerations.get(e2eeGroupId)?.group_generation || 0;
     let response: any;
     try {
       response = await this.e2eeClient!.updateMessage(channelType, channelId, messageId, {
         message: {
           mls_ciphertext: ciphertext,
           mls_epoch: Number(group.epoch()),
+          group_generation: groupGeneration,
           e2ee_group_id: e2eeGroupId,
           ...envelopeOptions,
         },
@@ -8514,10 +9911,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         await this._recoverEpochStaleGroup(channelType, channelId, e2eeGroupId, err);
         ciphertext = this.encryptMessage(e2eeGroupId, payload);
         group = this.getGroup(e2eeGroupId)!;
+        groupGeneration = this._groupGenerations.get(e2eeGroupId)?.group_generation || 0;
         response = await this.e2eeClient!.updateMessage(channelType, channelId, messageId, {
           message: {
             mls_ciphertext: ciphertext,
             mls_epoch: Number(group.epoch()),
+            group_generation: groupGeneration,
             e2ee_group_id: e2eeGroupId,
             ...envelopeOptions,
           },
@@ -8634,7 +10033,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         await this._recordRepairIssue(routeCid, msg, 'missing_local_snapshot', false);
         continue;
       }
-
+      if (await this._partialWelcomeJoin?.isPreJoinHistorical(groupCid, msg.mls_epoch)) {
+        this._logExpectedDecryptFailureOnce(routeCid, msg, this._safeGroupEpoch(group), 'pre_join_historical');
+        continue;
+      }
       // Skip messages already decrypted & stored for this version (encryption forward secrecy:
       // keys are consumed after first use, re-decrypting would fail)
       const existing = await this.storage.loadMessage(msg.id);
@@ -8764,6 +10166,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this.userId = null;
     this.deviceId = null;
     this.e2eeClient = null;
+    this._groupInfoRepair = null;
     this.client = null;
     this._recoveryPrivateKey = null;
     this._recoveryPublicKey = null;
@@ -8778,6 +10181,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this._archiveStashKeyPromise = null;
     this._recoveryPostUnlockMaintenancePromise = null;
     this._recoveryPostUnlockMaintenanceGeneration += 1;
+    this._partialWelcomeJoin = null;
+    this._onMlsRolloutMetric = null;
+    this._mlsRolloutTelemetryEnabled = false;
+    this._mlsRolloutTelemetryInFlight = false;
+    this._mlsRolloutTelemetryQueue = [];
     this._expectedDecryptLogKeys.clear();
     this._waterfallSummaryLogKeys.clear();
     this._deferredEncryptionEventLogKeys.clear();
@@ -8785,8 +10193,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this._restoreQueueRunning = false;
     this._restoreInflight.clear();
     this._bootstrapKnownChannelsPromise = null;
-    this._channelBootstrapSub?.unsubscribe?.();
-    this._channelBootstrapSub = null;
+    this._mlsRecoveryDiscoverySupported = null;
     this._e2eeBootstrapProgress = {
       total: 0,
       completed: 0,
@@ -8801,6 +10208,15 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this._syncGateResolve = null;
     this._lastSyncStates.clear();
     this._channelReadyLocks.clear();
+    this._generationRecoveryAttempted.clear();
+    this._generationRecoveryPending.clear();
+    this._generationRecoveryRetries.clear();
+    this._legacyGroupInfoRepairDeadlines.clear();
+    if (this._generationRecoveryRetryTimer) {
+      this._generationRecoveryClearTimeout(this._generationRecoveryRetryTimer);
+      this._generationRecoveryRetryTimer = null;
+      this._generationRecoveryRetryTimerAt = null;
+    }
     this._channelReadyUntil.clear();
     this._providerRestored = false;
     // Reset storage so next initialize() creates a new user-scoped instance
@@ -9025,6 +10441,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (result.success) {
         await this.safeArchiveCurrentEpochForCid(result.topic_cid);
       }
+    }
+    if (response.results.some((result) => result.success)) {
+      void this.ensureKeyPackagesFromServer('group_join');
     }
     return response;
   }

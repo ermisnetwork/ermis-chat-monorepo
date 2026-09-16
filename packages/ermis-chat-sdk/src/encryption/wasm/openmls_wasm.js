@@ -242,7 +242,7 @@ function passArray32ToWasm0(arg, malloc) {
  * # Example
  * ```javascript
  * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) globalThis.__ermisSdkLog?.('warn', "Invalid KeyPackage!");
+ * if (!isValid) console.warn("Invalid KeyPackage!");
  * ```
  * @param {Uint8Array} bytes
  * @returns {boolean}
@@ -573,7 +573,7 @@ export const MessageType = Object.freeze({
 });
 /**
  * Error codes for MLS operations
- * @enum {0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10}
+ * @enum {0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11}
  */
 export const MlsErrorCode = Object.freeze({
     /**
@@ -620,6 +620,10 @@ export const MlsErrorCode = Object.freeze({
      * External commit failed
      */
     ExternalCommitError: 10, "10": "ExternalCommitError",
+    /**
+     * A Welcome does not contain a KeyPackage owned by this provider
+     */
+    NoMatchingKeyPackage: 11, "11": "NoMatchingKeyPackage",
 });
 
 const AddMessagesFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -690,6 +694,14 @@ const ArchiveBlobAadFinalization = (typeof FinalizationRegistry === 'undefined')
 
 export class ArchiveBlobAad {
 
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(ArchiveBlobAad.prototype);
+        obj.__wbg_ptr = ptr;
+        ArchiveBlobAadFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -700,6 +712,27 @@ export class ArchiveBlobAad {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_archiveblobaad_free(ptr, 0);
+    }
+    /**
+     * @param {string} cid
+     * @param {bigint} group_generation
+     * @param {bigint} epoch
+     * @param {string} scope
+     * @param {string} blob_id
+     * @param {string} snapshot_hash
+     * @returns {ArchiveBlobAad}
+     */
+    static forGeneration(cid, group_generation, epoch, scope, blob_id, snapshot_hash) {
+        const ptr0 = passStringToWasm0(cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(scope, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(blob_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(snapshot_hash, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.archiveblobaad_forGeneration(ptr0, len0, group_generation, epoch, ptr1, len1, ptr2, len2, ptr3, len3);
+        return ArchiveBlobAad.__wrap(ret);
     }
     /**
      * @param {string} cid
@@ -742,6 +775,14 @@ const ArchiveKeyWrapInfoFinalization = (typeof FinalizationRegistry === 'undefin
 
 export class ArchiveKeyWrapInfo {
 
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(ArchiveKeyWrapInfo.prototype);
+        obj.__wbg_ptr = ptr;
+        ArchiveKeyWrapInfoFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -752,6 +793,30 @@ export class ArchiveKeyWrapInfo {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_archivekeywrapinfo_free(ptr, 0);
+    }
+    /**
+     * @param {string} channel_id
+     * @param {bigint} group_generation
+     * @param {bigint} epoch
+     * @param {string} scope
+     * @param {string} blob_id
+     * @param {string} snapshot_hash
+     * @param {string} recipient_key_id
+     * @returns {ArchiveKeyWrapInfo}
+     */
+    static forGeneration(channel_id, group_generation, epoch, scope, blob_id, snapshot_hash, recipient_key_id) {
+        const ptr0 = passStringToWasm0(channel_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(scope, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(blob_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(snapshot_hash, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passStringToWasm0(recipient_key_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.archivekeywrapinfo_forGeneration(ptr0, len0, group_generation, epoch, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+        return ArchiveKeyWrapInfo.__wrap(ret);
     }
     /**
      * @param {string} channel_id
@@ -1361,6 +1426,64 @@ export class Group {
             ptr1 = ratchet_tree.__destroy_into_raw();
         }
         const ret = wasm.group_join_with_welcome(provider.__wbg_ptr, ptr0, len0, ptr1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
+     * Load a generation-aware group using exact MLS GroupId bytes.
+     * @param {Provider} provider
+     * @param {Uint8Array} group_id_bytes
+     * @returns {Group}
+     */
+    static load_with_group_id(provider, group_id_bytes) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(group_id_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_load_with_group_id(provider.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
+     * Create a generation-aware group using explicit MLS GroupId bytes.
+     * @param {Provider} provider
+     * @param {Identity} founder
+     * @param {Uint8Array} group_id_bytes
+     * @returns {Group}
+     */
+    static create_with_group_id(provider, founder, group_id_bytes) {
+        _assertClass(provider, Provider);
+        _assertClass(founder, Identity);
+        const ptr0 = passArray8ToWasm0(group_id_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_create_with_group_id(provider.__wbg_ptr, founder.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
+     * Join using a Welcome while preserving a stable typed error. Clients may
+     * automatically fall back to external join only for
+     * `MlsErrorCode::NoMatchingKeyPackage`; every other error must fail closed.
+     * @param {Provider} provider
+     * @param {Uint8Array} welcome
+     * @param {RatchetTree | null} [ratchet_tree]
+     * @returns {Group}
+     */
+    static join_with_welcome_typed(provider, welcome, ratchet_tree) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        let ptr1 = 0;
+        if (!isLikeNone(ratchet_tree)) {
+            _assertClass(ratchet_tree, RatchetTree);
+            ptr1 = ratchet_tree.__destroy_into_raw();
+        }
+        const ret = wasm.group_join_with_welcome_typed(provider.__wbg_ptr, ptr0, len0, ptr1);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -2078,6 +2201,24 @@ export class Group {
         return ProcessedMessage.__wrap(ret[0]);
     }
     /**
+     * Process a durable handshake event using the trusted Bellboy acceptance
+     * timestamp. Application messages must continue to use `process_message`.
+     * @param {Provider} provider
+     * @param {Uint8Array} msg
+     * @param {bigint} server_accepted_at_seconds
+     * @returns {ProcessedMessage}
+     */
+    process_message_at(provider, msg, server_accepted_at_seconds) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(msg, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_process_message_at(this.__wbg_ptr, provider.__wbg_ptr, ptr0, len0, server_accepted_at_seconds);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ProcessedMessage.__wrap(ret[0]);
+    }
+    /**
      * Process message and return raw bytes (legacy API, for backwards compatibility)
      *
      * Returns decrypted bytes for application messages, empty for proposals/commits.
@@ -2511,6 +2652,14 @@ const MlsErrorFinalization = (typeof FinalizationRegistry === 'undefined')
  */
 export class MlsError {
 
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(MlsError.prototype);
+        obj.__wbg_ptr = ptr;
+        MlsErrorFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -2552,6 +2701,23 @@ export class MlsError {
         let deferred1_1;
         try {
             const ret = wasm.mlserror_message(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Stable string representation for clients that cannot safely depend on
+     * wasm-bindgen's numeric enum layout.
+     * @returns {string}
+     */
+    get code_name() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.mlserror_code_name(this.__wbg_ptr);
             deferred1_0 = ret[0];
             deferred1_1 = ret[1];
             return getStringFromWasm0(ret[0], ret[1]);
@@ -3067,6 +3233,10 @@ function __wbg_get_imports() {
     };
     imports.wbg.__wbg_memberinfo_new = function(arg0) {
         const ret = MemberInfo.__wrap(arg0);
+        return ret;
+    };
+    imports.wbg.__wbg_mlserror_new = function(arg0) {
+        const ret = MlsError.__wrap(arg0);
         return ret;
     };
     imports.wbg.__wbg_msCrypto_a61aeb35a24c1329 = function(arg0) {

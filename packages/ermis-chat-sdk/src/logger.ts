@@ -2,6 +2,37 @@ import type { Logger, LoggerOption, LogLevel } from './types';
 
 export const noopLogger: Logger = () => null;
 
+const SENSITIVE_QUERY_KEYS = new Set(['api_key', 'apikey', 'authorization', 'key', 'signature', 'token']);
+
+export function sanitizeUrlForLog(value: string): string {
+  try {
+    const parsed = new URL(value, 'http://ermis-log.invalid');
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
+        parsed.searchParams.set(key, '[REDACTED]');
+      }
+    }
+    parsed.hash = '';
+    if (parsed.origin === 'http://ermis-log.invalid') {
+      return `${parsed.pathname}${parsed.search}`;
+    }
+    return parsed.toString();
+  } catch {
+    return '[invalid_url]';
+  }
+}
+
+export function apiErrorLogDetails(error: unknown): {
+  category: 'network' | 'request' | 'response';
+  status?: number;
+} {
+  if (!error || typeof error !== 'object') return { category: 'request' };
+  const candidate = error as { request?: unknown; response?: { status?: unknown } };
+  const status = typeof candidate.response?.status === 'number' ? candidate.response.status : undefined;
+  if (status !== undefined) return { category: 'response', status };
+  return { category: candidate.request ? 'network' : 'request' };
+}
+
 type SdkLogBridge = (logLevel: LogLevel, ...args: unknown[]) => void;
 
 declare global {

@@ -370,6 +370,22 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   parent_cid?: string;
   project_id?: string;
   reason?: string;
+  idempotency_key?: string;
+  device_id?: string;
+  usable_count?: number;
+  target?: number;
+  requested_delta?: number;
+  generation?: number;
+  version?: number;
+  request_id?: string;
+  minimum_epoch?: number;
+  deadline_at?: string;
+  expires_at?: string;
+  attempt_count?: number;
+  epoch?: number;
+  hash?: string;
+  retry_after_ms?: number;
+  repair_status?: string;
   reaction?: ReactionResponse<ErmisChatGenerics>;
   received_at?: string | Date;
   refresh_token?: string;
@@ -397,6 +413,20 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   mls_enabled?: boolean;
   self_remove?: boolean;
 };
+
+export type KeyPackageRefillEventType = 'key_packages.low' | 'key_packages.empty' | 'key_packages.expiring';
+
+export interface KeyPackageRefillEvent {
+  type: KeyPackageRefillEventType;
+  idempotency_key: string;
+  device_id: string;
+  usable_count: number;
+  target: number;
+  requested_delta: number;
+  reason: string;
+  generation: number;
+  version: number;
+}
 
 export type EventHandler<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = (
   event: Event<ErmisChatGenerics>,

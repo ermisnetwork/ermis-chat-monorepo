@@ -8,6 +8,33 @@
     "type": "git",
     "url": "git+https://github.com/ermisnetwork/ermis-chat-monorepo.git"
   },
+  "openmlsBuild": {
+    "commit": "ea2310f46d716e29e28422c18b310dba06515267",
+    "sourceDiffSha256": "8334a89434b11ea090467f81c5637e92c3d96a944a316138dfd24c8dc375a7cf",
+    "patches": [
+      {
+        "path": "wasm-build/join-typed-welcome.patch",
+        "sha256": "dd475c8f4cdf0d0381030780d4f538eed75f2ee60a62a5e23cbbb7cfc36943d6"
+      },
+      {
+        "path": "wasm-build/historical-validation-time.patch",
+        "sha256": "7c3ae96d90db911d60d3740d6779ee2da943ac3bf627cd454524aac8cb8b9a3e"
+      }
+    ],
+    "cargoLockSha256": "202c66eb84ce92571bac3af92a5cdb82d0ff26b6d691d24ec6cee8ca81056d31",
+    "wasmPack": "wasm-pack 0.13.1",
+    "cargo": "cargo 1.94.1 (29ea6fb6a 2026-03-24)",
+    "rustc": "rustc 1.94.1 (e408947bf 2026-03-25)",
+    "wasmSha256": "4169a5786267e32ca27da90c8ed9f79e3ecdb6a211980b2baa19383a20e9fc4a",
+    "wasmSize": 2515709,
+    "contracts": [
+      "typed_welcome",
+      "trusted_historical_time",
+      "explicit_group_id",
+      "group_generation",
+      "epoch_archive_v2"
+    ]
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -79,6 +106,12 @@
     "types": "tsc --noEmit",
     "test:media": "node --test test/e2ee_media_streaming.test.cjs",
     "test:attachments": "node --test test/e2ee_attachments.test.cjs",
-    "test:repair": "node --test test/recovery_repair.test.cjs"
+    "test:refill": "node --test test/key_package_refill.test.cjs",
+    "test:join": "node --test test/partial_welcome_join.test.cjs",
+    "test:groupinfo": "node --test test/group_info_repair.test.cjs",
+    "test:rollout": "node --test test/mls_rollout_controls.test.cjs test/partial_welcome_join.test.cjs test/historical_delayed_commit_wasm.test.mjs",
+    "test:external": "node --test test/external_contract.test.cjs",
+    "test:repair": "node --test test/recovery_repair.test.cjs test/external_contract.test.cjs test/group_info_repair.test.cjs",
+    "test:rebootstrap": "node --test test/generation_rebootstrap_wasm.test.mjs test/generation_rebootstrap_claim_intent.test.cjs"
   }
 }

@@ -21,7 +21,9 @@
     "noFallthroughCasesInSwitch": true,
 
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@ermis-network/ermis-chat-sdk": ["../../packages/ermis-chat-sdk/dist/index.d.ts"],
+      "@ermis-network/ermis-chat-react": ["../../packages/ermis-chat-react/dist/index.d.ts"]
     }
   },
   "include": ["src"]

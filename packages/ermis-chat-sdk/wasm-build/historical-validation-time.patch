@@ -1,0 +1,1030 @@
+diff --git a/openmls/src/framing/mls_auth_content_in.rs b/openmls/src/framing/mls_auth_content_in.rs
+index b9e5ec7be..ced9e6494 100644
+--- a/openmls/src/framing/mls_auth_content_in.rs
++++ b/openmls/src/framing/mls_auth_content_in.rs
+@@ -17,6 +17,7 @@ use crate::{
+     ciphersuite::signable::{SignedStruct, Verifiable, VerifiedStruct},
+     credentials::CredentialWithKey,
+     group::errors::ValidationError,
++    key_packages::key_package_in::LifetimeValidationTime,
+     messages::proposals_in::ProposalIn,
+     versions::ProtocolVersion,
+ };
+@@ -53,6 +54,23 @@ impl AuthenticatedContentIn {
+         crypto: &impl OpenMlsCrypto,
+         sender_context: Option<SenderContext>,
+         protocol_version: ProtocolVersion,
++    ) -> Result<AuthenticatedContent, ValidationError> {
++        self.validate_for(
++            ciphersuite,
++            crypto,
++            sender_context,
++            protocol_version,
++            LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    pub(crate) fn validate_for(
++        self,
++        ciphersuite: Ciphersuite,
++        crypto: &impl OpenMlsCrypto,
++        sender_context: Option<SenderContext>,
++        protocol_version: ProtocolVersion,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<AuthenticatedContent, ValidationError> {
+         Ok(AuthenticatedContent {
+             wire_format: self.wire_format,
+@@ -61,6 +79,7 @@ impl AuthenticatedContentIn {
+                 crypto,
+                 sender_context,
+                 protocol_version,
++                lifetime_validation_time,
+             )?,
+             auth: self.auth,
+         })
+diff --git a/openmls/src/framing/mls_content_in.rs b/openmls/src/framing/mls_content_in.rs
+index d42d1e76d..22fd19af2 100644
+--- a/openmls/src/framing/mls_content_in.rs
++++ b/openmls/src/framing/mls_content_in.rs
+@@ -6,6 +6,7 @@ use crate::{
+     error::LibraryError,
+     framing::SenderContext,
+     group::{errors::ValidationError, GroupEpoch, GroupId},
++    key_packages::key_package_in::LifetimeValidationTime,
+     messages::{proposals_in::ProposalIn, CommitIn},
+     versions::ProtocolVersion,
+ };
+@@ -66,15 +67,20 @@ impl FramedContentIn {
+         crypto: &impl OpenMlsCrypto,
+         sender_context: Option<SenderContext>,
+         protocol_version: ProtocolVersion,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<FramedContent, ValidationError> {
+         Ok(FramedContent {
+             group_id: self.group_id,
+             epoch: self.epoch,
+             sender: self.sender,
+             authenticated_data: self.authenticated_data,
+-            body: self
+-                .body
+-                .validate(ciphersuite, crypto, sender_context, protocol_version)?,
++            body: self.body.validate(
++                ciphersuite,
++                crypto,
++                sender_context,
++                protocol_version,
++                lifetime_validation_time,
++            )?,
+         })
+     }
+ 
+@@ -163,12 +169,19 @@ impl FramedContentBodyIn {
+         crypto: &impl OpenMlsCrypto,
+         sender_context: Option<SenderContext>,
+         protocol_version: ProtocolVersion,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<FramedContentBody, ValidationError> {
+         Ok(match self {
+             FramedContentBodyIn::Application(bytes) => FramedContentBody::Application(bytes),
+-            FramedContentBodyIn::Proposal(proposal_in) => FramedContentBody::Proposal(
+-                proposal_in.validate(crypto, ciphersuite, sender_context, protocol_version)?,
+-            ),
++            FramedContentBodyIn::Proposal(proposal_in) => {
++                FramedContentBody::Proposal(proposal_in.validate(
++                    crypto,
++                    ciphersuite,
++                    sender_context,
++                    protocol_version,
++                    lifetime_validation_time,
++                )?)
++            }
+             FramedContentBodyIn::Commit(commit_in) => {
+                 let sender_context = sender_context
+                     .ok_or(LibraryError::custom("Forgot the commit sender context"))?;
+@@ -177,6 +190,7 @@ impl FramedContentBodyIn {
+                     crypto,
+                     sender_context,
+                     protocol_version,
++                    lifetime_validation_time,
+                 )?))
+             }
+         })
+diff --git a/openmls/src/framing/validation.rs b/openmls/src/framing/validation.rs
+index 471fc7eb2..9ba613a78 100644
+--- a/openmls/src/framing/validation.rs
++++ b/openmls/src/framing/validation.rs
+@@ -252,6 +252,21 @@ impl UnverifiedMessage {
+         ciphersuite: Ciphersuite,
+         crypto: &impl OpenMlsCrypto,
+         protocol_version: ProtocolVersion,
++    ) -> Result<(AuthenticatedContent, Credential), ValidationError> {
++        self.verify_for(
++            ciphersuite,
++            crypto,
++            protocol_version,
++            crate::key_packages::key_package_in::LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    pub(crate) fn verify_for(
++        self,
++        ciphersuite: Ciphersuite,
++        crypto: &impl OpenMlsCrypto,
++        protocol_version: ProtocolVersion,
++        lifetime_validation_time: crate::key_packages::key_package_in::LifetimeValidationTime,
+     ) -> Result<(AuthenticatedContent, Credential), ValidationError> {
+         let content: AuthenticatedContentIn = self
+             .verifiable_content
+@@ -259,8 +274,13 @@ impl UnverifiedMessage {
+             .map_err(|_| ValidationError::InvalidSignature)?;
+         // https://validation.openmls.tech/#valn1302
+         // https://validation.openmls.tech/#valn1304
+-        let content =
+-            content.validate(ciphersuite, crypto, self.sender_context, protocol_version)?;
++        let content = content.validate_for(
++            ciphersuite,
++            crypto,
++            self.sender_context,
++            protocol_version,
++            lifetime_validation_time,
++        )?;
+         Ok((content, self.credential))
+     }
+ 
+diff --git a/openmls/src/group/mls_group/commit_builder.rs b/openmls/src/group/mls_group/commit_builder.rs
+index dfdc443c6..61f61f816 100644
+--- a/openmls/src/group/mls_group/commit_builder.rs
++++ b/openmls/src/group/mls_group/commit_builder.rs
+@@ -14,6 +14,7 @@ use crate::{
+     extensions::Extensions,
+     framing::{FramingParameters, WireFormat},
+     group::{
++        creation::LeafNodeLifetimePolicy,
+         diff::compute_path::{CommitType, PathComputationResult},
+         CommitBuilderStageError, CreateCommitError, Extension, ExternalPubExtension, GroupContext,
+         ProposalQueue, ProposalQueueError, QueuedProposal, RatchetTreeExtension, StagedCommit,
+@@ -147,8 +148,8 @@ pub struct Complete {
+ ///   .stage_commit(provider)?;
+ ///
+ /// let commit = message_bundle.commit();
+-/// let welcome = message_bundle.welcome().expect("expected a welcome since there was an add");
+-/// let group_info = message_bundle.welcome().expect("expected a group info since there was an add");
++/// let welcome = message_bundle.welcome().ok_or("expected a welcome since there was an add")?;
++/// let group_info = message_bundle.group_info().ok_or("expected group info since there was an add")?;
+ /// ```
+ ///
+ /// In this example `signer` is a reference to a [`Signer`] and `app_policy_proposals` is the
+@@ -519,7 +520,11 @@ impl<'a, G: BorrowMut<MlsGroup>> CommitBuilder<'a, LoadedPsks, G> {
+             .public_group
+             .validate_key_uniqueness(&proposal_queue, None)?;
+         // ValSem105
+-        group.public_group.validate_add_proposals(&proposal_queue)?;
++        // Outgoing commits consume fresh KeyPackages, so their lifetimes remain
++        // strict-current even though inbound historical replay is contextual.
++        group
++            .public_group
++            .validate_add_proposals(&proposal_queue, LeafNodeLifetimePolicy::Verify)?;
+         // ValSem106
+         // ValSem109
+         group.public_group.validate_capabilities(&proposal_queue)?;
+diff --git a/openmls/src/group/mls_group/processing.rs b/openmls/src/group/mls_group/processing.rs
+index 64b5ca5a3..955f3b2bd 100644
+--- a/openmls/src/group/mls_group/processing.rs
++++ b/openmls/src/group/mls_group/processing.rs
+@@ -8,6 +8,7 @@ use openmls_traits::{crypto::OpenMlsCrypto, signatures::Signer, storage::Storage
+ use crate::{
+     framing::mls_content::FramedContentBody,
+     group::{errors::MergeCommitError, StageCommitError, ValidationError},
++    key_packages::key_package_in::LifetimeValidationTime,
+     messages::group_info::GroupInfo,
+     storage::OpenMlsProvider,
+     tree::sender_ratchet::SenderRatchetConfiguration,
+@@ -121,7 +122,92 @@ impl MlsGroup {
+         provider: &Provider,
+         message: impl Into<ProtocolMessage>,
+     ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
+-        let unverified_message = self.unprotect_message(provider, message)?;
++        self.process_message_with_secret_persistence(
++            provider,
++            message,
++            true,
++            false,
++            LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    /// Processes a durable protocol event using the trusted Delivery Service
++    /// acceptance timestamp for KeyPackage lifetime validation.
++    ///
++    /// The timestamp must be assigned by the Delivery Service and persisted
++    /// with the event. Applications must not pass a value supplied by another
++    /// client or silently substitute the receiver's current clock. Message
++    /// secrets are not persisted until semantic validation succeeds, so a
++    /// validation failure can be recovered by reloading durable group state.
++    pub fn process_message_at<Provider: OpenMlsProvider>(
++        &mut self,
++        provider: &Provider,
++        message: impl Into<ProtocolMessage>,
++        server_accepted_at_seconds: u64,
++    ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
++        self.process_message_with_secret_persistence(
++            provider,
++            message,
++            false,
++            true,
++            LifetimeValidationTime::ServerAcceptedAt(server_accepted_at_seconds),
++        )
++    }
++
++    /// Processes a message without persisting the modified message-secret tree.
++    ///
++    /// This is intended for clients that must durably store the decrypted application payload
++    /// before advancing the receiver ratchet in a separate database. The caller must persist the
++    /// group immediately after its application transaction succeeds. Dropping the mutated group
++    /// without saving restores the last durable ratchet state on reload.
++    ///
++    /// The regular [`Self::process_message`] remains the default because eagerly deleting used
++    /// ratchet secrets provides the strongest forward-secrecy guarantee.
++    pub fn process_message_deferred<Provider: OpenMlsProvider>(
++        &mut self,
++        provider: &Provider,
++        message: impl Into<ProtocolMessage>,
++    ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
++        self.process_message_with_secret_persistence(
++            provider,
++            message,
++            false,
++            false,
++            LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    /// Deferred-secret-persistence variant of [`Self::process_message_at`].
++    pub fn process_message_deferred_at<Provider: OpenMlsProvider>(
++        &mut self,
++        provider: &Provider,
++        message: impl Into<ProtocolMessage>,
++        server_accepted_at_seconds: u64,
++    ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
++        self.process_message_with_secret_persistence(
++            provider,
++            message,
++            false,
++            false,
++            LifetimeValidationTime::ServerAcceptedAt(server_accepted_at_seconds),
++        )
++    }
++
++    fn process_message_with_secret_persistence<Provider: OpenMlsProvider>(
++        &mut self,
++        provider: &Provider,
++        message: impl Into<ProtocolMessage>,
++        persist_message_secrets: bool,
++        persist_message_secrets_after_validation: bool,
++        lifetime_validation_time: LifetimeValidationTime,
++    ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
++        let message = message.into();
++        let will_modify_secret_tree = matches!(message, ProtocolMessage::PrivateMessage(_));
++        let unverified_message = self.unprotect_message_with_secret_persistence(
++            provider,
++            message,
++            persist_message_secrets,
++        )?;
+ 
+         // Check if the commit contains AppDataUpdate proposals - if so, the caller
+         // must use process_unverified_message_with_app_data_updates instead
+@@ -135,7 +221,26 @@ impl MlsGroup {
+                 }
+             }
+         }
+-        self.process_unverified_message(provider, unverified_message)
++        let result = match lifetime_validation_time {
++            LifetimeValidationTime::CurrentTime => {
++                self.process_unverified_message(provider, unverified_message)
++            }
++            LifetimeValidationTime::ServerAcceptedAt(server_accepted_at_seconds) => self
++                .process_unverified_message_for(
++                    provider,
++                    unverified_message,
++                    LifetimeValidationTime::ServerAcceptedAt(server_accepted_at_seconds),
++                ),
++        };
++
++        if result.is_ok() && will_modify_secret_tree && persist_message_secrets_after_validation {
++            provider
++                .storage()
++                .write_message_secrets(self.group_id(), &self.message_secrets_store)
++                .map_err(ProcessMessageError::StorageError)?;
++        }
++
++        result
+     }
+ 
+     #[cfg(feature = "extensions-draft-08")]
+@@ -150,6 +255,15 @@ impl MlsGroup {
+         &mut self,
+         provider: &Provider,
+         message: impl Into<ProtocolMessage>,
++    ) -> Result<UnverifiedMessage, ProcessMessageError<Provider::StorageError>> {
++        self.unprotect_message_with_secret_persistence(provider, message, true)
++    }
++
++    fn unprotect_message_with_secret_persistence<Provider: OpenMlsProvider>(
++        &mut self,
++        provider: &Provider,
++        message: impl Into<ProtocolMessage>,
++        persist_message_secrets: bool,
+     ) -> Result<UnverifiedMessage, ProcessMessageError<Provider::StorageError>> {
+         // Make sure we are still a member of the group
+         if !self.is_active() {
+@@ -187,7 +301,7 @@ impl MlsGroup {
+             self.decrypt_message(provider.crypto(), message, &sender_ratchet_configuration)?;
+ 
+         // Persist the secret tree if it was modified to ensure forward secrecy
+-        if will_modify_secret_tree {
++        if will_modify_secret_tree && persist_message_secrets {
+             provider
+                 .storage()
+                 .write_message_secrets(self.group_id(), &self.message_secrets_store)
+@@ -355,14 +469,52 @@ impl MlsGroup {
+         provider: &Provider,
+         unverified_message: UnverifiedMessage,
+         app_data_dict_updates: Option<AppDataUpdates>,
++    ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
++        self.process_unverified_message_with_app_data_updates_for(
++            provider,
++            unverified_message,
++            app_data_dict_updates,
++            LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    /// Processes an AppDataUpdate-bearing durable event with its trusted
++    /// Delivery Service acceptance timestamp.
++    #[cfg(feature = "extensions-draft-08")]
++    pub fn process_unverified_message_with_app_data_updates_at<Provider: OpenMlsProvider>(
++        &self,
++        provider: &Provider,
++        unverified_message: UnverifiedMessage,
++        app_data_dict_updates: Option<AppDataUpdates>,
++        server_accepted_at_seconds: u64,
++    ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
++        self.process_unverified_message_with_app_data_updates_for(
++            provider,
++            unverified_message,
++            app_data_dict_updates,
++            LifetimeValidationTime::ServerAcceptedAt(server_accepted_at_seconds),
++        )
++    }
++
++    #[cfg(feature = "extensions-draft-08")]
++    fn process_unverified_message_with_app_data_updates_for<Provider: OpenMlsProvider>(
++        &self,
++        provider: &Provider,
++        unverified_message: UnverifiedMessage,
++        app_data_dict_updates: Option<AppDataUpdates>,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
+         // Checks the following semantic validation:
+         //  - ValSem010
+         //  - ValSem246 (as part of ValSem010)
+         //  - https://validation.openmls.tech/#valn1302
+         //  - https://validation.openmls.tech/#valn1304
+-        let (content, credential) =
+-            unverified_message.verify(self.ciphersuite(), provider.crypto(), self.version())?;
++        let (content, credential) = unverified_message.verify_for(
++            self.ciphersuite(),
++            provider.crypto(),
++            self.version(),
++            lifetime_validation_time,
++        )?;
+ 
+         match content.sender() {
+             Sender::Member(_) | Sender::NewMemberProposal | Sender::NewMemberCommit => self
+@@ -409,14 +561,31 @@ impl MlsGroup {
+         &self,
+         provider: &Provider,
+         unverified_message: UnverifiedMessage,
++    ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
++        self.process_unverified_message_for(
++            provider,
++            unverified_message,
++            LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    fn process_unverified_message_for<Provider: OpenMlsProvider>(
++        &self,
++        provider: &Provider,
++        unverified_message: UnverifiedMessage,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<ProcessedMessage, ProcessMessageError<Provider::StorageError>> {
+         // Checks the following semantic validation:
+         //  - ValSem010
+         //  - ValSem246 (as part of ValSem010)
+         //  - https://validation.openmls.tech/#valn1302
+         //  - https://validation.openmls.tech/#valn1304
+-        let (content, credential) =
+-            unverified_message.verify(self.ciphersuite(), provider.crypto(), self.version())?;
++        let (content, credential) = unverified_message.verify_for(
++            self.ciphersuite(),
++            provider.crypto(),
++            self.version(),
++            lifetime_validation_time,
++        )?;
+ 
+         match content.sender() {
+             Sender::Member(_) | Sender::NewMemberProposal | Sender::NewMemberCommit => {
+diff --git a/openmls/src/group/public_group/process.rs b/openmls/src/group/public_group/process.rs
+index c032b7c44..8df328d13 100644
+--- a/openmls/src/group/public_group/process.rs
++++ b/openmls/src/group/public_group/process.rs
+@@ -17,6 +17,7 @@ use crate::{
+         errors::ValidationError, past_secrets::MessageSecretsStore, proposal_store::QueuedProposal,
+         PublicProcessMessageError,
+     },
++    key_packages::key_package_in::LifetimeValidationTime,
+     messages::proposals::Proposal,
+ };
+ 
+@@ -154,6 +155,30 @@ impl PublicGroup {
+         &self,
+         crypto: &impl OpenMlsCrypto,
+         message: impl Into<ProtocolMessage>,
++    ) -> Result<ProcessedMessage, PublicProcessMessageError> {
++        self.process_message_for(crypto, message, LifetimeValidationTime::CurrentTime)
++    }
++
++    /// Processes a durable public protocol event at the trusted Delivery
++    /// Service acceptance timestamp.
++    pub fn process_message_at(
++        &self,
++        crypto: &impl OpenMlsCrypto,
++        message: impl Into<ProtocolMessage>,
++        server_accepted_at_seconds: u64,
++    ) -> Result<ProcessedMessage, PublicProcessMessageError> {
++        self.process_message_for(
++            crypto,
++            message,
++            LifetimeValidationTime::ServerAcceptedAt(server_accepted_at_seconds),
++        )
++    }
++
++    fn process_message_for(
++        &self,
++        crypto: &impl OpenMlsCrypto,
++        message: impl Into<ProtocolMessage>,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<ProcessedMessage, PublicProcessMessageError> {
+         let protocol_message = message.into();
+         // Checks the following semantic validation:
+@@ -181,7 +206,17 @@ impl PublicGroup {
+         let unverified_message = self
+             .parse_message(decrypted_message, None)
+             .map_err(PublicProcessMessageError::from)?;
+-        self.process_unverified_message(crypto, unverified_message)
++        match lifetime_validation_time {
++            LifetimeValidationTime::CurrentTime => {
++                self.process_unverified_message(crypto, unverified_message)
++            }
++            LifetimeValidationTime::ServerAcceptedAt(server_accepted_at_seconds) => self
++                .process_unverified_message_for(
++                    crypto,
++                    unverified_message,
++                    LifetimeValidationTime::ServerAcceptedAt(server_accepted_at_seconds),
++                ),
++        }
+     }
+ }
+ 
+@@ -216,13 +251,30 @@ impl PublicGroup {
+         &self,
+         crypto: &impl OpenMlsCrypto,
+         unverified_message: UnverifiedMessage,
++    ) -> Result<ProcessedMessage, PublicProcessMessageError> {
++        self.process_unverified_message_for(
++            crypto,
++            unverified_message,
++            LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    fn process_unverified_message_for(
++        &self,
++        crypto: &impl OpenMlsCrypto,
++        unverified_message: UnverifiedMessage,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<ProcessedMessage, PublicProcessMessageError> {
+         // Checks the following semantic validation:
+         //  - ValSem010
+         //  - ValSem246 (as part of ValSem010)
+         //  - https://validation.openmls.tech/#valn1203
+-        let (content, credential) =
+-            unverified_message.verify(self.ciphersuite(), crypto, self.version())?;
++        let (content, credential) = unverified_message.verify_for(
++            self.ciphersuite(),
++            crypto,
++            self.version(),
++            lifetime_validation_time,
++        )?;
+ 
+         match content.sender() {
+             Sender::Member(_) | Sender::NewMemberCommit | Sender::NewMemberProposal => {
+@@ -271,8 +323,12 @@ impl PublicGroup {
+         //  - ValSem010
+         //  - ValSem246 (as part of ValSem010)
+         //  - https://validation.openmls.tech/#valn1203
+-        let (content, credential) =
+-            unverified_message.verify(self.ciphersuite(), crypto, self.version())?;
++        let (content, credential) = unverified_message.verify_for(
++            self.ciphersuite(),
++            crypto,
++            self.version(),
++            LifetimeValidationTime::CurrentTime,
++        )?;
+ 
+         match content.sender() {
+             Sender::Member(_) | Sender::NewMemberCommit | Sender::NewMemberProposal => self
+diff --git a/openmls/src/group/public_group/staged_commit.rs b/openmls/src/group/public_group/staged_commit.rs
+index 4c12f3bbd..1073e09c8 100644
+--- a/openmls/src/group/public_group/staged_commit.rs
++++ b/openmls/src/group/public_group/staged_commit.rs
+@@ -143,7 +143,10 @@ impl PublicGroup {
+         // ValSem104
+         self.validate_key_uniqueness(&proposal_queue, Some(commit))?;
+         // ValSem105
+-        self.validate_add_proposals(&proposal_queue)?;
++        // The embedded KeyPackage lifetime was checked against the trusted
++        // durable-event acceptance timestamp while authenticating the inbound
++        // commit. Do not compare it to a later receiver wall clock here.
++        self.validate_add_proposals(&proposal_queue, LeafNodeLifetimePolicy::Skip)?;
+         // ValSem106
+         // ValSem109
+         self.validate_capabilities(&proposal_queue)?;
+diff --git a/openmls/src/group/public_group/validation.rs b/openmls/src/group/public_group/validation.rs
+index d2eeba973..c26b9ecae 100644
+--- a/openmls/src/group/public_group/validation.rs
++++ b/openmls/src/group/public_group/validation.rs
+@@ -357,6 +357,7 @@ impl PublicGroup {
+     pub(crate) fn validate_add_proposals(
+         &self,
+         proposal_queue: &ProposalQueue,
++        lifetime_policy: LeafNodeLifetimePolicy,
+     ) -> Result<(), ProposalValidationError> {
+         let add_proposals = proposal_queue.add_proposals();
+ 
+@@ -372,7 +373,13 @@ impl PublicGroup {
+             }
+ 
+             // https://validation.openmls.tech/#valn0202
+-            self.validate_leaf_node(add_proposal.add_proposal().key_package().leaf_node())?;
++            // Lifetime was already checked when this Add proposal entered the
++            // trusted protocol event stream. Rechecking against the receiver's
++            // wall clock here would make delayed delivery non-deterministic.
++            self.validate_leaf_node_inner(
++                add_proposal.add_proposal().key_package().leaf_node(),
++                lifetime_policy,
++            )?;
+         }
+         Ok(())
+     }
+diff --git a/openmls/src/key_packages/key_package_in.rs b/openmls/src/key_packages/key_package_in.rs
+index 68817fcc5..0abfa58c5 100644
+--- a/openmls/src/key_packages/key_package_in.rs
++++ b/openmls/src/key_packages/key_package_in.rs
+@@ -18,6 +18,18 @@ use super::{
+     errors::KeyPackageVerifyError, InitKey, KeyPackage, KeyPackageTbs, SIGNATURE_KEY_PACKAGE_LABEL,
+ };
+ 
++/// Selects the instant used to validate a KeyPackage lifetime.
++///
++/// `CurrentTime` is used when a KeyPackage is freshly uploaded, selected, or
++/// otherwise consumed for the first time. `ServerAcceptedAt` is reserved for
++/// replaying an MLS protocol event whose acceptance timestamp was assigned by
++/// a trusted Delivery Service and stored with that durable event.
++#[derive(Debug, Copy, Clone, PartialEq, Eq)]
++pub(crate) enum LifetimeValidationTime {
++    CurrentTime,
++    ServerAcceptedAt(u64),
++}
++
+ #[cfg(any(feature = "test-utils", test))]
+ use super::KeyPackageBundle;
+ 
+@@ -137,6 +149,19 @@ impl KeyPackageIn {
+         self,
+         crypto: &impl OpenMlsCrypto,
+         protocol_version: ProtocolVersion,
++    ) -> Result<KeyPackage, KeyPackageVerifyError> {
++        self.validate_for(
++            crypto,
++            protocol_version,
++            LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    pub(crate) fn validate_for(
++        self,
++        crypto: &impl OpenMlsCrypto,
++        protocol_version: ProtocolVersion,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<KeyPackage, KeyPackageVerifyError> {
+         // We first need to verify the LeafNode inside the KeyPackage
+         let leaf_node = self.payload.leaf_node.clone().into_verifiable_leaf_node();
+@@ -194,7 +219,7 @@ impl KeyPackageIn {
+ 
+         // Ensure validity of the life time extension in the leaf node.
+         if let Some(life_time) = key_package.payload.leaf_node.life_time() {
+-            if !life_time.is_valid() {
++            if !life_time.is_valid_for(lifetime_validation_time) {
+                 return Err(KeyPackageVerifyError::InvalidLifetime);
+             }
+         } else {
+diff --git a/openmls/src/key_packages/lifetime.rs b/openmls/src/key_packages/lifetime.rs
+index ba5fe89f5..cf1cb9ac7 100644
+--- a/openmls/src/key_packages/lifetime.rs
++++ b/openmls/src/key_packages/lifetime.rs
+@@ -6,6 +6,38 @@ use std::time::{SystemTime, UNIX_EPOCH};
+ use serde::{Deserialize, Serialize};
+ use tls_codec::{TlsDeserialize, TlsDeserializeBytes, TlsSerialize, TlsSize};
+ 
++use super::key_package_in::LifetimeValidationTime;
++
++#[cfg(test)]
++use std::cell::Cell;
++
++#[cfg(test)]
++thread_local! {
++    static TEST_UNIX_TIME_SECONDS: Cell<Option<u64>> = const { Cell::new(None) };
++}
++
++#[cfg(test)]
++struct TestUnixTimeGuard(Option<u64>);
++
++#[cfg(test)]
++impl Drop for TestUnixTimeGuard {
++    fn drop(&mut self) {
++        TEST_UNIX_TIME_SECONDS.with(|clock| clock.set(self.0));
++    }
++}
++
++fn unix_time_seconds() -> Option<u64> {
++    #[cfg(test)]
++    if let Some(unix_time_seconds) = TEST_UNIX_TIME_SECONDS.with(Cell::get) {
++        return Some(unix_time_seconds);
++    }
++
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|duration| duration.as_secs())
++        .ok()
++}
++
+ /// This value is used as the default lifetime if no default  lifetime is configured.
+ /// The value is in seconds and amounts to 3 * 28 Days, i.e. about 3 months.
+ const DEFAULT_KEY_PACKAGE_LIFETIME_SECONDS: u64 = 60 * 60 * 24 * 28 * 3;
+@@ -61,12 +93,15 @@ impl Lifetime {
+     /// clocks, i.e. `not_before` is set to now - 1h.
+     pub fn new(t: u64) -> Self {
+         let lifetime_margin: u64 = DEFAULT_KEY_PACKAGE_LIFETIME_MARGIN_SECONDS;
+-        let now = SystemTime::now()
+-            .duration_since(UNIX_EPOCH)
+-            .expect("SystemTime before UNIX EPOCH!")
+-            .as_secs();
+-        let not_before = now - lifetime_margin;
+-        let not_after = now + t;
++        let now = match unix_time_seconds() {
++            Some(now) => now,
++            None => {
++                log::error!("SystemTime before UNIX EPOCH.");
++                0
++            }
++        };
++        let not_before = now.saturating_sub(lifetime_margin);
++        let not_after = now.saturating_add(t);
+         Self {
+             not_before,
+             not_after,
+@@ -83,18 +118,37 @@ impl Lifetime {
+ 
+     /// Returns true if this lifetime is valid.
+     pub fn is_valid(&self) -> bool {
+-        match SystemTime::now()
+-            .duration_since(UNIX_EPOCH)
+-            .map(|duration| duration.as_secs())
+-        {
+-            Ok(elapsed) => self.not_before < elapsed && elapsed < self.not_after,
+-            Err(_) => {
++        self.is_valid_for(LifetimeValidationTime::CurrentTime)
++    }
++
++    pub(crate) fn is_valid_for(&self, validation_time: LifetimeValidationTime) -> bool {
++        let elapsed = match validation_time {
++            LifetimeValidationTime::CurrentTime => unix_time_seconds(),
++            LifetimeValidationTime::ServerAcceptedAt(elapsed) => Some(elapsed),
++        };
++
++        match elapsed {
++            Some(elapsed) => self.is_valid_at(elapsed),
++            None => {
+                 log::error!("SystemTime before UNIX EPOCH.");
+                 false
+             }
+         }
+     }
+ 
++    /// Returns whether `unix_time_seconds` is strictly inside this lifetime.
++    /// RFC 9420 represents both limits as an open interval for this check.
++    pub fn is_valid_at(&self, unix_time_seconds: u64) -> bool {
++        self.not_before < unix_time_seconds && unix_time_seconds < self.not_after
++    }
++
++    #[cfg(test)]
++    pub(crate) fn with_test_unix_time<T>(unix_time_seconds: u64, action: impl FnOnce() -> T) -> T {
++        let previous = TEST_UNIX_TIME_SECONDS.with(|clock| clock.replace(Some(unix_time_seconds)));
++        let _guard = TestUnixTimeGuard(previous);
++        action()
++    }
++
+     /// ValSem(openmls/annotations#32):
+     /// Applications MUST define a maximum total lifetime that is acceptable for a LeafNode,
+     /// and reject any LeafNode where the total lifetime is longer than this duration.
+@@ -137,11 +191,26 @@ mod tests {
+         assert!(!ext.is_valid());
+ 
+         // Test (de)serializing invalid extension
+-        let serialized = ext
+-            .tls_serialize_detached()
+-            .expect("error encoding life time extension");
+-        let ext_deserialized = Lifetime::tls_deserialize(&mut serialized.as_slice())
+-            .expect("Error deserializing lifetime");
++        let serialized = match ext.tls_serialize_detached() {
++            Ok(serialized) => serialized,
++            Err(error) => panic!("error encoding lifetime extension: {error}"),
++        };
++        let ext_deserialized = match Lifetime::tls_deserialize(&mut serialized.as_slice()) {
++            Ok(lifetime) => lifetime,
++            Err(error) => panic!("error deserializing lifetime: {error}"),
++        };
+         assert!(!ext_deserialized.is_valid());
+     }
++
++    #[test]
++    fn explicit_validation_time_uses_open_interval_boundaries() {
++        let lifetime = Lifetime::init(100, 200);
++
++        assert!(!lifetime.is_valid_at(99));
++        assert!(!lifetime.is_valid_at(100));
++        assert!(lifetime.is_valid_at(101));
++        assert!(lifetime.is_valid_at(199));
++        assert!(!lifetime.is_valid_at(200));
++        assert!(!lifetime.is_valid_at(201));
++    }
+ }
+diff --git a/openmls/src/messages/mod.rs b/openmls/src/messages/mod.rs
+index 59cea757e..7a0aa80d9 100644
+--- a/openmls/src/messages/mod.rs
++++ b/openmls/src/messages/mod.rs
+@@ -219,11 +219,19 @@ impl CommitIn {
+         crypto: &impl OpenMlsCrypto,
+         sender_context: SenderContext,
+         protocol_version: ProtocolVersion,
++        lifetime_validation_time: crate::key_packages::key_package_in::LifetimeValidationTime,
+     ) -> Result<Commit, ValidationError> {
+         let proposals = self
+             .proposals
+             .into_iter()
+-            .map(|p| p.validate(crypto, ciphersuite, protocol_version))
++            .map(|p| {
++                p.validate_for(
++                    crypto,
++                    ciphersuite,
++                    protocol_version,
++                    lifetime_validation_time,
++                )
++            })
+             .collect::<Result<Vec<_>, _>>()?;
+ 
+         let path = if let Some(path) = self.path {
+@@ -503,16 +511,17 @@ impl GroupSecrets {
+             rng,
+             Psk::External(ExternalPsk::new(
+                 rng.random_vec(ciphersuite.hash_length())
+-                    .expect("Not enough randomness."),
++                    .map_err(|_| tls_codec::Error::InvalidInput)?,
+             )),
+         )
+-        .expect("An unexpected error occurred.");
++        .map_err(|_| tls_codec::Error::InvalidInput)?;
+         let psks = vec![psk_id];
+ 
+         GroupSecrets::new_encoded(
+             &JoinerSecret::random(ciphersuite, rng),
+             Some(&PathSecret {
+-                path_secret: Secret::random(ciphersuite, rng).expect("Not enough randomness."),
++                path_secret: Secret::random(ciphersuite, rng)
++                    .map_err(|_| tls_codec::Error::InvalidInput)?,
+             }),
+             &psks,
+         )
+diff --git a/openmls/src/messages/proposals_in.rs b/openmls/src/messages/proposals_in.rs
+index 226cc67c1..c43a9e1c8 100644
+--- a/openmls/src/messages/proposals_in.rs
++++ b/openmls/src/messages/proposals_in.rs
+@@ -8,7 +8,7 @@ use crate::{
+     extensions::{AnyObject, Extensions},
+     framing::SenderContext,
+     group::errors::ValidationError,
+-    key_packages::*,
++    key_packages::{key_package_in::LifetimeValidationTime, *},
+     prelude::InvalidExtensionError,
+     treesync::node::leaf_node::{LeafNodeIn, TreePosition, VerifiableLeafNode},
+     versions::ProtocolVersion,
+@@ -104,12 +104,14 @@ impl ProposalIn {
+         ciphersuite: Ciphersuite,
+         sender_context: Option<SenderContext>,
+         protocol_version: ProtocolVersion,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<Proposal, ValidationError> {
+         Ok(match self {
+             ProposalIn::Add(add) => Proposal::Add(Box::new(add.validate(
+                 crypto,
+                 protocol_version,
+                 ciphersuite,
++                lifetime_validation_time,
+             )?)),
+             ProposalIn::Update(update) => {
+                 let sender_context =
+@@ -173,8 +175,11 @@ impl AddProposalIn {
+         crypto: &impl OpenMlsCrypto,
+         protocol_version: ProtocolVersion,
+         ciphersuite: Ciphersuite,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<AddProposal, ValidationError> {
+-        let key_package = self.key_package.validate(crypto, protocol_version)?;
++        let key_package =
++            self.key_package
++                .validate_for(crypto, protocol_version, lifetime_validation_time)?;
+         // Verify that the ciphersuite is valid
+         if key_package.ciphersuite() != ciphersuite {
+             return Err(ValidationError::InvalidAddProposalCiphersuite);
+@@ -272,11 +277,32 @@ impl ProposalOrRefIn {
+         crypto: &impl OpenMlsCrypto,
+         ciphersuite: Ciphersuite,
+         protocol_version: ProtocolVersion,
++    ) -> Result<ProposalOrRef, ValidationError> {
++        self.validate_for(
++            crypto,
++            ciphersuite,
++            protocol_version,
++            LifetimeValidationTime::CurrentTime,
++        )
++    }
++
++    pub(crate) fn validate_for(
++        self,
++        crypto: &impl OpenMlsCrypto,
++        ciphersuite: Ciphersuite,
++        protocol_version: ProtocolVersion,
++        lifetime_validation_time: LifetimeValidationTime,
+     ) -> Result<ProposalOrRef, ValidationError> {
+         Ok(match self {
+-            ProposalOrRefIn::Proposal(proposal_in) => ProposalOrRef::Proposal(Box::new(
+-                proposal_in.validate(crypto, ciphersuite, None, protocol_version)?,
+-            )),
++            ProposalOrRefIn::Proposal(proposal_in) => {
++                ProposalOrRef::Proposal(Box::new(proposal_in.validate(
++                    crypto,
++                    ciphersuite,
++                    None,
++                    protocol_version,
++                    lifetime_validation_time,
++                )?))
++            }
+             ProposalOrRefIn::Reference(reference) => ProposalOrRef::Reference(reference),
+         })
+     }
+@@ -334,16 +360,21 @@ impl From<UpdateProposal> for UpdateProposalIn {
+ #[cfg(any(feature = "test-utils", test))]
+ impl From<GroupContextExtensionProposalIn> for GroupContextExtensionProposal {
+     fn from(value: GroupContextExtensionProposalIn) -> Self {
+-        Self::new(value.extensions_tbv.try_into().unwrap())
++        match value.extensions_tbv.try_into() {
++            Ok(extensions) => Self::new(extensions),
++            Err(error) => panic!("invalid test GroupContext extensions: {error}"),
++        }
+     }
+ }
+ 
+ #[cfg(any(feature = "test-utils", test))]
+ impl From<GroupContextExtensionProposalIn> for Box<GroupContextExtensionProposal> {
+     fn from(value: GroupContextExtensionProposalIn) -> Self {
+-        Box::new(GroupContextExtensionProposal::new(
+-            value.extensions_tbv.try_into().unwrap(),
+-        ))
++        let extensions = match value.extensions_tbv.try_into() {
++            Ok(extensions) => extensions,
++            Err(error) => panic!("invalid test GroupContext extensions: {error}"),
++        };
++        Box::new(GroupContextExtensionProposal::new(extensions))
+     }
+ }
+ 
+diff --git a/openmls-wasm/src/group/messaging.rs b/openmls-wasm/src/group/messaging.rs
+--- a/openmls-wasm/src/group/messaging.rs
++++ b/openmls-wasm/src/group/messaging.rs
+@@ -1,6 +1,9 @@
+ //! Message encryption and processing
+ 
+-use openmls::framing::{MlsMessageBodyIn, MlsMessageIn};
++use openmls::{
++    framing::{MlsMessageBodyIn, MlsMessageIn},
++    group::MlsGroup,
++};
+ use openmls_traits::OpenMlsProvider;
+ use tls_codec::{Deserialize, Serialize};
+ use wasm_bindgen::prelude::*;
+@@ -148,16 +151,56 @@
+         provider: &mut Provider,
+         msg: &[u8],
+     ) -> Result<ProcessedMessage, JsError> {
++        self.process_message_for(provider, msg, None)
++    }
++
++    /// Process a durable handshake event using the trusted Bellboy acceptance
++    /// timestamp. Application messages must continue to use `process_message`.
++    pub fn process_message_at(
++        &mut self,
++        provider: &mut Provider,
++        msg: &[u8],
++        server_accepted_at_seconds: u64,
++    ) -> Result<ProcessedMessage, JsError> {
++        self.process_message_for(provider, msg, Some(server_accepted_at_seconds))
++    }
++
++    fn process_message_for(
++        &mut self,
++        provider: &mut Provider,
++        msg: &[u8],
++        server_accepted_at_seconds: Option<u64>,
++    ) -> Result<ProcessedMessage, JsError> {
+         let mut msg_slice = msg;
+         let mls_msg = MlsMessageIn::tls_deserialize(&mut msg_slice)
+             .map_err(|e| JsError::new(&format!("Message deserialization error: {e}")))?;
+ 
+         let processed_msg = match mls_msg.extract() {
+             MlsMessageBodyIn::PublicMessage(msg) => {
+-                self.mls_group.process_message(provider.as_ref(), msg)?
++                let result = match server_accepted_at_seconds {
++                    Some(accepted_at) => {
++                        self.mls_group
++                            .process_message_at(provider.as_ref(), msg, accepted_at)
++                    }
++                    None => self.mls_group.process_message(provider.as_ref(), msg),
++                };
++                if result.is_err() && server_accepted_at_seconds.is_some() {
++                    self.restore_durable_group_after_historical_failure(provider)?;
++                }
++                result?
+             }
+             MlsMessageBodyIn::PrivateMessage(msg) => {
+-                self.mls_group.process_message(provider.as_ref(), msg)?
++                let result = match server_accepted_at_seconds {
++                    Some(accepted_at) => {
++                        self.mls_group
++                            .process_message_at(provider.as_ref(), msg, accepted_at)
++                    }
++                    None => self.mls_group.process_message(provider.as_ref(), msg),
++                };
++                if result.is_err() && server_accepted_at_seconds.is_some() {
++                    self.restore_durable_group_after_historical_failure(provider)?;
++                }
++                result?
+             }
+             MlsMessageBodyIn::Welcome(_) => {
+                 return Err(JsError::new(
+@@ -235,3 +278,24 @@
+         Ok(processed.content.unwrap_or_default())
+     }
+ }
++impl Group {
++    fn restore_durable_group_after_historical_failure(
++        &mut self,
++        provider: &Provider,
++    ) -> Result<(), JsError> {
++        let group_id = self.mls_group.group_id().clone();
++        let durable_group = MlsGroup::load(provider.0.storage(), &group_id)
++            .map_err(|error| {
++                JsError::new(&format!(
++                    "Historical protocol validation failed and durable group reload failed: {error}"
++                ))
++            })?
++            .ok_or_else(|| {
++                JsError::new(
++                    "Historical protocol validation failed and no durable group state was found",
++                )
++            })?;
++        self.mls_group = durable_group;
++        Ok(())
++    }
++}

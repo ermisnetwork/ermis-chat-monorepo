@@ -5,7 +5,6 @@ import {
   ErmisChat,
   EncryptionManager,
   CALL_ERROR_CODES,
-  loadOpenMlsWasm,
   isRetryableCallError,
   type ErmisChatOptions,
 } from '@ermis-network/ermis-chat-sdk';
@@ -18,6 +17,7 @@ import { UhmForwardMessageModal } from '@/features/chat/UhmForwardMessageModal';
 import { UhmCallUI } from '@/features/chat/UhmCallUI';
 import { UhmChannelListError } from '@/components/custom/UhmChannelListError';
 import { SafariCallGuard } from '@/components/custom/SafariCallGuard';
+import { loadUhmOpenMlsWasm } from '@/lib/openmls';
 import i18n from './i18n';
 import { toast, Toaster } from 'sonner';
 
@@ -26,6 +26,10 @@ const E2EE_ATTACHMENT_MULTIPART_UPLOAD_CONCURRENCY = parseOptionalPositiveIntege
   import.meta.env.VITE_E2EE_ATTACHMENT_MULTIPART_CONCURRENCY,
 );
 const E2EE_ATTACHMENT_UPLOAD_DEBUG = import.meta.env.VITE_E2EE_ATTACHMENT_UPLOAD_DEBUG === 'true';
+const E2EE_HISTORICAL_REPLAY_ENABLED = import.meta.env.VITE_E2EE_HISTORICAL_REPLAY !== 'false';
+const E2EE_PARTIAL_WELCOME_FALLBACK_ENABLED = import.meta.env.VITE_E2EE_PARTIAL_WELCOME_FALLBACK !== 'false';
+const E2EE_GROUP_INFO_REPAIR_ENABLED = import.meta.env.VITE_E2EE_GROUP_INFO_REPAIR !== 'false';
+const E2EE_MLS_ROLLOUT_TELEMETRY_ENABLED = import.meta.env.VITE_E2EE_MLS_ROLLOUT_TELEMETRY !== 'false';
 
 function parseOptionalPositiveInteger(value: unknown): number | undefined {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
@@ -90,11 +94,15 @@ async function initializeE2ee(userId: string) {
   if (chatClient.encryptionManager?.initialized) return;
   if (!e2eeInitPromise) {
     e2eeInitPromise = (async () => {
-      const wasmModule = await loadOpenMlsWasm('/openmls_wasm_bg.wasm');
+      const wasmModule = await loadUhmOpenMlsWasm('/openmls_wasm_bg.wasm');
       await encryptionManager.initialize(chatClient, userId, {
         wasmModule,
         enableE2eeAttachmentMultipart: E2EE_ATTACHMENT_MULTIPART_ENABLED,
         e2eeAttachmentMultipartUploadConcurrency: E2EE_ATTACHMENT_MULTIPART_UPLOAD_CONCURRENCY,
+        enableHistoricalReplay: E2EE_HISTORICAL_REPLAY_ENABLED,
+        enablePartialWelcomeFallback: E2EE_PARTIAL_WELCOME_FALLBACK_ENABLED,
+        enableGroupInfoRepair: E2EE_GROUP_INFO_REPAIR_ENABLED,
+        enableMlsRolloutTelemetry: E2EE_MLS_ROLLOUT_TELEMETRY_ENABLED,
       });
     })().catch((err) => {
       e2eeInitPromise = null;
@@ -331,6 +339,61 @@ function AppContent() {
       failureSubscription.unsubscribe();
     };
   }, [handleAuthRefreshFailed]);
+
+  useEffect(() => {
+    const subscription = chatClient.on('e2ee.group_info_repair_state', (event) => {
+      if (!event.cid) return;
+      const toastId = `group-info-repair:${event.cid}`;
+      if (event.repair_status === 'refreshing' || event.repair_status === 'retryable') {
+        toast.loading(i18n.t('e2ee.group_info_refresh', 'Secure session is being refreshed. You can retry shortly.'), {
+          id: toastId,
+        });
+        return;
+      }
+      toast.dismiss(toastId);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const subscription = chatClient.on('e2ee.mls_generation_recovery_state' as any, (event: any) => {
+      if (!event?.cid || !event?.status) return;
+      const toastId = `mls-generation-recovery:${event.cid}`;
+      switch (event.status) {
+        case 'waiting_for_repair':
+          toast.loading(i18n.t('e2ee.rebootstrap_waiting', 'Waiting for secure group repair.'), { id: toastId });
+          break;
+        case 'preparing':
+          toast.loading(i18n.t('e2ee.rebootstrap_preparing', 'Preparing a new secure group.'), { id: toastId });
+          break;
+        case 'recovered':
+          toast.success(i18n.t('e2ee.rebootstrap_recovered', 'Secure messaging recovered.'), { id: toastId });
+          break;
+        case 'history_incomplete':
+          toast.warning(
+            i18n.t('e2ee.rebootstrap_history_incomplete', 'Secure messaging recovered. Some earlier messages are unavailable.'),
+            { id: toastId },
+          );
+          break;
+        case 'client_upgrade_required':
+          toast.error(
+            event.reason === 'unsupported_protocol_version'
+              ? i18n.t('e2ee.rebootstrap_server_upgrade_required', 'The chat server must be upgraded for secure recovery.')
+              : i18n.t('e2ee.rebootstrap_upgrade_required', 'Update this app to continue secure messaging.'),
+            { id: toastId },
+          );
+          break;
+        case 'retryable_infrastructure_failure':
+          toast.error(i18n.t('e2ee.rebootstrap_retryable', 'Secure recovery is temporarily unavailable. Retry shortly.'), {
+            id: toastId,
+          });
+          break;
+        default:
+          toast.dismiss(toastId);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Restore login session from localStorage on mount
   useEffect(() => {

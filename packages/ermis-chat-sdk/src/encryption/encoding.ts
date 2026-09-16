@@ -9,7 +9,7 @@ const BASE64_LOOKUP = (() => {
 })();
 
 const ENCRYPTION_CHANNEL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'group_info'] as const;
-const PROTOCOL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'proposal'] as const;
+const PROTOCOL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'proposal', 'group_id'] as const;
 
 export const E2EE_BYTES_HEADER = 'X-Ermis-E2EE-Bytes';
 export const E2EE_BYTES_WIRE_FORMAT = 'base64';
@@ -171,6 +171,21 @@ export function normalizeScopeSyncResponseBytes<T>(response: T): T {
     }
   }
 
+  return response;
+}
+
+export function normalizeMlsRecoveryDiscoveryResponseBytes<T>(response: T): T {
+  const value = response as Record<string, unknown>;
+  const states = value.states as Record<
+    string,
+    { result?: unknown; generation?: Record<string, unknown> }
+  > | undefined;
+  if (!states) return response;
+
+  for (const state of Object.values(states)) {
+    if (state?.result !== 'state' || state.generation?.group_id == null) continue;
+    state.generation.group_id = normalizeRequiredBytes(state.generation.group_id, 'group_id');
+  }
   return response;
 }
 

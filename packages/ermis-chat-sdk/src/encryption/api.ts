@@ -11,6 +11,7 @@ import {
   E2EE_BYTES_WIRE_FORMAT,
   encodeBytesToBase64,
   normalizeE2eeSyncEventBytes,
+  normalizeMlsRecoveryDiscoveryResponseBytes,
   normalizeRequiredBytes,
   normalizeScopeSyncResponseBytes,
 } from './encoding';
@@ -45,6 +46,8 @@ import type {
   ListArchiveAvailabilityResponse,
   MemberKeyPackages,
   MemberSnapshotRecord,
+  MlsRolloutMetricObservation,
+  MlsRolloutTelemetryResponse,
   EncryptionOperationResponse,
   QueryArchiveMaterialRequest,
   QueryEpochArchivesRequest,
@@ -63,12 +66,22 @@ import type {
   UploadEpochArchiveRequest,
   UploadEpochArchiveResponse,
   UploadGroupInfoRequest,
+  UploadGroupInfoResponse,
+  GroupInfoRefreshResponse,
+  GroupInfoRefreshRequest,
+  ReportGroupInfoFailureRequest,
   UploadKeyPackagesRequest,
   UploadKeyPackagesResponse,
   UploadRecoveryVaultRequest,
   UploadRecoveryVaultResponse,
   EventCursor,
   RemovedSyncCursor,
+  CompleteMlsRebootstrapRequest,
+  MlsGenerationStateResponse,
+  MlsRecoveryDiscoveryGeneration,
+  MlsRecoveryDiscoveryResponse,
+  MlsRebootstrapClaimResponse,
+  MlsRebootstrapReceipt,
 } from './types';
 
 // ============================================================
@@ -84,7 +97,10 @@ type RawGetKeyPackagesResponse = Omit<GetKeyPackagesResponse, 'key_packages'> & 
 type RawGetKeyPackagesByCidResponse = Omit<GetKeyPackagesByCidResponse, 'members'> & {
   members: RawMemberKeyPackages[];
 };
-type RawGetGroupInfoResponse = Omit<GetGroupInfoResponse, 'group_info'> & { group_info: Base64Bytes };
+type RawGetGroupInfoResponse = Omit<GetGroupInfoResponse, 'group_info' | 'group_id'> & {
+  group_info: Base64Bytes;
+  group_id?: unknown;
+};
 type RawRecoveryVaultResponse = Omit<RecoveryVaultResponse, 'vault_bytes'> & { vault_bytes: Base64Bytes };
 type RawRecoveryPublicKeyResponse = Omit<RecoveryPublicKeyResponse, 'public_key'> & { public_key: Base64Bytes };
 type RawArchiveBlobRecord = Omit<ArchiveBlobRecord, 'encrypted_archive_bytes' | 'aead_nonce' | 'aead_aad'> & {
@@ -112,6 +128,26 @@ type RawHistoricalCiphertext = Omit<HistoricalCiphertext, 'mls_ciphertext'> & { 
 type RawCiphertextQueryResponse = Omit<CiphertextQueryResponse, 'ciphertexts'> & {
   ciphertexts: RawHistoricalCiphertext[];
 };
+type RawMlsGenerationStateResponse = Omit<MlsGenerationStateResponse, 'group_id'> & { group_id?: unknown };
+type RawMlsRecoveryDiscoveryResponse = Omit<MlsRecoveryDiscoveryResponse, 'states'> & {
+  states: Record<
+    string,
+    | {
+        result: 'state';
+        generation: Omit<MlsRecoveryDiscoveryGeneration, 'group_id'> & {
+          group_id?: unknown;
+        };
+        group_info_refresh: GroupInfoRefreshRequest | null;
+      }
+    | { result: 'error'; reason: string; retryable: boolean }
+  >;
+};
+type RawMlsRebootstrapClaimResponse = Omit<MlsRebootstrapClaimResponse, 'recipient_key_packages'> & {
+  recipient_key_packages: Array<Omit<MlsRebootstrapClaimResponse['recipient_key_packages'][number], 'key_package'> & {
+    key_package: unknown;
+  }>;
+};
+type RawMlsRebootstrapReceipt = Omit<MlsRebootstrapReceipt, 'group_id'> & { group_id?: unknown };
 
 function encodeBytesField(bytes: Uint8Array, fieldName: string): Base64Bytes {
   return encodeBytesToBase64(normalizeRequiredBytes(bytes, fieldName));
@@ -147,7 +183,21 @@ function encodeExternalJoinRequest(data: ExternalJoinRequest): Record<string, un
   return {
     ...data,
     commit: encodeBytesField(data.commit, 'commit'),
+    ...(data.group_id ? { group_id: encodeBytesField(data.group_id, 'group_id') } : {}),
     ...(data.group_info ? { group_info: encodeBytesField(data.group_info, 'group_info') } : {}),
+  };
+}
+
+function encodeMlsRebootstrapCompletion(data: CompleteMlsRebootstrapRequest): Record<string, unknown> {
+  return {
+    ...data,
+    group_id: encodeBytesField(data.group_id, 'group_id'),
+    group_info: encodeBytesField(data.group_info, 'group_info'),
+    ratchet_tree: encodeBytesField(data.ratchet_tree, 'ratchet_tree'),
+    ...(data.welcome ? { welcome: encodeBytesField(data.welcome, 'welcome') } : {}),
+    recipients: data.recipients.map((recipient) => ({
+      ...recipient,
+    })),
   };
 }
 
@@ -321,8 +371,18 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   /** Check remaining KeyPackage count for the current user. */
-  async getKeyPackageCount(): Promise<KeyPackageCountResponse> {
-    return await this._get(this.baseURL + '/v1/e2ee/key_packages/count');
+  async getKeyPackageCount(reason: 'manual' | 'group_join' = 'manual'): Promise<KeyPackageCountResponse> {
+    return await this._get(this.baseURL + '/v1/e2ee/key_packages/count', { reason });
+  }
+
+  /** Submit a privacy-bounded batch through the authenticated device transport. */
+  async reportMlsRolloutTelemetry(
+    observations: MlsRolloutMetricObservation[],
+  ): Promise<MlsRolloutTelemetryResponse> {
+    return await this._post(this.baseURL + '/v1/e2ee/rollout/telemetry', {
+      platform: 'web',
+      observations,
+    });
   }
 
   /** Consume one KeyPackage per device of the target user. */
@@ -407,11 +467,12 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   async querySponsoredArchiveRecipients(
     channelType: string,
     channelId: string,
+    groupGeneration: number,
     epoch: number,
   ): Promise<QuerySponsoredArchiveRecipientsResponse> {
     const raw = await this._post<RawQuerySponsoredArchiveRecipientsResponse>(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/recipients/query`,
-      { epoch },
+      { group_generation: groupGeneration, epoch },
     );
     return {
       ...raw,
@@ -446,7 +507,7 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   async listArchiveAvailability(
     channelType: string,
     channelId: string,
-    data: { cursor?: string; limit?: number } = {},
+    data: { group_generation?: number; cursor?: string; limit?: number } = {},
   ): Promise<ListArchiveAvailabilityResponse> {
     return await this._post<ListArchiveAvailabilityResponse>(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/availability/query`,
@@ -475,9 +536,15 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     };
   }
 
-  async getArchiveSnapshot(channelType: string, channelId: string, hash: string): Promise<MemberSnapshotRecord> {
+  async getArchiveSnapshot(
+    channelType: string,
+    channelId: string,
+    hash: string,
+    groupGeneration = 0,
+  ): Promise<MemberSnapshotRecord> {
     const raw = await this._get<RawMemberSnapshotRecord>(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/snapshot/${hash}`,
+      this.baseURL +
+        `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/snapshot/${hash}?group_generation=${groupGeneration}`,
     );
     return decodeMemberSnapshot(raw);
   }
@@ -485,7 +552,13 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   async queryArchiveCiphertexts(
     channelType: string,
     channelId: string,
-    data: { epoch_from: number; epoch_to: number; cursor?: CiphertextCursor; limit?: number },
+    data: {
+      group_generation?: number;
+      epoch_from: number;
+      epoch_to: number;
+      cursor?: CiphertextCursor;
+      limit?: number;
+    },
   ): Promise<CiphertextQueryResponse> {
     const raw = await this._post<RawCiphertextQueryResponse>(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/ciphertexts/query`,
@@ -692,6 +765,15 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return normalizeScopeSyncResponseBytes(raw);
   }
 
+  /** Discover authoritative generation and repair state for up to 200 E2EE channels. */
+  async discoverMlsRecovery(cids: string[], protocolVersion = 1): Promise<MlsRecoveryDiscoveryResponse> {
+    const raw = await this._post<RawMlsRecoveryDiscoveryResponse>(
+      this.baseURL + '/v1/e2ee/mls/recovery/discover',
+      { protocol_version: protocolVersion, cids },
+    );
+    return normalizeMlsRecoveryDiscoveryResponseBytes(raw) as MlsRecoveryDiscoveryResponse;
+  }
+
   // ============================================================
   // GroupInfo & External Join
   // ============================================================
@@ -704,11 +786,33 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     channelType: string,
     channelId: string,
     data: UploadGroupInfoRequest,
-  ): Promise<EncryptionOperationResponse> {
+  ): Promise<UploadGroupInfoResponse> {
     return await this._post(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/group_info`,
       encodeGroupInfoRequest(data),
     );
+  }
+
+  async getGroupInfoRefresh(channelType: string, channelId: string): Promise<GroupInfoRefreshResponse> {
+    return await this._get(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/group_info/refresh`);
+  }
+
+  async claimGroupInfoRefresh(
+    channelType: string,
+    channelId: string,
+    requestId: string,
+  ): Promise<GroupInfoRefreshRequest> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/group_info/refresh/claim`, {
+      request_id: requestId,
+    });
+  }
+
+  async reportGroupInfoFailure(
+    channelType: string,
+    channelId: string,
+    data: ReportGroupInfoFailureRequest,
+  ): Promise<GroupInfoRefreshResponse> {
+    return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/group_info/refresh`, data);
   }
 
   /**
@@ -719,7 +823,11 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     const raw = await this._get<RawGetGroupInfoResponse>(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/group_info`,
     );
-    return { ...raw, group_info: decodeBytesField(raw.group_info, 'group_info') };
+    return {
+      ...raw,
+      group_info: decodeBytesField(raw.group_info, 'group_info'),
+      group_id: raw.group_id == null ? null : decodeBytesField(raw.group_id, 'group_id'),
+    };
   }
 
   /**
@@ -735,6 +843,67 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/external_join`,
       encodeExternalJoinRequest(data),
     );
+  }
+
+  async getMlsGenerationState(
+    channelType: string,
+    channelId: string,
+    protocolVersion = 1,
+  ): Promise<MlsGenerationStateResponse> {
+    const raw = await this._get<RawMlsGenerationStateResponse>(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/generation`,
+      { protocol_version: protocolVersion },
+    );
+    return {
+      ...raw,
+      group_id: raw.group_id == null ? null : decodeBytesField(raw.group_id, 'group_id'),
+    };
+  }
+
+  async claimMlsRebootstrap(
+    channelType: string,
+    channelId: string,
+    request: {
+      operation_key: string;
+      expected_generation: number;
+      expected_epoch: number;
+      protocol_version: number;
+    },
+  ): Promise<MlsRebootstrapClaimResponse> {
+    const raw = await this._post<RawMlsRebootstrapClaimResponse>(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/rebootstrap/claim`,
+      request,
+    );
+    return {
+      ...raw,
+      recipient_key_packages: raw.recipient_key_packages.map((recipient) => ({
+        ...recipient,
+        key_package: decodeBytesField(recipient.key_package, 'key_package'),
+      })),
+    };
+  }
+
+  async completeMlsRebootstrap(
+    channelType: string,
+    channelId: string,
+    request: CompleteMlsRebootstrapRequest,
+  ): Promise<MlsRebootstrapReceipt> {
+    const raw = await this._post<RawMlsRebootstrapReceipt>(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/rebootstrap/complete`,
+      encodeMlsRebootstrapCompletion(request),
+    );
+    return { ...raw, group_id: raw.group_id == null ? null : decodeBytesField(raw.group_id, 'group_id') };
+  }
+
+  async getMlsRebootstrapReceipt(
+    channelType: string,
+    channelId: string,
+    operationId: string,
+  ): Promise<MlsRebootstrapReceipt> {
+    const raw = await this._get<RawMlsRebootstrapReceipt>(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/rebootstrap/operations/${operationId}`,
+    );
+    return { ...raw, group_id: raw.group_id == null ? null : decodeBytesField(raw.group_id, 'group_id') };
   }
 
   /**

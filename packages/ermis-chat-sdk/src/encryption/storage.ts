@@ -29,6 +29,11 @@ import type {
   EncryptionStorageAdapter,
   EncryptionSyncCheckpoint,
   PendingArchiveUpload,
+  ExternalJoinReadinessState,
+  JoinPersistenceCheckpoint,
+  MlsRebootstrapCandidateCheckpoint,
+  MlsRebootstrapClaimIntent,
+  StoredGroupInfoRefreshRequest,
   PendingE2eeSendRecord,
   PendingDeferredArchive,
   PendingE2eeSnapshot,
@@ -44,23 +49,39 @@ import type {
 const DB_NAME_PREFIX = 'ermis_data';
 /** Global DB (no userId) — only used for migrating legacy device_id */
 const DB_NAME_LEGACY = 'ermis_mls';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 const STORE_IDENTITY = 'identity';
 const STORE_MESSAGES = 'messages';
 const STORE_PENDING_SENDS = 'pending_sends';
 const STORE_META = 'meta';
 const STORE_GROUPS = 'groups';
+const GROUP_INFO_REFRESH_REQUEST_PREFIX = 'group_info_refresh:v1:';
 const STORE_ARCHIVE_UPLOADS = 'archive_uploads';
 const STORE_DEFERRED_ARCHIVES = 'deferred_archives';
 const STORE_ARCHIVE_ACKS = 'archive_acks';
 const STORE_RESTORE_PROGRESS = 'restore_progress';
+const STORE_RESTORE_PROGRESS_BY_GENERATION = 'restore_progress_by_generation';
 const ARCHIVE_STASH_KEY_META = 'archive_stash_key';
 const LEGACY_SYNC_PREFIX = 'sync:';
 const SCOPE_SYNC_PREFIX = 'scope_sync:';
 const CHANNEL_REPAIR_PREFIX = 'channel_repair:';
 const CHANNEL_REPAIR_LOCK_PREFIX = 'channel_repair_lock:';
 const EPOCH_ARCHIVE_CHECKPOINT_PREFIX = 'epoch_archive_checkpoint:';
+
+function epochArchiveCheckpointKey(scopeCid: string, groupGeneration: number, epoch: number): string {
+  // Preserve the generation-0 key byte-for-byte for existing IndexedDB rows.
+  return groupGeneration === 0
+    ? `${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`
+    : `${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:generation:${groupGeneration}:${epoch}`;
+}
+
+function archiveGenerationKeyPrefix(cid: string, groupGeneration: number): string {
+  return groupGeneration === 0 ? cid : `${cid}:generation:${groupGeneration}`;
+}
+const EXTERNAL_JOIN_READINESS_PREFIX = 'external_join_readiness:';
+const MLS_REBOOTSTRAP_CLAIM_INTENT_PREFIX = 'mls_rebootstrap_claim_intent:v1:';
+const MLS_REBOOTSTRAP_CANDIDATE_PREFIX = 'mls_rebootstrap_candidate:v1:';
 const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** localStorage key for device_id — global, per-browser */
@@ -69,6 +90,7 @@ const DEVICE_ID_LS_KEY = 'ermis_device_id';
 function normalizeDeferredArchiveRecord(record: PendingDeferredArchive): PendingDeferredArchive {
   return {
     ...record,
+    group_generation: record.group_generation || 0,
     encrypted_archive: {
       ciphertext: normalizeRequiredBytes(record.encrypted_archive.ciphertext, 'encrypted_archive.ciphertext'),
       nonce: normalizeRequiredBytes(record.encrypted_archive.nonce, 'encrypted_archive.nonce'),
@@ -88,6 +110,7 @@ function normalizeDeferredArchiveRecord(record: PendingDeferredArchive): Pending
 function normalizeEpochArchiveCheckpoint(record: EpochArchiveCheckpoint): EpochArchiveCheckpoint {
   return {
     ...record,
+    group_generation: record.group_generation || 0,
     encrypted_archive_bytes: {
       ciphertext: normalizeRequiredBytes(
         record.encrypted_archive_bytes.ciphertext,
@@ -219,6 +242,15 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           restoreStore.createIndex('device_status', ['device_id', 'status'], { unique: false });
         }
 
+        if (!db.objectStoreNames.contains(STORE_RESTORE_PROGRESS_BY_GENERATION)) {
+          const restoreStore = db.createObjectStore(STORE_RESTORE_PROGRESS_BY_GENERATION, {
+            keyPath: ['device_id', 'cid', 'group_generation'],
+          });
+          restoreStore.createIndex('status', 'status', { unique: false });
+          restoreStore.createIndex('device_id', 'device_id', { unique: false });
+          restoreStore.createIndex('device_status', ['device_id', 'status'], { unique: false });
+        }
+
         // DB version 7: Add cid_msg_seq index for offline pagination by msg_seq
         if (event.oldVersion < 7 && db.objectStoreNames.contains(STORE_MESSAGES)) {
           const tx = (event.target as IDBOpenDBRequest).transaction!;
@@ -342,6 +374,14 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         if (!db.objectStoreNames.contains(STORE_RESTORE_PROGRESS)) {
           const restoreStore = db.createObjectStore(STORE_RESTORE_PROGRESS, {
             keyPath: ['device_id', 'cid'],
+          });
+          restoreStore.createIndex('status', 'status', { unique: false });
+          restoreStore.createIndex('device_id', 'device_id', { unique: false });
+          restoreStore.createIndex('device_status', ['device_id', 'status'], { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_RESTORE_PROGRESS_BY_GENERATION)) {
+          const restoreStore = db.createObjectStore(STORE_RESTORE_PROGRESS_BY_GENERATION, {
+            keyPath: ['device_id', 'cid', 'group_generation'],
           });
           restoreStore.createIndex('status', 'status', { unique: false });
           restoreStore.createIndex('device_id', 'device_id', { unique: false });
@@ -1183,7 +1223,166 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       tx.onerror = () => reject(tx.error);
     });
   }
-
+  async loadExternalJoinReadiness(cid: string): Promise<ExternalJoinReadinessState | null> {
+    const db = await this.openDB();
+    return new Promise<ExternalJoinReadinessState | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const request = tx.objectStore(STORE_META).get(`${EXTERNAL_JOIN_READINESS_PREFIX}${cid}`);
+      request.onsuccess = () => resolve((request.result as ExternalJoinReadinessState) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async saveExternalJoinReadiness(state: ExternalJoinReadinessState): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).put(state, `${EXTERNAL_JOIN_READINESS_PREFIX}${state.cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async deleteExternalJoinReadiness(cid: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).delete(`${EXTERNAL_JOIN_READINESS_PREFIX}${cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async listGroupInfoRefreshRequests(): Promise<StoredGroupInfoRefreshRequest[]> {
+    const db = await this.openDB();
+    return new Promise<StoredGroupInfoRefreshRequest[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const store = tx.objectStore(STORE_META);
+      const values: StoredGroupInfoRefreshRequest[] = [];
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(values);
+          return;
+        }
+        if (typeof cursor.key === 'string' && cursor.key.startsWith(GROUP_INFO_REFRESH_REQUEST_PREFIX)) {
+          values.push(cursor.value as StoredGroupInfoRefreshRequest);
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async saveGroupInfoRefreshRequest(request: StoredGroupInfoRefreshRequest): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).put(
+        request,
+        `${GROUP_INFO_REFRESH_REQUEST_PREFIX}${request.cid}:${request.request_id}`,
+      );
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async deleteGroupInfoRefreshRequests(cid: string, throughEpoch?: number, requestId?: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      const cursorRequest = store.openCursor();
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        if (!cursor) return;
+        const value = cursor.value as StoredGroupInfoRefreshRequest;
+        const isRefreshKey = typeof cursor.key === 'string' && cursor.key.startsWith(GROUP_INFO_REFRESH_REQUEST_PREFIX);
+        const matchesCid = isRefreshKey && value.cid === cid;
+        const matchesSelection =
+          (requestId === undefined && throughEpoch === undefined) ||
+          (requestId !== undefined && value.request_id === requestId) ||
+          (throughEpoch !== undefined && value.minimum_epoch <= throughEpoch);
+        if (matchesCid && matchesSelection) cursor.delete();
+        cursor.continue();
+      };
+      cursorRequest.onerror = () => reject(cursorRequest.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async saveJoinCheckpoint(checkpoint: JoinPersistenceCheckpoint): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE_META, STORE_GROUPS], 'readwrite');
+      const meta = tx.objectStore(STORE_META);
+      meta.put(checkpoint.provider_bytes, `provider:${checkpoint.user_id}:${checkpoint.device_id}`);
+      if (checkpoint.readiness) {
+        meta.put(checkpoint.readiness, `${EXTERNAL_JOIN_READINESS_PREFIX}${checkpoint.cid}`);
+      } else {
+        meta.delete(`${EXTERNAL_JOIN_READINESS_PREFIX}${checkpoint.cid}`);
+      }
+      tx.objectStore(STORE_GROUPS).put(checkpoint.generation || true, checkpoint.cid);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('JOIN checkpoint transaction aborted'));
+    });
+  }
+  async saveRebootstrapClaimIntent(intent: MlsRebootstrapClaimIntent): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).put(intent, `${MLS_REBOOTSTRAP_CLAIM_INTENT_PREFIX}${intent.cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('rebootstrap claim intent transaction aborted'));
+    });
+  }
+  async loadRebootstrapClaimIntent(cid: string): Promise<MlsRebootstrapClaimIntent | null> {
+    const db = await this.openDB();
+    return new Promise<MlsRebootstrapClaimIntent | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const request = tx.objectStore(STORE_META).get(`${MLS_REBOOTSTRAP_CLAIM_INTENT_PREFIX}${cid}`);
+      request.onsuccess = () => resolve((request.result as MlsRebootstrapClaimIntent) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async deleteRebootstrapClaimIntent(cid: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).delete(`${MLS_REBOOTSTRAP_CLAIM_INTENT_PREFIX}${cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async saveRebootstrapCandidateCheckpoint(checkpoint: MlsRebootstrapCandidateCheckpoint): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      const store = tx.objectStore(STORE_META);
+      store.put(checkpoint.provider_bytes, `provider:${checkpoint.user_id}:${checkpoint.device_id}`);
+      store.put(checkpoint, `${MLS_REBOOTSTRAP_CANDIDATE_PREFIX}${checkpoint.marker.cid}`);
+      store.delete(`${MLS_REBOOTSTRAP_CLAIM_INTENT_PREFIX}${checkpoint.marker.cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('rebootstrap candidate checkpoint transaction aborted'));
+    });
+  }
+  async loadRebootstrapCandidateCheckpoint(cid: string): Promise<MlsRebootstrapCandidateCheckpoint | null> {
+    const db = await this.openDB();
+    return new Promise<MlsRebootstrapCandidateCheckpoint | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readonly');
+      const request = tx.objectStore(STORE_META).get(`${MLS_REBOOTSTRAP_CANDIDATE_PREFIX}${cid}`);
+      request.onsuccess = () => resolve((request.result as MlsRebootstrapCandidateCheckpoint) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async deleteRebootstrapCandidateCheckpoint(cid: string): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_META, 'readwrite');
+      tx.objectStore(STORE_META).delete(`${MLS_REBOOTSTRAP_CANDIDATE_PREFIX}${cid}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
   async saveEncryptionSyncCheckpoint(checkpoint: EncryptionSyncCheckpoint): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
@@ -1383,7 +1582,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readwrite');
       const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
       const archiveBlobId = (upload.upload as any)?.archive_blob_id || 'unknown';
-      store.put(upload, `${upload.cid}:${upload.epoch}:${archiveBlobId}`);
+      store.put(
+        upload,
+        `${archiveGenerationKeyPrefix(upload.cid, upload.group_generation || 0)}:${upload.epoch}:${archiveBlobId}`,
+      );
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1395,20 +1597,31 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readonly');
       const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
       const request = store.getAll();
-      request.onsuccess = () => resolve((request.result as PendingArchiveUpload[]) || []);
+      request.onsuccess = () =>
+        resolve(
+          ((request.result as PendingArchiveUpload[]) || []).map((record) => ({
+            ...record,
+            group_generation: record.group_generation || 0,
+          })),
+        );
       request.onerror = () => reject(request.error);
     });
   }
 
-  async deleteArchiveUpload(cid: string, epoch: number, archiveBlobId?: string): Promise<void> {
+  async deleteArchiveUpload(
+    cid: string,
+    epoch: number,
+    archiveBlobId?: string,
+    groupGeneration = 0,
+  ): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_ARCHIVE_UPLOADS, 'readwrite');
       const store = tx.objectStore(STORE_ARCHIVE_UPLOADS);
       if (archiveBlobId) {
-        store.delete(`${cid}:${epoch}:${archiveBlobId}`);
+        store.delete(`${archiveGenerationKeyPrefix(cid, groupGeneration)}:${epoch}:${archiveBlobId}`);
       } else {
-        const prefix = `${cid}:${epoch}:`;
+        const prefix = `${archiveGenerationKeyPrefix(cid, groupGeneration)}:${epoch}:`;
         const cursorReq = store.openCursor();
         cursorReq.onsuccess = () => {
           const cursor = cursorReq.result;
@@ -1428,7 +1641,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readwrite');
       const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
-      store.put(archive, `${archive.cid}:${archive.epoch}:${archive.archive_blob_id}`);
+      store.put(
+        archive,
+        `${archiveGenerationKeyPrefix(archive.cid, archive.group_generation || 0)}:${archive.epoch}:${archive.archive_blob_id}`,
+      );
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1446,15 +1662,20 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
-  async deleteDeferredArchive(cid: string, epoch: number, archiveBlobId?: string): Promise<void> {
+  async deleteDeferredArchive(
+    cid: string,
+    epoch: number,
+    archiveBlobId?: string,
+    groupGeneration = 0,
+  ): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_DEFERRED_ARCHIVES, 'readwrite');
       const store = tx.objectStore(STORE_DEFERRED_ARCHIVES);
       if (archiveBlobId) {
-        store.delete(`${cid}:${epoch}:${archiveBlobId}`);
+        store.delete(`${archiveGenerationKeyPrefix(cid, groupGeneration)}:${epoch}:${archiveBlobId}`);
       } else {
-        const prefix = `${cid}:${epoch}:`;
+        const prefix = `${archiveGenerationKeyPrefix(cid, groupGeneration)}:${epoch}:`;
         const cursorReq = store.openCursor();
         cursorReq.onsuccess = () => {
           const cursor = cursorReq.result;
@@ -1474,7 +1695,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readwrite');
       const store = tx.objectStore(STORE_ARCHIVE_ACKS);
-      store.put(record, `${record.cid}:${record.epoch}:${record.scope}:${record.coverage_key}`);
+      store.put(
+        record,
+        `${archiveGenerationKeyPrefix(record.cid, record.group_generation || 0)}:${record.epoch}:${record.scope}:${record.coverage_key}`,
+      );
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1482,6 +1706,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
 
   async loadArchiveAck(
     cid: string,
+    groupGeneration: number,
     epoch: number,
     scope: ArchiveScope,
     coverageKey: string,
@@ -1490,10 +1715,13 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     return new Promise<ArchiveAckRecord | null>((resolve, reject) => {
       const tx = db.transaction(STORE_ARCHIVE_ACKS, 'readonly');
       const store = tx.objectStore(STORE_ARCHIVE_ACKS);
-      const request = store.get(`${cid}:${epoch}:${scope}:${coverageKey}`);
+      const request = store.get(
+        `${archiveGenerationKeyPrefix(cid, groupGeneration)}:${epoch}:${scope}:${coverageKey}`,
+      );
       request.onsuccess = () => {
-        if (request.result || scope !== 'account_owned') {
-          resolve((request.result as ArchiveAckRecord) || null);
+        if (request.result || scope !== 'account_owned' || groupGeneration !== 0) {
+          const result = request.result as ArchiveAckRecord | undefined;
+          resolve(result ? { ...result, group_generation: result.group_generation || 0 } : null);
           return;
         }
         const legacyRequest = store.get(`${cid}:${epoch}:${coverageKey}`);
@@ -1503,6 +1731,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
             legacy
               ? {
                   ...legacy,
+                  group_generation: 0,
                   scope: 'account_owned',
                   coverage_key: coverageKey,
                   recovery_key_id: legacy.recovery_key_id || coverageKey,
@@ -1522,18 +1751,22 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       const tx = db.transaction(STORE_META, 'readwrite');
       tx.objectStore(STORE_META).put(
         checkpoint,
-        `${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${checkpoint.scope_cid}:${checkpoint.epoch}`,
+        epochArchiveCheckpointKey(checkpoint.scope_cid, checkpoint.group_generation || 0, checkpoint.epoch),
       );
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  async loadEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<EpochArchiveCheckpoint | null> {
+  async loadEpochArchiveCheckpoint(
+    scopeCid: string,
+    epoch: number,
+    groupGeneration = 0,
+  ): Promise<EpochArchiveCheckpoint | null> {
     const db = await this.openDB();
     return new Promise<EpochArchiveCheckpoint | null>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readonly');
-      const request = tx.objectStore(STORE_META).get(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
+      const request = tx.objectStore(STORE_META).get(epochArchiveCheckpointKey(scopeCid, groupGeneration, epoch));
       request.onsuccess = () =>
         resolve(request.result ? normalizeEpochArchiveCheckpoint(request.result as EpochArchiveCheckpoint) : null);
       request.onerror = () => reject(request.error);
@@ -1562,11 +1795,11 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
-  async deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number): Promise<void> {
+  async deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number, groupGeneration = 0): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readwrite');
-      tx.objectStore(STORE_META).delete(`${EPOCH_ARCHIVE_CHECKPOINT_PREFIX}${scopeCid}:${epoch}`);
+      tx.objectStore(STORE_META).delete(epochArchiveCheckpointKey(scopeCid, groupGeneration, epoch));
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1698,23 +1931,33 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   async saveRestoreProgress(record: RestoreProgressRecord): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readwrite');
-      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
-      store.put(record);
+      const normalized = { ...record, group_generation: record.group_generation || 0 };
+      const storeName = normalized.group_generation === 0
+        ? STORE_RESTORE_PROGRESS
+        : STORE_RESTORE_PROGRESS_BY_GENERATION;
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      store.put(normalized);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  async loadRestoreProgress(userId: string, deviceId: string, cid: string): Promise<RestoreProgressRecord | null> {
+  async loadRestoreProgress(
+    userId: string,
+    deviceId: string,
+    cid: string,
+    groupGeneration = 0,
+  ): Promise<RestoreProgressRecord | null> {
     const db = await this.openDB();
     return new Promise<RestoreProgressRecord | null>((resolve, reject) => {
-      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readonly');
-      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
-      const request = store.get([deviceId, cid]);
+      const storeName = groupGeneration === 0 ? STORE_RESTORE_PROGRESS : STORE_RESTORE_PROGRESS_BY_GENERATION;
+      const tx = db.transaction(storeName, 'readonly');
+      const store = tx.objectStore(storeName);
+      const request = store.get(groupGeneration === 0 ? [deviceId, cid] : [deviceId, cid, groupGeneration]);
       request.onsuccess = () => {
         const record = request.result as RestoreProgressRecord | undefined;
-        resolve(record && record.user_id === userId ? record : null);
+        resolve(record && record.user_id === userId ? { ...record, group_generation: record.group_generation || 0 } : null);
       };
       request.onerror = () => reject(request.error);
     });
@@ -1723,23 +1966,31 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   async loadIncompleteRestores(userId: string, deviceId: string): Promise<RestoreProgressRecord[]> {
     const statuses: RestoreStatus[] = ['pending', 'running', 'partial', 'failed'];
     const groups = await Promise.all(
-      statuses.map((status) => this._loadRestoreProgressByDeviceStatus(userId, deviceId, status)),
+      statuses.flatMap((status) => [
+        this._loadRestoreProgressByDeviceStatus(userId, deviceId, status, STORE_RESTORE_PROGRESS),
+        this._loadRestoreProgressByDeviceStatus(userId, deviceId, status, STORE_RESTORE_PROGRESS_BY_GENERATION),
+      ]),
     );
     return groups.flat();
   }
 
   async loadRestoresWithPermanentGaps(userId: string, deviceId: string): Promise<RestoreProgressRecord[]> {
-    return this._loadRestoreProgressByDeviceStatus(userId, deviceId, 'done_with_gaps');
+    const records = await Promise.all([
+      this._loadRestoreProgressByDeviceStatus(userId, deviceId, 'done_with_gaps', STORE_RESTORE_PROGRESS),
+      this._loadRestoreProgressByDeviceStatus(userId, deviceId, 'done_with_gaps', STORE_RESTORE_PROGRESS_BY_GENERATION),
+    ]);
+    return records.flat();
   }
 
-  async deleteRestoreProgress(userId: string, deviceId: string, cid: string): Promise<void> {
-    const existing = await this.loadRestoreProgress(userId, deviceId, cid);
+  async deleteRestoreProgress(userId: string, deviceId: string, cid: string, groupGeneration = 0): Promise<void> {
+    const existing = await this.loadRestoreProgress(userId, deviceId, cid, groupGeneration);
     if (!existing) return;
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readwrite');
-      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
-      store.delete([deviceId, cid]);
+      const storeName = groupGeneration === 0 ? STORE_RESTORE_PROGRESS : STORE_RESTORE_PROGRESS_BY_GENERATION;
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      store.delete(groupGeneration === 0 ? [deviceId, cid] : [deviceId, cid, groupGeneration]);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1749,17 +2000,18 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     userId: string,
     deviceId: string,
     status: RestoreStatus,
+    storeName: string,
   ): Promise<RestoreProgressRecord[]> {
     const db = await this.openDB();
     return new Promise<RestoreProgressRecord[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_RESTORE_PROGRESS, 'readonly');
-      const store = tx.objectStore(STORE_RESTORE_PROGRESS);
+      const tx = db.transaction(storeName, 'readonly');
+      const store = tx.objectStore(storeName);
       const index = store.index('device_status');
       const request = index.getAll(IDBKeyRange.only([deviceId, status]));
       request.onsuccess = () => {
         const records = ((request.result as RestoreProgressRecord[]) || []).filter(
           (record) => record.user_id === userId,
-        );
+        ).map((record) => ({ ...record, group_generation: record.group_generation || 0 }));
         resolve(records);
       };
       request.onerror = () => reject(request.error);
