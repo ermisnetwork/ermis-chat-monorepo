@@ -52,7 +52,8 @@ export function InvitesPanel({ onBack }: InvitesPanelProps) {
                 lastMessageText=""
                 lastMessageUser=""
                 onSelect={(selectedChannel) => {
-                  setActiveChannel(selectedChannel);
+                  setActiveChannel(selectedChannel)
+                  onBack()
                 }}
               />
             ))}

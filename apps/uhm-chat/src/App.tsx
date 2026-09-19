@@ -38,6 +38,15 @@ function parseOptionalPositiveInteger(value: unknown): number | undefined {
   return Math.floor(parsed);
 }
 
+function waitForBrowserPaint(): Promise<void> {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+  });
+}
+
 if (E2EE_ATTACHMENT_UPLOAD_DEBUG && typeof window !== 'undefined') {
   try {
     window.localStorage.setItem('ermis_e2ee_attachment_upload_debug', '1');
@@ -264,6 +273,10 @@ function AppContent() {
         await chatClient.connectUser({ id: userId }, token, { refreshToken });
 
         setBootstrapPhase('e2ee');
+        // Commit the secure-startup screen before synchronous WASM/KeyPackage
+        // work can occupy the main thread. This does not report the app ready
+        // early or move any cryptographic prerequisite into the background.
+        await waitForBrowserPaint();
         await initializeE2ee(userId);
 
         setIsAuthenticated(true);

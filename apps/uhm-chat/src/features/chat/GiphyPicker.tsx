@@ -41,7 +41,7 @@ const getApiKeys = (): string[] => {
     .split(',')
     .map((k: string) => k.trim())
     .filter(Boolean);
-  return keys.length > 0 ? keys : ['sXpCfdHBLXyp9WdQV8B0J9wAC43Nz8HM'];
+  return keys;
 };
 
 let globalKeyIndex = 0;
@@ -79,6 +79,12 @@ export const GiphyPicker: React.FC<GiphyPickerProps> = ({ onSelect }) => {
     setIsUnauthorized(false);
 
     const keys = getApiKeys();
+    if (keys.length === 0) {
+      setIsUnauthorized(true);
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     const endpoint = searchQuery
       ? `https://api.giphy.com/v1/${type}/search`
       : `https://api.giphy.com/v1/${type}/trending`;
@@ -125,7 +131,10 @@ export const GiphyPicker: React.FC<GiphyPickerProps> = ({ onSelect }) => {
 
   useEffect(() => {
     const activeSearchTerm = selectedTag || debouncedQuery;
-    fetchGiphy(activeSearchTerm, activeTab);
+    const requestTimer = window.setTimeout(() => {
+      void fetchGiphy(activeSearchTerm, activeTab);
+    }, 0);
+    return () => window.clearTimeout(requestTimer);
   }, [debouncedQuery, activeTab, selectedTag, fetchGiphy]);
 
   const handleTagClick = (tag: string) => {
