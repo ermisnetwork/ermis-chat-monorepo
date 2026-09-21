@@ -213,16 +213,69 @@ export function useForwardMessage(message: FormatMessageResponse, onDismiss: () 
 
     // Format message text to replace mention IDs with names
     let formattedMessage = { ...message };
-    if (formattedMessage.text && formattedMessage.mentioned_users && formattedMessage.mentioned_users.length > 0) {
-      let newText = formattedMessage.text;
-      const userMap = buildUserMap(activeChannel.state, client.state.users);
+    const mentionedList = (formattedMessage.mentioned_users || []) as any[];
 
-      formattedMessage.mentioned_users.forEach((userId) => {
-        const name = userMap[userId] || getUserDisplayName(client.state.users[userId], userId);
-        newText = newText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
-      });
+    if (formattedMessage.text && (mentionedList.length > 0 || formattedMessage.mentioned_all)) {
+      let userMap = buildUserMap(activeChannel.state, client.state.users);
+
+      // Collect user IDs that are not yet mapped to a display name
+      const missingIds: string[] = [];
+      for (const item of mentionedList) {
+        const id = typeof item === 'string' ? item : item?.id;
+        if (!id) continue;
+        const currentName = userMap[id];
+        if (!currentName || currentName === id) {
+          // Also check other active channels in client before querying server
+          let foundInOtherChannel = false;
+          if (client.activeChannels) {
+            for (const ch of Object.values(client.activeChannels) as Channel[]) {
+              const m =
+                (ch.state?.members as any)?.[id] ||
+                (Array.isArray(ch.state?.members)
+                  ? (ch.state?.members as any[]).find((x: any) => (x.user?.id || x.user_id || x.id) === id)
+                  : undefined);
+              if (m) {
+                const name = getUserDisplayName(m.user || m, id);
+                if (name && name !== id) {
+                  userMap[id] = name;
+                  foundInOtherChannel = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (!foundInOtherChannel && typeof (client as any).getBatchUsers === 'function') {
+            missingIds.push(id);
+          }
+        }
+      }
+
+      // If there are still missing users, fetch them in batch from server
+      if (missingIds.length > 0) {
+        try {
+          await (client as any).getBatchUsers(missingIds);
+          userMap = buildUserMap(activeChannel.state, client.state.users);
+        } catch (e) {
+          console.warn('[useForwardMessage] Failed to fetch users for mentions:', e);
+        }
+      }
+
+      // Convert all mentions to @DisplayName in plain text
+      let newText = formattedMessage.text;
+      for (const item of mentionedList) {
+        const id = typeof item === 'string' ? item : item?.id;
+        if (!id) continue;
+        const itemObjName = typeof item === 'object' ? item.name || item.display_name : undefined;
+        const name = userMap[id] || itemObjName || getUserDisplayName(client.state.users?.[id], id);
+        const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        newText = newText.replace(new RegExp(`@${escapedId}`, 'g'), `@${name}`);
+      }
       formattedMessage.text = newText;
     }
+
+    // Since mentions are converted into plain text, strip mention metadata
+    delete (formattedMessage as any).mentioned_users;
+    delete (formattedMessage as any).mentioned_all;
 
     for (const cid of selectedChannels) {
       const targetChannel = channels.find((c) => c.cid === cid);
@@ -233,9 +286,6 @@ export function useForwardMessage(message: FormatMessageResponse, onDismiss: () 
         }
         if (formattedMessage.quoted_message_id || formattedMessage.parent_id) {
           throw new Error('Reply/thread messages cannot be forwarded');
-        }
-        if (formattedMessage.mentioned_all || (formattedMessage.mentioned_users?.length || 0) > 0) {
-          throw new Error('Mention messages cannot be forwarded');
         }
         const targetIsE2ee = isEffectiveE2ee(targetChannel);
         const sourceIsE2ee = isEffectiveE2ee(activeChannel);

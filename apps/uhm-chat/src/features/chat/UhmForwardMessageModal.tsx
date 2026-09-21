@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, Send, Hash, Check, FileText } from 'lucide-react'
 import {
@@ -20,6 +21,8 @@ import {
   getMessageUserId,
   getUserDisplayName,
   StickerImage,
+  buildUserMap,
+  replaceMentionsForPreview,
 } from '@ermis-network/ermis-chat-react'
 import type { ForwardMessageModalProps } from '@ermis-network/ermis-chat-react'
 
@@ -32,7 +35,33 @@ export function UhmForwardMessageModal({
   onDismiss,
 }: ForwardMessageModalProps) {
   const { t } = useTranslation()
-  const { client } = useChatCore()
+  const { client, activeChannel } = useChatCore()
+
+  const [userMap, setUserMap] = useState<Record<string, string>>(() =>
+    buildUserMap(activeChannel?.state, client.state.users),
+  )
+
+  useEffect(() => {
+    const mentioned = (message.mentioned_users || []) as any[]
+    if (mentioned.length === 0) return
+
+    const missing: string[] = []
+    for (const item of mentioned) {
+      const id = typeof item === 'string' ? item : item?.id
+      if (id && (!userMap[id] || userMap[id] === id) && !client.state.users[id]) {
+        missing.push(id)
+      }
+    }
+
+    if (missing.length > 0 && typeof (client as any).getBatchUsers === 'function') {
+      (client as any).getBatchUsers(missing)
+        .then(() => {
+          setUserMap(buildUserMap(activeChannel?.state, client.state.users))
+        })
+        .catch(() => {})
+    }
+  }, [message.mentioned_users, activeChannel?.state, client])
+
   const {
     search,
     setSearch,
@@ -45,12 +74,8 @@ export function UhmForwardMessageModal({
 
   /* --- Message preview details --- */
   let previewText = message.text || ''
-  if (previewText && message.mentioned_users && message.mentioned_users.length > 0) {
-    message.mentioned_users.forEach((userId) => {
-      // In UI, we can try to find from client.state.users
-      const name = getUserDisplayName(client.state.users[userId], userId);
-      previewText = previewText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
-    });
+  if (previewText && ((message.mentioned_users?.length || 0) > 0 || (message as any).mentioned_all)) {
+    previewText = replaceMentionsForPreview(previewText, message, userMap)
   }
   const attachmentCount = message.attachments?.length ?? 0
   const isSticker = isStickerMessage(message)

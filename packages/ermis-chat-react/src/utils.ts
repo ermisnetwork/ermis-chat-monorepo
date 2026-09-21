@@ -210,11 +210,22 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   }
 
   // 2. Current members
-  const members = channelState?.members;
+  const members = channelState?.members || channelState?.data?.members || channelState?.channel?.members;
   if (members && typeof members === 'object') {
-    for (const [id, member] of Object.entries<any>(members)) {
-      const name = getUserDisplayName(member?.user, member?.user_id || id);
-      setDisplayName(id, name);
+    if (Array.isArray(members)) {
+      for (const member of members) {
+        const id = member?.user?.id || member?.user_id || member?.id;
+        if (id) {
+          const name = getUserDisplayName(member?.user || member, id);
+          setDisplayName(id, name);
+        }
+      }
+    } else {
+      for (const [id, member] of Object.entries<any>(members)) {
+        const resolvedId = member?.user?.id || member?.user_id || id;
+        const name = getUserDisplayName(member?.user || member, resolvedId);
+        setDisplayName(resolvedId, name);
+      }
     }
   }
 
@@ -230,8 +241,17 @@ export function buildUserMap(channelState: any, extraUsers?: Record<string, any>
   // 4. Fallback: check watchers
   const watchers = channelState?.watchers;
   if (watchers && typeof watchers === 'object') {
-    for (const [id, user] of Object.entries<any>(watchers)) {
-      setDisplayName(id, getUserDisplayName(user, id));
+    if (Array.isArray(watchers)) {
+      for (const watcher of watchers) {
+        const id = watcher?.id || watcher?.user_id;
+        if (id) {
+          setDisplayName(id, getUserDisplayName(watcher, id));
+        }
+      }
+    } else {
+      for (const [id, user] of Object.entries<any>(watchers)) {
+        setDisplayName(id, getUserDisplayName(user, id));
+      }
     }
   }
 

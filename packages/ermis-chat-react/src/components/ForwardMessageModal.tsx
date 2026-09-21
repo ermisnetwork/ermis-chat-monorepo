@@ -6,7 +6,7 @@ import { useChatComponents } from '../context/ChatComponentsContext';
 import type { ForwardMessageModalProps, ForwardChannelItemProps } from '../types';
 import { isTopicChannel } from '../channelTypeUtils';
 import { useForwardMessage } from '../hooks/useForwardMessage';
-import { getMessageUserId, getUserDisplayName } from '../utils';
+import { getMessageUserId, getUserDisplayName, buildUserMap, replaceMentionsForPreview } from '../utils';
 
 export type { ForwardMessageModalProps, ForwardChannelItemProps } from '../types';
 
@@ -74,7 +74,32 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   const { ModalComponent } = useChatComponents();
   const Modal = ModalComponent || DefaultModal;
   const backdropRef = useRef<HTMLDivElement>(null);
-  const { client } = useChatCore();
+  const { client, activeChannel } = useChatCore();
+
+  const [userMap, setUserMap] = useState<Record<string, string>>(() =>
+    buildUserMap(activeChannel?.state, client.state.users),
+  );
+
+  useEffect(() => {
+    const mentioned = (message.mentioned_users || []) as any[];
+    if (mentioned.length === 0) return;
+
+    const missing: string[] = [];
+    for (const item of mentioned) {
+      const id = typeof item === 'string' ? item : item?.id;
+      if (id && (!userMap[id] || userMap[id] === id) && !client.state.users[id]) {
+        missing.push(id);
+      }
+    }
+
+    if (missing.length > 0 && typeof (client as any).getBatchUsers === 'function') {
+      (client as any).getBatchUsers(missing)
+        .then(() => {
+          setUserMap(buildUserMap(activeChannel?.state, client.state.users));
+        })
+        .catch(() => {});
+    }
+  }, [message.mentioned_users, activeChannel?.state, client]);
 
   const {
     search,
@@ -103,11 +128,8 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
   /* ---------- Message preview ---------- */
   let previewText = message.text || '';
   
-  if (previewText && message.mentioned_users && message.mentioned_users.length > 0) {
-    message.mentioned_users.forEach((userId) => {
-      const name = getUserDisplayName(client.state.users[userId], userId);
-      previewText = previewText.replace(new RegExp(`@${userId}`, 'g'), `@${name}`);
-    });
+  if (previewText && ((message.mentioned_users?.length || 0) > 0 || (message as any).mentioned_all)) {
+    previewText = replaceMentionsForPreview(previewText, message, userMap);
   }
 
   previewText = previewText.length > 120 ? previewText.slice(0, 120) + '…' : previewText;
