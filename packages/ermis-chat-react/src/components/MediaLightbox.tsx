@@ -191,20 +191,28 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
       [onClose],
     );
 
-    const { downloadFile } = useDownloadHandler();
+    const { downloadFile, activeDownloads, cancelDownload } = useDownloadHandler();
 
     const currentItem = items[currentIndex];
     const hasMultiple = items.length > 1;
 
+    const downloadProgress = currentItem?.src ? activeDownloads.get(currentItem.src) : undefined;
+    const isDownloading = downloadProgress?.active === true;
+
     const handleDownload = useCallback(async () => {
       if (!currentItem) return;
+      // If already downloading, cancel instead
+      if (isDownloading && currentItem.src) {
+        cancelDownload(currentItem.src);
+        return;
+      }
       if (currentItem.download) {
         await currentItem.download();
         return;
       }
       if (!currentItem.src) return;
       await downloadFile(currentItem.src, currentItem.alt || 'media');
-    }, [currentItem, downloadFile]);
+    }, [currentItem, downloadFile, cancelDownload, isDownloading]);
 
     const restorePendingVideoSeekTime = useCallback(() => {
       setVideoLoading(false);
@@ -371,26 +379,32 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = React.memo(
           )}
           <div className="ermis-lightbox__actions">
             <button
-              className="ermis-lightbox__action-btn"
+              className={`ermis-lightbox__action-btn${isDownloading ? ' ermis-lightbox__action-btn--downloading' : ''}`}
               onClick={handleDownload}
-              aria-label="Download"
-              title="Download"
-              disabled={Boolean(currentItem.loading) || (!currentItem.src && !currentItem.download)}
+              aria-label={isDownloading ? 'Cancel download' : 'Download'}
+              title={isDownloading ? 'Cancel' : 'Download'}
+              disabled={!isDownloading && (Boolean(currentItem.loading) || (!currentItem.src && !currentItem.download))}
             >
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
+              {isDownloading ? (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ermis-lightbox__spinner">
+                  <circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" />
+                </svg>
+              ) : (
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              )}
             </button>
             <button className="ermis-lightbox__action-btn" onClick={onClose} aria-label="Close" title="Close">
               <svg

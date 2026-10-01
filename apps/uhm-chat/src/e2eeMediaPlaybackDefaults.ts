@@ -6,6 +6,35 @@ function envEnabled(value: unknown, defaultValue: boolean): boolean {
   return String(value).toLowerCase() !== 'false';
 }
 
+/**
+ * Unregister legacy PWA/workbox service workers left over from before PWA was removed.
+ * Without this, existing users would still have the old workbox SW intercepting
+ * bucket requests and caching opaque (CORS-failed) responses, breaking downloads.
+ */
+async function unregisterLegacyPwaWorker(): Promise<void> {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker?.getRegistrations) return;
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(
+    registrations.map(async (registration) => {
+      const scriptUrl =
+        registration.active?.scriptURL || registration.waiting?.scriptURL || registration.installing?.scriptURL || '';
+      // Keep E2EE media workers — only unregister workbox/sw.js (PWA) workers
+      if (scriptUrl.includes(E2EE_MEDIA_WORKER_MARKER)) return;
+      if (scriptUrl.includes('/sw.js') || scriptUrl.includes('workbox')) {
+        await registration.unregister();
+      }
+    }),
+  );
+  // Also clear workbox runtime caches that may contain stale opaque responses
+  if (typeof caches !== 'undefined') {
+    const keys = await caches.keys();
+    await Promise.all(
+      keys.filter((k) => k.startsWith('ermis-image-cache') || k.startsWith('general-image-cache') || k.startsWith('workbox-'))
+        .map((k) => caches.delete(k)),
+    );
+  }
+}
+
 async function unregisterStaleE2eeMediaWorker(): Promise<void> {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker?.getRegistrations) return;
   const registrations = await navigator.serviceWorker.getRegistrations();
@@ -19,6 +48,7 @@ async function unregisterStaleE2eeMediaWorker(): Promise<void> {
     }),
   );
 }
+
 
 export function configureE2eeMediaPlaybackDefaults(): void {
   if (typeof window === 'undefined') return;
@@ -51,6 +81,7 @@ export function configureE2eeMediaPlaybackDefaults(): void {
     // LocalStorage can be unavailable in hardened browser modes; the global flag still enables streaming.
   }
 
+  void unregisterLegacyPwaWorker().catch(() => {/* best-effort */});
   void unregisterStaleE2eeMediaWorker().catch((err) => {
     if (debugEnabled) console.info('[E2EE media streaming] stale worker cleanup skipped', err);
   });

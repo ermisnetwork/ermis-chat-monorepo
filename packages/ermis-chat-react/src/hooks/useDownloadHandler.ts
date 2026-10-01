@@ -1,11 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
-import { useChatCore } from './useChatCore';
 
-/** Threshold in bytes: files larger than 5MB use chunked/streamed download */
-const CHUNK_DOWNLOAD_THRESHOLD = 5 * 1024 * 1024;
+const BUCKET_ORIGIN = 'https://bucket.ermis.network';
+const BUCKET_PROXY_PREFIX = '/__bucket';
 
 export interface DownloadProgress {
-  /** Unique key for the download (typically the URL) */
+  /** Unique key for the download (typically the original URL) */
   key: string;
   /** File name being downloaded */
   filename: string;
@@ -19,8 +18,22 @@ export interface DownloadProgress {
   active: boolean;
 }
 
+/**
+ * Rewrite bucket URLs to go through a same-origin reverse proxy,
+ * completely bypassing CORS restrictions.
+ *
+ * - Dev: Vite proxy handles `/__bucket/...` → `bucket.ermis.network/...`
+ * - Production: configure nginx/CDN to proxy the same path prefix,
+ *   or remove this to rely on bucket CORS headers directly.
+ */
+function toProxiedUrl(url: string): string {
+  if (url.startsWith(BUCKET_ORIGIN)) {
+    return url.replace(BUCKET_ORIGIN, BUCKET_PROXY_PREFIX);
+  }
+  return url;
+}
+
 export const useDownloadHandler = () => {
-  const { client } = useChatCore();
   const [activeDownloads, setActiveDownloads] = useState<Map<string, DownloadProgress>>(new Map());
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
@@ -44,40 +57,6 @@ export const useDownloadHandler = () => {
     abortControllers.current.delete(key);
   }, []);
 
-  /**
-   * Streamed download using fetch + ReadableStream.
-   * Reads the response body in chunks, tracks progress, and assembles a blob at the end.
-   * This avoids loading the entire file into memory at once for very large files.
-   */
-  const streamedDownload = useCallback(
-    async (url: string, filename: string, signal: AbortSignal): Promise<Blob | null> => {
-      const response = await fetch(url, { signal });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
-      const contentType = response.headers.get('content-type') || 'application/octet-stream';
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('ReadableStream not supported');
-
-      const chunks: Uint8Array[] = [];
-      let loaded = 0;
-
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.byteLength;
-
-        const percent = contentLength > 0 ? Math.round((loaded / contentLength) * 100) : -1;
-        updateProgress(url, { loaded, total: contentLength, percent });
-      }
-
-      return new Blob(chunks as BlobPart[], { type: contentType });
-    },
-    [updateProgress],
-  );
-
   const downloadFile = useCallback(
     async (url: string | undefined, filename?: string) => {
       if (!url) return;
@@ -88,68 +67,82 @@ export const useDownloadHandler = () => {
       // If already downloading this URL, skip
       if (abortControllers.current.has(downloadKey)) return;
 
+      const controller = new AbortController();
+      abortControllers.current.set(downloadKey, controller);
+
+      // Show loading immediately
+      setActiveDownloads((prev) => {
+        const next = new Map(prev);
+        next.set(downloadKey, {
+          key: downloadKey,
+          filename: name,
+          loaded: 0,
+          total: 0,
+          percent: -1, // indeterminate until we know Content-Length
+          active: true,
+        });
+        return next;
+      });
+
       try {
-        // First, do a HEAD request to check file size (if possible)
-        let fileSize = 0;
-        try {
-          const head = await fetch(url, { method: 'HEAD' });
-          fileSize = parseInt(head.headers.get('content-length') || '0', 10);
-        } catch {
-          // HEAD might fail (CORS, etc.), proceed with regular download
+        // Route through same-origin proxy to bypass CORS
+        const proxiedUrl = toProxiedUrl(url);
+
+        const response = await fetch(proxiedUrl, {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+        const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+        if (contentLength > 0) {
+          updateProgress(downloadKey, { total: contentLength, percent: 0 });
         }
 
-        const useStreamed = fileSize > CHUNK_DOWNLOAD_THRESHOLD;
-
+        // Always stream with progress tracking
+        const reader = response.body?.getReader();
         let blob: Blob;
 
-        if (useStreamed) {
-          // Large file: use streamed download with progress tracking
-          const controller = new AbortController();
-          abortControllers.current.set(downloadKey, controller);
+        if (reader) {
+          const chunks: Uint8Array[] = [];
+          let loaded = 0;
 
-          setActiveDownloads((prev) => {
-            const next = new Map(prev);
-            next.set(downloadKey, {
-              key: downloadKey,
-              filename: name,
-              loaded: 0,
-              total: fileSize,
-              percent: 0,
-              active: true,
-            });
-            return next;
-          });
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            loaded += value.byteLength;
 
-          const result = await streamedDownload(url, name, controller.signal);
-          if (!result) {
-            removeDownload(downloadKey);
-            return;
+            const percent = contentLength > 0 ? Math.round((loaded / contentLength) * 100) : -1;
+            updateProgress(downloadKey, { loaded, total: contentLength, percent });
           }
-          blob = result;
+
+          blob = new Blob(chunks as BlobPart[], { type: contentType });
         } else {
-          // Small file: use existing client.downloadMedia (single fetch)
-          blob = await client.downloadMedia(url);
+          // Fallback for browsers without ReadableStream (rare)
+          blob = await response.blob();
         }
 
         // Trigger browser download
-        const urlBlob = window.URL.createObjectURL(blob);
+        const blobUrl = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.style.display = 'none';
-        a.href = urlBlob;
+        a.href = blobUrl;
         a.download = name;
         document.body.appendChild(a);
         a.click();
 
         setTimeout(() => {
           if (document.body.contains(a)) document.body.removeChild(a);
-          window.URL.revokeObjectURL(urlBlob);
+          window.URL.revokeObjectURL(blobUrl);
         }, 1000);
 
-        if (useStreamed) {
-          updateProgress(downloadKey, { percent: 100, active: false });
-          // Remove from active after a short delay so UI can show "Complete"
-          setTimeout(() => removeDownload(downloadKey), 2000);
-        }
+        // Show "Complete" briefly before removing
+        updateProgress(downloadKey, { percent: 100, active: false });
+        setTimeout(() => removeDownload(downloadKey), 2000);
       } catch (err: any) {
         if (err?.name === 'AbortError') {
           console.log('Download cancelled:', name);
@@ -157,13 +150,10 @@ export const useDownloadHandler = () => {
           return;
         }
 
-        console.warn('Download via blob failed, falling back to direct link:', err);
+        console.warn('Download via proxy failed, falling back to direct link:', err);
         removeDownload(downloadKey);
 
-        // Fallback: open in a new tab.
-        // NOTE: The `download` attribute is ignored by browsers for cross-origin URLs,
-        // so if the bucket lacks CORS headers we cannot force a download via JS.
-        // Opening in _blank at least prevents navigating away from the chat.
+        // Fallback: open in a new tab
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
@@ -177,7 +167,7 @@ export const useDownloadHandler = () => {
         }, 1000);
       }
     },
-    [client, streamedDownload, updateProgress, removeDownload],
+    [updateProgress, removeDownload],
   );
 
   const cancelDownload = useCallback(

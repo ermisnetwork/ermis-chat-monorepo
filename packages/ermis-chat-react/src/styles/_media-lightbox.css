@@ -83,6 +83,19 @@
   cursor: not-allowed;
 }
 
+.ermis-lightbox__action-btn--downloading {
+  opacity: 0.7;
+}
+
+.ermis-lightbox__spinner {
+  animation: ermis-spinner-rotate 1s linear infinite;
+}
+
+@keyframes ermis-spinner-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* ----------------------------------------------------------
    Content area
    ---------------------------------------------------------- */

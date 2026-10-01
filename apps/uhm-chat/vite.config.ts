@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 
 // https://vite.dev/config/
@@ -12,45 +11,6 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({
-      registerType: 'prompt',
-      workbox: {
-        // Keep E2EE range playback in the app worker. Registering a second
-        // root-scoped worker from the SDK would replace this PWA worker and
-        // make vite-plugin-pwa report a false app update.
-        importScripts: ['/e2ee-media-stream-worker.js?v=20260723-4'],
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // Tăng giới hạn lên 5MB
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/bucket\.ermis\.network\/.*$/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'ermis-image-cache',
-              expiration: {
-                maxEntries: 1000,
-                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 Days
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'general-image-cache',
-              expiration: {
-                maxEntries: 200,
-              },
-            },
-          },
-        ],
-      },
-      devOptions: {
-        enabled: false,
-      },
-    }),
   ],
   resolve: {
     alias: {
@@ -83,6 +43,15 @@ export default defineConfig({
     port: 3001,
     strictPort: true,
     allowedHosts: ['3001uhm.sub2s.live'],
+    proxy: {
+      // Proxy bucket requests through same-origin to avoid CORS entirely.
+      // In production, configure nginx/CDN to proxy this same path prefix.
+      '/__bucket': {
+        target: 'https://bucket.ermis.network',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/__bucket/, ''),
+      },
+    },
     watch: {
       // Prevent HMR full-page reloads caused by tsup --watch rebuilding dist/
       ignored: [
