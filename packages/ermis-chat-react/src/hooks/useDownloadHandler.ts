@@ -160,11 +160,15 @@ export const useDownloadHandler = () => {
         console.warn('Download via blob failed, falling back to direct link:', err);
         removeDownload(downloadKey);
 
-        // Fallback: use an <a> tag with download attribute
+        // Fallback: open in a new tab.
+        // NOTE: The `download` attribute is ignored by browsers for cross-origin URLs,
+        // so if the bucket lacks CORS headers we cannot force a download via JS.
+        // Opening in _blank at least prevents navigating away from the chat.
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
         a.download = name;
+        a.target = '_blank';
         a.rel = 'noopener noreferrer';
         document.body.appendChild(a);
         a.click();
