@@ -5,7 +5,7 @@ import type { Channel, Event, ChannelFilters } from '@ermis-network/ermis-chat-s
 import { useChatCore } from '../hooks/useChatCore';
 import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
 import { useOnlineUsers } from '../hooks/useOnlineUsers';
-import { getLastMessagePreview } from '../utils';
+import { getLastMessagePreview, getUserDisplayName } from '../utils';
 import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
 import { usePendingState } from '../hooks/usePendingState';
 import {
@@ -92,25 +92,30 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   }, [defaultActions, hiddenActions]);
   const ActionsComponent = ChannelActionsComponent || DefaultChannelActions;
 
-  // For DM channels, resolve name/image from the other member if channel.data.name is missing
+  // For DM channels, resolve name/image from the other member
   const resolvedNameImage = useMemo(() => {
-    if (channel.data?.name) {
-      return { name: channel.data.name as string, image: channel.data.image as string | undefined };
-    }
     // For DM (messaging) channels, find the other member's info
     if (isDirectChannel(channel) && currentUserId && channel.state?.members) {
       const members = Object.values(channel.state.members) as any[];
       const other = members.find((m: any) => (m.user_id || m.user?.id) !== currentUserId);
       if (other) {
-        const otherUser = other.user || other;
+        const otherUser = other.user || other || (other.user_id ? client?.state?.users?.[other.user_id] : undefined);
+        const resolvedName = getUserDisplayName(
+          otherUser,
+          other.user_id || otherUser?.id,
+          other.user_id ? client?.state?.users?.[other.user_id] : undefined
+        );
         return {
-          name: otherUser.name || otherUser.id || channel.cid,
-          image: otherUser.image || otherUser.avatar || otherUser.avatar_url,
+          name: resolvedName || (channel.data?.name as string) || channel.cid,
+          image: otherUser?.image || otherUser?.avatar || otherUser?.avatar_url || (channel.data?.image as string | undefined),
         };
       }
     }
+    if (channel.data?.name) {
+      return { name: channel.data.name as string, image: channel.data.image as string | undefined };
+    }
     return { name: channel.cid, image: channel.data?.image as string | undefined };
-  }, [channel.data?.name, channel.data?.image, channel.state?.members, currentUserId, channel.cid, updateCount]);
+  }, [channel.data?.name, channel.data?.image, channel.state?.members, currentUserId, channel.cid, updateCount, client?.state?.users]);
 
   const name = resolvedNameImage.name;
   const image = resolvedNameImage.image;

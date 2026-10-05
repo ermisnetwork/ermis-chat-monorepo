@@ -4,7 +4,7 @@ import { Avatar } from './Avatar';
 import { Modal as DefaultModal } from './Modal';
 import { useChatComponents } from '../context/ChatComponentsContext';
 import type { ForwardMessageModalProps, ForwardChannelItemProps } from '../types';
-import { isTopicChannel } from '../channelTypeUtils';
+import { isTopicChannel, isDirectChannel } from '../channelTypeUtils';
 import { useForwardMessage } from '../hooks/useForwardMessage';
 import { getMessageUserId, getUserDisplayName, buildUserMap, replaceMentionsForPreview } from '../utils';
 
@@ -25,8 +25,21 @@ const DefaultForwardChannelItem: React.FC<ForwardChannelItemProps> = React.memo(
   const parent = parentCid ? client.activeChannels[parentCid] : null;
   const parentName = parent?.data?.name || '';
 
-  const name = (channel.data?.name || channel.cid) as string;
-  const rawImage = channel.data?.image as string | undefined;
+  let name = (channel.data?.name || channel.cid) as string;
+  let rawImage = channel.data?.image as string | undefined;
+  if (isDirectChannel(channel) && client.userID && channel.state?.members) {
+    const members = Object.values(channel.state.members) as any[];
+    const other = members.find((m: any) => (m.user_id || m.user?.id) !== client.userID);
+    if (other) {
+      const otherUser = other.user || other || (other.user_id ? client?.state?.users?.[other.user_id] : undefined);
+      name = getUserDisplayName(
+        otherUser,
+        other.user_id || otherUser?.id,
+        other.user_id ? client?.state?.users?.[other.user_id] : undefined
+      ) || name;
+      rawImage = otherUser?.image || otherUser?.avatar || otherUser?.avatar_url || rawImage;
+    }
+  }
   // Parse emoji:// format → extract just the emoji for avatar fallback
   const isEmoji = rawImage?.startsWith('emoji://');
   const image = isEmoji ? undefined : rawImage;

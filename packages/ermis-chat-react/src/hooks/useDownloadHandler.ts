@@ -1,8 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
 
-const BUCKET_ORIGIN = 'https://bucket.ermis.network';
-const BUCKET_PROXY_PREFIX = '/__bucket';
-
 export interface DownloadProgress {
   /** Unique key for the download (typically the original URL) */
   key: string;
@@ -18,19 +15,46 @@ export interface DownloadProgress {
   active: boolean;
 }
 
-/**
- * Rewrite bucket URLs to go through a same-origin reverse proxy,
- * completely bypassing CORS restrictions.
- *
- * - Dev: Vite proxy handles `/__bucket/...` → `bucket.ermis.network/...`
- * - Production: configure nginx/CDN to proxy the same path prefix,
- *   or remove this to rely on bucket CORS headers directly.
- */
+const BUCKET_ORIGIN = 'https://bucket.ermis.network';
+const BUCKET_PROXY_PREFIX = '/__bucket';
+
 function toProxiedUrl(url: string): string {
   if (url.startsWith(BUCKET_ORIGIN)) {
     return url.replace(BUCKET_ORIGIN, BUCKET_PROXY_PREFIX);
   }
   return url;
+}
+
+function fallbackDirectDownload(url: string, filename?: string) {
+  if (typeof document === 'undefined') return;
+
+  const isMediaOrDoc = /\.(jpe?g|png|gif|webp|svg|pdf|mp3|wav|ogg|mp4|webm)$/i.test(filename || '');
+  if (!isMediaOrDoc) {
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      setTimeout(() => {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+      }, 30000);
+      return;
+    } catch {
+      // Fall through to <a> tag
+    }
+  }
+
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = url;
+  if (filename) a.download = filename;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    if (document.body.contains(a)) document.body.removeChild(a);
+  }, 1000);
 }
 
 export const useDownloadHandler = () => {
@@ -85,17 +109,41 @@ export const useDownloadHandler = () => {
       });
 
       try {
-        // Route through same-origin proxy to bypass CORS
         const proxiedUrl = toProxiedUrl(url);
+        let response: Response;
 
-        const response = await fetch(proxiedUrl, {
-          signal: controller.signal,
-          cache: 'no-store',
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        try {
+          response = await fetch(proxiedUrl, {
+            signal: controller.signal,
+            cache: 'no-store',
+          });
 
-        const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+          const contentType = response.headers.get('content-type') || 'application/octet-stream';
+          const isHtmlExpected = /\.html?$/i.test(name);
+          // If proxy returned 200 with HTML (e.g. SPA fallback index.html), reject this response
+          if (!response.ok || (contentType.toLowerCase().includes('text/html') && !isHtmlExpected)) {
+            throw new Error(`Proxy response invalid (status ${response.status}, contentType ${contentType})`);
+          }
+        } catch (proxyErr: any) {
+          if (proxyErr?.name === 'AbortError') throw proxyErr;
+          // If proxied fetch failed (e.g. proxy prefix not configured on production Nginx), try direct URL
+          if (proxiedUrl !== url) {
+            response = await fetch(url, {
+              signal: controller.signal,
+              cache: 'no-store',
+            });
+            const contentType = response.headers.get('content-type') || 'application/octet-stream';
+            const isHtmlExpected = /\.html?$/i.test(name);
+            if (!response.ok || (contentType.toLowerCase().includes('text/html') && !isHtmlExpected)) {
+              throw new Error(`Direct response invalid (status ${response.status}, contentType ${contentType})`);
+            }
+          } else {
+            throw proxyErr;
+          }
+        }
+
         const contentType = response.headers.get('content-type') || 'application/octet-stream';
+        const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
 
         if (contentLength > 0) {
           updateProgress(downloadKey, { total: contentLength, percent: 0 });
@@ -150,21 +198,11 @@ export const useDownloadHandler = () => {
           return;
         }
 
-        console.warn('Download via proxy failed, falling back to direct link:', err);
+        console.warn('Download via stream failed, falling back to direct download:', err);
         removeDownload(downloadKey);
 
-        // Fallback: open in a new tab
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = name;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          if (document.body.contains(a)) document.body.removeChild(a);
-        }, 1000);
+        // Fallback: trigger direct browser download without CORS restrictions
+        fallbackDirectDownload(url, name);
       }
     },
     [updateProgress, removeDownload],

@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Channel } from '@ermis-network/ermis-chat-sdk';
+import { isDirectChannel } from '../channelTypeUtils';
+import { getUserDisplayName } from '../utils';
 
 export const useChannelMembers = (channel: Channel | null | undefined) => {
   const [memberUpdateCount, setMemberUpdateCount] = useState(0);
@@ -57,8 +59,39 @@ export const useChannelProfile = (channel: Channel | null | undefined) => {
     };
   }, [channel]);
 
-  const channelName = useMemo(() => channel?.data?.name || channel?.cid || 'Unknown Channel', [channel?.data?.name, channel?.cid, channel?.type, channelUpdateCount]);
-  const channelImage = useMemo(() => channel?.data?.image as string | undefined, [channel?.data?.image, channelUpdateCount]);
+  const client = channel?.getClient?.();
+  const currentUserId = client?.userID;
+
+  const channelName = useMemo(() => {
+    if (channel && isDirectChannel(channel) && currentUserId && channel.state?.members) {
+      const members = Object.values(channel.state.members) as any[];
+      const other = members.find((m: any) => (m.user_id || m.user?.id) !== currentUserId);
+      if (other) {
+        const otherUser = other.user || other || (other.user_id ? client?.state?.users?.[other.user_id] : undefined);
+        const resolvedName = getUserDisplayName(
+          otherUser,
+          other.user_id || otherUser?.id,
+          other.user_id ? client?.state?.users?.[other.user_id] : undefined
+        );
+        if (resolvedName) return resolvedName;
+      }
+    }
+    return channel?.data?.name || channel?.cid || 'Unknown Channel';
+  }, [channel?.data?.name, channel?.cid, channel?.type, channel?.state?.members, currentUserId, channelUpdateCount, client?.state?.users]);
+
+  const channelImage = useMemo(() => {
+    if (channel && isDirectChannel(channel) && currentUserId && channel.state?.members) {
+      const members = Object.values(channel.state.members) as any[];
+      const other = members.find((m: any) => (m.user_id || m.user?.id) !== currentUserId);
+      if (other) {
+        const otherUser = other.user || other;
+        const resolvedImage = otherUser?.image || otherUser?.avatar || otherUser?.avatar_url;
+        if (resolvedImage) return resolvedImage;
+      }
+    }
+    return channel?.data?.image as string | undefined;
+  }, [channel?.data?.image, channel?.state?.members, currentUserId, channelUpdateCount]);
+
   const channelDescription = useMemo(() => channel?.data?.description as string | undefined, [channel?.data?.description, channelUpdateCount]);
   const isPinned = useMemo(() => channel?.data?.is_pinned === true, [channel?.data?.is_pinned, channelUpdateCount]);
 

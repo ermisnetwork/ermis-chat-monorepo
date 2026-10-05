@@ -86,10 +86,12 @@ const DefaultBubble: React.FC<MessageBubbleProps> = React.memo(({
   isOwnMessage,
   message,
   children,
-}) => (
-  <div
-    className={`ermis-message-bubble ${isOwnMessage ? 'ermis-message-bubble--own' : 'ermis-message-bubble--other'}`}
-  >
+}) => {
+  const hasCode = message?.text?.includes('```');
+  return (
+    <div
+      className={`ermis-message-bubble ${isOwnMessage ? 'ermis-message-bubble--own' : 'ermis-message-bubble--other'}${hasCode ? ' ermis-message-bubble--has-code' : ''}`}
+    >
     {message?.pinned && (
       <div className={`ermis-message-list__pinned-indicator ${isOwnMessage ? 'ermis-message-list__pinned-indicator--own' : 'ermis-message-list__pinned-indicator--other'}`}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -99,7 +101,8 @@ const DefaultBubble: React.FC<MessageBubbleProps> = React.memo(({
     )}
     {children}
   </div>
-));
+  );
+});
 (DefaultBubble as any).displayName = 'DefaultBubble';
 
 const DefaultPendingInviteeNotification = React.memo(({ inviteeName, label }: { inviteeName?: string, label?: string }) => {

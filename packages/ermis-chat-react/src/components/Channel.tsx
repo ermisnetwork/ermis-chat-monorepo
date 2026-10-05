@@ -5,6 +5,8 @@ import { useChatComponents } from '../context/ChatComponentsContext';
 import { useBannedState } from '../hooks/useBannedState';
 import { useBlockedState } from '../hooks/useBlockedState';
 import { ForwardMessageModal } from './ForwardMessageModal';
+import { isDirectChannel } from '../channelTypeUtils';
+import { getUserDisplayName } from '../utils';
 import type { ChannelProps } from '../types';
 
 export type { ChannelProps } from '../types';
@@ -48,12 +50,27 @@ export const Channel: React.FC<ChannelProps> = React.memo(({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const headerData = useMemo(() => {
     if (!activeChannel || !HeaderComponent) return null;
+    let name = (activeChannel.data?.name || activeChannel.cid || '') as string;
+    let image = activeChannel.data?.image as string | undefined;
+    if (isDirectChannel(activeChannel) && client.userID && activeChannel.state?.members) {
+      const members = Object.values(activeChannel.state.members) as any[];
+      const other = members.find((m: any) => (m.user_id || m.user?.id) !== client.userID);
+      if (other) {
+        const otherUser = other.user || other || (other.user_id ? client?.state?.users?.[other.user_id] : undefined);
+        name = getUserDisplayName(
+          otherUser,
+          other.user_id || otherUser?.id,
+          other.user_id ? client?.state?.users?.[other.user_id] : undefined
+        ) || name;
+        image = otherUser?.image || otherUser?.avatar || otherUser?.avatar_url || image;
+      }
+    }
     return {
       channel: activeChannel,
-      name: (activeChannel.data?.name || activeChannel.cid || '') as string,
-      image: activeChannel.data?.image as string | undefined,
+      name,
+      image,
     };
-  }, [activeChannel, HeaderComponent, channelUpdateCount]);
+  }, [activeChannel, HeaderComponent, client.userID, client?.state?.users, channelUpdateCount]);
 
   if (!activeChannel) {
     return <EmptyStateIndicator />;

@@ -111,6 +111,8 @@
   align-items: flex-start;
   position: relative;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .ermis-message-list__item--own .ermis-message-list__bubble-wrapper {
@@ -243,7 +245,10 @@
   font-size: var(--ermis-font-size-sm);
   line-height: 1.5;
   word-break: break-word;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* --- Mentions --- */
@@ -301,9 +306,19 @@
   /* contains floats, allowing bottom-right time alignment */
   padding: 8px 10px;
   border-radius: var(--ermis-radius-lg);
-  /* width: 100%; */
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   word-break: break-word;
+  overflow-wrap: anywhere;
   overflow: visible;
+}
+
+.ermis-message-bubble:has(.ermis-code-block),
+.ermis-message-bubble--has-code {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .ermis-message-bubble--own {
@@ -1616,7 +1631,10 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 0.8125rem;
   line-height: 1.6;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .ermis-chat--light .ermis-code-block {
@@ -1638,6 +1656,8 @@
   background-color: rgba(255, 255, 255, 0.04);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   min-height: 28px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .ermis-chat--light .ermis-code-block__header {
@@ -1723,6 +1743,8 @@
   padding: 12px 14px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* Custom scrollbar for code blocks */
@@ -1752,6 +1774,8 @@
   word-break: normal;
   word-wrap: normal;
   tab-size: 2;
+  display: block;
+  min-width: max-content;
 }
 
 .ermis-chat--light .ermis-code-block__code {
@@ -1763,8 +1787,12 @@
 }
 
 /* --- Disable white-space: pre-wrap on message text when it contains code blocks --- */
-.ermis-message-list__item-text:has(.ermis-code-block) {
+.ermis-message-list__item-text:has(.ermis-code-block),
+.ermis-message-list__item-text--has-code {
   white-space: normal;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* ============================================================

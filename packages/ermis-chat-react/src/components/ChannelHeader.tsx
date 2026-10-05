@@ -8,6 +8,7 @@ import { ErmisCallContext } from '../context/ErmisCallContext';
 import { hasTopicsEnabled, isDirectChannel } from '../channelTypeUtils';
 import { isSkippedMember, isFriendChannel } from '../channelRoleUtils';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
+import { getUserDisplayName } from '../utils';
 
 export type { ChannelHeaderProps } from '../types';
 
@@ -58,27 +59,20 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
       }
     });
 
+    const sub3 = client.on('user.updated', (event) => {
+      if (activeChannel && isDirectChannel(activeChannel) && event.user?.id && activeChannel.state?.members?.[event.user.id]) {
+        handleUpdate();
+      }
+    });
+
     return () => {
       sub1.unsubscribe();
       sub2.unsubscribe();
+      sub3.unsubscribe();
     };
   }, [activeChannel, client]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const channelName = useMemo(() =>
-    title || activeChannel?.data?.name || activeChannel?.cid || '',
-    [title, activeChannel?.data?.name, activeChannel?.cid, channelUpdateCount],
-  );
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const channelImage = useMemo(() =>
-    image || (activeChannel?.data?.image as string | undefined),
-    [image, activeChannel?.data?.image, channelUpdateCount],
-  );
-
-  const teamName = undefined;
-
-  // ── Online Status (direct friend channels only) ──
+  // ── Direct Channel other member resolution ──
   const currentUserId = client.userID;
 
   const otherUserId = useMemo(() => {
@@ -90,6 +84,42 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
     }
     return undefined;
   }, [activeChannel, currentUserId, channelUpdateCount]);
+
+  const otherMember = useMemo(() => {
+    if (!activeChannel || !otherUserId) return undefined;
+    return activeChannel.state?.members?.[otherUserId];
+  }, [activeChannel, otherUserId, channelUpdateCount]);
+
+  const otherUser = useMemo(() => {
+    if (!otherMember && !otherUserId) return undefined;
+    return otherMember?.user || (otherMember as any) || (otherUserId ? client?.state?.users?.[otherUserId] : undefined);
+  }, [otherMember, otherUserId, client?.state?.users]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const channelName = useMemo(() => {
+    if (title) return title;
+    if (activeChannel && isDirectChannel(activeChannel)) {
+      const resolvedName = getUserDisplayName(
+        otherUser,
+        otherUserId,
+        otherUserId ? client?.state?.users?.[otherUserId] : undefined
+      );
+      if (resolvedName) return resolvedName;
+    }
+    return activeChannel?.data?.name || activeChannel?.cid || '';
+  }, [title, activeChannel, otherUser, otherUserId, client?.state?.users, channelUpdateCount]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const channelImage = useMemo(() => {
+    if (image) return image;
+    if (activeChannel && isDirectChannel(activeChannel)) {
+      const resolvedImage = otherUser?.image || otherUser?.avatar || otherUser?.avatar_url;
+      if (resolvedImage) return resolvedImage;
+    }
+    return activeChannel?.data?.image as string | undefined;
+  }, [image, activeChannel, otherUser, channelUpdateCount]);
+
+  const teamName = undefined;
 
   const isFriend = useMemo(() => {
     if (!otherUserId || !currentUserId || !activeChannel) return false;

@@ -44,8 +44,6 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: ['3001uhm.sub2s.live'],
     proxy: {
-      // Proxy bucket requests through same-origin to avoid CORS entirely.
-      // In production, configure nginx/CDN to proxy this same path prefix.
       '/__bucket': {
         target: 'https://bucket.ermis.network',
         changeOrigin: true,
@@ -58,6 +56,17 @@ export default defineConfig({
         '**/packages/ermis-chat-sdk/dist/**',
         '**/packages/ermis-chat-react/dist/**',
       ],
+    },
+  },
+  preview: {
+    port: 3001,
+    allowedHosts: ['3001uhm.sub2s.live'],
+    proxy: {
+      '/__bucket': {
+        target: 'https://bucket.ermis.network',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/__bucket/, ''),
+      },
     },
   },
 });

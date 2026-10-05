@@ -1269,8 +1269,8 @@ type CodeSegment =
 function parseCodeBlocks(text: string): CodeSegment[] {
   const segments: CodeSegment[] = [];
   // Match fenced code blocks (```lang\n...\n```) and inline code (`...`)
-  // Fenced must be matched first (greedy triple-backtick before single)
-  const CODE_REGEX = /```(\w*)\n([\s\S]*?)```|`([^`\n]+?)`/g;
+  // Support optional language, spaces, CRLF (\r\n) or LF (\n)
+  const CODE_REGEX = /```([a-zA-Z0-9_-]*)[ \t]*\r?\n([\s\S]*?)```|`([^`\r\n]+?)`/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -1284,7 +1284,7 @@ function parseCodeBlocks(text: string): CodeSegment[] {
       // Fenced code block
       segments.push({
         type: 'code-block',
-        code: match[2].replace(/\n$/, ''), // strip trailing newline
+        code: match[2].replace(/\r?\n$/, ''), // strip trailing newline
         lang: (match[1] || '').toLowerCase(),
       });
     } else if (match[3] !== undefined) {
@@ -1384,6 +1384,9 @@ const LANG_DISPLAY_NAMES: Record<string, string> = {
 /** Fenced code block with syntax highlighting */
 const CodeBlock: React.FC<{ code: string; lang: string; keyProp: string }> = React.memo(
   ({ code, lang, keyProp }) => {
+    if (!code.trim() && !lang) {
+      return null;
+    }
     const highlightedHtml = useMemo(() => highlightCode(code, lang), [code, lang]);
     const displayLang = lang ? (LANG_DISPLAY_NAMES[lang] || lang) : '';
 
@@ -1600,6 +1603,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
     // Use <div> wrapper when code blocks are present (they contain block-level elements like <pre> and <button>)
     // Using <span> would be invalid HTML and break button click events
     const TextWrapper = hasCodeBlocks ? 'div' : 'span';
+    const textClassName = `ermis-message-list__item-text${hasCodeBlocks ? ' ermis-message-list__item-text--has-code' : ''}`;
 
     const attachmentsToRender = useMemo(() => {
       if (!message.attachments || message.attachments.length === 0) return [];
@@ -1631,7 +1635,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
     if (hasAttachments) {
       return (
         <div className="ermis-message-content--with-attachments">
-          {textContent && <TextWrapper className="ermis-message-list__item-text">{textContent}</TextWrapper>}
+          {textContent && <TextWrapper className={textClassName}>{textContent}</TextWrapper>}
           {encryptedPlaceholder}
           <AttachmentList attachments={attachmentsToRender} e2eeGrantReady={e2eeGrantReady} />
         </div>
@@ -1640,7 +1644,7 @@ export const RegularMessage: React.FC<MessageRendererProps> = React.memo(
 
     return (
       <>
-        {textContent && <TextWrapper className="ermis-message-list__item-text">{textContent}</TextWrapper>}
+        {textContent && <TextWrapper className={textClassName}>{textContent}</TextWrapper>}
         {encryptedPlaceholder}
       </>
     );
