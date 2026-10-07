@@ -33,9 +33,9 @@ class MemoryStorage {
     this.requests = this.requests.filter((value) => {
       if (value.cid !== cid) return true;
       return !(
-        (requestId === undefined && throughEpoch === undefined) ||
-        (requestId !== undefined && value.request_id === requestId) ||
-        (throughEpoch !== undefined && value.minimum_epoch <= throughEpoch)
+        throughEpoch !== undefined
+          ? value.minimum_epoch <= throughEpoch
+          : requestId === undefined || value.request_id === requestId
       );
     });
   }
@@ -359,4 +359,42 @@ test('HTTP client sends reconcile, claim, report, and leased upload contract', a
   assert.equal(calls[3].data.request_id, 'request-a');
   assert.equal(calls[3].data.lease_token, 'lease-a');
   assert.equal(calls[3].options.headers['X-Device-ID'], 'device-a');
+});
+
+
+test('production IndexedDB store preserves advanced same-ID work after old ACK across reopen', async () => {
+  const { indexedDB, IDBKeyRange } = require('fake-indexeddb');
+  const { BrowserEncryptionStorage } = require(bundle);
+  global.indexedDB = indexedDB;
+  global.IDBKeyRange = IDBKeyRange;
+  const account = `ack-fence-${require('node:crypto').randomUUID()}`;
+  const storage = new BrowserEncryptionStorage(account);
+  const db = await storage.openDB();
+  try {
+    await storage.saveGroupInfoRefreshRequest({ cid: 'team:a', ...request({ request_id: 'same', minimum_epoch: 7 }) });
+    await storage.saveGroupInfoRefreshRequest({ cid: 'team:a', ...request({ request_id: 'same', minimum_epoch: 9 }) });
+    await storage.saveGroupInfoRefreshRequest({ cid: 'team:a', ...request({ request_id: 'older', minimum_epoch: 6 }) });
+    await storage.saveGroupInfoRefreshRequest({ cid: 'team:b', ...request({ request_id: 'same', minimum_epoch: 6 }) });
+    await storage.deleteGroupInfoRefreshRequests('team:a', 8, 'same');
+    db.close();
+    const reopened = new BrowserEncryptionStorage(account);
+    const reopenedDb = await reopened.openDB();
+    try {
+      let values = await reopened.listGroupInfoRefreshRequests();
+      assert.deepEqual(values.filter(v => v.cid === 'team:a').map(v => v.minimum_epoch), [9]);
+      assert.equal(values.filter(v => v.cid === 'team:b').length, 1);
+      await reopened.deleteGroupInfoRefreshRequests('team:a', 9, 'different');
+      await reopened.deleteGroupInfoRefreshRequests('team:b', undefined, 'other');
+      assert.equal((await reopened.listGroupInfoRefreshRequests()).length, 1);
+      await reopened.deleteGroupInfoRefreshRequests('team:b', undefined, 'same');
+      assert.equal((await reopened.listGroupInfoRefreshRequests()).length, 0);
+    } finally { reopenedDb.close(); }
+  } finally {
+    db.close();
+    await new Promise((resolve, reject) => {
+      const deletion = indexedDB.deleteDatabase(db.name);
+      deletion.onsuccess = resolve;
+      deletion.onerror = () => reject(deletion.error);
+    });
+  }
 });

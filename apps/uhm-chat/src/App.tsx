@@ -12,6 +12,7 @@ import { LoginPage } from '@/pages/LoginPage';
 import { ChatPage } from '@/pages/ChatPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants';
+import { mlsDevLogger } from '@/utils/mlsDevLogger';
 import { UhmModal } from '@/components/custom/UhmModal';
 import { UhmForwardMessageModal } from '@/features/chat/UhmForwardMessageModal';
 import { UhmCallUI } from '@/features/chat/UhmCallUI';
@@ -76,7 +77,7 @@ const chatClientOptions: ErmisChatOptions = {
       window.localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refresh_token);
     }
   },
-  logger: import.meta.env.DEV ? ['info', 'warn', 'error'] : [],
+  logger: import.meta.env.DEV ? mlsDevLogger : [],
 };
 
 const chatClient = ErmisChat.getInstance(

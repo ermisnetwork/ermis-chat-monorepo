@@ -182,3 +182,300 @@ IndexedDB provider/cursor/archive để che lỗi và không resend ciphertext c
   - Compatibility/default: documentation only; no WASM/package/runtime setting changed.
 
 </details>
+
+## 2026-10-03 shared repair ACK correction
+
+Production IndexedDB deletion now lets an epoch-bearing ACK clear only epoch-covered obligations, including matching IDs. Request-only cancellation and per-CID/account isolation stay compatible. Actual SDK store regression uses test-only fake-indexeddb and verifies same-ID epoch7->9, ACK8 retain across DB reopen, ACK9 clear and cancellation/CID isolation. Rebuilt bundles/declarations and repair suites pass **53/0/4**; the four skipped external-distribution checks are retained. [Exact evidence/commands/artifact identity](../bellboy/docs/evidence/local_main_plan/20261003-android-coordinator/README.md), [shared canonical journal](../bellboy/docs/todo/e2ee_mls_group_rebootstrap_plan.md#2026-10-03--shared-ack-fence-verified). Whole-workspace dependency addition hit existing espree hoisting invariant; narrow manifest/lock entry uses the fetched verified cache, while fresh workspace installation remains unverified. Native WASM is unchanged; no flag/schema/route change or environment deployment.
+
+
+## 2026-10-05 — Persisted pending-send epoch recovery (local acceptance pending)
+
+Canonical history remains the [shared parity plan](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md),
+A-004/A-007/CLIENT-005. [Final evidence](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/pending-send-recovery-provenance.json)
+binds source/build hashes. Login/reconnect resume of stored ciphertext now handles
+definitive epoch_stale with existing sync/recovery and one same-generation retry.
+Provider and updated retry record persist before corrected send; same message ID,
+AAD and encrypted metadata retained. Optional full payload field needs no IndexedDB
+version change; legacy text/manifest fallback remains. Ambiguous network errors
+retain original bytes; generation mismatch is terminal; unsent rows are never
+deleted merely because new traffic works. After accepted send/cache publication,
+queued row is removed. Historical HTTP400 remains in DevTools history.
+
+SDK/UHM builds and29 focused regressions PASS (12 recovery,17 existing); fake
+IndexedDB reopen proves adapter semantics only, not real browser/native durability.
+Owner final-source reload/new exchange pending with collector active first. Vite
+HMR interval is unverified; require explicit retry receipts for exact old-queue
+recovery. TEST/PRODUCTION excluded, no broad rollout gate closed.
+
+### Axios HTTP400 response-shape follow-up — 2026-10-05
+
+[Supplement evidence](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/pending-send-axios-provenance.json)
+records classifier reproduction/fix: prefer Bellboy response.data.message over
+Axios generic error.message. Actual Axios stale/non-stale/direct-send regression
+coverage added. Serial32/0/0 PASS; parallel31/1/0 old standard-upload fixture
+failure retained with root cause unverified. SDK/UHM builds PASS. Fixed enum
+pending_send_failed categories add no payload logging. Mobile capture gap
+invalidates complete runtime acceptance of prior owner confirmation; collectors
+restored and final browser pending-send acceptance remains UNVERIFIED. Reuse
+the shared canonical plan, preserve all prior failed reports and persistent data.
+
+
+## 2026-10-05 — Archive permission6 backlog pause
+
+[Canonical journal](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md#2026-10-05--archive-permission-pause-and-coalesced-drain-locally-verified),
+[bound source/build evidence](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/archive-backlog-provenance.json).
+Web retains permission-denied encrypted uploads/protected checkpoints, suppresses
+regeneration/query loops and coalesces concurrent drains. Other eligible epochs
+continue; denied work is never marked acknowledged. Explicit
+`retryBlockedArchiveUploads(channelType, channelId)` reuses bytes after server
+rights remediation. Fields are additive, no IndexedDB upgrade; old SDK rollback
+retries paused rows. Server authorization remains account/epoch based; device
+change is not a proven root cause. Fixed capture enums include archive result;
+no raw payload/token logs. SDK/UHM builds,37 focused +40 recovery tests PASS.
+Invalid fixture/old standard-attachment timing failures retained; broader
+crash/concurrency/cursor/history gates remain OPEN. Prepared owner Web reload/
+PIN-unlock gate remains UNVERIFIED; do not clear stores or fake historical ACKs.
+
+
+### Owner runtime result for permission backlog
+
+[Observed result](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/archive-backlog-owner-result.json):
+owner browser/tab reopen after reported crash, all3 read/capture0/no archive
+errors. Logs Android2 full checkpoint chains, Web/iOS2 decode/provider pairs;
+source/artifacts match. Bounded reopen/exchange/error non-repetition PASS.
+Exact blocked blob inventory, successful valid archive ACK, browser crash cause
+and broad durability/history/rollout gates remain OPEN.
+
+
+## 2026-10-05 — Durable archive ACK retirement and batch capture
+
+[Canonical journal](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md#2026-10-05--ack-before-retirement-and-batched-capture-locally-verified),
+[final provenance](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/archive-ack-batch-provenance.json).
+Real server ACK/checkpoint must commit before pending archive deletion; aborted
+local writes retain unchanged idempotent work. recipient_set_stale remains a
+rewrap decision, not an ACK. Four archive writes now reject transaction abort/
+request errors explicitly. Local86/0 SDK cases pass, failed82/4 candidate retained.
+No DB/public API/backend change; old SDK rollback retains its original window.
+
+Capture now batches<=32 fixed markers,200ms timer/finish flush and5s deadline.
+Collector validates all markers before logging; legacy single marker still works.
+Lost-marker count is preserved; timestamps are batch receipt time. Source tests
+5 frontend +7 parser PASS and consumer build PASS. Owner reports tab/DevTools
+freeze, not a process crash; root cause still unknown. Source/artifact13/6 bound,
+new Web collector11581; owner new-E2EE-group valid ACK smoke pending. No broad
+history/cursor/ratchet/KP/GI/rollout closure or prior-runtime rebinding.
+
+
+## 2026-10-05 — Repeated group query payload and iOS initial-join failure
+
+[Canonical plan](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md),
+[new-group failure](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/archive-ack-new-group-owner-result.json),
+[same-group reopen](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/new-group-ios-reopen-owner-result.json).
+Web selected Android/iOS KPs, emitted2 durable archive ACK operations; owner
+Web/Android worked but initial iOS read/send failed. Uhm Dev relaunch then emitted
+external join/commit acceptance/receipt finalization/ready; owner same group all3
+worked, capture0. Android collector255 disconnect precedes that exchange; native
+Android runtime evidence UNVERIFIED. Do not call initial join or broad gates PASS.
+
+Channel.query now retires full E2EE constructor payload after acknowledged
+same-channel response, before local hydration. Failed HTTP keeps exact payload;
+newer in-flight data and non-MLS behavior retained. Three same-ID HTTP200 queries
+are create/watch/read, not proven duplicate bootstrap. Actual Channel focused
+8PASS/0FAIL; prior baseline2PASS/3FAIL retained; SDK/UHM buildsPASS.
+Strict native join parser13PASS saves only fixed enums/booleans, no identifiers
+or raw error text. Fresh initial-join owner acceptance on all3 still pending.
+
+## 2026-10-05 — External key rotation pending-delivery compatibility
+
+Mode: research/local rehearsal against Bellboy External with Datastore db637807
+and Concierge 294229b. Its adapter passed a 100-cycle/10-room reconnect probe.
+An authenticated outage exposed a Web SDK acceptance bug: user B replayed the
+durably accepted Commit to epoch 2, while user A had cleared its pending Commit
+after Bellboy's 503 `mls_transition_pending` and stayed at epoch 1.
+
+`EncryptionManager.keyRotation` now accepts only that typed response with a
+valid operation UUID, retryable flag and the exact requested next epoch. It
+merges/persists the original Commit and returns optional `delivery_pending`
+and `operation_id`. Generic outage and mismatched receipts retain their prior
+error behavior. SDK README documents the additive result. Existing unrelated
+dirty source changes remain preserved; no WASM/storage/dependency update.
+SDK build passed; focused acceptance/epoch-stale tests and a fresh authenticated
+outage are being verified. This does not close other mutation acceptance,
+nonzero-generation, browser crash, native-client or TEST/production gates.
+
+Local follow-up PASS: SDK build and nine acceptance/epoch-stale tests. On two
+existing test identities, an 8-second Concierge outage produced accepted pending
+503; the creating peer merged/saved epoch 2 and its peer replayed the Commit to
+epoch 2. Both message directions decrypted after recovery, GroupInfo matched
+epoch 2, and stale epoch/generation requests were rejected. Bellboy was not
+restarted for recovery. SDK source/build hashes and remaining gates are recorded
+in `bellboy-external-release/docs/release/evidence/2026-10-05/sdk-source-manifest.json`.
+This local monorepo SDK fix has not been promoted to an external SDK/UI artifact.
+
+
+## 2026-10-05 local External generation compatibility follow-up
+
+Ordinary mutations use the installed `_groupGenerations` marker and compare its
+explicit GroupId against OpenMLS before staging a Commit. Rotation, member add/
+remove, self-left cleanup and per-topic request/codec paths transmit this identity.
+Batch external join stores the verified topic marker. Generation 0 omits GroupId.
+No WASM/IndexedDB schema change and no external SDK artifact promotion.
+
+Actual Web3002 + External Docker: controlled loss/expired-repair fixture activated
+generation 1; B recovered historical Welcome. Rotation to epoch 2, removal to 3,
+re-add to 4, bidirectional decrypt and reload persistence passed. Invalid/absent/
+legacy GroupId at matching epoch failed closed. Build +31 focused tests passed.
+Other mutation pending/ambiguous acceptance and crash durability remain open;
+gated-topic and self-left full live/outage matrices are not closed by codec tests.
+
+
+The epoch-5 outage also exposed a delayed-Commit mixed-cursor gap. Global sync
+now compares the installed epoch with existing same-generation/GroupId recovery
+metadata and replays from current membership when behind. Healthy sync adds no
+network call; gap repair scans O(membership history) in 100-event pages. An epoch-6
+live regression kept B at 5/needs_retry until Commit delivery, then ordinary sync
+recovered 6 and two-way decrypt passed, without stale-send/rejoin/API restart.
+SDK build +44 focused tests passed; earlier failure is retained. External SDK
+promotion and large-history recovery budgets remain gates.
+
+
+### 2026-10-06 — External ordinary mutation checkpoint follow-up (local)
+
+Scope: bellboy-external-release + local SDK/Web3002; no internal backend modification,
+external UI promotion, commit/push or environment deployment. Added atomic staged/accepted/
+merged mutation checkpoints in existing IndexedDB stores, exact own-Commit reconciliation,
+unknown-outcome retention and saved-artifact retries. Custom storage adapters need the new
+atomic primitive before ordinary mutations. New channel/topic bootstrap and batch external
+join checkpointing, cross-tab/provider concurrency and full crash coverage remain open.
+External dedicated-topic backend now uses existing atomic channel-create/outbox reservation
+instead of pre-writing the next epoch. Existing SQL bundle and both old dependency pins stay.
+Source/image-specific runtime evidence is in External release docs; prior images are historical.
+
+Topic regressions added strict re-add/removal timestamp checks, queued-ghost membership
+refresh, newer-generation Welcome replacement, readiness-cache invalidation through the
+existing atomic Welcome coordinator, and REST Base64 normalization before receive/replay.
+Encrypted cache rows without plaintext are not decrypt evidence. SDK build and 80 focused
+tests pass, including real WASM encoded-history receive/waterfall and checkpoint failures.
+Real Web tests recovered ordinary mutation journals at renderer crash boundaries before HTTP
+and after acceptance/before merge using replacement pages in the same browser context.
+The old pre-fix cursor did not automatically rewind a skipped envelope; explicit SDK waterfall
+replay recovered it. Full browser/process restart, all interruption boundaries and cross-tab
+coordination remain open. No SQL schema or dependency pin changes were introduced by these fixes.
+
+### 2026-10-06 — Internal Uhm Web future-epoch receive baseline (local)
+
+Owner iOS/Android peers read new messages while Web reports epoch/future. The internal SDK now rejects unprocessed Commit gaps instead of acknowledging them, restores provider/group together, preserves failed scope prefix while reaching authoritative rewind discovery, and requests gated/cooldown global sync after persisted realtime future-epoch failure. Channel realtime Commit/own-ACK/Welcome awaits global gate and retains session identity. No backend wire/schema or data reset; no external SDK promotion in this change.
+
+Real-WASM baseline16PASS/2FAIL and Channel gate baseline0PASS/3FAIL/9SKIP retained; final affected tests100PASS/0FAIL/0SKIP, build/types exit0. Vite3001 serves matching code; native artifacts unchanged. Physical original-message recovery/new reads NOT YET VERIFIED; CLIENT-005-MEMBER-REJOIN FAIL/OPEN and kick/reinvite halted. See [canonical journal](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md#2026-10-06--future-epoch-protocol-correction-verified-locally-retained-state-browser-retest-pending) and [bound evidence](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/membership-rejoin/r02-future-epoch-fix-provenance.json).
+
+### 2026-10-06 — Internal Web peer-membership fence and scoped diagnostics follow-up
+
+Previous100-case local correction still FAILS physically: Web future epoch persists after sync, native peers read. Retained failed report remains authoritative; kick/reinvite halted. Peer member.updated was independently reproduced replacing current-user membership/moving replay fence. Channel producer now restricts current membership to authenticated user; MLS reader rejects explicitly peer identity and falls back to own roster, preserving ownerless legacy projections. No data/provider reset or backend contract change.
+
+Hidden SDK info logs made owner Console-copy instructions unusable. DEV host now prints/captures validated scope SHA256 + safe epoch/replay enum metadata (bounded128/10s; no raw IDs/payload/errors). Matching collector restart and fresh retained-state refresh required. Local109 SDK cases,13 host diagnostic cases,24 parser cases pass; SDK build/types pass. Full Uhm typecheck still fails unrelated poll narrowing, retained. Actual-message recovery and broader CLIENT-005-MEMBER-REJOIN remain FAIL/OPEN. [Canonical plan](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md), [prior corrected-source failure](../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/membership-rejoin/r02-future-epoch-retest-failed-result.json).
+
+### 2026-10-06 — Own Commit acknowledgement fence
+
+Internal Web SDK now routes own-tagged WS/scope events through processOwnMlsCommit. Exact durable candidate still reconciles first; unapplied event is authenticated through WASM rather than skipped by logical device ID. Genuine missing self candidate stays failed, preserving provider/cursor; no auto rejoin/reset. Local WASM/durability regressions pass; retained-state MLS-Join-04 physical acceptance pending. Canonical journal: ../bellboy/docs/todo/e2ee_mls_android_parity_plan.md (CLIENT-005-MEMBER-REJOIN FAIL/OPEN). No external artifact promotion.
+
+### 2026-10-06 — External bootstrap and batch join checkpoint follow-up (local)
+
+Scope: bellboy-external-release plus this local SDK/Web3002. Bootstrap preparation
+keeps its Commit staged and checkpoints the complete encoded create request
+before HTTP. Exact Welcome/tree or authoritative matching GroupInfo confirms
+acceptance; an unknown response preserves the original artifacts and metadata.
+Batch external-join checkpoints each candidate before POST and explicitly merges
+its external Commit despite OpenMLS already reporting N+1. Provider, marker,
+first-decryptable epoch and journal deletion commit together. Storage adapters
+must support atomic readiness; reconcile/drain these journal kinds before an
+older SDK rollback. Same-manager in-flight sync retries and duplicate topic
+creation for an unresolved parent are blocked; cross-tab serialization remains open.
+
+Real Web renderer recovery passes bootstrap before HTTP/after acceptance and
+two-topic batch before HTTP/lost response. SQL absence/unchanged epoch proves
+the pre-HTTP boundaries; journals clear and two-way decrypt passes at bootstrap
+epoch 1/batch epoch 2. Batch fixtures use a synthetic second owner-device
+KeyPackage and suppress automatic single-join only for fixture CIDs. Same browser
+contexts are preserved; this does not prove a full browser/process crash matrix.
+The rejected empty-Welcome setup and earlier cache/sync failures remain recorded.
+External creation now invalidates membership cache after commit and GroupInfo
+checks current SQL membership. No dependency-pin or SQL migration changes in
+this follow-up; internal bellboy backend was not edited by this task.
+
+Final SDK build/types +119 focused tests, Rust125 tests, Datastore80k command
+routing and Concierge adapter100 reconnect cycles pass. Matching-image generated
+d6→target migration/backfill/resume/verify and PostgreSQL rollback pass with
+explicit clone-only current-GroupInfo projection; stale-source verify still
+fails and remains evidence. See [External follow-up result](../bellboy-external-release/docs/release/evidence/2026-10-06/bootstrap-followup/result.json).
+Single external-join unknown outcomes, partial enable activation, full crash/
+generation-replacement matrix, shared-provider concurrency, external SDK/UI
+adoption, representative legacy migration/cryptographic rollback and TEST
+soak/canary remain gates. Status: dependency-compatible but rollout-unverified.
+No commit/push, external SDK publication or environment rollout.
+
+### 2026-10-06 — External single external-join journal follow-up (local)
+
+The public single-join SDK path now checkpoints its staged external Commit
+before HTTP instead of clearing it on unknown response. Exact historical
+Commit, successful exact request or validated accepted-pending receipt merges
+the original candidate. Recovery keeps the saved Commit; a retry rejection
+cannot disprove original acceptance. Initial timeout/rate-limit errors remain
+pending, and definite initial input/authorization rejection clears the candidate.
+The final atomic checkpoint preserves Welcome fallback metadata and writes
+provider, marker, first-decryptable epoch and journal deletion together.
+
+SDK build/types and 131 focused tests pass, including real-WASM generation0/1
+checkpoint faults and exact retry. Real Web single joins recover after lost
+response and before-HTTP renderer crash, reach epoch2, clear journals and decrypt
+both ways. Same-context/synthetic-owner-device fixture limits still apply.
+Backend/image digest is unchanged from the bootstrap follow-up; no new SQL or
+pin changes, internal Bellboy edit or external artifact publication. See
+[single-join evidence](../bellboy-external-release/docs/release/evidence/2026-10-06/single-join-followup/result.json).
+Partial enable activation, full crash/generation-replacement and multi-tab
+provider matrix, external SDK/UI adoption, representative legacy/cryptographic
+rollback and TEST soak/canary remain gates. Status remains dependency-compatible
+but rollout-unverified.
+
+### 2026-10-07 — Owner-authorized Web source consolidation
+
+The reviewed field-replay changes are now integrated into the main
+`ermis-chat-monorepo` checkout on `feature/key-package`, retaining the other
+task's bootstrap, single/batch external-join journals, in-flight exclusions and
+Welcome-fallback metadata. The only integration conflict keeps the in-flight
+skip before retained-rejoin recovery. No Git commit or branch merge was made.
+
+Own-Commit replay and owner-triggered retained-state repair remain separate
+modules. Repair preserves plaintext, pending ciphertext and scope cursors;
+unknown outcomes retain the exact candidate, and a definite initial rejection
+restores prior provider/group state. Corrupt/missing-provider restore fails
+closed to preserve private KeyPackages. Old history recovery and cross-tab
+provider coordination remain open.
+
+The main SDK matches the reviewed combined candidate. Actual main SDK build,
+typecheck and141focused tests pass; React and full Uhm build pass. Port3001 now
+serves main source; real Chromium/WASM/IndexedDB synthetic reload and encryption
+checks pass with capture0. Authenticated combined browser/device acceptance
+remains unverified. Full evidence is recorded in the
+[canonical journal](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md).
+[Integration evidence](../bellboy/docs/evidence/local_main_plan/20261007-web-source-review/)
+preserves pre-merge status, reviewed patch and final main tests. Prior physical
+FINAL exchange belongs to the earlier isolated artifact and is not transferred
+to the new combined artifact. The old worktree remains a retained snapshot;
+new development uses the main checkout. No backend/schema/WASM upgrade,
+external package publication or TEST/PRODUCTION deployment in this integration.
+
+
+### 2026-10-07 — Combined source physical messaging follow-up
+
+Owner confirms all three platforms send/read MERGE messages and capture0. The
+bounded Web/Android/iOS logs contain fresh decoded/provider checkpoints, same
+process identities and zero reviewed main-source/generated-artifact drift.
+Combined ordinary send/receive is now **PASS bounded**, superseding the preceding
+authenticated-combined-unverified status.
+[Result](../bellboy/docs/evidence/local_main_plan/20261007-web-source-review/combined-device-result.json)
+and [canonical journal](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md#2026-10-07--combined-source-merge-exchange-functional-pass-bounded).
+
+Web historical cache retries and past-generation mismatch remain OPEN; this
+exchange does not establish full cursor/provider/proof/ratchet atomicity,
+selected/private server-pool reconciliation, cross-tab correctness or natural
+auth expiry. No new membership repetitions, reset, commit/push or deployment.

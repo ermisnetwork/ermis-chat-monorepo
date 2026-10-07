@@ -47,7 +47,18 @@ async function loadActualWasm() {
 
 function managerStorage() {
   const storage = memoryStorage();
+  const mutations = new Map();
   return Object.assign(storage, {
+    async listPendingMlsMutations() { return [...mutations.values()]; },
+    async saveMlsMutationCheckpoint(checkpoint) {
+      this.providers.set(`${checkpoint.user_id}:${checkpoint.device_id}`, Uint8Array.from(checkpoint.provider_bytes));
+      if (checkpoint.marker) this.groups.set(checkpoint.cid, checkpoint.marker);
+      else this.groups.delete(checkpoint.cid);
+      if (checkpoint.pending) mutations.set(checkpoint.cid, checkpoint.pending);
+      else mutations.delete(checkpoint.cid);
+      if (checkpoint.readiness) this.states.set(checkpoint.cid, { ...checkpoint.readiness });
+      else if (checkpoint.readiness === null) this.states.delete(checkpoint.cid);
+    },
     async getDeviceId() {
       return 'device-dave';
     },
@@ -117,9 +128,9 @@ test('promoted artifact and EncryptionManager expose only typed Welcome fallback
   );
 
   const order = [];
-  const originalCheckpoint = storage.saveJoinCheckpoint.bind(storage);
-  storage.saveJoinCheckpoint = async (checkpoint) => {
-    order.push('checkpoint');
+  const originalCheckpoint = storage.saveMlsMutationCheckpoint.bind(storage);
+  storage.saveMlsMutationCheckpoint = async (checkpoint) => {
+    order.push(checkpoint.pending ? checkpoint.pending.accepted ? 'accepted' : 'staged' : 'merged');
     await originalCheckpoint(checkpoint);
   };
   manager.e2eeClient = {
@@ -141,7 +152,8 @@ test('promoted artifact and EncryptionManager expose only typed Welcome fallback
   };
   const external = await manager.joinExternal('team', 'artifact-typed-welcome', 'team:artifact-typed-welcome');
   assert.equal(external.status, 'joined_external');
-  assert.deepEqual(order, ['server', 'checkpoint', 'upload']);
+  assert.deepEqual(order, ['staged', 'server', 'accepted', 'merged', 'upload']);
+  assert.equal((await storage.listPendingMlsMutations()).length, 0);
   const restarted = new PartialWelcomeJoinCoordinator(memoryStorage(storage.states));
   const restartedState = await restarted.getState('team:artifact-typed-welcome');
   assert.equal(restartedState.status, 'joined_external');
@@ -310,4 +322,53 @@ test('JOIN checkpoint failure never publishes a ready state', async () => {
   );
   assert.equal((await restarted.getState('team:checkpoint-failure')).status, 'pending_external_join');
   assert.equal(storage.groups.has('team:checkpoint-failure'), false);
+});
+
+
+test('unreadable persisted provider fails initialization without replacing private material', async () => {
+  const wasm = await loadActualWasm();
+  const storage = managerStorage();
+  const corrupt = Uint8Array.from([255, 0, 17]);
+  let writes = 0;
+  storage.loadProviderState = async () => corrupt;
+  storage.saveProviderState = async () => { writes += 1; };
+  const client = { activeChannels: {}, deviceId: 'device-dave', latestKeyPackagesRemaining: 100, dispatchEvent() {} };
+  const manager = new EncryptionManager();
+  await assert.rejects(() => manager.initialize(client, 'dave', { storage, wasmModule: wasm }));
+  assert.equal(writes, 0);
+  assert.deepEqual(await storage.loadProviderState(), corrupt);
+});
+
+test('actual WASM private KP survives provider serialization and is consumed only once', async () => {
+  const wasm = await loadActualWasm();
+  const senderProvider = new wasm.Provider();
+  const sender = new wasm.Identity(senderProvider, 'sender');
+  const original = new wasm.Provider();
+  const receiver = new wasm.Identity(original, 'receiver');
+  const publicPackage = receiver.key_package(original);
+  const persisted = original.to_bytes();
+  const group = wasm.Group.create_with_cid(senderProvider, sender, 'messaging:kp-reopen-followup');
+  const bundle = group.add_members(senderProvider, sender, [publicPackage]);
+  group.merge_pending_commit(senderProvider);
+  const reopened = wasm.Provider.from_bytes(persisted);
+  const joined = wasm.Group.join_with_welcome_typed(reopened, bundle.welcome, group.export_ratchet_tree());
+  assert.equal(joined.epoch(), group.epoch());
+  const consumed = wasm.Provider.from_bytes(reopened.to_bytes());
+  assert.throws(() => wasm.Group.join_with_welcome_typed(consumed, bundle.welcome, group.export_ratchet_tree()),
+    error => error.code === wasm.MlsErrorCode.NoMatchingKeyPackage);
+});
+
+
+test('retained identity without its private provider cannot silently create an empty store', async () => {
+  const wasm = await loadActualWasm();
+  const storage = managerStorage();
+  const provider = new wasm.Provider();
+  const identity = new wasm.Identity(provider, 'dave');
+  storage.loadIdentity = async () => identity.to_bytes();
+  let writes = 0;
+  storage.saveProviderState = async () => { writes += 1; };
+  const manager = new EncryptionManager();
+  const client = { activeChannels: {}, deviceId: 'device-dave', latestKeyPackagesRemaining: 100, dispatchEvent() {} };
+  await assert.rejects(() => manager.initialize(client, 'dave', { storage, wasmModule: wasm }), /no persisted provider/);
+  assert.equal(writes, 0);
 });

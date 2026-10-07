@@ -8,7 +8,7 @@ const BASE64_LOOKUP = (() => {
   return lookup;
 })();
 
-const ENCRYPTION_CHANNEL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'group_info'] as const;
+const ENCRYPTION_CHANNEL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'group_info', 'group_id'] as const;
 const PROTOCOL_BYTE_FIELDS = ['commit', 'welcome', 'ratchet_tree', 'proposal', 'group_id'] as const;
 
 export const E2EE_BYTES_HEADER = 'X-Ermis-E2EE-Bytes';

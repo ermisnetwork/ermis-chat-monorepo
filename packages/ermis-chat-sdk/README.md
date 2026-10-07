@@ -47,6 +47,58 @@ or retry an external commit already accepted by Bellboy.
 
 ## Client Configuration
 
+### MLS mutations with delayed delivery
+
+<details><summary>Change log</summary>
+
+- `2026-10-07`: Internal Web source consolidation preserves bootstrap/single-join journals together with retained-state repair and authenticated own-Commit replay.
+  - Main `ermis-chat-monorepo` is the active source. Recovery first skips an in-flight request, then handles a saved retained-rejoin candidate; neither branch replaces the other.
+  - An unreadable persisted provider, or a retained identity with no provider, fails initialization while keeping stored data for explicit repair. A fresh provider cannot reconstruct uploaded private KeyPackages.
+  - Owner-triggered encrypted-state repair stages a retained external-rejoin candidate before HTTP. Exact accepted Commit/epoch/generation/GroupId settles it; ambiguous outcomes retain the candidate, and definite initial rejection restores prior state. Plaintext, ciphertext backlog and scope cursors are preserved. Old ciphertext without plaintext remains pending for authorized archive recovery.
+  - Custom adapters must support the existing atomic mutation primitive. Older SDK rollback must first settle retained-rejoin journals. Build/unit evidence does not establish combined browser/device acceptance or cross-tab provider serialization; see the [canonical implementation journal](../../../bellboy/docs/todo/e2ee_mls_android_parity_plan.md).
+
+- `2026-10-06`: Single external-join uses the durable mutation journal before HTTP.
+  - Unknown responses preserve the exact staged external Commit; matching historical Commit, successful exact-request response or a validated accepted-pending receipt completes the original merge. Retry keeps the saved Commit instead of fetching a new GroupInfo and creating another candidate.
+  - Staged N+1 cannot authorize readiness or encryption. Merged provider, marker, first-decryptable epoch, existing Welcome-fallback metadata and journal deletion commit atomically. Initial timeout/rate-limit failures and rejected retries keep the unknown candidate; definite initial authorization/input rejection clears it.
+  - Custom storage adapters need the atomic mutation checkpoint as well as the existing Welcome JOIN checkpoint. A missing primitive fails before network I/O. This shares the bootstrap/batch SDK rollback requirement below; full crash/generation-replacement and multi-tab/provider concurrency remain gates.
+
+- `2026-10-06`: Channel/topic bootstrap and batch topic external-join now retain durable candidates before HTTP.
+  - Preparation leaves the bootstrap Commit staged at epoch 0. `Channel.create`, direct-channel creation and `Channel.createTopic` bind the complete encoded request before sending; custom flows should use `postMlsBootstrap(cid, url, encodedPayload)` after preparation. Preparation without complete metadata cannot invent a create request during recovery.
+  - Acceptance requires exact generation/GroupId and the original Welcome/tree or signed GroupInfo, rather than HTTP 200 or a numeric epoch. An existing channel can return 200 for a different creator's bundle. Solo bootstrap and enable also require matching authoritative GroupInfo.
+  - Batch external-join persists each staged group with its exact external Commit. OpenMLS reports N+1 before merge, so that number cannot acknowledge a staged candidate. Exact historical Commit or matching per-topic success completes the original merge. Missing/ambiguous outcomes remain non-ready; retry sends the saved artifact once per sync.
+  - Persistence: merged join provider, generation marker, first-decryptable epoch and journal deletion are atomic. Custom adapters must handle `MlsMutationCheckpoint.readiness` in the same transaction: undefined preserves it, null deletes it, an object replaces it. A null group marker deletes the CID marker.
+  - Concurrency: sync does not resend an initial bootstrap/batch join still in flight. A parent with an unresolved bound topic create refuses another random-CID create. This does not provide cross-tab or full shared-provider serialization.
+  - Compatibility: existing public request fields, WASM and IndexedDB version remain unchanged. Code expecting a merged group immediately from `createE2eeChannel`/`createE2eeTopic` must wait for accepted creation. Single external-join unknown responses, the full interruption matrix and multi-tab/provider concurrency remain gates. No external SDK publication.
+  - SDK rollback: deploy the matching storage adapter with these journal kinds. Reconcile/drain pending bootstrap and batch-join journals before returning to older SDK code that cannot recover them; unchanged IndexedDB version does not make that rollback safe.
+
+- `2026-10-06`: Rotation, add/remove member, self-left eviction and gated-topic member-add retain device-local mutation checkpoints before HTTP.
+  - Re-add safety: ignore an older removal only when authenticated current active membership has a strictly newer creation timestamp. Refresh queued ghost membership before a mutation; preserve active users unless explicitly removed or re-added.
+  - Welcome recovery: a Welcome carrying a newer generation installs its group over an older restored group at the same CID; the older handle is released after the JOIN checkpoint succeeds.
+  - Decrypt recovery: the Welcome checkpoint clears cached external-join readiness as well as storage. Cached encrypted envelopes or rows without plaintext cannot satisfy a replay/dedup check.
+  - Historical bytes: receive and waterfall normalize Base64/legacy byte arrays through the existing strict codec before WASM and ciphertext hashing; malformed encoded input stays retryable in replay.
+  - Reason: a timeout, lost reply or per-topic error string cannot prove the original Commit was rejected.
+  - Integrator action: custom storage adapters must implement `saveMlsMutationCheckpoint` atomically across provider, group marker and pending record, plus `listPendingMlsMutations`. Unsupported adapters fail before HTTP. The default IndexedDB adapter uses existing meta/groups stores, without a DB version change.
+  - Recovery: exact next-epoch pending receipts merge the original candidate; unknown outcomes remain non-ready and block new mutation/encryption for that group. Sync replays within the current membership boundary, matches exact Commit/generation/GroupId, or retries the saved request once per sync. It never regenerates Commit or consumes fresh KeyPackages for that retry. A failed retry does not disprove original acceptance.
+  - Persistence: acceptance is checkpointed before merge; merged provider and journal deletion are then atomic. Own-device Commit events must reconcile pending candidates instead of always being skipped. Competing authenticated Commits may resolve a losing candidate after successful application.
+  - Limits: this change covers ordinary installed-group mutations and topic member-add, not new channel/topic bootstrap, batch external join or all multi-tab/device/generation-replacement crashes. Those remain separate gates. No external SDK/UI package publication.
+
+- `2026-10-05`: Global encryption sync compares its installed epoch with the existing authenticated recovery-discovery snapshot and replays from the current membership boundary when it is behind in the same generation/GroupId.
+  - Reason: a delayed outbox Commit keeps its original acceptance timestamp, which can precede an already saved application cursor.
+  - Integrator action: pending protocol delivery reports `needs_retry`; retry sync after delivery. The client must not treat a numeric server epoch as a locally installed/decryptable epoch.
+  - Compatibility: no sequence contract, schema change, group replacement or extra Commit. Healthy sync adds no network call. A lagging scope scans O(current membership history), in pages of 100; large-history recovery remains a load gate.
+
+- `2026-10-05`: Ordinary MLS mutations and gated-topic bundles send the installed `group_generation` and canonical Base64 `group_id`.
+  - Reason: preserve correct key rotation and membership operations after rebootstrap.
+  - Integrator action: update this SDK together with Bellboy's optional mutation identity fields; generation > 0 requires an exact local OpenMLS GroupId. Historical/mismatched local markers fail before a Commit is staged or sent.
+  - Compatibility: generation 0 omits GroupId. No WASM or IndexedDB schema change. This is the local monorepo test SDK; no external SDK artifact has been promoted.
+
+- `2026-10-05`: `EncryptionManager.keyRotation()` recognizes a validated HTTP 503 `mls_transition_pending` response for the requested next epoch.
+  - Reason: Bellboy has already accepted that Commit into its durable outbox; clearing it leaves the creating device at the previous epoch.
+  - Integrator action: the result may include `delivery_pending: true` and `operation_id`. The original pending Commit is merged and saved once. Wait for durable delivery/reconcile before assuming peers have advanced; do not generate another Commit to retry this operation.
+  - Compatibility: ordinary success still returns `{ epoch }`. Generic 503, invalid operation identity, authorization errors and a mismatched accepted epoch are not treated as acceptance. No IndexedDB schema or WASM change.
+
+</details>
+
 Cloud mode:
 
 ```ts

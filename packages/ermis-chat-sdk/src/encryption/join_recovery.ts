@@ -53,6 +53,11 @@ export class PartialWelcomeJoinCoordinator {
 
   constructor(private readonly storage: EncryptionStorageAdapter) {}
 
+  /** Reload readiness after a separate atomic mutation checkpoint updates it. */
+  invalidateCachedState(cid: string): void {
+    this.states.delete(cid);
+  }
+
   async getState(cid: string): Promise<ExternalJoinReadinessState | null> {
     const cached = this.states.get(cid);
     if (cached) return cached;

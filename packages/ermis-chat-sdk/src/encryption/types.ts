@@ -29,6 +29,8 @@ export interface StoredMessage {
 
   // Decrypted content (MessageContent::Standard)
   text: string;
+  /** SHA-256 of the exact MLS ciphertext that produced this cached plaintext. */
+  mls_ciphertext_hash?: string;
   attachments?: unknown[];
   sticker_url?: string;
   poll_type?: string;
@@ -172,6 +174,9 @@ export interface PendingArchiveUpload {
   upload: unknown;
   retry_count: number;
   created_at: number;
+  /** Missing on legacy rows means queued. Permission denial requires explicit retry. */
+  status?: 'queued' | 'permission_denied';
+  last_error_code?: number;
 }
 
 export interface PendingDeferredArchive {
@@ -237,6 +242,8 @@ export interface EpochArchiveCheckpoint {
   sponsored_rewrap_count?: number;
   materialization: Partial<Record<ArchiveScope, ArchiveMaterializationStatus>>;
   coverage_degraded?: boolean;
+  /** Preserve protected epoch material when the server refuses this epoch. */
+  permission_denied?: boolean;
   last_error?: string;
   captured_at: number;
   updated_at: number;
@@ -314,6 +321,40 @@ export interface RestoreProgressRecord {
  * NOTE: `getDeviceId()` is a GLOBAL (per-browser) operation and does NOT
  * require a userId — it identifies the physical device, not the user.
  */
+/** Device-local staged Commit. Never infer acceptance from a server epoch alone. */
+export interface PendingMlsMutation {
+  cid: string;
+  expected_epoch: number;
+  group_generation: number;
+  group_id: Uint8Array | null;
+  commit: Uint8Array;
+  ghost_user_ids: string[];
+  accepted: boolean;
+  /** Only an in-memory retry hint; the acceptance checkpoint precedes merge. */
+  merged?: boolean;
+  request: {
+    kind: 'rotation' | 'add' | 'remove' | 'eviction' | 'topic_add' | 'bootstrap_channel' | 'bootstrap_topic' | 'enable' | 'topic_join' | 'external_join';
+    channel_type: string;
+    channel_id: string;
+    target_user_ids: string[];
+    body: Record<string, unknown>;
+    /** Bound complete creation request; preparation alone cannot create a channel. */
+    query_path?: string;
+    query_body?: Record<string, unknown>;
+  };
+}
+
+export interface MlsMutationCheckpoint {
+  user_id: string;
+  device_id: string;
+  provider_bytes: Uint8Array;
+  cid: string;
+  marker: unknown;
+  pending: PendingMlsMutation | null;
+  /** When supplied, update join readiness in this same atomic checkpoint. */
+  readiness?: ExternalJoinReadinessState | null;
+}
+
 export interface EncryptionStorageAdapter {
   // ---- Device ID (global, per-browser) ----
   getDeviceId(): Promise<string>;
@@ -359,6 +400,9 @@ export interface EncryptionStorageAdapter {
   // ---- Provider State ----
   saveProviderState(userId: string, deviceId: string, providerBytes: Uint8Array): Promise<void>;
   loadProviderState(userId: string, deviceId: string): Promise<Uint8Array | null>;
+  /** Atomic provider, marker, journal and optional readiness; required for mutations/bootstrap/batch join. */
+  saveMlsMutationCheckpoint?(checkpoint: MlsMutationCheckpoint): Promise<void>;
+  listPendingMlsMutations?(): Promise<PendingMlsMutation[]>;
 
   // ---- Sync Timestamps ----
   saveSyncTimestamp(cid: string, timestamp: string): Promise<void>;
@@ -519,6 +563,8 @@ export interface GetKeyPackagesByCidResponse extends APIResponse {
 // See EncryptionManager.evictMember() in encryption/manager.ts for the updated flow.
 
 export interface KeyRotationRequest {
+  group_generation?: number;
+  group_id?: Uint8Array;
   commit: Uint8Array;
   epoch: number;
   /** TLS-serialized GroupInfo bytes — required so server stores alongside epoch advance. */
@@ -773,6 +819,8 @@ export interface ExternalJoinRequest {
  * Does NOT touch channel membership (already handled by self_remove in edit_channel).
  */
 export interface CommitEvictionRequest {
+  group_generation?: number;
+  group_id?: Uint8Array;
   /** All users removed by the composite inline commit. Must already be inactive in channel membership. */
   target_user_ids: string[];
   /** Encryption commit bytes from WASM commit_member_removals(target_user_ids) */
@@ -989,6 +1037,8 @@ export interface PendingE2eeSendRecord {
   local_progress?: number;
   local_progress_by_file?: number[];
   mls_ciphertext?: Uint8Array;
+  /** Full encrypted content for same-generation epoch-stale recovery. Legacy records use text/manifest. */
+  payload?: E2eePayload;
   mls_ciphertext_sha256?: string;
   mls_epoch?: number;
   /** Missing on legacy records means generation 0. */
@@ -1426,6 +1476,8 @@ export interface ScopeSyncResponse extends APIResponse {
 // ============================================================
 
 export interface BatchAddMembersTopicBundle {
+  group_generation?: number;
+  group_id?: Uint8Array;
   topic_cid: string;
   commit: Uint8Array;
   welcome: Uint8Array;
@@ -1440,6 +1492,8 @@ export interface BatchAddMembersToTopicsRequest {
 }
 
 export interface BatchExternalJoinTopicBundle {
+  group_generation?: number;
+  group_id?: Uint8Array;
   topic_cid: string;
   commit: Uint8Array;
   epoch: number;

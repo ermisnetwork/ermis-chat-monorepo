@@ -160,6 +160,7 @@ function decodeBytesField(bytes: unknown, fieldName: string): Uint8Array {
 function encodeKeyRotationRequest(data: KeyRotationRequest): Record<string, unknown> {
   return {
     ...data,
+    ...(data.group_id ? { group_id: encodeBytesField(data.group_id, 'group_id') } : {}),
     commit: encodeBytesField(data.commit, 'commit'),
     group_info: encodeBytesField(data.group_info, 'group_info'),
   };
@@ -204,6 +205,7 @@ function encodeMlsRebootstrapCompletion(data: CompleteMlsRebootstrapRequest): Re
 function encodeCommitEvictionRequest(data: CommitEvictionRequest): Record<string, unknown> {
   return {
     ...data,
+    ...(data.group_id ? { group_id: encodeBytesField(data.group_id, 'group_id') } : {}),
     commit: encodeBytesField(data.commit, 'commit'),
     group_info: encodeBytesField(data.group_info, 'group_info'),
   };
@@ -255,6 +257,7 @@ function encodeBatchAddMembersToTopicsRequest(data: BatchAddMembersToTopicsReque
     ...data,
     topics: data.topics.map((topic) => ({
       ...topic,
+    ...(topic.group_id ? { group_id: encodeBytesField(topic.group_id, 'group_id') } : {}),
       commit: encodeBytesField(topic.commit, 'topic.commit'),
       welcome: encodeBytesField(topic.welcome, 'topic.welcome'),
       ratchet_tree: encodeBytesField(topic.ratchet_tree, 'topic.ratchet_tree'),
@@ -268,6 +271,7 @@ function encodeBatchExternalJoinTopicsRequest(data: BatchExternalJoinTopicsReque
     ...data,
     topics: data.topics.map((topic) => ({
       ...topic,
+    ...(topic.group_id ? { group_id: encodeBytesField(topic.group_id, 'group_id') } : {}),
       commit: encodeBytesField(topic.commit, 'topic.commit'),
       ...(topic.group_info ? { group_info: encodeBytesField(topic.group_info, 'topic.group_info') } : {}),
     })),

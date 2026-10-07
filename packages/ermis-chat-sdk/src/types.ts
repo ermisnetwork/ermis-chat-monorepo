@@ -534,6 +534,8 @@ export type ChannelData<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
 /** Encryption protocol fields required for E2EE add_members operations. */
 export type E2EEAddMembersOptions = {
+  group_generation?: number;
+  group_id?: Uint8Array;
   commit: Uint8Array;
   welcome: Uint8Array;
   ratchet_tree: Uint8Array;
@@ -543,6 +545,8 @@ export type E2EEAddMembersOptions = {
 
 /** Encryption protocol fields required for E2EE remove_members operations. */
 export type E2EERemoveMembersOptions = {
+  group_generation?: number;
+  group_id?: Uint8Array;
   commit: Uint8Array;
   epoch: number;
   group_info: Uint8Array;

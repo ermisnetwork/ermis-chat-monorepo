@@ -35,6 +35,8 @@ import type {
   MlsRebootstrapClaimIntent,
   StoredGroupInfoRefreshRequest,
   PendingE2eeSendRecord,
+  PendingMlsMutation,
+  MlsMutationCheckpoint,
   PendingDeferredArchive,
   PendingE2eeSnapshot,
   RemovedSyncCursor,
@@ -82,6 +84,7 @@ function archiveGenerationKeyPrefix(cid: string, groupGeneration: number): strin
 const EXTERNAL_JOIN_READINESS_PREFIX = 'external_join_readiness:';
 const MLS_REBOOTSTRAP_CLAIM_INTENT_PREFIX = 'mls_rebootstrap_claim_intent:v1:';
 const MLS_REBOOTSTRAP_CANDIDATE_PREFIX = 'mls_rebootstrap_candidate:v1:';
+const MLS_MUTATION_PREFIX = 'mls_mutation:v1:';
 const ZERO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** localStorage key for device_id — global, per-browser */
@@ -1066,6 +1069,51 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
+  async saveMlsMutationCheckpoint(checkpoint: MlsMutationCheckpoint): Promise<void> {
+    const db = await this.openDB();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE_META, STORE_GROUPS], 'readwrite');
+      const meta = tx.objectStore(STORE_META);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('MLS mutation checkpoint transaction aborted'));
+      try {
+        meta.put(checkpoint.provider_bytes, `provider:${checkpoint.user_id}:${checkpoint.device_id}`);
+        if (checkpoint.marker === null) tx.objectStore(STORE_GROUPS).delete(checkpoint.cid);
+        else tx.objectStore(STORE_GROUPS).put(checkpoint.marker, checkpoint.cid);
+        const key = `${MLS_MUTATION_PREFIX}${checkpoint.cid}`;
+        if (checkpoint.pending) meta.put(checkpoint.pending, key);
+        else meta.delete(key);
+        if (checkpoint.readiness !== undefined) {
+          const readinessKey = `${EXTERNAL_JOIN_READINESS_PREFIX}${checkpoint.cid}`;
+          if (checkpoint.readiness) meta.put(checkpoint.readiness, readinessKey);
+          else meta.delete(readinessKey);
+        }
+      } catch (error) {
+        tx.abort();
+        reject(error);
+      }
+    });
+  }
+
+  async listPendingMlsMutations(): Promise<PendingMlsMutation[]> {
+    const db = await this.openDB();
+    return new Promise<PendingMlsMutation[]>((resolve, reject) => {
+      const result: PendingMlsMutation[] = [];
+      const tx = db.transaction(STORE_META, 'readonly');
+      const request = tx.objectStore(STORE_META).openCursor(
+        IDBKeyRange.bound(MLS_MUTATION_PREFIX, `${MLS_MUTATION_PREFIX}\uffff`),
+      );
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) { result.push(cursor.value as PendingMlsMutation); cursor.continue(); }
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('MLS mutation checkpoint read aborted'));
+    });
+  }
+
   // ---- Sync Timestamps ----
 
   async saveSyncTimestamp(cid: string, timestamp: string): Promise<void> {
@@ -1296,9 +1344,9 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         const isRefreshKey = typeof cursor.key === 'string' && cursor.key.startsWith(GROUP_INFO_REFRESH_REQUEST_PREFIX);
         const matchesCid = isRefreshKey && value.cid === cid;
         const matchesSelection =
-          (requestId === undefined && throughEpoch === undefined) ||
-          (requestId !== undefined && value.request_id === requestId) ||
-          (throughEpoch !== undefined && value.minimum_epoch <= throughEpoch);
+          throughEpoch !== undefined
+            ? value.minimum_epoch <= throughEpoch
+            : requestId === undefined || value.request_id === requestId;
         if (matchesCid && matchesSelection) cursor.delete();
         cursor.continue();
       };
@@ -1587,7 +1635,8 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         `${archiveGenerationKeyPrefix(upload.cid, upload.group_generation || 0)}:${upload.epoch}:${archiveBlobId}`,
       );
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = (event) => reject(tx.error || (event.target as IDBRequest | null)?.error || new Error('IndexedDB archive transaction failed'));
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB archive transaction aborted'));
     });
   }
 
@@ -1632,7 +1681,8 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         };
       }
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = (event) => reject(tx.error || (event.target as IDBRequest | null)?.error || new Error('IndexedDB archive transaction failed'));
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB archive transaction aborted'));
     });
   }
 
@@ -1700,7 +1750,8 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         `${archiveGenerationKeyPrefix(record.cid, record.group_generation || 0)}:${record.epoch}:${record.scope}:${record.coverage_key}`,
       );
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = (event) => reject(tx.error || (event.target as IDBRequest | null)?.error || new Error('IndexedDB archive transaction failed'));
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB archive transaction aborted'));
     });
   }
 
@@ -1754,7 +1805,8 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         epochArchiveCheckpointKey(checkpoint.scope_cid, checkpoint.group_generation || 0, checkpoint.epoch),
       );
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = (event) => reject(tx.error || (event.target as IDBRequest | null)?.error || new Error('IndexedDB archive transaction failed'));
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB archive transaction aborted'));
     });
   }
 
