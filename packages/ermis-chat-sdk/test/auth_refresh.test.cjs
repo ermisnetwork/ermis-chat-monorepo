@@ -95,6 +95,102 @@ test('API 401 refreshes access token once and retries with the new Authorization
   assert.deepEqual(authorizationHeaders, ['Bearer access-old', 'Bearer access-new']);
 });
 
+test('legacy API 401 calls the configured refresh endpoint, rotates tokens, and retries once', async () => {
+  const persisted = [];
+  const client = new ErmisChat({
+    apiKey: 'api-key',
+    projectId: 'project-id',
+    baseURL: 'http://chat.test',
+    userBaseURL: 'http://users.test',
+    endUserApiMode: 'legacy',
+    browser: false,
+    logger: () => {},
+    onTokenRefresh: (tokens) => persisted.push(tokens),
+  });
+  client.tokenManager.setTokenOrProvider('access-old', { id: 'user-1' }, 'refresh-old');
+
+  const authorizationHeaders = [];
+  let protectedCalls = 0;
+  let refreshCalls = 0;
+  client.axiosInstance.get = async (_url, config) => {
+    protectedCalls += 1;
+    authorizationHeaders.push(config.headers.Authorization);
+    if (protectedCalls === 1) {
+      const error = new Error('expired');
+      error.response = { status: 401, data: {} };
+      throw error;
+    }
+    return axiosResponse({ ok: true });
+  };
+  client.axiosInstance.post = async (url, data, config) => {
+    refreshCalls += 1;
+    assert.equal(url, 'http://users.test/uss/v1/refresh_token');
+    assert.deepEqual(data, { refresh_token: 'refresh-old' });
+    assert.equal(config.headers.Authorization, undefined);
+    return axiosResponse({
+      token: 'access-new',
+      refresh_token: 'refresh-new',
+      user_id: 'user-1',
+    });
+  };
+
+  const response = await client.get('http://chat.test/protected');
+
+  assert.deepEqual(response, { ok: true });
+  assert.equal(refreshCalls, 1);
+  assert.equal(protectedCalls, 2);
+  assert.deepEqual(authorizationHeaders, ['Bearer access-old', 'Bearer access-new']);
+  assert.equal(client.tokenManager.getToken(), 'access-new');
+  assert.equal(await client.tokenManager.getRefreshToken(), 'refresh-new');
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].token, 'access-new');
+  assert.equal(persisted[0].refresh_token, 'refresh-new');
+});
+
+test('API logs omit request payloads, credentials, identities, and raw errors', async () => {
+  const entries = [];
+  const client = new ErmisChat('private-api-key-sentinel', 'project-id', 'http://example.test', {
+    browser: false,
+    logger: (level, message, extra) => entries.push({ level, message, extra }),
+  });
+  client.tokenManager.setTokenOrProvider('private-access-token-sentinel', { id: 'private-user-sentinel' });
+  client.deviceId = 'private-device-sentinel';
+  client.axiosInstance.post = async (_url, _data, config) => {
+    const error = new Error('private-raw-error-sentinel');
+    error.config = config;
+    error.response = {
+      status: 503,
+      data: { error: 'private-response-sentinel' },
+    };
+    throw error;
+  };
+
+  await assert.rejects(() =>
+    client.post('http://example.test/v1/e2ee/scope_sync?api_key=private-query-sentinel', {
+      cid: 'private-cid-sentinel',
+      mls_bytes: 'private-mls-sentinel',
+    }),
+  );
+
+  const output = JSON.stringify(entries);
+  for (const sentinel of [
+    'private-api-key-sentinel',
+    'private-access-token-sentinel',
+    'private-user-sentinel',
+    'private-device-sentinel',
+    'private-query-sentinel',
+    'private-raw-error-sentinel',
+    'private-response-sentinel',
+    'private-cid-sentinel',
+    'private-mls-sentinel',
+  ]) {
+    assert.equal(output.includes(sentinel), false, `log contained ${sentinel}`);
+  }
+  assert.match(output, /REDACTED/);
+  assert.match(output, /"category":"response"/);
+  assert.match(output, /"status":503/);
+});
+
 test('API 403 and TOKEN_EXPIRED codes share the same one-retry refresh path', async () => {
   for (const response of [
     { status: 403, data: {} },

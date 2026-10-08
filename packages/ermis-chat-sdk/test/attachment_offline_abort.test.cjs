@@ -425,7 +425,7 @@ test('channels.queried replays pending E2EE display progress without restarting 
     replayPromise = restorePresentations();
     return replayPromise;
   };
-  manager._registerKnownChannelBootstrapListener();
+  manager.handleChannelsHydrated();
   const replayedPercentages = [];
   const eventSub = channel.on('message.updated', (event) => {
     if (event.message?.id === messageId) {
@@ -433,7 +433,6 @@ test('channels.queried replays pending E2EE display progress without restarting 
     }
   });
 
-  client.dispatchEvent({ type: 'channels.queried' });
   await flush();
   assert.ok(replayPromise);
   await replayPromise;
@@ -446,7 +445,6 @@ test('channels.queried replays pending E2EE display progress without restarting 
   );
   assert.equal(replayedPercentages[replayedPercentages.length - 1], 47);
   eventSub.unsubscribe?.();
-  manager._channelBootstrapSub?.unsubscribe?.();
 });
 
 test('failed E2EE final send retries persisted MLS ciphertext without re-uploading files', async () => {

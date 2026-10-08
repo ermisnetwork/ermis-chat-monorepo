@@ -15,7 +15,7 @@
  * # Example
  * ```javascript
  * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) sdkLog("warn", "Invalid KeyPackage!");
+ * if (!isValid) console.warn("Invalid KeyPackage!");
  * ```
  */
 export function validate_key_package_bytes(bytes: Uint8Array): boolean;
@@ -138,6 +138,10 @@ export enum MlsErrorCode {
    * External commit failed
    */
   ExternalCommitError = 10,
+  /**
+   * A Welcome does not contain a KeyPackage owned by this provider
+   */
+  NoMatchingKeyPackage = 11,
 }
 /**
  * Messages generated when adding a member (legacy format)
@@ -152,11 +156,13 @@ export class AddMessages {
 }
 export class ArchiveBlobAad {
   free(): void;
+  static forGeneration(cid: string, group_generation: bigint, epoch: bigint, scope: string, blob_id: string, snapshot_hash: string): ArchiveBlobAad;
   constructor(cid: string, epoch: bigint, scope: string, blob_id: string, snapshot_hash: string);
   to_bytes(): Uint8Array;
 }
 export class ArchiveKeyWrapInfo {
   free(): void;
+  static forGeneration(channel_id: string, group_generation: bigint, epoch: bigint, scope: string, blob_id: string, snapshot_hash: string, recipient_key_id: string): ArchiveKeyWrapInfo;
   constructor(channel_id: string, epoch: bigint, scope: string, blob_id: string, snapshot_hash: string, recipient_key_id: string);
   to_bytes(): Uint8Array;
 }
@@ -345,6 +351,20 @@ export class Group {
    * * `ratchet_tree` - Optional ratchet tree (if not embedded in welcome)
    */
   static join_with_welcome(provider: Provider, welcome: Uint8Array, ratchet_tree?: RatchetTree | null): Group;
+  /**
+   * Load a generation-aware group using exact MLS GroupId bytes.
+   */
+  static load_with_group_id(provider: Provider, group_id_bytes: Uint8Array): Group;
+  /**
+   * Create a generation-aware group using explicit MLS GroupId bytes.
+   */
+  static create_with_group_id(provider: Provider, founder: Identity, group_id_bytes: Uint8Array): Group;
+  /**
+   * Join using a Welcome while preserving a stable typed error. Clients may
+   * automatically fall back to external join only for
+   * `MlsErrorCode::NoMatchingKeyPackage`; every other error must fail closed.
+   */
+  static join_with_welcome_typed(provider: Provider, welcome: Uint8Array, ratchet_tree?: RatchetTree | null): Group;
   /**
    * Join a group using a Welcome (legacy API)
    */
@@ -600,6 +620,11 @@ export class Group {
    */
   process_message(provider: Provider, msg: Uint8Array): ProcessedMessage;
   /**
+   * Process a durable handshake event using the trusted Bellboy acceptance
+   * timestamp. Application messages must continue to use `process_message`.
+   */
+  process_message_at(provider: Provider, msg: Uint8Array, server_accepted_at_seconds: bigint): ProcessedMessage;
+  /**
    * Process message and return raw bytes (legacy API, for backwards compatibility)
    *
    * Returns decrypted bytes for application messages, empty for proposals/commits.
@@ -737,6 +762,11 @@ export class MlsError {
    * Get error message
    */
   readonly message: string;
+  /**
+   * Stable string representation for clients that cannot safely depend on
+   * wasm-bindgen's numeric enum layout.
+   */
+  readonly code_name: string;
 }
 /**
  * Result of processing an incoming message
@@ -904,6 +934,7 @@ export interface InitOutput {
   readonly group_join: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_join_external: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
   readonly group_join_with_welcome: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_join_with_welcome_typed: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_leave_group: (a: number, b: number, c: number) => [number, number, number, number];
   readonly group_load: (a: number, b: number, c: number) => [number, number, number];
   readonly group_member_by_user_id: (a: number, b: number, c: number) => number;
@@ -941,6 +972,8 @@ export interface InitOutput {
   readonly proposalmessage_bytes_as_uint8array: (a: number) => any;
   readonly proposalmessage_proposal_ref: (a: number) => [number, number];
   readonly validate_key_package_bytes: (a: number, b: number) => number;
+  readonly group_create_with_group_id: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_load_with_group_id: (a: number, b: number, c: number) => [number, number, number];
   readonly __wbg_archiveblobaad_free: (a: number, b: number) => void;
   readonly __wbg_archivedmessage_free: (a: number, b: number) => void;
   readonly __wbg_archivedsenderdata_free: (a: number, b: number) => void;
@@ -949,8 +982,10 @@ export interface InitOutput {
   readonly __wbg_hpkewrappedarchivedatakey_free: (a: number, b: number) => void;
   readonly __wbg_processedmessage_free: (a: number, b: number) => void;
   readonly __wbg_provider_free: (a: number, b: number) => void;
+  readonly __wbg_ratchettree_free: (a: number, b: number) => void;
   readonly __wbg_recoverykeypair_free: (a: number, b: number) => void;
   readonly __wbg_wrappedrecoverykey_free: (a: number, b: number) => void;
+  readonly archiveblobaad_forGeneration: (a: number, b: number, c: bigint, d: bigint, e: number, f: number, g: number, h: number, i: number, j: number) => number;
   readonly archiveblobaad_new: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number) => number;
   readonly archiveblobaad_to_bytes: (a: number) => [number, number, number, number];
   readonly archivedmessage_aad: (a: number) => [number, number];
@@ -963,6 +998,7 @@ export interface InitOutput {
   readonly archivedsenderdata_generation: (a: number) => number;
   readonly archivedsenderdata_own_message: (a: number) => number;
   readonly archivedsenderdata_sender_index: (a: number) => number;
+  readonly archivekeywrapinfo_forGeneration: (a: number, b: number, c: bigint, d: bigint, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
   readonly archivekeywrapinfo_new: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
   readonly archivekeywrapinfo_to_bytes: (a: number) => [number, number, number, number];
   readonly decrypt_archive_blob: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
@@ -977,6 +1013,7 @@ export interface InitOutput {
   readonly group_create_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
   readonly group_create_message_with_aad: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
   readonly group_process_message: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_process_message_at: (a: number, b: number, c: number, d: number, e: bigint) => [number, number, number];
   readonly group_process_message_raw: (a: number, b: number, c: number, d: number) => [number, number, number, number];
   readonly group_set_aad: (a: number, b: number, c: number) => void;
   readonly hash_channel_id: (a: number, b: number, c: number, d: number) => [number, number];
@@ -996,6 +1033,8 @@ export interface InitOutput {
   readonly provider_from_bytes: (a: number, b: number) => [number, number, number];
   readonly provider_new: () => number;
   readonly provider_to_bytes: (a: number) => [number, number, number, number];
+  readonly ratchettree_from_bytes: (a: number, b: number) => [number, number, number];
+  readonly ratchettree_to_bytes: (a: number) => [number, number];
   readonly recoverykeypair_key_id: (a: number) => [number, number];
   readonly recoverykeypair_private_key: (a: number) => [number, number];
   readonly recoverykeypair_public_key: (a: number) => [number, number];
@@ -1015,11 +1054,9 @@ export interface InitOutput {
   readonly archivedsenderdata_epoch: (a: number) => bigint;
   readonly processedmessage_epoch: (a: number) => bigint;
   readonly processedmessage_sender_index: (a: number) => number;
-  readonly __wbg_ratchettree_free: (a: number, b: number) => void;
-  readonly ratchettree_from_bytes: (a: number, b: number) => [number, number, number];
-  readonly ratchettree_to_bytes: (a: number) => [number, number];
   readonly __wbg_mlserror_free: (a: number, b: number) => void;
   readonly mlserror_code: (a: number) => number;
+  readonly mlserror_code_name: (a: number) => [number, number];
   readonly mlserror_message: (a: number) => [number, number];
   readonly mlserror_new: (a: number, b: number, c: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;

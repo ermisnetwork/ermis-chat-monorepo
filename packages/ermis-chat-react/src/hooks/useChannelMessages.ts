@@ -177,7 +177,15 @@ export function useChannelMessages({
     // scroll to bottom instead of trying to restore a potentially stale offset.
     let initialLoadSettled = false;
     const fadeListIn = () => {
-      if (!el) return;
+      if (!el) {
+        // Intentional overlays (pending invite, skipped, banned, blocked, or a
+        // closed topic) render instead of the normal message-list container.
+        // They are already interactive and have no virtual-list scroll work to
+        // settle, so consumers must not wait forever for a missing DOM ref.
+        initialLoadSettled = true;
+        onReadyRef.current?.();
+        return;
+      }
       // Wait until all scheduled scrollToBottom calls have fired and VList has
       // settled BEFORE making the list visible. Showing the list too early while
       // scroll is still adjusting causes visible jitter.

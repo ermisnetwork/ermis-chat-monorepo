@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-09-11T01:26:54.374Z",
+  "openmls_commit": "ea2310f46d716e29e28422c18b310dba06515267",
+  "openmls_dirty": true,
+  "openmls_status_sha256": "3dcc6530dbaa388f84191eaf711385b8620c3edfbcbc0ba06f34aeddf4ed5404",
+  "openmls_tracked_diff_sha256": "8334a89434b11ea090467f81c5637e92c3d96a944a316138dfd24c8dc375a7cf",
+  "cargo_lock_sha256": "202c66eb84ce92571bac3af92a5cdb82d0ff26b6d691d24ec6cee8ca81056d31",
+  "wasm_pack": "wasm-pack 0.13.1",
+  "cargo": "cargo 1.94.1 (29ea6fb6a 2026-03-24)",
+  "rustc": "rustc 1.94.1 (e408947bf 2026-03-25)",
+  "wasm_sha256": "4169a5786267e32ca27da90c8ed9f79e3ecdb6a211980b2baa19383a20e9fc4a",
+  "wasm_size": 2515709,
+  "contracts": [
+    "recovery_pin",
+    "epoch_archive",
+    "typed_welcome",
+    "trusted_historical_time"
+  ]
+}

@@ -2,7 +2,8 @@
 
 ## UHM Chat E2EE Runtime Notes
 
-- `public/openmls_wasm_bg.wasm` must be published with the app. `App.tsx` loads this binary through `loadOpenMlsWasm()` after `connectUser`; the OpenMLS JS glue comes from the SDK bundle so SDK logger settings cover OpenMLS glue logs. The legacy public OpenMLS JS glue copies are logger-safe for direct/older asset loads.
+- For a Web SDK/UHM source handoff or environment upgrade, follow the repository-owned [MLS upgrade runbook](../../MLS_UPGRADE_HANDOFF.md). Keep the server/schema/client dependency order and record the WASM actually loaded by UHM; a Web build alone is not artifact provenance.
+- UHM loads `public/openmls_wasm.js` and `public/openmls_wasm_bg.wasm` as one internal artifact after `connectUser`. This bundle must contain both PIN/epoch-archive and rollout `process_message_at`/typed-Welcome exports. Regenerate all four public files together with `npm run build:uhm-wasm`; a dirty OpenMLS source is accepted only for local validation with `ALLOW_DIRTY_OPENMLS=1`. The publishable SDK keeps its smaller external-safe artifact and its build must not overwrite UHM's internal WASM.
 - `public/e2ee-media-stream-worker.js` is the E2EE video streaming worker. UHM enables native Service Worker range playback by default at bootstrap with `VITE_E2EE_MEDIA_STREAMING` defaulting to on; set `VITE_E2EE_MEDIA_STREAMING=false` to force the whole-blob fallback. Playback diagnostics default to on for current UHM validation and can be disabled with `VITE_E2EE_MEDIA_PLAYBACK_DEBUG=false`. The PWA build imports the E2EE handlers into `sw.js` so video playback does not replace the root-scoped app worker; the SDK reuses that worker and falls back to whole-blob playback rather than overwriting an unrelated worker. The bootstrap only unregisters stale standalone `e2ee-media-stream-worker.js` registrations, not the app PWA `sw.js` or unrelated Service Workers. The worker intercepts only `/__ermis/e2ee-media/*` virtual URLs and keeps decrypted frames in memory only.
 - Large E2EE attachment upload can use multipart when `VITE_E2EE_ATTACHMENT_MULTIPART=true`. Multipart PUT concurrency defaults to `3` and can be tuned with `VITE_E2EE_ATTACHMENT_MULTIPART_CONCURRENCY`; the SDK clamps it to `1..4`, where `1` restores the old sequential PUT behavior. If upload or completion fails after init, the SDK cancels every unbound attachment initialized for that pending message so Bellboy can abort its R2 multipart sessions in the deferred cleanup worker. Optional upload diagnostics are enabled with `VITE_E2EE_ATTACHMENT_UPLOAD_DEBUG=true` or `localStorage.ermis_e2ee_attachment_upload_debug = "1"`.
 - `public/wasm_worker.worker.mjs` must be copied from the SDK `dist` after building or installing a published SDK. The worker forwards WASM logs through the SDK logger bridge, so stale public copies can bypass `logger` and write to the browser console directly.
@@ -19,6 +20,7 @@
 - UHM defaults to SDK self-host mode (`VITE_ERMIS_SELF_HOSTED` unset or any value except `false`), so API key and project ID env vars are optional. Set `VITE_ERMIS_SELF_HOSTED=false` for cloud mode, where `VITE_API_KEY` and `VITE_CHAT_PROJECT_ID` are required.
 - `VITE_END_USER_API_MODE=legacy|v1` explicitly selects the auth/user contract for both `ErmisAuthProvider` and `ErmisChat`. If omitted, UHM uses `legacy` in both self-host and cloud mode. This selection performs no backend probe.
 - `VITE_USS_API_URL` is optional. Both API modes accept the root host, `/v1`, or `/uss/v1` and normalize it to `/uss/v1`.
+- The checked-in fallback uses Uhm at `https://api-trieve.ermis.network`. Override `VITE_API_URL` and, when using a separate USS service, `VITE_USS_API_URL` for another environment. Tokens are server-scoped; after switching hosts, sign in again instead of reusing access or refresh tokens issued by the previous server.
 - UHM requires and persists `refresh_token` after OTP/Google login. The SDK refreshes expired access tokens automatically, writes rotated tokens to localStorage, and handles WS `4001` reconnect without interrupting the UI. Terminal refresh failure clears the session and returns the user to login with an expiry message.
 - UserPicker is search-driven for v1. It seeds from `client.state.users` and active friend channels on mount, does not call `queryUsers()`, and only performs remote user search when the search box is non-empty.
 - After the channel list loads, the SDK prepares all loaded E2EE channels in the background with sequential external join and reports progress through a compact secure-restore banner.
@@ -93,3 +95,32 @@ export default defineConfig([
   },
 ]);
 ```
+
+
+### Local MLS field capture
+
+<details>
+<summary>Change log</summary>
+
+- `2026-10-06` follow-up: the initial group-free projection could not explain failed recovery, and suppressed info logs made Console copy instructions unusable. DEV now projects scoped `receive_epoch` and `protocol_replay` lines to capture and Console.
+  - Fields: SHA256 scope fingerprint, safe integer epochs/unknown, fixed error/result/reason enums; raw CID, message IDs, errors and payloads stay excluded. This extends the earlier numeric-epoch exclusion only for validated Web diagnostic metadata.
+  - Bounds:128 cached digests/inflight jobs/throttle keys,512-character CID hash input,10s per scope/result/reason; finish awaits projection before its boundary. Healthy epoch_current markers stay silent in Console. Existing capture transport caps apply, dropped projection counts as a capture failure.
+  - Diagnostic refresh/inspection is preparation; no extra messages or gate closure are implied. Restart matching collector before refresh.
+
+- `2026-10-06`: DEV capture projects the exact SDK receive-failure logger arguments into fixed `receive_diagnostic error=... epoch_relation=...` markers, including failures otherwise hidden at info level.
+  - Reason: coarse decrypt_error did not distinguish failed epoch sync from AEAD/AAD/consumed-secret errors during same-state rejoin testing.
+  - Integrator action: restart the matching collector, refresh the retained-state tab, require capture_ready, then inspect diagnostics after owner confirmation. Each class/relation emits at most once per10s, preserving the existing caps/deadlines.
+  - Compatibility/default: diagnostic classes are observational and do not authorize repair/cursor movement; raw errors, IDs and numeric epochs are not sent. Production logger behavior and MLS state are unchanged.
+
+</details>
+
+For the prepared owner-run acceptance, the localhost:3001 DEV hook connects to
+agent collector localhost:8766 before startup. It sends fixed allowlisted markers
+in batches of at most32, with a200ms timer,5s request deadline and10000-marker
+page limit (startup buffer512). `await window.__mlsFieldCapture.finish()` flushes
+queued markers and prints the number of lost markers; zero is transport success,
+not a crypto-error count. Capture stays active after finish. Old single-marker
+collector payloads remain supported; restart the collector before testing batch
+code. Timestamps reflect batch receipt and preserve order. No raw identifiers,
+auth tokens or MLS payloads are recorded. See the [canonical journal](../../../bellboy/docs/todo/e2ee_mls_android_parity_plan.md)
+and [bound evidence](../../../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/archive-ack-batch-provenance.json).

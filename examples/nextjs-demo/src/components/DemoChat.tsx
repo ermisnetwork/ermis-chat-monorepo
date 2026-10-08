@@ -16,7 +16,7 @@ const API_KEY = 'sXhcPu0JneUbQ6TG2tXePK8MC2tBAHn9';
 const PROJECT_ID = 'ec964975-ae84-4a8e-91a1-222ca3aeeef8';
 const USER_ID = 'YOUR_USER_ID';
 const USER_TOKEN = 'YOUR_USER_TOKEN';
-const BASE_URL = 'https://api-trieve.ermis.network';
+const BASE_URL = 'https://api.xoithit.lol';
 
 export const DemoChat = () => {
   const [client, setClient] = useState<ErmisChat | null>(null);

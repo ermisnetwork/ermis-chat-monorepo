@@ -2374,6 +2374,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   };
 
   async createTopic(data: CreateTopicData) {
+    this.getClient().encryptionManager?.assertCanCreateMlsTopic(this.cid);
     const uuid = randomId();
     const project_id = this._client._projectIdForInternalUse();
     const topicID = project_id ? `${project_id}:${uuid}` : undefined;
@@ -2418,14 +2419,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             err,
             cid: topicCid,
           });
+          throw err;
         }
       }
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
-      queryURL + '/query',
-      this._encodeE2eeChannelPayload(payload),
-    );
+    const encoded = this._encodeE2eeChannelPayload(payload);
+    const manager = this.getClient().encryptionManager;
+    const state: QueryChannelAPIResponse<ErmisChatGenerics> = manager?.initialized && topicCid
+      ? await manager.postMlsBootstrap(topicCid, queryURL + '/query', encoded)
+      : await this.getClient().post(queryURL + '/query', encoded);
 
     return state;
   }
@@ -2459,15 +2462,33 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       ...update_options,
     };
 
+    const creationData = this._data;
     const dataPayload = this._queryDataPayload();
     if (dataPayload) {
       payload.data = dataPayload;
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
-      queryURL + '/query',
-      this._encodeE2eeChannelPayload(payload),
-    );
+    const manager = this.getClient().encryptionManager;
+    const encoded = this._encodeE2eeChannelPayload(payload);
+    const state: QueryChannelAPIResponse<ErmisChatGenerics> = manager?.initialized
+      ? await manager.postMlsBootstrap(this.cid, queryURL + '/query', encoded)
+      : await this.getClient().post(queryURL + '/query', encoded);
+    // Constructor data is a creation request. After the server acknowledges this
+    // E2EE channel, watch/query must not resend its Welcome/tree/GroupInfo. Omit
+    // the whole creation data: keeping mls_enabled without its bundle would fail
+    // Bellboy's create-data validation even when the channel already exists.
+    // Retire before local hydration, retain on HTTP failure, and never clear a
+    // replacement supplied by another caller while this request was in flight.
+    if (
+      this._data === creationData &&
+      (dataPayload as any)?.mls_enabled === true &&
+      (dataPayload as any)?.welcome !== undefined &&
+      state.channel.mls_enabled === true &&
+      state.channel.type === this.type &&
+      state.channel.id === this.id
+    ) {
+      this._data = {};
+    }
     await this._applyQueryHistoryBoundary(state);
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
@@ -2557,10 +2578,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       payload.data = dataPayload;
     }
 
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
-      queryURL + '/query',
-      this._encodeE2eeChannelPayload(payload),
-    );
+    const manager = this.getClient().encryptionManager;
+    const encoded = this._encodeE2eeChannelPayload(payload);
+    const candidateCid = typeof (dataPayload as any)?.cid === 'string'
+      ? (dataPayload as any).cid : `messaging:${(dataPayload as any)?.channel_id || this.id}`;
+    const state: QueryChannelAPIResponse<ErmisChatGenerics> = manager?.initialized
+      ? await manager.postMlsBootstrap(candidateCid, queryURL + '/query', encoded)
+      : await this.getClient().post(queryURL + '/query', encoded);
     await this._applyQueryHistoryBoundary(state);
 
     // Ensure all members' user info are loaded in state.users
@@ -3773,12 +3797,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const user = getUserInfo(event.member.user_id, users);
           event.member.user = user;
           channelState.members[event.member.user_id] = event.member;
-          channelState.membership = event.member;
+          if (event.member.user_id === (this.getClient().userID || this.getClient().user?.id)) {
+            channelState.membership = event.member;
+          }
         }
         break;
       case 'member.removed': {
         const removedUserId = event.member?.user_id || event.user?.id;
         if (removedUserId) {
+          const removedAt = (event as any).created_at || (event as any).createdAt || event.message?.created_at;
+          if (this.getClient().encryptionManager?.isObsoleteMlsRemoval(this.cid, removedUserId, removedAt)) break;
           delete channelState.members[removedUserId];
 
           const encryptionMgrRemoved = this.getClient().encryptionManager;
@@ -4189,6 +4217,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         const encryptionMgrProto = this.getClient().encryptionManager;
         if (!encryptionMgrProto?.initialized || !this.cid) break;
 
+        const protocolUser = encryptionMgrProto.userId;
+        const protocolDevice = encryptionMgrProto.deviceId;
+        while (encryptionMgrProto.initialized && encryptionMgrProto.isSyncing()) {
+          await encryptionMgrProto.waitForSync();
+        }
+        if (!encryptionMgrProto.initialized || this.getClient().encryptionManager !== encryptionMgrProto ||
+            encryptionMgrProto.userId !== protocolUser || encryptionMgrProto.deviceId !== protocolDevice) break;
+
         if (encryptionMgrProto.isScopeRepairing(this.cid)) {
           encryptionMgrProto.requestScopeSyncAfterRepair(this.cid);
           break;
@@ -4201,6 +4237,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         switch (protoType) {
           case 'welcome': {
+            await encryptionMgrProto.reconcileMlsBootstrapWelcome(this.cid, protoMsg);
             const targetIds = (protoMsg.target_user_ids as string[]) || [];
             if (
               targetIds.includes(encryptionMgrProto.userId) &&
@@ -4222,7 +4259,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               protoUserId === encryptionMgrProto.userId &&
               !!protoDeviceId &&
               protoDeviceId === encryptionMgrProto.deviceId;
-            if (isOwnDeviceCommit) break;
+            if (isOwnDeviceCommit) {
+              encryptionMgrProto.processOwnMlsCommit(this.cid, protoMsg).catch(() => {
+                encryptionMgrProto.sync().catch(() => undefined);
+              });
+              break;
+            }
 
             encryptionMgrProto.processCommit(this.cid, protoMsg.commit, protoMsg.epoch).catch((err: unknown) => {
               this.getClient().logger('error', '[Encryption Event] Failed to process protocol commit', {

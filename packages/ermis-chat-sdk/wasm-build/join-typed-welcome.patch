@@ -1,0 +1,164 @@
+diff --git a/openmls-wasm/src/errors.rs b/openmls-wasm/src/errors.rs
+index 6037d64ae..c34df4e8f 100644
+--- a/openmls-wasm/src/errors.rs
++++ b/openmls-wasm/src/errors.rs
+@@ -2,6 +2,8 @@
+ 
+ use wasm_bindgen::prelude::*;
+ 
++use openmls::group::WelcomeError;
++
+ /// Error codes for MLS operations
+ #[wasm_bindgen]
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+@@ -28,6 +30,8 @@ pub enum MlsErrorCode {
+     InvalidState,
+     /// External commit failed
+     ExternalCommitError,
++    /// A Welcome does not contain a KeyPackage owned by this provider
++    NoMatchingKeyPackage,
+ }
+ 
+ /// Custom error type for MLS operations
+@@ -60,6 +64,27 @@ impl MlsError {
+     pub fn message(&self) -> String {
+         self.message.clone()
+     }
++
++    /// Stable string representation for clients that cannot safely depend on
++    /// wasm-bindgen's numeric enum layout.
++    #[wasm_bindgen(getter)]
++    pub fn code_name(&self) -> String {
++        match self.code {
++            MlsErrorCode::SerializationError => "SerializationError",
++            MlsErrorCode::DeserializationError => "DeserializationError",
++            MlsErrorCode::GroupNotOperational => "GroupNotOperational",
++            MlsErrorCode::MemberNotFound => "MemberNotFound",
++            MlsErrorCode::InvalidMessage => "InvalidMessage",
++            MlsErrorCode::NoWelcome => "NoWelcome",
++            MlsErrorCode::InvalidCid => "InvalidCid",
++            MlsErrorCode::StorageError => "StorageError",
++            MlsErrorCode::CryptoError => "CryptoError",
++            MlsErrorCode::InvalidState => "InvalidState",
++            MlsErrorCode::ExternalCommitError => "ExternalCommitError",
++            MlsErrorCode::NoMatchingKeyPackage => "NoMatchingKeyPackage",
++        }
++        .to_string()
++    }
+ }
+ 
+ impl std::fmt::Display for MlsError {
+@@ -70,6 +95,17 @@ impl std::fmt::Display for MlsError {
+ 
+ // Helper to convert internal errors
+ impl MlsError {
++    pub(crate) fn from_welcome_error<StorageError: std::fmt::Display>(
++        error: WelcomeError<StorageError>,
++    ) -> Self {
++        let code = match &error {
++            WelcomeError::NoMatchingKeyPackage => MlsErrorCode::NoMatchingKeyPackage,
++            WelcomeError::StorageError(_) => MlsErrorCode::StorageError,
++            _ => MlsErrorCode::InvalidMessage,
++        };
++        Self::new(code, &error.to_string())
++    }
++
+     pub fn serialization(msg: &str) -> JsError {
+         JsError::new(&format!("[SerializationError] {}", msg))
+     }
+@@ -110,3 +146,15 @@ impl MlsError {
+         JsError::new(&format!("[InvalidState] {}", msg))
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn no_matching_key_package_has_stable_typed_code() {
++        let error = MlsError::from_welcome_error(WelcomeError::<String>::NoMatchingKeyPackage);
++        assert_eq!(error.code(), MlsErrorCode::NoMatchingKeyPackage);
++        assert_eq!(error.code_name(), "NoMatchingKeyPackage");
++    }
++}
+diff --git a/openmls-wasm/src/group/mod.rs b/openmls-wasm/src/group/mod.rs
+index 20e3956b2..63395ee7e 100644
+--- a/openmls-wasm/src/group/mod.rs
++++ b/openmls-wasm/src/group/mod.rs
+@@ -25,7 +25,12 @@ use openmls::{
+ use tls_codec::{Deserialize, Serialize};
+ use wasm_bindgen::prelude::*;
+ 
+-use crate::{identity::Identity, types::RatchetTree, Provider, CIPHERSUITE};
++use crate::{
++    CIPHERSUITE, Provider,
++    errors::{MlsError, MlsErrorCode},
++    identity::Identity,
++    types::RatchetTree,
++};
+ use openmls_traits::OpenMlsProvider;
+ 
+ /// An MLS Group representing an encrypted channel
+@@ -58,6 +63,43 @@ impl ExternalJoinResult {
+ 
+ #[wasm_bindgen]
+ impl Group {
++    fn join_with_welcome_typed_inner(
++        provider: &Provider,
++        welcome: &[u8],
++        ratchet_tree: Option<RatchetTree>,
++    ) -> Result<Group, MlsError> {
++        let mut welcome_slice = welcome;
++        let message = MlsMessageIn::tls_deserialize(&mut welcome_slice).map_err(|error| {
++            MlsError::new(
++                MlsErrorCode::DeserializationError,
++                &format!("Welcome deserialization failed: {error}"),
++            )
++        })?;
++        let mls_welcome = match message.extract() {
++            MlsMessageBodyIn::Welcome(welcome) => welcome,
++            _ => {
++                return Err(MlsError::new(
++                    MlsErrorCode::InvalidMessage,
++                    "Expected a Welcome message",
++                ));
++            }
++        };
++
++        let config = MlsGroupJoinConfig::builder()
++            .use_ratchet_tree_extension(true)
++            .max_past_epochs(5)
++            .sender_ratchet_configuration(SenderRatchetConfiguration::new(10, 2000))
++            .build();
++        let ratchet_tree_in = ratchet_tree.map(|tree| tree.0);
++        let staged =
++            StagedWelcome::new_from_welcome(&provider.0, &config, mls_welcome, ratchet_tree_in)
++                .map_err(MlsError::from_welcome_error)?;
++        let mls_group = staged
++            .into_group(&provider.0)
++            .map_err(MlsError::from_welcome_error)?;
++        Ok(Group { mls_group })
++    }
++
+     /// Create a new group with a CID from Ermis
+     ///
+     /// # Arguments
+@@ -180,6 +222,17 @@ impl Group {
+         Ok(Group { mls_group })
+     }
+ 
++    /// Join using a Welcome while preserving a stable typed error. Clients may
++    /// automatically fall back to external join only for
++    /// `MlsErrorCode::NoMatchingKeyPackage`; every other error must fail closed.
++    pub fn join_with_welcome_typed(
++        provider: &Provider,
++        welcome: &[u8],
++        ratchet_tree: Option<RatchetTree>,
++    ) -> Result<Group, MlsError> {
++        Self::join_with_welcome_typed_inner(provider, welcome, ratchet_tree)
++    }
++
+     /// Join a group using a Welcome (legacy API)
+     pub fn join(
+         provider: &Provider,

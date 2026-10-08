@@ -55,25 +55,9 @@ export const GlobalPickers: React.FC = () => {
     return () => window.removeEventListener('keydown', handleEsc);
   }, [closePickers]);
 
-  const [savedRect, setSavedRect] = React.useState<DOMRect | null>(null);
-  const lastType = useRef<'emoji' | 'sticker' | 'giphy'>('emoji');
-  const [hasOpenedSticker, setHasOpenedSticker] = React.useState(false);
-
-  useEffect(() => {
-    if (pickerAction.anchorRect) {
-      setSavedRect(pickerAction.anchorRect);
-    }
-    if (pickerAction.type) {
-      lastType.current = pickerAction.type;
-    }
-    if (pickerAction.type === 'sticker') {
-      setHasOpenedSticker(true);
-    }
-  }, [pickerAction.anchorRect, pickerAction.type]);
-
   const isOpen = !!pickerAction.type;
-  const activeRect = pickerAction.anchorRect || savedRect;
-  const currentType = pickerAction.type || lastType.current;
+  const activeRect = pickerAction.anchorRect;
+  const currentType = pickerAction.type || 'emoji';
   const pickerHeight = currentType === 'giphy' ? 420 : currentType === 'sticker' ? 400 : 368;
 
   const style: React.CSSProperties = {
@@ -102,56 +86,58 @@ export const GlobalPickers: React.FC = () => {
       >
         {/* Emoji Picker */}
         <div style={{ display: currentType === 'emoji' ? 'block' : 'none' }}>
-          <EmojiPicker.Root
-            className="isolate flex h-[368px] w-[350px] flex-col bg-white dark:bg-[#1a1828]"
-            locale={i18n.language === 'vi' ? 'vi' : 'en'}
-            onEmojiSelect={(emoji) => {
-              if (pickerAction.onSelect) {
-                pickerAction.onSelect(emoji.emoji);
-              }
-            }}
-          >
-            <EmojiPicker.Search className="z-10 mx-3 mt-3 appearance-none rounded-xl bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-primary/50" />
-            <EmojiPicker.Viewport className="relative flex-1 outline-hidden mt-2">
-              <EmojiPicker.Loading className="absolute inset-0 flex items-center justify-center text-zinc-400 text-sm dark:text-zinc-500">
-                {i18n.language === 'vi' ? 'Đang tải…' : 'Loading…'}
-              </EmojiPicker.Loading>
-              <EmojiPicker.Empty className="absolute inset-0 flex items-center justify-center text-zinc-400 text-sm dark:text-zinc-500">
-                {i18n.language === 'vi' ? 'Không tìm thấy emoji.' : 'No emoji found.'}
-              </EmojiPicker.Empty>
-              <EmojiPicker.List
-                className="select-none pb-1.5"
-                components={{
-                  CategoryHeader: ({ category, ...props }) => (
-                    <div
-                      className="bg-white/90 px-3 pt-3 pb-1.5 font-semibold text-zinc-500 text-xs dark:bg-[#1a1828]/90 dark:text-zinc-400 backdrop-blur-md"
-                      {...props}
-                    >
-                      {category.label}
-                    </div>
-                  ),
-                  Row: ({ children, ...props }) => (
-                    <div className="scroll-my-1.5 px-2 flex justify-between" {...props}>
-                      {children}
-                    </div>
-                  ),
-                  Emoji: ({ emoji, ...props }) => (
-                    <button
-                      className="flex size-9 items-center justify-center rounded-lg text-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors data-[active]:bg-zinc-100 dark:data-[active]:bg-zinc-800"
-                      {...props}
-                    >
-                      {emoji.emoji}
-                    </button>
-                  ),
-                }}
-              />
-            </EmojiPicker.Viewport>
-          </EmojiPicker.Root>
+          {isOpen && (
+            <EmojiPicker.Root
+              className="isolate flex h-[368px] w-[350px] flex-col bg-white dark:bg-[#1a1828]"
+              locale={i18n.language === 'vi' ? 'vi' : 'en'}
+              onEmojiSelect={(emoji) => {
+                if (pickerAction.onSelect) {
+                  pickerAction.onSelect(emoji.emoji);
+                }
+              }}
+            >
+              <EmojiPicker.Search className="z-10 mx-3 mt-3 appearance-none rounded-xl bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-primary/50" />
+              <EmojiPicker.Viewport className="relative flex-1 outline-hidden mt-2">
+                <EmojiPicker.Loading className="absolute inset-0 flex items-center justify-center text-zinc-400 text-sm dark:text-zinc-500">
+                  {i18n.language === 'vi' ? 'Đang tải…' : 'Loading…'}
+                </EmojiPicker.Loading>
+                <EmojiPicker.Empty className="absolute inset-0 flex items-center justify-center text-zinc-400 text-sm dark:text-zinc-500">
+                  {i18n.language === 'vi' ? 'Không tìm thấy emoji.' : 'No emoji found.'}
+                </EmojiPicker.Empty>
+                <EmojiPicker.List
+                  className="select-none pb-1.5"
+                  components={{
+                    CategoryHeader: ({ category, ...props }) => (
+                      <div
+                        className="bg-white/90 px-3 pt-3 pb-1.5 font-semibold text-zinc-500 text-xs dark:bg-[#1a1828]/90 dark:text-zinc-400 backdrop-blur-md"
+                        {...props}
+                      >
+                        {category.label}
+                      </div>
+                    ),
+                    Row: ({ children, ...props }) => (
+                      <div className="scroll-my-1.5 px-2 flex justify-between" {...props}>
+                        {children}
+                      </div>
+                    ),
+                    Emoji: ({ emoji, ...props }) => (
+                      <button
+                        className="flex size-9 items-center justify-center rounded-lg text-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors data-[active]:bg-zinc-100 dark:data-[active]:bg-zinc-800"
+                        {...props}
+                      >
+                        {emoji.emoji}
+                      </button>
+                    ),
+                  }}
+                />
+              </EmojiPicker.Viewport>
+            </EmojiPicker.Root>
+          )}
         </div>
 
         {/* Sticker Picker */}
         <div style={{ display: currentType === 'sticker' ? 'block' : 'none', width: '350px', height: '400px' }}>
-          {hasOpenedSticker && (
+          {isOpen && currentType === 'sticker' && (
             <iframe
               src={stickerIframeUrl}
               className="w-full h-full border-none bg-white dark:bg-[#1a1828]"
@@ -163,14 +149,16 @@ export const GlobalPickers: React.FC = () => {
 
         {/* Giphy Picker */}
         <div style={{ display: currentType === 'giphy' ? 'block' : 'none' }}>
-          <GiphyPicker
-            onSelect={(gifUrl) => {
-              if (pickerAction.onSelect) {
-                pickerAction.onSelect(gifUrl);
-              }
-              closePickers();
-            }}
-          />
+          {isOpen && currentType === 'giphy' && (
+            <GiphyPicker
+              onSelect={(gifUrl) => {
+                if (pickerAction.onSelect) {
+                  pickerAction.onSelect(gifUrl);
+                }
+                closePickers();
+              }}
+            />
+          )}
         </div>
       </motion.div>
     </>

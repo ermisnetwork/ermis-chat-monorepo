@@ -11,7 +11,7 @@ import { StableWSConnection } from './connection';
 import { E2EE_BYTES_HEADER, E2EE_BYTES_WIRE_FORMAT, normalizeE2eeEventBytes } from './encryption/encoding';
 import { IndexedDBEncryptionStorage } from './encryption/storage';
 import { IndexedDBUserCache } from './user_cache';
-import { getLogger, setSdkLogger } from './logger';
+import { apiErrorLogDetails, getLogger, sanitizeUrlForLog, setSdkLogger } from './logger';
 import { StandardAttachmentUploadStorage } from './standard_attachment_upload_storage';
 
 import { TokenManager } from './token_manager';
@@ -54,6 +54,7 @@ import {
   EventHandler,
   ExtendableGenerics,
   Logger,
+  KeyPackageRefillEvent,
   QueryChannelsAPIResponse,
   RefreshTokenInput,
   SendFileAPIResponse,
@@ -188,6 +189,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   deviceId?: string;
   /** Latest current-device KeyPackage count reported by health.check. */
   latestKeyPackagesRemaining?: number;
+  /** Latest durable current-device refill demand, cached until encryption initializes. */
+  latestKeyPackageRefill?: KeyPackageRefillEvent;
+  /** GroupInfo refresh hints received before the encryption manager is ready. */
+  pendingGroupInfoRefreshEvents: Array<Record<string, unknown>> = [];
   /** Encryption Manager instance set by EncryptionManager.initialize() for E2EE event handling. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   encryptionManager?: any;
@@ -212,6 +217,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   private _syncPromise: Promise<void> | null = null;
   /** Timestamp of the last successful performSync to throttle redundant bursts. */
   private _lastSyncCompletedAt = 0;
+  /** Client-owned cold-start state; UI and EncryptionManager never subscribe to channel hydration to start sync. */
+  private _coldStartSyncState: 'waiting_for_channels' | 'running' | 'ready' | 'retryable' =
+    'waiting_for_channels';
+  /** The Client-owned cold-start run. Channel-open readiness may await it, but never starts it. */
+  private _coldStartSyncPromise: Promise<void> | null = null;
 
   /**
    * Initializes a new Ermis Chat Client instance.
@@ -754,6 +764,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this.deviceId = undefined;
     this.userCache = undefined;
     this.userCacheKey = undefined;
+    this._coldStartSyncState = 'waiting_for_channels';
+    this._coldStartSyncPromise = null;
+    this._lastSyncCompletedAt = 0;
 
     // remove the user specific fields
     delete this.user;
@@ -848,38 +861,37 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       config?: AxiosRequestConfig & { maxBodyLength?: number };
     },
   ) {
-    const loggedData =
-      data && typeof data === 'object' && 'refresh_token' in data
-        ? { ...(data as Record<string, unknown>), refresh_token: '[REDACTED]' }
-        : data;
+    const loggedUrl = sanitizeUrlForLog(url);
     this.logger(
       'info',
-      `client: ${type} - Request - ${url}- ${JSON.stringify(loggedData)} - ${JSON.stringify(config.params)}`,
+      `client:${type} - Request - url: ${loggedUrl}`,
       {
         tags: ['api', 'api_request', 'client'],
-        url,
-        payload: loggedData,
-        config,
+        url: loggedUrl,
       },
     );
   }
 
   _logApiResponse<T>(type: string, url: string, response: AxiosResponse<T>) {
-    this.logger('info', `client:${type} - Response - url: ${url} > status ${response.status}`, {
+    const loggedUrl = sanitizeUrlForLog(url);
+    this.logger('info', `client:${type} - Response - url: ${loggedUrl} > status ${response.status}`, {
       tags: ['api', 'api_response', 'client'],
-      url,
-      response,
+      url: loggedUrl,
+      status: response.status,
     });
   }
 
-  _logApiError(type: string, url: string, error: unknown, options: unknown) {
+  _logApiError(type: string, url: string, error: unknown, _options: unknown) {
+    const loggedUrl = sanitizeUrlForLog(url);
+    const details = apiErrorLogDetails(error);
+    const statusSuffix = details.status === undefined ? '' : ` - status: ${details.status}`;
     this.logger(
       'error',
-      `client:${type} - Error: ${JSON.stringify(error)} - url: ${url} - options: ${JSON.stringify(options)}`,
+      `client:${type} - Error - url: ${loggedUrl} - category: ${details.category}${statusSuffix}`,
       {
         tags: ['api', 'api_response', 'client'],
-        url,
-        error,
+        url: loggedUrl,
+        ...details,
       },
     );
   }
@@ -1359,11 +1371,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     if (event.type === 'health.check' && event.me) {
       const remaining = (event.me as any).key_packages_remaining;
+      const target = (event.me as any).key_package_refill_target;
+      const lowWatermark = (event.me as any).key_package_refill_low_watermark;
       if (typeof remaining === 'number') {
         this.latestKeyPackagesRemaining = remaining;
       }
       if (this.encryptionManager?.initialized && typeof remaining === 'number') {
-        this.encryptionManager.ensureKeyPackages(remaining).catch((err: unknown) => {
+        this.encryptionManager.ensureKeyPackages(remaining, target, lowWatermark).catch((err: unknown) => {
           this.logger('warn', '[Encryption] Failed to top up key packages', { err });
         });
       }
@@ -1380,7 +1394,76 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       });
     }
 
+    if (
+      event.type === 'key_packages.low' ||
+      event.type === 'key_packages.empty' ||
+      event.type === 'key_packages.expiring'
+    ) {
+      const refill = event as unknown as KeyPackageRefillEvent;
+      if (
+        typeof refill.idempotency_key === 'string' &&
+        typeof refill.device_id === 'string' &&
+        typeof refill.usable_count === 'number' &&
+        typeof refill.target === 'number' &&
+        typeof refill.requested_delta === 'number' &&
+        typeof refill.generation === 'number' &&
+        typeof refill.version === 'number'
+      ) {
+        this.latestKeyPackageRefill = refill;
+        if (this.encryptionManager?.initialized) {
+          this.encryptionManager.handleKeyPackageRefill(refill).catch((err: unknown) => {
+            this.logger('warn', '[Encryption] Failed to process key package refill demand', { err });
+          });
+        }
+      }
+    }
+    if (event.type === 'group_info.refresh_requested') {
+      const refresh = event as any;
+      if (
+        typeof refresh.cid === 'string' &&
+        typeof refresh.request_id === 'string' &&
+        typeof refresh.minimum_epoch === 'number' &&
+        typeof refresh.deadline_at === 'string' &&
+        typeof refresh.expires_at === 'string' &&
+        typeof refresh.reason === 'string' &&
+        typeof refresh.attempt_count === 'number' &&
+        refresh.version === 1
+      ) {
+        if (this.encryptionManager?.initialized) {
+          this.encryptionManager.handleGroupInfoRefreshRequested(refresh).catch((err: unknown) => {
+            this.logger('warn', '[Encryption] Failed to process GroupInfo refresh request', { err });
+          });
+        } else {
+          const duplicate = this.pendingGroupInfoRefreshEvents.some(
+            (candidate) => candidate.cid === refresh.cid && candidate.request_id === refresh.request_id,
+          );
+          if (!duplicate) this.pendingGroupInfoRefreshEvents.push(refresh);
+        }
+      }
+    }
+
+    if (event.type === 'group_info.uploaded') {
+      const uploaded = event as any;
+      if (
+        typeof uploaded.cid === 'string' &&
+        typeof uploaded.request_id === 'string' &&
+        typeof uploaded.epoch === 'number' &&
+        typeof uploaded.hash === 'string' &&
+        uploaded.version === 1 &&
+        this.encryptionManager?.initialized
+      ) {
+        this.encryptionManager.handleGroupInfoUploaded(uploaded).catch((err: unknown) => {
+          this.logger('warn', '[Encryption] Failed to acknowledge GroupInfo upload', { err });
+        });
+      }
+    }
+
     if ((event.type === 'channel.deleted' || event.type === 'notification.channel_deleted') && event.cid) {
+      if (this.encryptionManager?.initialized) {
+        this.encryptionManager.handleGroupInfoChannelRemoved(event.cid).catch((err: unknown) => {
+          this.logger('warn', '[Encryption] Failed to clear removed GroupInfo repair state', { err });
+        });
+      }
       client.state.deleteAllChannelReference(event.cid);
       this.activeChannels[event.cid]?.state.clearMessages();
       this.activeChannels[event.cid]?.state.resetSyncState();
@@ -2006,12 +2089,57 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     await this._persistSyncState();
 
+    // Establish the Client-owned cold-start promise before notifying UI
+    // listeners. A synchronous channels.queried listener may open a channel,
+    // but its readiness path must join this run instead of racing it.
+    this._scheduleHydratedColdStartSync();
     this.dispatchEvent({
       type: 'channels.queried',
     } as unknown as Event<ErmisChatGenerics>);
 
     return channels;
   }
+
+  /** @internal Schedule the single cold-start sync once channel hydration and E2EE init are both complete. */
+  _scheduleHydratedColdStartSync = (): void => {
+    this.encryptionManager?.handleChannelsHydrated?.();
+    if (
+      this._coldStartSyncState !== 'waiting_for_channels' ||
+      Object.keys(this.activeChannels).length === 0 ||
+      !this.encryptionManager?.initialized
+    ) {
+      return;
+    }
+
+    this._coldStartSyncState = 'running';
+    const coldStartSync = Promise.resolve()
+      .then(() => this.restoreSyncState())
+      .then(() => this.performSync(true))
+      .then(() => {
+        this._coldStartSyncState = 'ready';
+      })
+      .catch((error: unknown) => {
+        this._coldStartSyncState = 'retryable';
+        this.logger('warn', 'client:coldStartSync - MLS startup sync failed', {
+          err: error,
+          tags: ['sync', 'e2ee'],
+        });
+      });
+    this._coldStartSyncPromise = coldStartSync;
+    void coldStartSync.finally(() => {
+      if (this._coldStartSyncPromise === coldStartSync) {
+        this._coldStartSyncPromise = null;
+      }
+    });
+  };
+
+  /** @internal Await an already-running hydrated cold start without scheduling another sync. */
+  _waitForHydratedColdStartSync = (): Promise<void> => {
+    if (this._coldStartSyncState !== 'running' || !this._coldStartSyncPromise) {
+      return Promise.resolve();
+    }
+    return this._coldStartSyncPromise;
+  };
 
   hydrateChannels(
     channelsFromApi: ChannelAPIResponse<ErmisChatGenerics>[] = [],

@@ -4,6 +4,10 @@
 ![Languages](https://img.shields.io/badge/language-TYPESCRIPT-orange.svg)
 [![npm](https://img.shields.io/npm/v/@ermis-network/ermis-chat-sdk.svg?style=popout&colorB=red)](https://www.npmjs.com/package/@ermis-network/ermis-chat-sdk)
 
+Web SDK, React and UHM owners should follow
+[MLS_UPGRADE_HANDOFF.md](MLS_UPGRADE_HANDOFF.md) for OpenMLS WASM intake,
+build/test, startup request-count acceptance, version skew and rollback.
+
 ## Table of contents
 
 1.  [Introduction](#introduction)

@@ -10,6 +10,10 @@ export * from './e2ee_media_stream';
 export * from './e2ee_media_stream_planner';
 export * from './attachment_crypto_provider';
 export * from './sha256';
+export * from './join_recovery';
+export * from './group_info_repair';
+export * from './generation_rebootstrap';
+export * from './rollout_controls';
 
 export { E2eeClient as EncryptionApiClient } from './api';
 export { EncryptionManager } from './manager';

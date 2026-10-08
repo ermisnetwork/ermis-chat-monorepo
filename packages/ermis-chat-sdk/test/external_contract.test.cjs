@@ -1,0 +1,205 @@
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const sdk = require('../dist/index.cjs');
+const encryption = require('../dist/encryption/index.cjs');
+
+// The uhm-chat branch is the full internal SDK and intentionally retains
+// encrypted-history APIs. Set this only when validating the stripped outsource
+// distribution; the shared wire/base64 checks below always run.
+const externalDistributionTest = process.env.ERMIS_EXTERNAL_CONTRACT === '1' ? test : test.skip;
+
+const forbiddenPublicName = /(recovery|Recovery|vault|Vault|archive|Archive|historical|Historical|Pin)/;
+const forbiddenEndpoint = /(\/v1\/e2ee\/recovery\/vault|epoch_archives)/i;
+
+externalDistributionTest('external root exports and manager prototype omit encrypted-history APIs', () => {
+  const rootNames = Object.keys(sdk).filter((name) => forbiddenPublicName.test(name));
+  const managerNames = Object.getOwnPropertyNames(sdk.EncryptionManager.prototype).filter((name) =>
+    forbiddenPublicName.test(name),
+  );
+
+  assert.deepEqual(rootNames, []);
+  assert.deepEqual(managerNames, []);
+  assert.equal(typeof sdk.EncryptionManager.prototype.repairEncryptedChannel, 'function');
+  assert.equal(typeof sdk.EncryptionManager.prototype.keyRotation, 'function');
+});
+
+externalDistributionTest('public declarations omit encrypted-history contracts', () => {
+  const files = [
+    'dist/index.d.ts',
+    'dist/encryption/index.d.ts',
+    ...fs
+      .readdirSync(path.join(__dirname, '..', 'dist'))
+      .filter((name) => /^index-.+\.d\.ts$/.test(name))
+      .map((name) => `dist/${name}`),
+  ];
+  const forbidden =
+    /(useRecoveryPin|RecoveryVault|EpochArchive|RestoreProgressRecord|e2ee_recovery_policy|archiveCurrentEpoch)/i;
+
+  for (const relative of files) {
+    const source = fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
+    assert.equal(forbidden.test(source), false, `${relative} exposes an encrypted-history contract`);
+    assert.equal(source.includes('sourcesContent'), false, `${relative} contains sourcesContent`);
+  }
+});
+
+externalDistributionTest('pinned OpenMLS artifact is live-only and matches package provenance', () => {
+  const manifest = require('../package.json');
+  const build = manifest.openmlsBuild;
+  const generatedFiles = [
+    'src/encryption/wasm/openmls_wasm.js',
+    'src/encryption/wasm/openmls_wasm.d.ts',
+    'src/encryption/wasm/openmls_wasm_bg.wasm.d.ts',
+  ];
+  const forbidden = /epoch[-_ ]?archive|\b(?:recovery|vault|pin)\b/i;
+
+  for (const relative of generatedFiles) {
+    const source = fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
+    assert.equal(forbidden.test(source), false, `${relative} contains an encrypted-history contract`);
+  }
+  for (const patch of build.patches || []) {
+    const patchBytes = fs.readFileSync(path.join(__dirname, '..', patch.path));
+    assert.equal(crypto.createHash('sha256').update(patchBytes).digest('hex'), patch.sha256);
+  }
+  const declarations = fs.readFileSync(path.join(__dirname, '../src/encryption/wasm/openmls_wasm.d.ts'), 'utf8');
+  assert.equal(declarations.includes('join_with_welcome_typed'), true);
+  assert.equal(declarations.includes('NoMatchingKeyPackage'), true);
+
+  assert.equal(
+    fs.existsSync(path.join(__dirname, '../src/encryption/wasm/openmls_wasm_bg.js')),
+    false,
+    'stale split WASM glue must not be retained',
+  );
+
+  const sourceWasm = fs.readFileSync(path.join(__dirname, '../src/encryption/wasm/openmls_wasm_bg.wasm'));
+  const publicWasm = fs.readFileSync(path.join(__dirname, '../public/openmls_wasm_bg.wasm'));
+  const appWasm = fs.readFileSync(path.join(__dirname, '../../../apps/uhm-chat/public/openmls_wasm_bg.wasm'));
+  const digest = crypto.createHash('sha256').update(sourceWasm).digest('hex');
+
+  assert.equal(digest, build.wasmSha256);
+  assert.equal(sourceWasm.byteLength, build.wasmSize);
+  assert.deepEqual(publicWasm, sourceWasm);
+  assert.deepEqual(appWasm, sourceWasm);
+});
+
+externalDistributionTest('external runtime has no encrypted-history endpoint strings', () => {
+  for (const relative of [
+    'dist/index.cjs',
+    'dist/index.mjs',
+    'dist/encryption/index.cjs',
+    'dist/encryption/index.mjs',
+  ]) {
+    const source = fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
+    assert.equal(forbiddenEndpoint.test(source), false, `${relative} contains a forbidden endpoint`);
+  }
+});
+
+test('external API selects Base64 while decoding legacy array responses', async () => {
+  const calls = [];
+  const client = {
+    baseURL: 'https://bellboy.example',
+    deviceId: 'web-migration-test',
+    async doAxiosRequest(method, url, data, config) {
+      calls.push({ method, url, data, config });
+      if (method === 'get' && url.endsWith('/group_info')) {
+        return { group_info: [1, 2, 3, 255], epoch: 7 };
+      }
+      return { duration: '0ms' };
+    },
+  };
+  const api = new encryption.EncryptionApiClient(client);
+
+  const response = await api.getGroupInfo('team', 'legacy-channel');
+  assert.ok(response.group_info instanceof Uint8Array);
+  assert.deepEqual(Array.from(response.group_info), [1, 2, 3, 255]);
+  assert.equal(calls[0].config.headers['X-Ermis-E2EE-Bytes'], 'base64');
+  assert.equal(calls[0].config.headers['X-Device-ID'], 'web-migration-test');
+
+  await api.uploadGroupInfo('team', 'legacy-channel', {
+    group_info: Uint8Array.from([1, 2, 3, 255]),
+    epoch: 8,
+  });
+  assert.equal(calls[1].data.group_info, 'AQID/w==');
+  assert.equal(calls[1].config.headers['X-Ermis-E2EE-Bytes'], 'base64');
+});
+
+test('external websocket bundle carries the Base64 selector', () => {
+  for (const relative of ['dist/index.cjs', 'dist/index.mjs']) {
+    const source = fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
+    assert.equal(source.includes('e2ee_bytes'), true, `${relative} omits the websocket selector`);
+    assert.equal(source.includes('X-Ermis-E2EE-Bytes'), true, `${relative} omits the HTTP selector`);
+  }
+});
+
+test('external scope sync stays event-only and recovery discovery normalizes GroupId bytes', async () => {
+  const requestBodies = [];
+  const client = {
+    baseURL: 'https://bellboy.example',
+    deviceId: 'web-nested-test',
+    async doAxiosRequest(_method, _url, data) {
+      requestBodies.push({ url: _url, data });
+      if (_url.endsWith('/v1/e2ee/mls/recovery/discover')) {
+        return {
+          protocol_version: 1,
+          capability: { protocol_version: 1 },
+          states: {
+            'team:test': {
+              result: 'state',
+              generation: { group_id: 'AQID', group_generation: 1 },
+              group_info_refresh: null,
+            },
+          },
+        };
+      }
+      return {
+        channels: {
+          'team:test': {
+            events: [
+              { type: 'application', data: { mls_ciphertext: 'AQID', mls_epoch: 3, label: 'base64' } },
+              { type: 'protocol', data: { proposal: [4, 5, 6], epoch: 4 } },
+              { type: 'message_updated', data: { message: { mls_ciphertext: [7, 8, 9], mls_epoch: 5 } } },
+              { type: 'member_removed', data: { user_id: 'unchanged' } },
+            ],
+            has_more: false,
+            next_cursor: null,
+          },
+        },
+        removed_channels: { events: [], has_more: false, next_cursor: null },
+      };
+    },
+  };
+  const api = new encryption.EncryptionApiClient(client);
+  const response = await api.scopeSync({}, 10);
+  const events = response.channels['team:test'].events;
+  assert.deepEqual(Array.from(events[0].data.mls_ciphertext), [1, 2, 3]);
+  assert.deepEqual(Array.from(events[1].data.proposal), [4, 5, 6]);
+  assert.deepEqual(Array.from(events[2].data.message.mls_ciphertext), [7, 8, 9]);
+  assert.equal(events[3].data.user_id, 'unchanged');
+  assert.equal(events[0].data.label, 'base64');
+  assert.equal('mls_generation_protocol_version' in requestBodies[0].data, false);
+
+  const discovery = await api.discoverMlsRecovery(['team:test']);
+  assert.deepEqual(Array.from(discovery.states['team:test'].generation.group_id), [1, 2, 3]);
+  assert.deepEqual(requestBodies[1].data, { protocol_version: 1, cids: ['team:test'] });
+});
+
+test('external decoder rejects noncanonical Base64 and accepts omitted optional fields', async () => {
+  let response = { group_info: 'AQIDBA', epoch: 7 };
+  const client = {
+    baseURL: 'https://bellboy.example',
+    deviceId: 'web-strict-test',
+    async doAxiosRequest() {
+      return response;
+    },
+  };
+  const api = new encryption.EncryptionApiClient(client);
+  await assert.rejects(() => api.getGroupInfo('team', 'invalid-base64'), /base64/i);
+
+  response = { group_info: [1, 2, 3], epoch: 8 };
+  const decoded = await api.getGroupInfo('team', 'legacy-array');
+  assert.deepEqual(Array.from(decoded.group_info), [1, 2, 3]);
+  assert.equal(decoded.ratchet_tree, undefined);
+});
