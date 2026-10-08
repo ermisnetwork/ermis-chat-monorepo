@@ -257,12 +257,19 @@ test('accepted external commit is not retried when its post-merge GroupInfo uplo
     },
   };
   const joinStates = new Map();
+  const mutationStates = new Map();
   const storage = {
     getDeviceId: async () => 'device-a',
     listGroupInfoRefreshRequests: async () => [],
     saveGroupInfoRefreshRequest: async () => {},
     deleteGroupInfoRefreshRequests: async () => {},
     saveGroupState: async () => {},
+    listPendingMlsMutations: async () => Array.from(mutationStates.values()),
+    saveMlsMutationCheckpoint: async (checkpoint) => {
+      if (checkpoint.pending) mutationStates.set(checkpoint.cid, structuredClone(checkpoint.pending));
+      else mutationStates.delete(checkpoint.cid);
+      if (checkpoint.readiness) joinStates.set(checkpoint.cid, { ...checkpoint.readiness });
+    },
     loadExternalJoinReadiness: async (cid) => joinStates.get(cid) || null,
     saveExternalJoinReadiness: async (state) => joinStates.set(state.cid, { ...state }),
     deleteExternalJoinReadiness: async (cid) => joinStates.delete(cid),
@@ -315,6 +322,7 @@ test('accepted external commit is not retried when its post-merge GroupInfo uplo
   assert.equal(externalJoinCalls, 1);
   assert.equal(uploadCalls, 1);
   assert.equal(manager.groups.get('team:a'), joinedGroup);
+  assert.equal(mutationStates.size, 0, 'accepted commit must remain durably settled after GI upload failure');
 });
 
 test('HTTP client sends reconcile, claim, report, and leased upload contract', async () => {

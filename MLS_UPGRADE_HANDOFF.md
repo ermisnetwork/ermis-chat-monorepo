@@ -479,3 +479,33 @@ Web historical cache retries and past-generation mismatch remain OPEN; this
 exchange does not establish full cursor/provider/proof/ratchet atomicity,
 selected/private server-pool reconciliation, cross-tab correctness or natural
 auth expiry. No new membership repetitions, reset, commit/push or deployment.
+## 2026-10-08 — TEST/POC KeyPackage and generation parity
+
+Against Bellboy External's client/server recovery contract, validate lifecycle
+inventory/demand fields before KeyPackage generation, honor uncleared durable
+demand above the low watermark, and recount an ambiguous fifth upload without
+creating a sixth batch. Keep Provider persistence before upload, concurrent
+coalescing and old-server responses lacking all lifecycle metadata compatible.
+Reject recovery protocol skew, malformed/regressing generation identity, and use
+authoritative join for `delivery_failed_retryable` rather than a new claim.
+Update the stale GI repair test storage fixture to include atomic mutation
+checkpoints. Local UHM Web `.env.local` points at `https://api.khoakheu.pro`.
+GI repair and server-authorized rebootstrap already enabled; no new toggle needed.
+No WASM/native artifact, backend API/SQL/Postman or production deployment changes.
+Validation O(1); Provider snapshot O(P) time/memory plus O(B) keys, B <= 100;
+at most five uploads and six counts on ambiguous outcomes. See
+[cross-client executable evidence](../bellboy-external-release/docs/release/evidence/2026-10-08/client-rebootstrap/README.md).
+
+### 2026-10-08 — Web source readiness confirmation
+
+Owner clarified that deployment/build will be performed on their server, using
+`api-trieve.ermis.network`; no agent deployment or publication is requested.
+Fresh `npm run build:uhm` passes SDK, React, declarations and Uhm/PWA build;
+the five focused refill/GI/recovery/claim-intent/generation suites pass **73/73**
+with no failures/skips, and `git diff --check` passes. Rebootstrap, KeyPackage
+refill and GroupInfo repair need no additional Web toggle for this change.
+Local `.env.local` is ignored and selects the owner's test API; server builds
+must select `VITE_API_URL=https://api-trieve.ermis.network` independently.
+The five current tracked edits remain uncommitted/unpushed; these local checks
+do not imply the server has received the updated source or that production
+runtime recovery has been verified. No WASM, backend or deployment change.

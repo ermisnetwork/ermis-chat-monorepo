@@ -955,6 +955,26 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     });
     return this._keyPackageTopUpPromise;
   }
+  private _keyPackageInventoryHint(
+    remaining: number,
+    inventory: { target?: number; low_watermark?: number; requested_delta?: number; refill_generation?: number | null },
+  ): KeyPackageRefillHint {
+    const hasLifecycleMetadata = inventory.target !== undefined || inventory.low_watermark !== undefined ||
+      inventory.requested_delta !== undefined || inventory.refill_generation !== undefined;
+    const target = hasLifecycleMetadata ? inventory.target : KEY_PACKAGE_POOL_TARGET;
+    const lowWatermark = hasLifecycleMetadata ? inventory.low_watermark : KEY_PACKAGE_POOL_LOW_WATERMARK;
+    const generation = inventory.refill_generation;
+    if (!Number.isSafeInteger(remaining) || remaining < 0 ||
+        !Number.isSafeInteger(target) || target! < 1 || target! > KEY_PACKAGE_POOL_TARGET ||
+        !Number.isSafeInteger(lowWatermark) || lowWatermark! < 0 || lowWatermark! >= target! ||
+        (hasLifecycleMetadata && (inventory.requested_delta !== Math.max(0, target! - remaining) ||
+          (generation != null && (!Number.isSafeInteger(generation) || generation <= 0)) ||
+          (remaining <= lowWatermark! && remaining < target! && generation == null)))) {
+      throw new Error('[Encryption] Invalid KeyPackage inventory/durable demand contract');
+    }
+    return { remaining, target: target!, lowWatermark: lowWatermark!, generation: generation ?? undefined, confirmed: true };
+  }
+
   private async _runKeyPackageRefill(): Promise<void> {
     while (this._pendingKeyPackageRefill) {
       let hint = this._pendingKeyPackageRefill;
@@ -967,20 +987,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         try {
           if (!hint.confirmed || attempt > 1) {
             const count = await this.e2eeClient!.getKeyPackageCount('manual');
-            hint = {
-              remaining: Math.max(0, Math.floor(count.remaining)),
-              target: Math.max(1, Math.min(KEY_PACKAGE_POOL_TARGET, Math.floor(count.target || hint.target))),
-              lowWatermark: Math.max(
-                0,
-                Math.min(
-                  Math.floor((count.target || hint.target) - 1),
-                  Math.floor(count.low_watermark ?? hint.lowWatermark),
-                ),
-              ),
-              generation: count.refill_generation || hint.generation,
-              confirmed: true,
-            };
+            const demandedGeneration = hint.generation;
+            hint = this._keyPackageInventoryHint(count.remaining, count);
+            if (hint.remaining >= hint.target) hint.generation ??= demandedGeneration;
           }
+          if (!hint.generation && hint.remaining > hint.lowWatermark && hint.remaining < hint.target) break;
           if (hint.remaining >= hint.target) {
             if (hint.generation) {
               this._completedKeyPackageRefillGeneration = Math.max(
@@ -991,31 +1002,33 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             break;
           }
           const response = await this._uploadKeyPackages(hint.target - hint.remaining);
-          hint = {
-            ...hint,
-            remaining: Math.max(0, Math.floor(response.total_remaining)),
-            target: Math.max(1, Math.min(KEY_PACKAGE_POOL_TARGET, Math.floor(response.target || hint.target))),
-            lowWatermark: Math.max(
-              0,
-              Math.min(
-                Math.floor((response.target || hint.target) - 1),
-                Math.floor(response.low_watermark ?? hint.lowWatermark),
-              ),
-            ),
-            generation: response.refill_generation || hint.generation,
-            confirmed: true,
-          };
+          const completedGeneration = hint.generation;
+          hint = this._keyPackageInventoryHint(response.total_remaining, response);
           if (hint.remaining >= hint.target) {
-            if (hint.generation) {
+            if (completedGeneration) {
               this._completedKeyPackageRefillGeneration = Math.max(
                 this._completedKeyPackageRefillGeneration,
-                hint.generation,
+                completedGeneration,
               );
             }
             break;
           }
         } catch (err) {
           if (attempt >= KEY_PACKAGE_REFILL_MAX_ATTEMPTS) {
+            // The final upload may have been accepted before its ACK was lost.
+            // Recount once without allowing another generation/upload attempt.
+            try {
+              const count = await this.e2eeClient!.getKeyPackageCount('manual');
+              const reconciled = this._keyPackageInventoryHint(count.remaining, count);
+              if (reconciled.remaining >= reconciled.target) {
+                if (hint.generation) this._completedKeyPackageRefillGeneration = Math.max(
+                  this._completedKeyPackageRefillGeneration, hint.generation,
+                );
+                break;
+              }
+            } catch {
+              // Retain the pending demand for the next bounded reconciliation.
+            }
             sdkLog('warn', '[Encryption] KeyPackage refill exhausted jittered retries:', err);
             break;
           }
@@ -1043,11 +1056,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   async ensureKeyPackagesFromServer(reason: 'manual' | 'group_join' = 'manual'): Promise<void> {
     try {
       const response = await this.e2eeClient!.getKeyPackageCount(reason);
+      const hint = this._keyPackageInventoryHint(response.remaining, response);
       await this.ensureKeyPackages(
-        response.remaining,
-        response.target,
-        response.low_watermark,
-        response.refill_generation || undefined,
+        hint.remaining,
+        hint.target,
+        hint.lowWatermark,
+        hint.generation,
         true,
       );
     } catch (err) {
@@ -1963,6 +1977,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const chunk = uniqueCids.slice(offset, offset + MLS_RECOVERY_DISCOVERY_CHUNK_SIZE);
       try {
         const response = await this.e2eeClient!.discoverMlsRecovery(chunk, 1);
+        if (response.protocol_version !== 1 || response.capability?.protocol_version !== 1) {
+          this._mlsRecoveryDiscoverySupported = false;
+          return { states: {}, unsupported: true };
+        }
         this._mlsRecoveryDiscoverySupported = true;
         for (const [cid, item] of Object.entries(response.states || {})) {
           states[cid] =
@@ -7644,6 +7662,17 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }
       state = item.generation;
     }
+    if (state.capability?.protocol_version !== 1) {
+      return { cid, generation: local?.group_generation || 0, epoch: this.getEpoch(cid),
+        status: 'client_upgrade_required', reason: 'unsupported_protocol_version', retryable: false };
+    }
+    if (!Number.isSafeInteger(state.group_generation) || state.group_generation < (local?.group_generation || 0) ||
+        !Number.isSafeInteger(state.current_epoch) || state.current_epoch < 0 ||
+        (state.group_id ? state.group_id.length < 1 || state.group_id.length > 255 : state.group_generation > 0)) {
+      return { cid, generation: local?.group_generation || 0, epoch: this.getEpoch(cid),
+        status: 'retryable_infrastructure_failure', reason: 'infrastructure_unavailable', retryable: true,
+        retry_at: this._generationRecoveryRetryAt() };
+    }
     if (local?.group_generation === state.group_generation && this.groups.has(cid)) {
       return {
         cid,
@@ -7678,7 +7707,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             : this._generationRecoveryRetryAt(),
       };
     }
-    if (state.state === 'activated' && state.group_id) {
+    if ((state.state === 'activated' || state.state === 'delivery_failed_retryable') && state.group_id) {
       await this.storage.deleteRebootstrapClaimIntent?.(cid);
       const joined = await this._joinAuthoritativeGeneration(channelType, channelId, cid);
       return {

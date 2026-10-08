@@ -31,6 +31,48 @@ const boundary = {
   expected_epoch: 9,
 };
 
+test('activated generation remains joinable when Welcome delivery failed', async () => {
+  const manager = new EncryptionManager();
+  manager.initialized = true;
+  manager.userId = 'alice';
+  manager.deviceId = 'web-a';
+  manager.storage = { deleteRebootstrapClaimIntent: async () => {} };
+  let joins = 0;
+  manager.e2eeClient = {
+    claimMlsRebootstrap: async () => { throw new Error('must not create another generation'); },
+  };
+  manager._joinAuthoritativeGeneration = async () => { joins += 1; return { epoch: 4 }; };
+  const result = await manager.recoverMlsGeneration('messaging', 'stable-cid', boundary.cid, {
+    group_generation: 1, group_id: [1, 2, 3], current_epoch: 4,
+    state: 'delivery_failed_retryable', reason: 'delivery_pending', retryable: true,
+    capability: { protocol_version: 1, automatic_enabled: false },
+  });
+  assert.equal(joins, 1);
+  assert.equal(result.status, 'recovered');
+  assert.equal(result.generation, 1);
+});
+
+test('malformed or regressing authoritative state cannot join or claim', async () => {
+  const manager = new EncryptionManager();
+  manager.initialized = true;
+  manager.userId = 'alice';
+  manager.deviceId = 'web-a';
+  manager.storage = {};
+  manager._groupGenerations.set(boundary.cid, { group_generation: 2, group_id: [4] });
+  manager.e2eeClient = {
+    claimMlsRebootstrap: async () => { throw new Error('must not claim'); },
+  };
+  manager._joinAuthoritativeGeneration = async () => { throw new Error('must not join'); };
+  for (const override of [{ group_generation: 1 }, { group_id: null }, { current_epoch: -1 },
+    { group_generation: 2.5 }, { group_id: [] }, { group_id: new Uint8Array(256) }]) {
+    const result = await manager.recoverMlsGeneration('messaging', 'stable-cid', boundary.cid, {
+      group_generation: 2, group_id: [1], current_epoch: 4, state: 'activated',
+      capability: { protocol_version: 1 }, ...override,
+    });
+    assert.equal(result.status, 'retryable_infrastructure_failure');
+  }
+});
+
 test('ambiguous claim ACK reuses the durable operation key after restart', async () => {
   const storage = new MemoryClaimIntentStorage();
   let allocated = 0;
