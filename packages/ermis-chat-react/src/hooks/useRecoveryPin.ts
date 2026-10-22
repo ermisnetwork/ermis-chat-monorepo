@@ -50,7 +50,7 @@ export type UseRecoveryPinReturn = {
   repairEncryptedChannel: (
     channelType: string,
     channelId: string,
-    options?: { mode?: EncryptedChannelRepairMode },
+    options?: { mode?: EncryptedChannelRepairMode; validateManualGroupInfo?: boolean },
   ) => Promise<EncryptedChannelRepairResult>;
   enqueueRestore: (
     channelType: string,
@@ -172,7 +172,7 @@ export const useRecoveryPin = (): UseRecoveryPinReturn => {
     (
       channelType: string,
       channelId: string,
-      options?: { mode?: EncryptedChannelRepairMode },
+      options?: { mode?: EncryptedChannelRepairMode; validateManualGroupInfo?: boolean },
     ): Promise<EncryptedChannelRepairResult> =>
       run((manager) => manager.repairEncryptedChannel(channelType, channelId, options)),
     [run],

@@ -14,6 +14,7 @@ import type {
   StandardUploadSession,
 } from './standard_attachment_upload_storage';
 import { encodeEncryptionChannelFields } from './encryption/encoding';
+import { mlsProtocolProcessingOptions } from './encryption/acceptance_context';
 import type { PendingE2eeSendRecord } from './encryption/types';
 import { resolvePendingE2eeAttachmentDisplayProgress } from './encryption/attachment_resume_progress';
 import {
@@ -481,7 +482,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (
       record.cid !== this.cid ||
       !record.message_id ||
-      !record.files?.length
+      (!record.files?.length && !(record.unsealed_intent_version === 1 && record.payload && record.operation_kind !== 'update'))
     ) {
       return;
     }
@@ -493,7 +494,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       : undefined;
     const existingPendingSend = this._pendingE2eeAttachmentSends.get(record.message_id);
     const localAttachments =
-      existingPendingSend?.localAttachments || this._buildPendingLocalAttachments(record.files, displayOverrides);
+      existingPendingSend?.localAttachments || this._buildPendingLocalAttachments(record.files || [], displayOverrides);
     const phase =
       record.status === 'generating_preview' ||
       record.status === 'encrypting' ||
@@ -816,7 +817,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       paused: true,
     });
     this.state.addMessageSorted(optimisticMessage);
-    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(persisted.message_id) as any);
+    // State is already applied: async profile enrichment must not replay this snapshot.
+    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(persisted.message_id) as any, true);
     if (this.getClient().wsConnection?.isHealthy) {
       void this.resumePendingStandardAttachmentUploads();
     }
@@ -873,7 +875,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       createdAt: now,
     });
     this.state.addMessageSorted(optimisticMessage);
-    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any);
+    // State is already applied: async profile enrichment must not replay this snapshot.
+    this._dispatchLocalMessageStateEvent('message.new', this._findLocalMessageById(messageId) as any, true);
     await this._persistPendingStandardAttachment(messageId);
 
     void this._processStandardAttachmentMessage(messageId).catch(() => undefined);
@@ -2140,11 +2143,25 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (currentUserId && userId !== currentUserId) {
       throw new Error('[E2EE] leaveChannelE2ee can only remove the current user');
     }
-    const response = await this._update({ remove_members: [userId], self_remove: true });
-    const encryptionManager = this.getClient().encryptionManager;
-    if (encryptionManager?.initialized && this.cid) {
-      encryptionManager.leaveGroup(this.cid, Date.now());
+    const client = this.getClient(), encryptionManager = client.encryptionManager, channel = client.activeChannels[this.cid];
+    const assertAuth = (client as any)._captureAuthScope?.().assertCurrent;
+    const assertManager = encryptionManager?.captureHostSyncScope?.();
+    const assertScope = () => { assertAuth?.(); assertManager?.(); };
+    const owner = encryptionManager?.initialized
+      ? encryptionManager.captureMlsCleanupOwner(this.cid) : undefined;
+    if (owner) { await encryptionManager!.admitMlsCleanup(this.cid, owner); assertScope(); owner.assertCurrent(); }
+    // _update publishes response into this.data; self-leave must fence before publication.
+    const response = await client.post<UpdateChannelAPIResponse<ErmisChatGenerics>>(this._channelURL(),
+      this._encodeE2eeChannelPayload({remove_members: [userId], self_remove: true}));
+    assertScope?.();
+    if (client !== this.getClient() || client.encryptionManager !== encryptionManager || client.activeChannels[this.cid] !== channel) {
+      throw Object.assign(new Error('Self-leave owner changed'), {code: 'recovery_scope_changed'});
     }
+    owner?.assertCurrent();
+    if (owner) await encryptionManager!.leaveGroup(this.cid, undefined, owner, {kind: 'owner_request'});
+    assertScope?.();
+    if (client.activeChannels[this.cid] !== channel) throw Object.assign(new Error('Self-leave channel changed'), {code: 'recovery_scope_changed'});
+    this.data = {...this.data, ...response.channel};
     return response;
   }
 
@@ -2546,6 +2563,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     }
 
     // add any messages to our channel state
+    this.getClient().encryptionManager?.observeChannelE2ee?.(state.channel.e2ee,true);
     const { messageSet } = this._initializeState(state, messageSetToAddToIfDoesNotExist);
 
     const areCapabilitiesChanged =
@@ -2602,6 +2620,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.pinned_messages = await this._hydrateE2eeMessagesFromLocalCache(state.pinned_messages || [], state.channel);
 
     // add any messages to our channel state
+    this.getClient().encryptionManager?.observeChannelE2ee?.(state.channel.e2ee,true);
     const { messageSet } = this._initializeState(state, messageSetToAddToIfDoesNotExist);
 
     const areCapabilitiesChanged =
@@ -3170,6 +3189,23 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const channelState = channel.state;
     const users = Object.values(this.getClient().state.users);
+    let mlsRemovalSettled = false;
+    if (event.type === 'member.removed' && (event.member?.user_id || event.user?.id) === this.getClient().userID) {
+      const client = this.getClient(), manager = client.encryptionManager;
+      const removedAt = event.created_at || event.createdAt || event.message?.created_at;
+      if (manager?.isObsoleteMlsRemoval(this.cid, client.userID!, removedAt)) return;
+      if (manager?.initialized && (event.mls_enabled || this.data?.mls_enabled || manager.hasLocalMlsCleanupState(this.cid))) {
+        const assertAuth = (client as any)._captureAuthScope?.().assertCurrent, assertManager = manager.captureHostSyncScope();
+        const assertScope = () => { assertAuth?.(); assertManager(); }, ownedChannel = client.activeChannels[this.cid];
+        const membership = channelState.members[client.userID!], ownMembership = channelState.membership;
+        await manager.leaveGroups([this.cid, ...(event.topic_cids || []).filter(cid => manager.ownsE2eeGroup(cid))], removedAt,
+          {kind: 'canonical_removal', event_id: (event as any).event_id, removed_at: typeof removedAt === 'string' ? removedAt : undefined, expected_generation: (event as any).group_generation});
+        assertScope();
+        if (this.getClient() !== client || client.encryptionManager !== manager || client.activeChannels[this.cid] !== ownedChannel ||
+            channelState.members[client.userID!] !== membership || channelState.membership !== ownMembership) throw Object.assign(new Error('Removal owner changed'), {code: 'recovery_scope_changed'});
+        mlsRemovalSettled = true;
+      }
+    }
 
     // ─── Event Sourcing: WebSocket Gap Detection (Section 6.2) ──────────
     const eventSeq = (event as any).event_seq as number | undefined;
@@ -3807,8 +3843,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         if (removedUserId) {
           const removedAt = (event as any).created_at || (event as any).createdAt || event.message?.created_at;
           if (this.getClient().encryptionManager?.isObsoleteMlsRemoval(this.cid, removedUserId, removedAt)) break;
-          delete channelState.members[removedUserId];
-
+          const membership = channelState.members[removedUserId], client = this.getClient();
           const encryptionMgrRemoved = this.getClient().encryptionManager;
           const actorUserId = event.user?.id;
           const currentUserId = this.getClient().user?.id;
@@ -3819,14 +3854,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           const removalCursor = (event as any).created_at || (event as any).createdAt || event.message?.created_at;
 
           if (currentUserWasRemoved) {
-            if (encryptionMgrRemoved?.initialized && this.cid) {
-              encryptionMgrRemoved.leaveGroup(this.cid, removalCursor);
-              if (Array.isArray(event.topic_cids)) {
-                for (const topicCid of event.topic_cids) {
-                  if (encryptionMgrRemoved.ownsE2eeGroup(topicCid)) {
-                    encryptionMgrRemoved.leaveGroup(topicCid, removalCursor);
-                  }
-                }
+            if (encryptionMgrRemoved?.initialized && this.cid && !mlsRemovalSettled) {
+              const assertScope = encryptionMgrRemoved.captureHostSyncScope();
+              const ownedChannel = client.activeChannels[this.cid];
+              await encryptionMgrRemoved.leaveGroups([this.cid, ...(event.topic_cids || []).filter(topicCid => encryptionMgrRemoved.ownsE2eeGroup(topicCid))],
+                removalCursor, {kind: 'canonical_removal', event_id: (event as any).event_id, removed_at: typeof removalCursor === 'string' ? removalCursor : undefined, expected_generation: (event as any).group_generation});
+              assertScope();
+              if (this.getClient() !== client || client.encryptionManager !== encryptionMgrRemoved ||
+                  client.activeChannels[this.cid] !== ownedChannel || channelState.members[removedUserId] !== membership) {
+                throw Object.assign(new Error('Removal owner changed'), {code: 'recovery_scope_changed'});
               }
             }
           } else if (
@@ -3838,39 +3874,28 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             this.id &&
             encryptionMgrRemoved.isDesignatedEvictor(channel)
           ) {
-            encryptionMgrRemoved
-              .evictMember(this.type, this.id, this.cid, removedUserId, true)
-              .catch((err: unknown) => {
-                this.getClient().logger('error', '[Encryption Event] evictMember after member.removed failed', {
-                  err,
-                  cid: this.cid,
-                  user_id: removedUserId,
-                });
-              });
-
-            if (Array.isArray(event.topic_cids)) {
-              for (const topicCid of event.topic_cids) {
-                if (!encryptionMgrRemoved.ownsE2eeGroup(topicCid)) continue;
-                const colonIdx = topicCid.indexOf(':');
-                const topicType = topicCid.substring(0, colonIdx);
-                const topicId = topicCid.substring(colonIdx + 1);
-                encryptionMgrRemoved
-                  .evictMember(topicType, topicId, topicCid, removedUserId, true)
-                  .catch((err: unknown) => {
-                    this.getClient().logger(
-                      'error',
-                      '[Encryption Event] topic evictMember after member.removed failed',
-                      {
-                        err,
-                        cid: topicCid,
-                        user_id: removedUserId,
-                      },
-                    );
-                  });
+            const assertAuth = (client as any)._captureAuthScope?.().assertCurrent;
+            const assertManager = encryptionMgrRemoved.captureHostSyncScope();
+            const ownedChannel = client.activeChannels[this.cid];
+            const assertOwner = () => {
+              assertAuth?.(); assertManager();
+              if (this.getClient() !== client || client.encryptionManager !== encryptionMgrRemoved ||
+                  client.activeChannels[this.cid] !== ownedChannel || channelState.members[removedUserId] !== membership) {
+                throw Object.assign(new Error('Removal owner changed'), {code: 'recovery_scope_changed'});
               }
+            };
+            // Self-leave changes DB membership only. Persist the ghost here;
+            // the next explicit membership mutation owns the composite commit.
+            await encryptionMgrRemoved.queuePendingEviction(this.cid, removedUserId);
+            assertOwner();
+            for (const topicCid of event.topic_cids || []) {
+              if (!encryptionMgrRemoved.ownsE2eeGroup(topicCid)) continue;
+              await encryptionMgrRemoved.queuePendingEviction(topicCid, removedUserId);
+              assertOwner();
             }
           }
         }
+        if (removedUserId) delete channelState.members[removedUserId];
         break;
       }
       case 'channel.topic.enabled':
@@ -4035,7 +4060,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
           const encryptionMgrAccept = this.getClient().encryptionManager;
           if (
-            event.mls_enabled &&
+            (event.mls_enabled ?? this._isEffectiveE2ee()) &&
             encryptionMgrAccept?.initialized &&
             event.member.user_id === this.getClient().user?.id &&
             this.cid
@@ -4237,19 +4262,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         switch (protoType) {
           case 'welcome': {
-            await encryptionMgrProto.reconcileMlsBootstrapWelcome(this.cid, protoMsg);
-            const targetIds = (protoMsg.target_user_ids as string[]) || [];
-            if (
-              targetIds.includes(encryptionMgrProto.userId) &&
-              !encryptionMgrProto.getGroup(this.cid) &&
-              !encryptionMgrProto.isChannelEncryptionSyncBlocked(this.cid)
-            ) {
-              encryptionMgrProto.joinGroup(protoMsg.welcome, protoMsg.ratchet_tree).catch((err: unknown) => {
-                this.getClient().logger('error', '[Encryption Event] Failed to process welcome', {
-                  err,
-                  cid: this.cid,
-                });
-              });
+            try {
+              const disposition = await encryptionMgrProto.processMlsWelcome(this.cid, protoMsg,
+                mlsProtocolProcessingOptions(event, protoMsg, this.cid, false),
+                {created_at: event.created_at!, event_id: protoMsg.event_id || (event as any).event_id});
+              if (disposition === 'pending_external_join') encryptionMgrProto.requestScopeSyncAfterRepair(this.cid);
+            } catch {
+              this.getClient().logger('warn', '[Encryption Event] Welcome requires durable recovery', {cid: this.cid});
+              encryptionMgrProto.requestScopeSyncAfterRepair(this.cid);
             }
             break;
           }
@@ -4260,13 +4280,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               !!protoDeviceId &&
               protoDeviceId === encryptionMgrProto.deviceId;
             if (isOwnDeviceCommit) {
-              encryptionMgrProto.processOwnMlsCommit(this.cid, protoMsg).catch(() => {
+              encryptionMgrProto.processOwnMlsCommit(this.cid, protoMsg,
+                mlsProtocolProcessingOptions(event, protoMsg, this.cid, false)).catch(() => {
                 encryptionMgrProto.sync().catch(() => undefined);
               });
               break;
             }
 
-            encryptionMgrProto.processCommit(this.cid, protoMsg.commit, protoMsg.epoch).catch((err: unknown) => {
+            encryptionMgrProto.processCommit(this.cid, protoMsg.commit, protoMsg.epoch, protoUserId,
+              mlsProtocolProcessingOptions(event, protoMsg, this.cid, false)).catch((err: unknown) => {
               this.getClient().logger('error', '[Encryption Event] Failed to process protocol commit', {
                 err,
                 cid: this.cid,
@@ -4567,6 +4589,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     updateUserIds?: (id: string) => void,
   ) {
     const { state: clientState, user, userID } = this.getClient();
+    this.getClient().encryptionManager?.observeChannelE2ee?.(state.channel.e2ee);
     // Query responses are authoritative snapshots. Apply the clear-history
     // boundary before any returned/cache message can enter ChannelState.
     void this._applyQueryHistoryBoundary(state, false);

@@ -282,7 +282,14 @@
     "topic_inherited": "E2EE kế thừa từ kênh cha",
     "toggle_label": "Mã hóa đầu cuối",
     "toggle_description": "Tin nhắn và tệp đính kèm được mã hóa cho thành viên kênh.",
-    "unavailable": "E2EE chưa khả dụng cho đến khi mã hóa được khởi tạo."
+    "unavailable": "E2EE chưa khả dụng cho đến khi mã hóa được khởi tạo.",
+    "secure_session_refreshing": "Đang khôi phục nhắn tin bảo mật…",
+    "secure_session_preparing": "Đang chuẩn bị nhắn tin bảo mật…",
+    "secure_session_waiting_member": "Thiết bị này chưa sẵn sàng nhắn tin bảo mật. Hãy mở cuộc trò chuyện trên thiết bị vẫn sử dụng được, rồi thử lại.",
+    "secure_session_retry": "Chưa khôi phục được nhắn tin bảo mật. Bạn có thể thử lại.",
+    "secure_session_upgrade": "Hãy cập nhật ứng dụng để khôi phục nhắn tin bảo mật.",
+    "secure_session_server_upgrade": "Tính năng khôi phục nhắn tin bảo mật chưa khả dụng. Vui lòng liên hệ hỗ trợ.",
+    "secure_session_history": "Nhắn tin bảo mật đã sẵn sàng. Một số tin nhắn cũ chưa khôi phục được."
   },
   "recovery_pin": {
     "title": "PIN lịch sử trò chuyện",

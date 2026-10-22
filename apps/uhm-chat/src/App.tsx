@@ -12,13 +12,15 @@ import { LoginPage } from '@/pages/LoginPage';
 import { ChatPage } from '@/pages/ChatPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { STORAGE_KEYS, API_DEFAULTS } from '@/utils/constants';
-import { mlsDevLogger } from '@/utils/mlsDevLogger';
 import { UhmModal } from '@/components/custom/UhmModal';
 import { UhmForwardMessageModal } from '@/features/chat/UhmForwardMessageModal';
 import { UhmCallUI } from '@/features/chat/UhmCallUI';
 import { UhmChannelListError } from '@/components/custom/UhmChannelListError';
 import { SafariCallGuard } from '@/components/custom/SafariCallGuard';
 import { loadUhmOpenMlsWasm } from '@/lib/openmls';
+import { installMlsRepairDiagnostics } from '@/utils/mlsRepairDiagnostics';
+import { requiresLoginAfterRefreshFailure } from '@/utils/authFailure';
+import { waitForBrowserPaint } from '@/utils/browserPaint';
 import i18n from './i18n';
 import { toast, Toaster } from 'sonner';
 
@@ -39,21 +41,12 @@ function parseOptionalPositiveInteger(value: unknown): number | undefined {
   return Math.floor(parsed);
 }
 
-function waitForBrowserPaint(): Promise<void> {
-  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
-  });
-}
-
 if (E2EE_ATTACHMENT_UPLOAD_DEBUG && typeof window !== 'undefined') {
   try {
     window.localStorage.setItem('ermis_e2ee_attachment_upload_debug', '1');
     (window as unknown as { __ERMIS_E2EE_ATTACHMENT_UPLOAD_DEBUG__?: boolean }).__ERMIS_E2EE_ATTACHMENT_UPLOAD_DEBUG__ =
       true;
-  } catch {}
+  } catch { }
 }
 
 function getStoredRefreshToken() {
@@ -77,27 +70,29 @@ const chatClientOptions: ErmisChatOptions = {
       window.localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refresh_token);
     }
   },
-  logger: import.meta.env.DEV ? mlsDevLogger : [],
+  // logger: import.meta.env.DEV ? mlsDevLogger : [],
+  logger: ['info', 'warn', 'error']
 };
 
 const chatClient = ErmisChat.getInstance(
   API_DEFAULTS.SELF_HOSTED
     ? {
-        ...chatClientOptions,
-        baseURL: API_DEFAULTS.BASE_URL,
-        selfHosted: true,
-        projectId: API_DEFAULTS.PROJECT_ID || undefined,
-      }
+      ...chatClientOptions,
+      baseURL: API_DEFAULTS.BASE_URL,
+      selfHosted: true,
+      projectId: API_DEFAULTS.PROJECT_ID || undefined,
+    }
     : {
-        ...chatClientOptions,
-        apiKey: API_DEFAULTS.API_KEY,
-        projectId: API_DEFAULTS.PROJECT_ID,
-        baseURL: API_DEFAULTS.BASE_URL,
-        selfHosted: false,
-      },
+      ...chatClientOptions,
+      apiKey: API_DEFAULTS.API_KEY,
+      projectId: API_DEFAULTS.PROJECT_ID,
+      baseURL: API_DEFAULTS.BASE_URL,
+      selfHosted: false,
+    },
 );
 
 const encryptionManager = new EncryptionManager();
+installMlsRepairDiagnostics(chatClient);
 let e2eeInitPromise: Promise<void> | null = null;
 
 async function initializeE2ee(userId: string) {
@@ -345,8 +340,8 @@ function AppContent() {
       if (event.token) localStorage.setItem(STORAGE_KEYS.TOKEN, event.token);
       if (event.refresh_token) localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, event.refresh_token);
     });
-    const failureSubscription = chatClient.on('auth.refresh_failed', () => {
-      void handleAuthRefreshFailed();
+    const failureSubscription = chatClient.on('auth.refresh_failed', (event) => {
+      if (requiresLoginAfterRefreshFailure(event)) void handleAuthRefreshFailed();
     });
     return () => {
       tokenSubscription.unsubscribe();
@@ -355,58 +350,11 @@ function AppContent() {
   }, [handleAuthRefreshFailed]);
 
   useEffect(() => {
-    const subscription = chatClient.on('e2ee.group_info_repair_state', (event) => {
-      if (!event.cid) return;
-      const toastId = `group-info-repair:${event.cid}`;
-      if (event.repair_status === 'refreshing' || event.repair_status === 'retryable') {
-        toast.loading(i18n.t('e2ee.group_info_refresh', 'Secure session is being refreshed. You can retry shortly.'), {
-          id: toastId,
-        });
-        return;
-      }
-      toast.dismiss(toastId);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const subscription = chatClient.on('e2ee.mls_generation_recovery_state' as any, (event: any) => {
-      if (!event?.cid || !event?.status) return;
-      const toastId = `mls-generation-recovery:${event.cid}`;
-      switch (event.status) {
-        case 'waiting_for_repair':
-          toast.loading(i18n.t('e2ee.rebootstrap_waiting', 'Waiting for secure group repair.'), { id: toastId });
-          break;
-        case 'preparing':
-          toast.loading(i18n.t('e2ee.rebootstrap_preparing', 'Preparing a new secure group.'), { id: toastId });
-          break;
-        case 'recovered':
-          toast.success(i18n.t('e2ee.rebootstrap_recovered', 'Secure messaging recovered.'), { id: toastId });
-          break;
-        case 'history_incomplete':
-          toast.warning(
-            i18n.t('e2ee.rebootstrap_history_incomplete', 'Secure messaging recovered. Some earlier messages are unavailable.'),
-            { id: toastId },
-          );
-          break;
-        case 'client_upgrade_required':
-          toast.error(
-            event.reason === 'unsupported_protocol_version'
-              ? i18n.t('e2ee.rebootstrap_server_upgrade_required', 'The chat server must be upgraded for secure recovery.')
-              : i18n.t('e2ee.rebootstrap_upgrade_required', 'Update this app to continue secure messaging.'),
-            { id: toastId },
-          );
-          break;
-        case 'retryable_infrastructure_failure':
-          toast.error(i18n.t('e2ee.rebootstrap_retryable', 'Secure recovery is temporarily unavailable. Retry shortly.'), {
-            id: toastId,
-          });
-          break;
-        default:
-          toast.dismiss(toastId);
-      }
-    });
-    return () => subscription.unsubscribe();
+    // Clear legacy infinite repair toasts retained by Sonner during local HMR.
+    for (const item of toast.getToasts()) {
+      const id = String(item.id);
+      if (id.startsWith('group-info-repair:') || id.startsWith('mls-generation-recovery:')) toast.dismiss(item.id);
+    }
   }, []);
 
   // Restore login session from localStorage on mount
@@ -467,12 +415,12 @@ function AppContent() {
           bootstrapPhase === 'error' && bootstrapAction === 'login'
             ? goToLogin
             : bootstrapPhase === 'error' && bootstrapAction === 'retry' && pendingBootstrap
-            ? () =>
+              ? () =>
                 void bootstrapSession(pendingBootstrap.userId, pendingBootstrap.token, {
                   navigateToChat: true,
                   refreshToken: pendingBootstrap.refreshToken,
                 })
-            : undefined
+              : undefined
         }
       />
     );

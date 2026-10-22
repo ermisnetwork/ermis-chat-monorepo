@@ -1,3 +1,7 @@
+import type {ChannelEvidenceBase, ChannelEvidenceWork} from "./channel_recovery";
+import type {GroupInfoWork, GroupInfoWorkOwner, GroupInfoWorkChange, GroupInfoWorkPage, GroupInfoWorkAdmission, GroupInfoWorkScope} from './group_info_work';
+import type {MlsReadyBase, MlsReadyCheckpoint, ValidationAckWorkBase, ValidationAdmissionWorkChange} from './common_state';
+import type {RecoveryDiscoveryWork, RecoveryDiscoveryOwner, RecoveryDiscoveryChange} from './discovery_work';
 /**
  * Public type contracts for Ermis encrypted messaging.
  *
@@ -8,6 +12,9 @@
 
 import type { APIResponse, E2eeRecoveryPolicy, SyncStateRecord } from '../types';
 import type { E2eeAttachmentCryptoProvider } from './attachment_crypto_provider';
+import type { MlsAcceptanceContext } from './acceptance_context';
+import type { RecoveryControlCheckpoint } from './recovery_control';
+import type {GroupInfoValidationAckCheckpoint,GroupInfoValidationAdmission} from './validation_ack';
 
 // ============================================================
 // Storage Adapter Interface
@@ -31,6 +38,10 @@ export interface StoredMessage {
   text: string;
   /** SHA-256 of the exact MLS ciphertext that produced this cached plaintext. */
   mls_ciphertext_hash?: string;
+  /** Identifies an atomic provider/plaintext write; publication still requires exact readback. */
+  mls_application_checkpoint_version?: 1;
+  /** SHA-256 of canonical contextual AAD (empty bytes when there is none). */
+  mls_aad_sha256?: string;
   attachments?: unknown[];
   sticker_url?: string;
   poll_type?: string;
@@ -111,11 +122,24 @@ export interface ExternalJoinReadinessState {
   status: ExternalJoinReadinessStatus;
   reason: 'NoMatchingKeyPackage' | 'active_member_recovery' | 'manual_external_join';
   welcome_epoch?: number;
+  welcome_generation?: number;
   welcome_event_cursor?: EventCursor;
   first_decryptable_epoch?: number;
   updated_at: number;
 }
+/** Local concurrency fence; never authorization or an MLS generation. */
+export interface ProviderWriteGuard {
+  expected_revision: string | null;
+  next_revision: string;
+}
+export interface ProviderStorageCheckpoint {
+  provider_bytes: Uint8Array | null;
+  revision: string | null;
+}
+
 export interface JoinPersistenceCheckpoint {
+  /** CAS provider and all accompanying metadata in the same transaction. */
+  provider_write_guard?: ProviderWriteGuard;
   user_id: string;
   device_id: string;
   provider_bytes: Uint8Array;
@@ -123,6 +147,68 @@ export interface JoinPersistenceCheckpoint {
   /** `null` means a successful Welcome cleared any earlier fallback state. */
   readiness: ExternalJoinReadinessState | null;
   generation?: MlsGroupGenerationMarker;
+  /** Written in the same transaction as provider/group/readiness activation. */
+  welcome_dispositions?: WelcomeRecoveryCheckpoint[];
+}
+
+/** Public local evidence, scoped to one canonical Welcome and persisted identity. */
+export interface WelcomeRecoveryCheckpoint {
+  version: 1;
+  user_id: string;
+  device_id: string;
+  signing_identity_sha256: string;
+  cid: string;
+  event_cursor: EventCursor;
+  group_generation: number;
+  epoch: number;
+  payload_sha256: string;
+  status: 'pending_external_join' | 'applied' | 'superseded_by_recovery' | 'authored' | 'superseded_by_generation';
+  checkpoint?: {
+    provider_sha256: string;
+    marker: MlsGroupGenerationMarker;
+    receipt?: ExternalJoinReceipt;
+    generation_receipt?: Pick<MlsRebootstrapReceipt, 'operation_id' | 'state' | 'expected_generation' | 'current_generation' | 'current_epoch' | 'group_id' | 'membership_version' | 'activated_at'> & {version: 1; cid: string};
+    authored_device_id?: string;
+    ratchet_tree_sha256?: string;
+  };
+}
+
+/** Private base/candidate remain only in the account's local provider store. */
+export interface ExternalJoinCandidateCheckpoint {
+  version: 1;
+  cid: string;
+  user_id: string;
+  device_id: string;
+  signing_identity_sha256: string;
+  base_provider_bytes: Uint8Array;
+  base_sha256: string;
+  candidate_provider_bytes: Uint8Array;
+  candidate_sha256: string;
+  marker: MlsGroupGenerationMarker;
+  body: Omit<ExternalJoinRequest, 'group_info'> & { operation_id: string; group_info?: Uint8Array };
+  /** Absent only on retained pre-DEC084 candidates. */
+  group_info_sha256?: string;
+  commit_sha256: string;
+  channel_type: string;
+  channel_id: string;
+  created_at: number;
+}
+
+export interface ExternalJoinReceipt {
+  version: 1;
+  operation_id: string;
+  cid: string;
+  state: 'accepted' | 'rejected' | 'outcome_unknown';
+  delivery_pending: boolean;
+  group_generation: number | null;
+  epoch: number | null;
+  group_id: Uint8Array | null;
+  commit_sha256: string | null;
+  group_info_sha256?: string | null;
+  event_id: string | null;
+  acceptance_context: MlsAcceptanceContext | null;
+  rejection_reason?: 'head_conflict';
+  rejected_at?: string;
 }
 
 export interface MlsGroupGenerationMarker {
@@ -136,6 +222,7 @@ export interface MlsGroupGenerationMarker {
 }
 
 export interface MlsRebootstrapCandidateCheckpoint {
+  provider_write_guard?: ProviderWriteGuard;
   user_id: string;
   device_id: string;
   provider_bytes: Uint8Array;
@@ -154,12 +241,18 @@ export interface MlsRebootstrapClaimIntent {
   created_at: number;
 }
 export interface EncryptionSyncCheckpoint {
+  /** CAS provider and all accompanying metadata in the same transaction. */
+  provider_write_guard?: ProviderWriteGuard;
   user_id: string;
   device_id: string;
   provider_bytes: Uint8Array;
   scope_cursors?: Record<string, EventCursor>;
   pending_snapshots?: Record<string, PendingE2eeSnapshot[]>;
   repair_states?: ChannelRepairState[];
+  /** Outbound ciphertext and its provider ratchet commit in the same transaction. */
+  pending_sends?: PendingE2eeSendRecord[];
+  /** Ephemeral exact predecessor read set, compared in the private-ratchet transaction. */
+  pending_send_guards?: Record<string, PendingE2eeSendRecord | null>;
 }
 
 export type ArchiveScope = 'account_owned' | 'group_sponsored';
@@ -344,7 +437,41 @@ export interface PendingMlsMutation {
   };
 }
 
+/** Initial signer import/create; provider and identity belong to one durable base. */
+export interface IdentityCheckpoint {
+  user_id: string;
+  device_id: string;
+  provider_bytes: Uint8Array;
+  provider_write_guard: ProviderWriteGuard;
+  identity_bytes: Uint8Array;
+  expected_identity: Uint8Array | null;
+}
+
+/** Exact CID cleanup read set; preserved obligations are never rejection evidence. */
+export interface MlsCleanupState {
+  marker: unknown;
+  metadata: Record<string, unknown>;
+  pending_sends: PendingE2eeSendRecord[];
+}
+export interface MlsCleanupCheckpoint {
+  user_id: string;
+  device_id: string;
+  cid: string;
+  provider_bytes: Uint8Array;
+  provider_write_guard: ProviderWriteGuard;
+  expected: MlsCleanupState;
+  marker: MlsGroupGenerationMarker;
+  removal: {kind: 'owner_request' | 'canonical_removal'; event_id?: string; removed_at?: string; expected_generation?: number;
+    group_generation: number; group_id: Uint8Array | null};
+}
+/** Opaque in-memory owner guard, captured before a removal's HTTP/await. */
+export interface MlsCleanupOwner { cid: string; assertCurrent(): void; }
+
 export interface MlsMutationCheckpoint {
+  /** Settlement CAS: compare both values before any write in this transaction. */
+  expected_mutation?: { marker: unknown; pending: PendingMlsMutation | null };
+  /** CAS provider and all accompanying metadata in the same transaction. */
+  provider_write_guard?: ProviderWriteGuard;
   user_id: string;
   device_id: string;
   provider_bytes: Uint8Array;
@@ -355,16 +482,50 @@ export interface MlsMutationCheckpoint {
   readiness?: ExternalJoinReadinessState | null;
 }
 
+/** Application-only ratchet and exact plaintext committed under one provider CAS. */
+export interface ApplicationReceiveCheckpoint {
+  user_id: string;
+  device_id: string;
+  provider_bytes: Uint8Array;
+  provider_write_guard: ProviderWriteGuard;
+  message: StoredMessage;
+}
+
 export interface EncryptionStorageAdapter {
+  /** Local storage connection/format owner. A versionchange retires captured continuations. */
+  readonly storageScopeRevision?: unknown;
+  readonly welcomeHistoryCheckpointVersion?: 1;
+  readonly welcomeHistoryWorkVersion?: 1;
+  subscribeWelcomeHistoryWork?(deviceId: string, listener: () => void): () => void;
+  loadWelcomeHistoryWork?(user: string, device: string, cid: string): Promise<import('./welcome_history').WelcomeHistoryWorkBase>;
+  saveWelcomeHistoryWork?(user: string, device: string, cid: string, expected: import('./welcome_history').WelcomeHistoryWorkBase,
+    continuation: import('./welcome_history').WelcomeHistoryContinuation, now: number): Promise<import('./welcome_history').WelcomeHistoryWorkBase>;
+  takeWelcomeHistoryWorkPage?(user: string, device: string, owner: import('./recovery_work').RecoveryWorkOwner,
+    assertOwner: () => void, now: number): Promise<import('./welcome_history').WelcomeHistoryWorkSelection>;
+  compactWelcomeHistory?(userId: string, deviceId: string, cid: string, continuation: import('./welcome_history').WelcomeHistoryContinuation): Promise<import('./welcome_history').WelcomeHistoryPage>;
+
   // ---- Device ID (global, per-browser) ----
   getDeviceId(): Promise<string>;
 
   // ---- Identity ----
   saveIdentity(userId: string, deviceId: string, identityBytes: Uint8Array): Promise<void>;
   loadIdentity(userId: string, deviceId: string): Promise<Uint8Array | null>;
+  identityCheckpointVersion?: 1;
+  loadIdentityCheckpoint?(userId: string, deviceId: string): Promise<ProviderStorageCheckpoint & {identity_bytes: Uint8Array | null}>;
+  saveIdentityCheckpoint?(checkpoint: IdentityCheckpoint): Promise<void>;
+  verifyIdentityCheckpoint?(checkpoint: IdentityCheckpoint): Promise<boolean>;
+
+  mlsCleanupCheckpointVersion?: 1;
+  loadMlsCleanupState?(cid: string): Promise<MlsCleanupState>;
+  saveMlsCleanupCheckpoint?(checkpoint: MlsCleanupCheckpoint, assertOwner: () => void): Promise<void>;
+  verifyMlsCleanupCheckpoint?(checkpoint: MlsCleanupCheckpoint): Promise<boolean>;
 
   // ---- Messages ----
   saveMessage(message: StoredMessage): Promise<void>;
+  /** Advertise only when both atomic receive and consistent exact readback are implemented. */
+  applicationReceiveCheckpointVersion?: 1;
+  saveApplicationReceiveCheckpoint?(checkpoint: ApplicationReceiveCheckpoint): Promise<void>;
+  verifyApplicationReceiveCheckpoint?(checkpoint: ApplicationReceiveCheckpoint): Promise<boolean>;
   loadMessage(messageId: string): Promise<StoredMessage | null>;
   loadMessages?(messageIds: string[]): Promise<Map<string, StoredMessage>>;
   deleteMessage(messageId: string): Promise<void>;
@@ -380,7 +541,11 @@ export interface EncryptionStorageAdapter {
   clearAllSyncState(): Promise<void>;
 
   // ---- Pending E2EE Sends ----
+  applicationIntentCheckpointVersion?: 1;
+  reserveApplicationIntent?(record: PendingE2eeSendRecord, owner: ProviderStorageCheckpoint & {identity_bytes: Uint8Array}, assertOwner: () => void): Promise<PendingE2eeSendRecord>;
   savePendingE2eeSend(record: PendingE2eeSendRecord): Promise<void>;
+  /** Update/delete only the exact ciphertext job; false preserves an intervening replacement. */
+  savePendingE2eeSendOutcome?(expected: PendingE2eeSendRecord, next: PendingE2eeSendRecord | null, message?: StoredMessage): Promise<boolean>;
   loadPendingE2eeSend(messageId: string): Promise<PendingE2eeSendRecord | null>;
   listPendingE2eeSends(statuses?: string[]): Promise<PendingE2eeSendRecord[]>;
   deletePendingE2eeSend(messageId: string): Promise<void>;
@@ -398,10 +563,127 @@ export interface EncryptionStorageAdapter {
   deleteGroup(cid: string): Promise<void>;
 
   // ---- Provider State ----
-  saveProviderState(userId: string, deviceId: string, providerBytes: Uint8Array): Promise<void>;
+  /** When advertised, every provider-writing method must honor ProviderWriteGuard. */
+  readonly providerCheckpointCASVersion?: 1;
+  /** Atomic provider + pending send/edit save and readback, including operation dispatch. */
+  readonly applicationSendCheckpointVersion?: 1;
+  loadProviderCheckpoint?(userId: string, deviceId: string): Promise<ProviderStorageCheckpoint>;
+  saveProviderState(userId: string, deviceId: string, providerBytes: Uint8Array, guard?: ProviderWriteGuard): Promise<void>;
   loadProviderState(userId: string, deviceId: string): Promise<Uint8Array | null>;
+  /** Optional on legacy adapters; ownership retirement is deferred without durable continuation. */
+  readonly keyPackageOwnershipWorkVersion?: 1;
+  loadKeyPackageOwnershipWorkBase?(userId: string, deviceId: string): Promise<import('./ownership_checkpoint').KeyPackageOwnershipWorkBase>;
+  saveKeyPackageOwnershipWork?(userId: string, deviceId: string, expected: import('./ownership_checkpoint').KeyPackageOwnershipWorkBase,
+    owner: import('./ownership_checkpoint').KeyPackageOwnershipWorkOwner, change: import('./ownership_checkpoint').KeyPackageOwnershipWorkChange,
+    assertOwner: () => void): Promise<import('./ownership_checkpoint').KeyPackageOwnershipWorkBase>;
+  verifyKeyPackageOwnershipWork?(userId: string, deviceId: string, expected: import('./ownership_checkpoint').KeyPackageOwnershipWorkBase,
+    owner: import('./ownership_checkpoint').KeyPackageOwnershipWorkOwner, assertOwner: () => void): Promise<void>;
+  loadKeyPackageOwnershipCheckpoint?(userId: string, deviceId: string): Promise<unknown | null>;
+  saveKeyPackageOwnershipCheckpoint?(checkpoint: KeyPackageOwnershipCheckpoint): Promise<void>;
+  keyPackageUploadWorkVersion?: 1;
+  verifyKeyPackageUploadWork?(userId: string, deviceId: string, pending: PendingKeyPackageUpload, owner: KeyPackageUploadOwner, assertCurrent: () => void): Promise<void>;
+  settleKeyPackageUploadWork?(userId: string, deviceId: string, pending: PendingKeyPackageUpload, owner: KeyPackageUploadOwner, replacement: PendingKeyPackageUpload | null, assertCurrent: () => void): Promise<void>;
+  loadPendingKeyPackageUpload?(userId: string, deviceId: string): Promise<PendingKeyPackageUpload | null>;
+  saveKeyPackageUploadCheckpoint?(userId: string, deviceId: string, providerBytes: Uint8Array, pending: PendingKeyPackageUpload, guard?: ProviderWriteGuard): Promise<void>;
+  clearPendingKeyPackageUpload?(userId: string, deviceId: string, operationId: string): Promise<void>;
+  loadExternalJoinCandidateCheckpoint?(cid: string): Promise<ExternalJoinCandidateCheckpoint | null>;
+  listExternalJoinCandidateCheckpoints?(): Promise<ExternalJoinCandidateCheckpoint[]>;
+  /** Bounded private candidate selection; omitted restoreAfter uses the durable fair resume cursor. */
+  externalJoinCandidateScanVersion?: 1;
+  takeExternalJoinCandidatePage?(userId: string, deviceId: string, owner: import('./recovery_work').RecoveryWorkOwner,
+    assertOwner: (cid?: string) => void, restoreAfter?: string | null): Promise<import('./external_candidate_scan').ExternalJoinCandidatePage>;
+  saveExternalJoinCandidateCheckpoint?(checkpoint: ExternalJoinCandidateCheckpoint): Promise<void>;
+  externalJoinWorkCheckpointVersion?: 1;
+  externalJoinReadyCheckpointVersion?: 1;
+  loadExternalJoinWorkBase?(userId: string, deviceId: string, cid: string, operationId: string, eventId?: string, continuation?: import('./welcome_history').WelcomeHistoryContinuation): Promise<import('./external_join_work').ExternalJoinWorkBase>;
+  saveExternalJoinWork?(userId: string, deviceId: string, cid: string, expected: import('./external_join_work').ExternalJoinWorkBase,
+    change: import('./external_join_work').ExternalJoinWorkChange, assertOwner: () => void): Promise<import('./external_join_work').ExternalJoinWorkBase>;
+  welcomeWorkCheckpointVersion?: 1;
+  welcomeAuthoredDispositionVersion?: 1;
+  welcomeGenerationDispositionVersion?: 1;
+  welcomeManualWorkCheckpointVersion?: 1;
+  saveWelcomeWork?(userId: string, deviceId: string, cid: string, expected: import('./external_join_work').ExternalJoinWorkBase,
+    change: import('./welcome_work').WelcomeWorkChange, assertOwner: () => void): Promise<import('./external_join_work').ExternalJoinWorkBase>;
+  loadWelcomeRecoveryCheckpoint?(cid: string, deviceId: string, eventId: string): Promise<WelcomeRecoveryCheckpoint | null>;
+  listWelcomeRecoveryCheckpoints?(cid: string, deviceId: string, limit: number): Promise<WelcomeRecoveryCheckpoint[]>;
+  saveWelcomeFailureCheckpoint?(checkpoint: WelcomeRecoveryCheckpoint, readiness: ExternalJoinReadinessState): Promise<void>;
+  /** Mandatory for public local Ready; includes full consistent owner/obligation proof. */
+  groupInfoRefreshCheckpointVersion?: 1;
+  /** One bounded consistent metadata read, captured before discovery HTTP. */
+  groupInfoRefreshSnapshotVersion?: 1;
+  /** Bounded, owned public-work disposition; preserve unknown/corrupt originals. */
+  recoveryWorkDispositionVersion?: 1;
+  maintainRecoveryWork?(userId: string, deviceId: string, lane: import('./recovery_work').RecoveryWorkLane,
+    owner: import('./recovery_work').RecoveryWorkOwner, assertOwner: () => void): Promise<number>;
+  /** Durable fair selection only; each selected job still requires its owned checkpoint. */
+  recoveryWorkScanVersion?: 1;
+  takeRecoveryWorkPage?<L extends import('./recovery_work').RecoveryWorkScanLane>(userId: string, deviceId: string,
+    lane: L, now: number, owner: import('./recovery_work').RecoveryWorkOwner,
+    assertOwner: () => void): Promise<import('./recovery_work').RecoveryWorkScanRows[L][]>;
+  groupInfoRepairWorkVersion?: 1;
+  loadGroupInfoWorkObligations?(cids:string[]):Promise<Record<string,{mutation:unknown;external:unknown;removal:unknown}>>;
+  loadGroupInfoWork?(deviceId: string, requests: Array<{cid:string;request_id:string}>): Promise<Array<GroupInfoWork|null>>;
+  listDueGroupInfoWork?(deviceId: string, now:number, limit:number): Promise<GroupInfoWork[]>;
+  loadGroupInfoWorkPage?(deviceId:string):Promise<GroupInfoWorkPage>;
+  saveGroupInfoWork?(userId:string,deviceId:string,changes:GroupInfoWorkChange[],owner:GroupInfoWorkOwner,
+    assertOwner:()=>void,admission?:GroupInfoWorkAdmission):Promise<boolean[]>;
+  recoveryDiscoveryWorkVersion?: 1;
+  loadRecoveryDiscoveryWork?(deviceId: string, cids: string[]): Promise<Record<string, RecoveryDiscoveryWork | null>>;
+  listDueRecoveryDiscoveryWork?(deviceId: string, now: number, limit: number): Promise<RecoveryDiscoveryWork[]>;
+  saveRecoveryDiscoveryWork?(userId: string, deviceId: string, changes: RecoveryDiscoveryChange[], owner: RecoveryDiscoveryOwner,
+    assertOwner: () => void): Promise<boolean[]>;
+  loadGroupInfoRefreshSnapshot?(cids: string[]): Promise<Record<string, StoredGroupInfoRefreshRequest[]>>;
+  saveGroupInfoRefreshCheckpoint?(userId: string, deviceId: string, cid: string, expected: MlsReadyBase,
+    next: StoredGroupInfoRefreshRequest[], assertOwner: () => void, workScope?: GroupInfoWorkScope): Promise<void>;
+  readyCheckpointVersion?: 2;
+  loadMlsReadyBase?(userId: string, deviceId: string, cid: string): Promise<MlsReadyBase>;
+  saveMlsReadyCheckpoint?(checkpoint: MlsReadyCheckpoint, assertOwner: () => void): Promise<void>;
+  verifyMlsReadyCheckpoint?(checkpoint: MlsReadyCheckpoint): Promise<boolean>;
+  loadRecoveryControlCheckpoint?(cid: string, deviceId: string): Promise<RecoveryControlCheckpoint | null>;
+  saveRecoveryControlCheckpoint?(checkpoint: RecoveryControlCheckpoint, owner?: {provider_revision: string | null; marker: unknown}, assertOwner?: () => void): Promise<RecoveryControlCheckpoint>;
+  recoveryControlWorkCheckpointVersion?: 1;
+  /** Full captured private/scoped CAS+readback before authoritative control publication. */
+  channelEvidenceWorkVersion?:1;
+  loadChannelEvidenceWork?(user:string,device:string,cid:string,evidence:string):Promise<ChannelEvidenceBase>;
+  saveChannelEvidenceWork?(user:string,device:string,cid:string,expected:ChannelEvidenceBase,next:ChannelEvidenceWork,assertOwner:()=>void):Promise<ChannelEvidenceBase>;
+  saveRecoveryControlWork?(userId:string,deviceId:string,cid:string,expected:MlsReadyBase,
+    next:RecoveryControlCheckpoint,assertOwner:()=>void):Promise<MlsReadyBase>;
+  listDueGroupInfoValidationAdmissions?(deviceId: string, now: number, limit: number): Promise<GroupInfoValidationAdmission[]>;
+  loadGroupInfoValidationAdmission?(cid:string,deviceId:string):Promise<GroupInfoValidationAdmission|null>;
+  validationAdmissionSchedulingVersion?: 1;
+  deferGroupInfoValidationAdmission?(job: GroupInfoValidationAdmission, now: number, pause: boolean,
+    owner: {provider_revision: string | null; marker: unknown; control: RecoveryControlCheckpoint | null}, assertOwner: () => void): Promise<boolean>;
+  reserveGroupInfoValidationAdmission?(job:GroupInfoValidationAdmission,now:number,assertOwner?:()=>void):Promise<GroupInfoValidationAdmission|null>;
+  finishGroupInfoValidationAdmission?(cid:string,deviceId:string,jobId:string,attempt:number,prepared:boolean,assertOwner?:()=>void):Promise<void>;
+  validationAdmissionWorkCheckpointVersion?: 1;
+  saveValidationAdmissionWork?(userId:string,deviceId:string,cid:string,expected:MlsReadyBase,
+    change:ValidationAdmissionWorkChange,assertOwner:()=>void):Promise<MlsReadyBase|null>;
+  validationAckWorkCheckpointVersion?: 1;
+  loadValidationAckWorkBase?(userId:string,deviceId:string,cid:string):Promise<ValidationAckWorkBase>;
+  saveValidationAckWork?(userId:string,deviceId:string,cid:string,expected:ValidationAckWorkBase,
+    next:GroupInfoValidationAckCheckpoint,assertOwner:()=>void):Promise<GroupInfoValidationAckCheckpoint|null>;
+  loadGroupInfoValidationAckCheckpoint?(cid: string, deviceId: string): Promise<GroupInfoValidationAckCheckpoint | null>;
+  saveGroupInfoValidationAckCheckpoint?(job: GroupInfoValidationAckCheckpoint, providerBytes: Uint8Array, previousJobId: string | null, assertOwner?: () => void): Promise<GroupInfoValidationAckCheckpoint>;
+  listDueGroupInfoValidationAcks?(deviceId: string, now: number, limit: number): Promise<GroupInfoValidationAckCheckpoint[]>;
+  deferGroupInfoValidationAck?(job: GroupInfoValidationAckCheckpoint, now: number, assertOwner: () => void): Promise<void>;
+  reserveGroupInfoValidationAckAttempt?(cid: string, deviceId: string, jobId: string, now: number, assertOwner?: () => void): Promise<GroupInfoValidationAckCheckpoint | null>;
+  finishGroupInfoValidationAckAttempt?(cid: string, deviceId: string, jobId: string, outcome: GroupInfoValidationAckCheckpoint['outcome'], attempt?: number, assertOwner?: () => void): Promise<void>;
+  /** Compare operation/scope, atomically save active provider/marker/readiness/receipt and delete that candidate. */
+  saveExternalJoinActivationCheckpoint?(checkpoint: JoinPersistenceCheckpoint, receipt: ExternalJoinReceipt, expectedActiveProvider: Uint8Array): Promise<void>;
+  loadExternalJoinReceipt?(cid: string): Promise<ExternalJoinReceipt | null>;
+  saveExternalJoinRejectionCheckpoint?(candidate: ExternalJoinCandidateCheckpoint, receipt: ExternalJoinReceipt): Promise<void>;
+  externalJoinRejectionWorkVersion?: 1;
+  saveExternalJoinRejectionWork?(userId: string, deviceId: string, cid: string, expected: MlsReadyBase,
+    candidate: ExternalJoinCandidateCheckpoint, receipt: ExternalJoinReceipt, assertOwner: () => void): Promise<MlsReadyBase>;
+  loadExternalJoinRejectionCheckpoint?(cid: string, operationId: string): Promise<ExternalJoinReceipt | null>;
+
   /** Atomic provider, marker, journal and optional readiness; required for mutations/bootstrap/batch join. */
   saveMlsMutationCheckpoint?(checkpoint: MlsMutationCheckpoint): Promise<void>;
+  /** Retained rejoin requires CAS and consistent provider/marker/journal/readiness readback. */
+  mlsMutationCheckpointVersion?: 1;
+  /** Honors expected_mutation and reports checkpoint_outcome=aborted only after actual abort. */
+  readonly mlsMutationSettlementVersion?: 1;
+  verifyMlsMutationCheckpoint?(checkpoint: MlsMutationCheckpoint): Promise<boolean>;
   listPendingMlsMutations?(): Promise<PendingMlsMutation[]>;
 
   // ---- Sync Timestamps ----
@@ -435,7 +717,10 @@ export interface EncryptionStorageAdapter {
   saveRebootstrapCandidateCheckpoint?(checkpoint: MlsRebootstrapCandidateCheckpoint): Promise<void>;
   loadRebootstrapCandidateCheckpoint?(cid: string): Promise<MlsRebootstrapCandidateCheckpoint | null>;
   deleteRebootstrapCandidateCheckpoint?(cid: string): Promise<void>;
+  /** Atomic provider/cursor/pending/repair save. Pair with verification before publication. */
   saveEncryptionSyncCheckpoint?(checkpoint: EncryptionSyncCheckpoint): Promise<void>;
+  /** Read exact submitted values in one consistent storage snapshot; absent/deleted empty pending equals []. */
+  verifyEncryptionSyncCheckpoint?(checkpoint: EncryptionSyncCheckpoint): Promise<boolean>;
   tryAcquireRepairLock?(scopeCid: string, ownerId: string, ttlMs: number): Promise<boolean>;
   releaseRepairLock?(scopeCid: string, ownerId: string): Promise<void>;
   loadRemovedSyncCursor(): Promise<RemovedSyncCursor | null>;
@@ -501,6 +786,8 @@ export interface UploadKeyPackagesRequest {
 }
 
 export interface UploadKeyPackagesResponse extends APIResponse {
+  batch_id?: string;
+  validation_version?: number;
   stored: number;
   total_remaining: number;
   target?: number;
@@ -595,9 +882,11 @@ export interface EncryptionOperationResponse extends APIResponse {
 // GroupInfo & External Join types
 
 export interface UploadGroupInfoRequest {
+  expected?: {group_generation:number;group_id:Uint8Array|null};
   /** TLS-serialized GroupInfo bytes from WASM export_group_info */
   group_info: Uint8Array;
   epoch: number;
+  observed_hash?: string | null;
   request_id?: string;
   lease_token?: string;
 }
@@ -660,6 +949,10 @@ export type MlsRebootstrapReason =
   | 'history_incomplete';
 
 export interface MlsGenerationStateResponse extends APIResponse {
+  incident_id?: string | null;
+  recovery_action?: RecoveryControlCheckpoint['recovery_action'];
+  recovery_revision?: string;
+  repair_retry_until?: string | null;
   group_generation: number;
   group_id: Uint8Array | null;
   current_epoch: number;
@@ -741,6 +1034,7 @@ export interface MlsGenerationRecoveryResult {
   generation: number;
   epoch: number;
   status:
+    | 'manual_intervention_required'
     | 'waiting_for_repair'
     | 'preparing'
     | 'recovered'
@@ -754,6 +1048,8 @@ export interface MlsGenerationRecoveryResult {
 }
 export type GroupInfoRepairReason = 'external_join_deadline' | 'group_info_stale' | 'group_info_invalid';
 export interface GroupInfoRefreshRequest {
+  /** Missing on legacy servers/events means generation zero; never a GroupId proof. */
+  group_generation?: number;
   request_id: string;
   minimum_epoch: number;
   deadline_at: string;
@@ -780,6 +1076,7 @@ export interface GroupInfoRefreshRequestedEvent extends GroupInfoRefreshRequest 
   version: number;
 }
 export interface GroupInfoUploadedEvent {
+  group_generation?: number;
   type: 'group_info.uploaded';
   cid: string;
   request_id: string;
@@ -798,17 +1095,15 @@ export interface GroupInfoRepairState {
   deadline_at?: string;
 }
 export interface ExternalJoinRequest {
+  /** Stable UUID persisted with the isolated candidate; selects the bound-session receipt contract. */
+  operation_id: string;
   /** External commit bytes from WASM Group.join_external */
   commit: Uint8Array;
   epoch: number;
   group_generation?: number;
   group_id?: Uint8Array;
-  /**
-   * GroupInfo bytes from joiner — optional because export_group_info() is
-   * only valid AFTER merge_pending_commit(). The joiner uploads GroupInfo
-   * via a separate POST /group_info call after merging.
-   */
-  group_info?: Uint8Array;
+  /** Next-epoch GI exported from the exact isolated candidate; atomic with commit. */
+  group_info: Uint8Array;
   project_id?: string;
   members?: string[];
 }
@@ -1025,6 +1320,13 @@ export interface PendingE2eeAttachmentUploadCheckpoint {
 }
 
 export interface PendingE2eeSendRecord {
+  /** Original intent reserved before Ready or ciphertext; never an acceptance claim. */
+  unsealed_intent_version?: 1;
+  /** Omitted legacy records use the create-message endpoint. */
+  operation_kind?: 'send' | 'update';
+  checkpoint_user_id?: string;
+  checkpoint_device_id?: string;
+  signing_identity_sha256?: string;
   message_id: string;
   cid: string;
   e2ee_group_id: string;
@@ -1413,17 +1715,21 @@ export interface ScopeSyncResult {
 }
 
 /** Generation snapshot returned by POST /v1/e2ee/mls/recovery/discover. */
-export type MlsRecoveryDiscoveryGeneration = Omit<MlsGenerationStateResponse, 'capability'>;
+export type MlsRecoveryDiscoveryGeneration = Omit<MlsGenerationStateResponse, 'capability'> & {
+  /** Optional complete per-CID policy. Absent legacy servers use the batch default. */
+  capability?: MlsGenerationStateResponse['capability'];
+};
 
 export interface MlsRecoveryDiscoveryState {
   result: 'state';
   generation: MlsRecoveryDiscoveryGeneration;
   group_info_refresh: GroupInfoRefreshRequest | null;
+  publication_marker?: {request_id:string;group_generation:number;epoch:number;observed_hash:string|null}|null;
 }
 
 export interface MlsRecoveryDiscoveryError {
   result: 'error';
-  reason: 'not_authorized' | 'state_unavailable' | 'infrastructure_unavailable';
+  reason: 'not_authorized' | 'state_unavailable' | 'infrastructure_unavailable' | 'client_upgrade_required';
   retryable: boolean;
 }
 
@@ -1536,6 +1842,10 @@ export interface MlsRolloutTelemetryResponse extends APIResponse {
 }
 
 export interface EncryptionManagerOptions {
+  /** SHA256 of actual loaded WASM bytes, provided by a verified loader. Required for validation ACK. */
+  wasmArtifactSha256?: string;
+  /** Explicit join-tree policy only; preserves not_before/range/crypto. Defaults to false. */
+  allowExpiredJoinTreeLeaves?: boolean;
   /** Custom storage adapter. Defaults to IndexedDBEncryptionStorage. */
   storage?: EncryptionStorageAdapter;
   /** Path to the openmls WASM binary. Defaults to '/openmls_wasm_bg.wasm'. */
@@ -1749,3 +2059,45 @@ export interface RecoveryStatus {
   e2eeBootstrapCompleted?: number;
   e2eeBootstrapTotal?: number;
 }
+
+/** Own-device, public-reference inventory; no private bytes leave the provider. */
+export type KeyPackageOwnershipCursor = { created_at: string; id: string };
+/** Exact signed public bytes for retry; matching private bundles stay only in provider storage. */
+export type KeyPackageUploadOwner = {provider_bytes: Uint8Array; identity_bytes: Uint8Array; revision: string};
+export type PendingKeyPackageUpload = {
+  version: 1;
+  operation_id: string;
+  user_id: string;
+  device_id: string;
+  signing_identity_sha256: string;
+  packages: Uint8Array[];
+  package_sha256: string[];
+  created_at: number;
+  attempts?: number;
+  retry_at?: number;
+  disposition?: 'retained_invalid_or_expired' | 'retained_private_uncertain' | 'retained_server_rejected';
+};
+export type KeyPackageOwnershipRetry = {
+  cursor: KeyPackageOwnershipCursor | null;
+  attempts: number;
+  next_retry_at: number;
+};
+/** Public metadata only. Never place provider, credential or private KeyPackage bytes here. */
+export type KeyPackageOwnershipCheckpoint = {
+  version: 1;
+  user_id: string;
+  device_id: string;
+  signing_identity_sha256: string;
+  scan_cursor: KeyPackageOwnershipCursor | null;
+  scan_attempts: number;
+  scan_next_retry_at: number;
+  retry_queue: KeyPackageOwnershipRetry[];
+  restart_scan_required: boolean;
+  updated_at: number;
+};
+export type KeyPackageOwnershipEntry = { id: string; key_package_ref: Uint8Array; created_at: string };
+export type KeyPackageOwnershipInventory = {
+  version: 1;
+  entries: KeyPackageOwnershipEntry[];
+  next_cursor?: KeyPackageOwnershipCursor | null;
+};

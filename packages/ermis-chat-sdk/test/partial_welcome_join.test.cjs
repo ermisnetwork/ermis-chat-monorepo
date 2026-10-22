@@ -62,8 +62,9 @@ function managerStorage() {
     async getDeviceId() {
       return 'device-dave';
     },
-    async loadProviderState() {
-      return null;
+    async loadProviderState(userId, deviceId) {
+      const bytes=this.providers.get(`${userId}:${deviceId}`);
+      return bytes ? new Uint8Array(bytes) : null;
     },
     async saveProviderState(userId, deviceId, bytes) {
       this.providers.set(`${userId}:${deviceId}`, Uint8Array.from(bytes));
@@ -93,7 +94,7 @@ function managerStorage() {
   });
 }
 
-test('promoted artifact and EncryptionManager expose only typed Welcome fallback', async () => {
+test('promoted artifact exposes typed Welcome failure; legacy adapter must upgrade before External Join', async () => {
   const wasm = await loadActualWasm();
   assert.equal(typeof wasm.Group.join_with_welcome_typed, 'function');
   assert.equal(wasm.MlsErrorCode.NoMatchingKeyPackage, 11);
@@ -116,12 +117,18 @@ test('promoted artifact and EncryptionManager expose only typed Welcome fallback
     dispatchEvent() {},
   };
   const manager = new EncryptionManager();
-  await manager.initialize(client, 'dave', { storage, wasmModule: wasm });
+  await assert.rejects(manager.initialize(client, 'dave', { storage, wasmModule: wasm }), error => error.code === 'client_upgrade_required');
+  assert.equal(manager._activeProvider, null);
+  // Typed producer/legacy admission component: initialization cannot use this
+  // adapter. Real Identity initialization is exercised with default IndexedDB.
+  manager._restoreOrCreateProvider = async () => {}; await manager._initWasm();
+  manager.provider = new wasm.Provider(); manager.identity = new wasm.Identity(manager.provider, 'dave'); manager.initialized = true;
 
   await assert.rejects(
     () => manager.joinGroup(welcome, aliceGroup.export_ratchet_tree().to_bytes()),
-    (error) => error && error.code === NO_MATCHING_KEY_PACKAGE,
-  );
+    (error) => error && error.code === 'client_upgrade_required',
+  ); // Unsupported legacy manual adapter defers before crypto; actual typed NoMatching is covered with IndexedDB.
+
   await assert.rejects(
     () => manager.joinGroup(Uint8Array.from([1, 2])),
     (error) => error && error.code !== NO_MATCHING_KEY_PACKAGE,
@@ -150,14 +157,11 @@ test('promoted artifact and EncryptionManager expose only typed Welcome fallback
       throw new Error('simulated GroupInfo outage');
     },
   };
-  const external = await manager.joinExternal('team', 'artifact-typed-welcome', 'team:artifact-typed-welcome');
-  assert.equal(external.status, 'joined_external');
-  assert.deepEqual(order, ['staged', 'server', 'accepted', 'merged', 'upload']);
+  await assert.rejects(manager.joinExternal('team', 'artifact-typed-welcome', 'team:artifact-typed-welcome'),
+    error => error.code === 'client_upgrade_required');
+  assert.deepEqual(order, [], 'legacy adapter cannot stage, POST or upload before receipt capability');
+  assert.equal(manager.groups.has('team:artifact-typed-welcome'), false);
   assert.equal((await storage.listPendingMlsMutations()).length, 0);
-  const restarted = new PartialWelcomeJoinCoordinator(memoryStorage(storage.states));
-  const restartedState = await restarted.getState('team:artifact-typed-welcome');
-  assert.equal(restartedState.status, 'joined_external');
-  assert.equal(restartedState.first_decryptable_epoch, external.epoch);
 });
 
 test('one usable device creates one real Welcome leaf without fabricating missing devices', () => {
@@ -369,6 +373,7 @@ test('retained identity without its private provider cannot silently create an e
   storage.saveProviderState = async () => { writes += 1; };
   const manager = new EncryptionManager();
   const client = { activeChannels: {}, deviceId: 'device-dave', latestKeyPackagesRemaining: 100, dispatchEvent() {} };
-  await assert.rejects(() => manager.initialize(client, 'dave', { storage, wasmModule: wasm }), /no persisted provider/);
+  await assert.rejects(() => manager.initialize(client, 'dave', { storage, wasmModule: wasm }), error => error.code === 'client_upgrade_required');
+  assert.equal(manager._activeProvider, null);
   assert.equal(writes, 0);
 });

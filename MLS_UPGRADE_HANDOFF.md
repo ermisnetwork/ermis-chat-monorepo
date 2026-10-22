@@ -509,3 +509,75 @@ must select `VITE_API_URL=https://api-trieve.ermis.network` independently.
 The five current tracked edits remain uncommitted/unpushed; these local checks
 do not imply the server has received the updated source or that production
 runtime recovery has been verified. No WASM, backend or deployment change.
+
+## 2026-10-07 — Actual ownership inventory and final generated consumers
+
+This supersedes the earlier statement that no ownership endpoint was added. Canonical design/journal/evidence: [remaining client plan](../bellboy/docs/todo/e2ee_mls_android_parity_plan.md#2026-10-07--final-generated-consumers-and-bounded-local-acceptance); authoritative [lifecycle ledger](../bellboy/docs/todo/e2ee_mls_keypackage_lifecycle_plan.md). Own-device `/v1/e2ee/key_packages/ownership/inventory` and `/ownership/reconcile` use bounded hash-reference pages and selective CAS retirement tombstones. Generated private-bundle/current-signer probes are adopted by all3actual consumers; unknown storage/pending join/unsupported capability defer safely, no whole-pool purge. Native generation/serialization now throw typed errors; Swift callers require `try`, generated source and library must move together. Main Web serves3001, historical exact proofs skip obsolete ratchet reuse and contextual AAD rejection restores durable state. Local automated counts and failures are in the canonical journal. Server deployment, owner final-artifact messaging and genuine native expiry remain unverified; full ledger boxes are not closed by build/unit/capture0.
+
+## 2026-10-09 — LOR reviewed three-way restoration starts
+
+Both the current 2026-10-08 source-readiness journal and the parked 2026-10-07 consumer journal are retained above as historical evidence. They do not certify the new lifetime/ownership/recovery source or artifact. Current coordination is solely the [LOR ledger](../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_ledger.md), with its [canonical narrative](../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md). Local source/build/disposable tests are authorized; production/publish/device/canary remain separate. Server rebootstrap remains disabled for the new canary. This reviewed text resolution combines base/current/saved append-only histories; current manager changes merge separately without overwrite.
+
+## 2026-10-09 — LOR Web implementation journal (local only)
+
+Authoritative status/dependencies remain in [Bellboy LOR ledger](../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_ledger.md); the single canonical detailed narrative is [LOR plan](../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md). Historical journals above are preserved; none closes the new LOR gates.
+
+Three-way restoration receipt restore-qjtqom4d.json retained newer manager work and both conflicting journals. Web public ownership checkpoint version 1 uses existing IndexedDB meta store, signer fingerprint, scan/retry lanes, max16 queue and bounded3-page/6-HTTP work; 19 source tests PASS. Welcome uses isolated candidate, atomic save/readback/activate then group publication; 45 related tests PASS. Live/history/own settlement now require canonical event-bound context, isolated protocol checkpoint and typed errors; 131 regression tests PASS. Raw timestamp alone defers and does not advance cursor. Paired SDK/app current artifact SHA256 4f52c348ddd73a5412bc6bbbbefbf9ee671765eb2ee9a21944a82026be3db12a (2557170 bytes), local-only provenance includes untracked producer hashes; seven binary scenario groups PASS.
+
+Full mutation writer migration/retry routing, exact upload retry bytes, external receipt/Welcome race, state callbacks/ACK/hints/minimum version, browser restart/crash and mobile/device/canary gates remain open. No runtime flags/production endpoints changed and no install/publish/rollout was performed. Android/iOS have not been restored. Evidence and failed runs are retained under ../.task-artifacts/lor-20261009; ledger has exact commands and limitations.
+
+
+2026-10-20 DEC085 final intent writer contract: applicationIntentCheckpointVersion1 includes exact ephemeral pending_send_guards in the same provider+pending private checkpoint. Cancellation/replacement between admission and commit aborts the whole candidate; no ratchet or winning job is overwritten. Preserve unsealed_intent_version1 original UUID/payload/route/AAD and known generation across restart. Hydration/resume restores text intents as well as attachment jobs through existing Channel callbacks. Canceled unknown ciphertext is retained; late errors cannot make it retryable. Compatible predecessor reader/artifact remains unqualified. Final507 affected tests and physical/browser evidence are indexed in the existing Bellboy LOR canonical/ledger, with full six gates still open. Pinned Uhm build used Vite configLoader runner; ESM config resolves projectDir through import.meta.url without alias changes. Default bundled Rolldown loader hung and is retained as a toolchain limitation, not a source-test PASS.
+
+
+DEC085 final continuation (2026-10-20): a queued send that encounters typed provider_mutation_busy now coalesces a point-read wake after the existing provider checkpoint tail. It rereads durable status and current scope, preserves exact UUID/ciphertext and skips canceled/terminal/sent work; no timer, attempt reset or provider mutex through HTTP. Final affected510PASS includes held-checkpoint autonomous wake/cancel/owner fences; actual final browser restart and offline/online exact retry both returned200. This supersedes the earlier507 count for this changed boundary. Full generation/rollback/performance acceptance remains open in the authoritative LOR ledger.
+
+
+2026-10-20 Gate2 functional reader floor: restored/unknown sealed work observes scoped server generation independently of full Ready before messageHTTP when no current-session authenticated head is available; just-minted durable Ready/ciphertext objects have one-use volatile admission only. Exact retry keeps UUID/body/endpoint; newer generation yields old_group_generation and retained terminal obligation, never reencrypt. Genuine absent endpoint404/405/501 permits only generation0 legacy compatibility; transient/malformed/lower observations retain fail-closed. Scoped generation GET includes5s absolute auth/transport deadline and owner/cancel reread.
+
+Web IndexedDB local WelcomeRecoveryCheckpoint v1 additionally understands status `superseded_by_generation` and checkpoint.generation_receipt (version/cid/operation_id/state/expected_generation/current_generation/current_epoch/group_id/membership_version/activated_at), guarded by storage `welcomeGenerationDispositionVersion:1`. Original old event/cursor/hash/scope remain; only actual authenticated activated receipt matching current durable marker operation/GroupId and exact previous-generation boundary can atomically disposition that event. It is neither applied nor authored Welcome proof and grants no old private state/history. Provider bytes unchanged, matching pending index/readiness removed only by full CAS/readback. Older statuses/readers remain unchanged; older binaries that reject/ignore this appended status are not qualified rollback. No IndexedDBversion/nativeABI/server-schema migration. Qualified predecessor now must retain/read this disposition in addition to prior native/preparing, iOS pointer/continuation, generation and exact Web pending obligations. Missing receipt/operation provenance remains typed welcome_generation_receipt_pending; invalid proof stays retained with welcome_generation_receipt_invalid. [Current execution](../.task-artifacts/qa/runs/20261020T083844Z-06733877c196/report.md).
+
+
+### Retained generation0 history after activation (2026-10-20)
+
+<details>
+<summary>Change log</summary>
+
+- `2026-10-20`: The Web history receive pipeline can process generation0 ciphertext using the exact retained native group whose GroupId is UTF8(CID), while the active generation is newer.
+  - Reason: old ciphertext was previously buffered despite the original private group still being present.
+  - Integrator action: use the production history receive pipeline; keep all retained providers and exact pending sends. Cached plaintext alone cannot establish fresh historical decrypt acceptance.
+  - Compatibility/default: no wire, native ABI, IDB version or server schema change. Positive old generations need exact historical GroupId bindings and remain unsupported/pending; never infer their GroupId from CID.
+
+</details>
+
+History-only processing loads the retained group from the same account/device owned provider, verifies the exact legacy GroupId, uses a candidate provider, and atomically commits the old ratchet/plaintext through the existing application receive checkpoint. It preserves the current active group handle, generation marker and epoch. Realtime receive and send continue to require the current generation; old ciphertext must never enter that current group. Missing old private state stays pending, without an extra External Join, key import, cursor rewind or provider replacement. No network occurs inside the provider mutation/storage transaction. The branch adds at most one native retained-group lookup to the existing per-message candidate/checkpoint path; no timer or background scan. Optimization/benchmark work remains Deferred by owner.
+
+Rollback qualification requires a predecessor that preserves and understands exact pending/unknown/canceled send obligations, native journals, iOS applied-Welcome continuation, generation markers, and the appended Web `superseded_by_generation` Welcome disposition. A historical binary that ignores a retained obligation or cannot make required history progress is not qualified. Current full-client binary rollback remains OPEN; the native preparing testhost reader rehearsal qualifies only that component.
+
+
+### 2026-10-20 Ready public-progress recovery (LOR-WEB/REC/TEST/COMPAT)
+
+<details>
+<summary>Change log</summary>
+
+- `2026-10-20`: Ready retains its full durable CAS/readback proof. After a successful private-noop checkpoint, an exact own next revision plus identical provider/identity bytes may rebase only when the remaining readset differs solely by forward scoped cursor progress or a newly added same-CID protocol-pending obligation. A fresh full validation runs once after releasing the provider queue; a second race returns `local_checkpoint_pending`. No Ready is published from byte equality alone.
+  - Integrator action: preserve the winning public state and all pending obligations; treat typed pending as continuation, never clear private uncertainty manually. Precommit public-only conflict is an aborted `local_checkpoint_pending`; actual private/revision conflict remains `provider_checkpoint_conflict`.
+  - Compatibility/default: no schema, durable version, wire payload or native ABI change. Unknown commit/readback exceptions, foreign revision, admission/receipt/index/marker changes and joined-external canonical-base mismatch remain fail closed. These unproved mismatch classes are still open liveness work; the bounded fix does not qualify a predecessor binary or close LOR.
+
+</details>
+
+SDK31-file affected regression: 1134 PASS/0 FAIL/0 skipped/0 cancelled, execution `20261020T163510Z-db203e5bdfc6`; SDK and React build PASS. Actual artifacts and UI acceptance are mapped in the [canonical LOR journal](../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md). No API/SQL/Postman request contract changed.
+
+
+### Joined-external Ready continuation — 2026-10-21 local / 2026-10-20 UTC
+
+<details>
+<summary>Change log</summary>
+
+- After an acknowledged private-noop Ready commit, a recognized forward cursor/new-pending race may now be re-proved for joined-external owners too. `loadExternalJoinWorkBase` must return one consistent full readonly base: accepted/rejected receipt, Welcome primary/pending/history witnesses and Ready state. Every canonical field outside Ready state must equal the original checkpoint base; within state only the already recognized public progress is admitted. Original owner, exact own next revision and full provider/identity bytes must still match.
+  - Integrator action: retain the complete canonical read set and perform the one fresh full Ready validation outside the provider queue. No Ready is granted by a state-only read. Unknown read, backlog, receipt/Welcome/index/admission replacement or foreign owner/private revision remains fail closed.
+  - Compatibility/default: existing composed adapter methods and versions, no new persistence format, database version, native ABI, wire payload or SQL/Postman change. The proof read has no retention/compaction continuation and no HTTP. At most100 active Welcome rows; exceeding the bound cannot become truncated proof. Same one-retry bound applies; repeated progress returns `local_checkpoint_pending`, then a later normal invocation may continue.
+
+</details>
+
+Final producer/consumer regressions:1138 PASS/0 FAIL/0 skipped/0 cancelled across31 affected files, including real WASM joined-external cursor races, repeated-race bound, simultaneous changed receipt+cursor rejection and throwing full-base read. The earlier final3 exclusion is superseded only for this precisely re-proved class. Unknown or changed authoritative data is not normalized away. Full client binary rollback remains unqualified.

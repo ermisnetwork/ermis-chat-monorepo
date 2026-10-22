@@ -2,6 +2,23 @@
 
 ## UHM Chat E2EE Runtime Notes
 
+<details>
+<summary>Secure-session UI change log</summary>
+
+- `2026-10-09` (local diagnosis): Added a localhost-only DEV capture for GroupInfo repair, manual retry, generation discovery, and the original WASM external-join error. Summaries go through the Vite middleware to `/private/tmp/uhm-mls-repair-local.jsonl` with mode `0600`; headers, credentials, private state, message content, and full MLS bytes are excluded. Production builds disable capture and the middleware runs only in the dev server. The external-join wrapper rethrows the same error and does not change MLS policy or recovery authorization.
+  - Runtime evidence: The owner's Try Again at `2026-10-08T17:01:25Z` on the reported epoch-41 channel received GroupInfo `is_stale=false`, generation `0`, then failed WASM join with `Lifetime is not acceptable.` and reported `group_info_invalid` (409). Discovery called the existing generation `activated`; channel readiness remained `pending_external_join`. This does not prove recovery or creation of a new generation.
+  - Diagnosis: OpenMLS external join validates lifetimes of KeyPackage-source leaves already embedded in the ratchet tree. The failing interval must be inspected to distinguish expiry from clock skew. Replenishing the server KeyPackage pool does not update those existing leaves. Backend metadata/hash reconciliation alone cannot establish client cryptographic validity.
+  - Verification: Both test files passed all 12 cases, including exact WASM error/result preservation, credential/blob exclusion, discovery capability capture, and the production no-op guard. TypeScript and the production build passed; the real manual retry was captured without logging private MLS state.
+
+- `2026-10-08` (research/local): Replaced global GroupInfo/rebootstrap loading toasts with the active conversation banner in `src/features/chat/SecureSessionBanner.tsx`, using `secureSessionNotice.ts` for scope and status handling. Added English/Vietnamese messages and removed the old listeners from `src/App.tsx`.
+  - Reason: `retryable` also means no local group or exhausted repair attempts, so it must not display indefinite active work.
+  - Integrator action: UHM now renders these events inside the selected conversation; SDK integrations should distinguish active work from waiting/retryable states.
+  - Compatibility: Uses existing SDK events and coordinators; API, schema, credentials, endpoint configuration, and backend feature flags are unchanged.
+  - Cost: O(1) UI work per event and O(C) small cached notices for C affected conversations in the current session, with no periodic network polling or message payload copies. Explicit retry uses existing per-channel SDK locks, bounded repair attempts, and synchronization.
+  - Verification: `node --test test/secure_session_notice.test.cjs` passed 9 regression tests; TypeScript and `npm run build` passed. Isolated Chrome checks on localhost passed background-channel filtering, cached notices, bounded spinners, retry deduplication, late completion after channel switch, inherited topics, session changes, and Vietnamese messages with a synthetic SDK and HTTPS blocked. This verifies UI behavior, not production channel recovery.
+
+</details>
+
 - For a Web SDK/UHM source handoff or environment upgrade, follow the repository-owned [MLS upgrade runbook](../../MLS_UPGRADE_HANDOFF.md). Keep the server/schema/client dependency order and record the WASM actually loaded by UHM; a Web build alone is not artifact provenance.
 - UHM loads `public/openmls_wasm.js` and `public/openmls_wasm_bg.wasm` as one internal artifact after `connectUser`. This bundle must contain both PIN/epoch-archive and rollout `process_message_at`/typed-Welcome exports. Regenerate all four public files together with `npm run build:uhm-wasm`; a dirty OpenMLS source is accepted only for local validation with `ALLOW_DIRTY_OPENMLS=1`. The publishable SDK keeps its smaller external-safe artifact and its build must not overwrite UHM's internal WASM.
 - `public/e2ee-media-stream-worker.js` is the E2EE video streaming worker. UHM enables native Service Worker range playback by default at bootstrap with `VITE_E2EE_MEDIA_STREAMING` defaulting to on; set `VITE_E2EE_MEDIA_STREAMING=false` to force the whole-blob fallback. Playback diagnostics default to on for current UHM validation and can be disabled with `VITE_E2EE_MEDIA_PLAYBACK_DEBUG=false`. The PWA build imports the E2EE handlers into `sw.js` so video playback does not replace the root-scoped app worker; the SDK reuses that worker and falls back to whole-blob playback rather than overwriting an unrelated worker. The bootstrap only unregisters stale standalone `e2ee-media-stream-worker.js` registrations, not the app PWA `sw.js` or unrelated Service Workers. The worker intercepts only `/__ermis/e2ee-media/*` virtual URLs and keeps decrypted frames in memory only.
@@ -25,6 +42,8 @@
 - UserPicker is search-driven for v1. It seeds from `client.state.users` and active friend channels on mount, does not call `queryUsers()`, and only performs remote user search when the search box is non-empty.
 - After the channel list loads, the SDK prepares all loaded E2EE channels in the background with sequential external join and reports progress through a compact secure-restore banner.
 - Active E2EE channels show running/pending restore progress from local `restore_progress` records without creating fake messages.
+- Secure-session repair and generation recovery appear in one banner below the active conversation header, including its parent MLS scope for inherited topics. Background channel failures do not show global loading toasts. Only active repair/preparation uses a spinner; repeated events cannot extend its 30-second UI limit. Waiting, exhausted retries, and missing local groups use a static message with an explicit retry action. The UI timeout does not cancel SDK work or declare recovery complete.
+- The secure-session retry action reconciles GroupInfo, invokes server-authorized generation recovery, then checks channel readiness. It performs no periodic polling, resets no local encryption state, and does not enable backend rebootstrap. A `ready`/`recovered` event clears the relevant notice; incomplete history and required upgrades remain explicit.
 - Permanent restore gaps are summarized in Chat history PIN settings instead of rendering warning banners or gap badges inside each channel.
 - E2EE message rows and channel previews preserve sender display names from local user metadata when encrypted message cache entries only carry a raw user id.
 - E2EE quoted replies render from local decrypted quote data when the server event only carries `quoted_message_id`; sticker quotes render as sticker previews instead of unavailable encrypted placeholders.
@@ -124,3 +143,6 @@ collector payloads remain supported; restart the collector before testing batch
 code. Timestamps reflect batch receipt and preserve order. No raw identifiers,
 auth tokens or MLS payloads are recorded. See the [canonical journal](../../../bellboy/docs/todo/e2ee_mls_android_parity_plan.md)
 and [bound evidence](../../../bellboy/docs/evidence/local_main_plan/20261004-three-platform-field/archive-ack-batch-provenance.json).
+
+
+2026-10-20 secure startup: background tabs continue normal WASM/provider/auth initialization without waiting for a suspended animation frame. Visible tabs yield for paint with a100ms fallback and visibility-change cleanup; this never publishes chat Ready before cryptographic initialization. Actual hidden-tab reload regression and final artifact are linked in the Bellboy LOR DEC085 canonical journal. Performance optimization is owner-deferred to the next phase; recorded idle CPU failure remains open.

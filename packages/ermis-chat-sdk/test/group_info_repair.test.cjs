@@ -147,11 +147,11 @@ test('expired or contested lease is retried with bounded attempts and a fresh cl
   assert.ok(h.calls.claim <= 3);
 });
 
-test('removed member clears local obligations and never exports/uploads', async () => {
+test('removed eligibility preserves dormant obligations and never exports/uploads', async () => {
   const h = harness({ seed: [{ cid: 'team:a', ...request() }], removed: true });
   await h.coordinator.reconcile('team:a');
   assert.equal(h.calls.upload, 0);
-  assert.equal(h.storage.requests.length, 0);
+  assert.equal(h.storage.requests.length, 1);
   assert.equal(h.states.at(-1).status, 'removed');
 });
 
@@ -235,7 +235,7 @@ test('uploaded event wakes a waiting external join before the backoff timer', as
   assert.equal(refreshed.hash, 'new');
 });
 
-test('accepted external commit is not retried when its post-merge GroupInfo upload fails', async () => {
+test('legacy External Join adapter/artifact requires upgrade before a group is staged or sent', async () => {
   let externalJoinCalls = 0;
   let uploadCalls = 0;
   const provider = {
@@ -258,8 +258,14 @@ test('accepted external commit is not retried when its post-merge GroupInfo uplo
   };
   const joinStates = new Map();
   const mutationStates = new Map();
+  let durableProvider = null;
   const storage = {
     getDeviceId: async () => 'device-a',
+    loadProviderState: async () => durableProvider && new Uint8Array(durableProvider),
+    saveProviderState: async (_userId, _deviceId, bytes) => {
+      assert.deepEqual(bytes, Uint8Array.from([9]));
+      durableProvider = new Uint8Array(bytes);
+    },
     listGroupInfoRefreshRequests: async () => [],
     saveGroupInfoRefreshRequest: async () => {},
     deleteGroupInfoRefreshRequests: async () => {},
@@ -299,7 +305,12 @@ test('accepted external commit is not retried when its post-merge GroupInfo uplo
   manager._resumeEpochArchiveCheckpoints = async () => {};
   manager.resumePendingE2eeSends = async () => {};
   manager.safeArchiveCurrentEpoch = async () => {};
-  await manager.initialize(client, 'user-a', { storage, wasmModule: wasm });
+  await assert.rejects(manager.initialize(client, 'user-a', { storage, wasmModule: wasm }), error => error.code === 'client_upgrade_required');
+  assert.equal(manager.initialized, false);
+  // This legacy transport component fixture continues below without claiming
+  // private initialization/checkpoint acceptance.
+  manager.userId = 'user-a'; manager.deviceId = 'device-a'; manager.client = client;
+  manager.storage = storage; manager.provider = provider; manager.identity = {}; manager.initialized = true;
   manager.e2eeClient = {
     getGroupInfo: async () => ({
       group_info: Uint8Array.from([1]),
@@ -317,12 +328,11 @@ test('accepted external commit is not retried when its post-merge GroupInfo uplo
     },
   };
 
-  const result = await manager.joinExternal('team', 'a', 'team:a');
-  assert.equal(result.epoch, 8);
-  assert.equal(externalJoinCalls, 1);
-  assert.equal(uploadCalls, 1);
-  assert.equal(manager.groups.get('team:a'), joinedGroup);
-  assert.equal(mutationStates.size, 0, 'accepted commit must remain durably settled after GI upload failure');
+  await assert.rejects(manager.joinExternal('team', 'a', 'team:a'), error => error.code === 'client_upgrade_required');
+  assert.equal(externalJoinCalls, 0);
+  assert.equal(uploadCalls, 0);
+  assert.equal(manager.groups.has('team:a'), false);
+  assert.equal(mutationStates.size, 0);
 });
 
 test('HTTP client sends reconcile, claim, report, and leased upload contract', async () => {

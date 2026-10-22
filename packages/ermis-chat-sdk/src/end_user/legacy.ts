@@ -94,7 +94,7 @@ export class LegacyEndUserClientApi<ErmisChatGenerics extends ExtendableGenerics
   async refreshToken(refreshToken: string): Promise<TokenRefreshResult> {
     const response = await this.transport.publicRequest<TokenRefreshResult>('post', this.baseURL + '/refresh_token', {
       refresh_token: refreshToken,
-    });
+    }, {timeout: 5000});
     if (!response.token) throw new Error('Refresh token response did not include token');
     return response;
   }

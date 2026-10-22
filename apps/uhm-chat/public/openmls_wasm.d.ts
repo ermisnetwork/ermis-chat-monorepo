@@ -1,42 +1,23 @@
 /* tslint:disable */
 /* eslint-disable */
-/**
- * Validate raw key package bytes without constructing a KeyPackage object.
- *
- * Performs full validation: TLS deserialization, signature verification,
- * protocol version check, lifetime check, init_key ≠ encryption_key.
- *
- * # Arguments
- * * `bytes` - TLS-serialized KeyPackage bytes (from server API)
- *
- * # Returns
- * `true` if the KeyPackage is valid, `false` otherwise.
- *
- * # Example
- * ```javascript
- * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) console.warn("Invalid KeyPackage!");
- * ```
- */
-export function validate_key_package_bytes(bytes: Uint8Array): boolean;
-export function generate_recovery_keypair(provider: Provider): RecoveryKeypair;
-export function decrypt_archive_blob(provider: Provider, adk: Uint8Array, ciphertext: Uint8Array, nonce: Uint8Array, aead_aad: Uint8Array): Uint8Array;
-export function encrypt_archive_blob(provider: Provider, archive_bytes: Uint8Array, aad: ArchiveBlobAad): EncryptedArchiveBlob;
-export function unwrap_archive_data_key_from_parts(provider: Provider, recovery_private_key: Uint8Array, kem_output: Uint8Array, ciphertext: Uint8Array, hpke_info: Uint8Array): Uint8Array;
 export function wrap_archive_data_key(provider: Provider, adk: Uint8Array, recipient_recovery_public_key: Uint8Array, info: ArchiveKeyWrapInfo): HpkeWrappedArchiveDataKey;
 export function wrap_recovery_private_key(provider: Provider, pin: string, private_key: Uint8Array, public_key: Uint8Array, key_id: string, ciphersuite: number, iterations: number): WrappedRecoveryKey;
-export function unwrap_archive_data_key(provider: Provider, recovery_private_key: Uint8Array, wrapped: HpkeWrappedArchiveDataKey): Uint8Array;
 export function unwrap_recovery_private_key(provider: Provider, pin: string, wrapped: WrappedRecoveryKey): Uint8Array;
-/**
- * Test function to verify the module is working
- */
-export function greet(): void;
+export function unwrap_archive_data_key_from_parts(provider: Provider, recovery_private_key: Uint8Array, kem_output: Uint8Array, ciphertext: Uint8Array, hpke_info: Uint8Array): Uint8Array;
+export function decrypt_archive_blob(provider: Provider, adk: Uint8Array, ciphertext: Uint8Array, nonce: Uint8Array, aead_aad: Uint8Array): Uint8Array;
+export function generate_recovery_keypair(provider: Provider): RecoveryKeypair;
+export function unwrap_archive_data_key(provider: Provider, recovery_private_key: Uint8Array, wrapped: HpkeWrappedArchiveDataKey): Uint8Array;
+export function encrypt_archive_blob(provider: Provider, archive_bytes: Uint8Array, aad: ArchiveBlobAad): EncryptedArchiveBlob;
 /**
  * Initialize the WASM module
  *
  * Call this once at startup to set up panic hooks for better error messages.
  */
 export function init(): void;
+/**
+ * Test function to verify the module is working
+ */
+export function greet(): void;
 /**
  * Compute the deterministic channel_id for E2EE Messaging (DM) channels.
  *
@@ -60,10 +41,6 @@ export function init(): void;
  */
 export function hash_channel_id(project_id: string, user_ids: string[]): string;
 /**
- * Decrypt and verify an MLS private message using a V2 archive + snapshot.
- */
-export function decrypt_with_epoch_archive_v2(provider: Provider, archive: Uint8Array, snapshot: Uint8Array, ciphertext: Uint8Array, allow_own_messages: boolean, max_forward_distance: number): ArchivedMessage;
-/**
  * Decrypt sender data using an archived epoch without consuming the message ratchet.
  */
 export function peek_sender_data_from_archive(provider: Provider, archive: Uint8Array, ciphertext: Uint8Array): ArchivedSenderData;
@@ -73,6 +50,29 @@ export function peek_sender_data_from_archive(provider: Provider, archive: Uint8
  * `max_forward_distance` uses `0` as "use archive default".
  */
 export function decrypt_with_epoch_archive(provider: Provider, archive: Uint8Array, ciphertext: Uint8Array, allow_own_messages: boolean, max_forward_distance: number): ArchivedMessage;
+/**
+ * Decrypt and verify an MLS private message using a V2 archive + snapshot.
+ */
+export function decrypt_with_epoch_archive_v2(provider: Provider, archive: Uint8Array, snapshot: Uint8Array, ciphertext: Uint8Array, allow_own_messages: boolean, max_forward_distance: number): ArchivedMessage;
+/**
+ * Validate raw key package bytes without constructing a KeyPackage object.
+ *
+ * Performs full validation: TLS deserialization, signature verification,
+ * protocol version check, lifetime check, init_key ≠ encryption_key.
+ *
+ * # Arguments
+ * * `bytes` - TLS-serialized KeyPackage bytes (from server API)
+ *
+ * # Returns
+ * `true` if the KeyPackage is valid, `false` otherwise.
+ *
+ * # Example
+ * ```javascript
+ * const isValid = validate_key_package_bytes(kpBytes);
+ * if (!isValid) console.warn("Invalid KeyPackage!");
+ * ```
+ */
+export function validate_key_package_bytes(bytes: Uint8Array): boolean;
 /**
  * Type of processed message
  */
@@ -142,6 +142,15 @@ export enum MlsErrorCode {
    * A Welcome does not contain a KeyPackage owned by this provider
    */
   NoMatchingKeyPackage = 11,
+  LifetimeRangeInvalid = 12,
+  LeafNotYetValid = 13,
+  KeyPackageExpired = 14,
+  InvalidClock = 15,
+  StorageCorruption = 16,
+  GroupInfoInvalid = 17,
+  EpochConflict = 18,
+  TransportUnknown = 19,
+  AcceptanceMetadataInvalid = 20,
 }
 /**
  * Messages generated when adding a member (legacy format)
@@ -292,6 +301,12 @@ export class Group {
   private constructor();
   free(): void;
   /**
+   * Same signature/tree/lifetime checks as production external join, with
+   * explicit policy and no commit build/finalize, storage writes or KP use.
+   * Embedded ratchet tree and external_pub are required by that boundary.
+   */
+  static validate_group_info_with_policy(provider: Provider, identity: Identity, group_info: Uint8Array, allow_expired_tree_leaves: boolean): GroupInfoValidation;
+  /**
    * Create a new group (legacy API, uses group_id string directly)
    */
   static create_new(provider: Provider, founder: Identity, group_id: string): Group;
@@ -365,6 +380,16 @@ export class Group {
    * `MlsErrorCode::NoMatchingKeyPackage`; every other error must fail closed.
    */
   static join_with_welcome_typed(provider: Provider, welcome: Uint8Array, ratchet_tree?: RatchetTree | null): Group;
+  /**
+   * Typed opt-in expiry policy; caller uses a pending isolated provider and
+   * waits for durable backend acceptance/checkpoints before publishing Ready.
+   */
+  static join_external_with_policy(provider: Provider, identity: Identity, group_info: Uint8Array, ratchet_tree: RatchetTree | null | undefined, allow_expired_tree_leaves: boolean): ExternalJoinResult;
+  /**
+   * Opt-in checked AllowExpired for a Welcome tree. The caller mutates a
+   * candidate provider and persists it before publishing the new group.
+   */
+  static join_with_welcome_with_policy(provider: Provider, welcome: Uint8Array, ratchet_tree: RatchetTree | null | undefined, allow_expired_tree_leaves: boolean): Group;
   /**
    * Join a group using a Welcome (legacy API)
    */
@@ -643,6 +668,15 @@ export class Group {
    */
   create_message_with_aad(provider: Provider, sender: Identity, plaintext: Uint8Array, aad: Uint8Array): Uint8Array;
   /**
+   * Application-only deferred validation: contextual AAD must pass before
+   * durable ratchet mutation. Any rejection reloads the previous durable group.
+   */
+  process_application_message(provider: Provider, msg: Uint8Array, expected_aad?: Uint8Array | null): ProcessedMessage;
+  /**
+   * Context-verified handshake processing for both live and history lanes.
+   */
+  process_message_with_context(provider: Provider, msg: Uint8Array, context_json: string, event_id: string, cid: string, group_generation: bigint, event_epoch: bigint, defer_secret_persistence: boolean): ProcessedMessage;
+  /**
    * Set Additional Authenticated Data (AAD) for the next outgoing message
    *
    * AAD is authenticated but NOT encrypted - use for metadata that needs
@@ -653,6 +687,13 @@ export class Group {
    * * `aad` - Bytes to use as AAD (typically JSON-serialized metadata)
    */
   set_aad(aad: Uint8Array): void;
+}
+export class GroupInfoValidation {
+  private constructor();
+  free(): void;
+  readonly ratchet_tree_sha256: Uint8Array;
+  readonly epoch: bigint;
+  readonly group_id: Uint8Array;
 }
 export class HpkeWrappedArchiveDataKey {
   private constructor();
@@ -685,6 +726,24 @@ export class Identity {
    * * `count` - Number of key packages to generate
    */
   key_packages(provider: Provider, count: number): KeyPackage[];
+  /**
+   * Typed fallible generation for durable SDK candidate operations.
+   */
+  key_package_typed(provider: Provider): KeyPackage;
+  /**
+   * The SDK bounds the batch and persists candidate/private keys before upload.
+   */
+  key_packages_typed(provider: Provider, count: number): KeyPackage[];
+  /**
+   * Read-only private-bundle ownership probe for selective pool reconciliation.
+   */
+  owns_key_package_ref(provider: Provider, reference: Uint8Array): boolean;
+  signature_public_key(): Uint8Array;
+  /**
+   * Signs only a validated, domain-separated LOR control request.
+   */
+  lor_request_signature(context_json: string): Uint8Array;
+  device_registration_signature(device_id: string, project_id: string, issued_at: bigint): Uint8Array;
   /**
    * Create a new identity for a user
    *
@@ -833,6 +892,12 @@ export class ProposalMessage {
 export class Provider {
   free(): void;
   /**
+   * Rebase a private candidate after HTTP/restart without losing unrelated
+   * current writes. This returns an isolated provider, never mutates active,
+   * and proves neither backend acceptance nor durable client activation.
+   */
+  rebase_candidate(base: Uint8Array, candidate: Uint8Array): Provider;
+  /**
    * Restore a Provider from previously serialized bytes
    *
    * The crypto provider (RNG) is always fresh; only the key store
@@ -871,6 +936,37 @@ export class RecoveryKeypair {
   readonly private_key: Uint8Array;
   readonly key_id: string;
 }
+export class WelcomeCandidate {
+  private constructor();
+  free(): void;
+  /**
+   * Private snapshot: persist in the same durable scope, never log/upload.
+   */
+  provider_bytes(): Uint8Array;
+  /**
+   * Public candidate identity for validating the checkpoint before activation.
+   */
+  cid(): string;
+  /**
+   * Candidate epoch for the durable group marker.
+   */
+  epoch(): bigint;
+  /**
+   * The caller holds the one provider-wide SDK lock across create, save,
+   * readback, activate, checkpoint publication and active-group publication.
+   */
+  static create(active: Provider, welcome: Uint8Array, ratchet_tree: RatchetTree | null | undefined, allow_expired_tree_leaves: boolean): WelcomeCandidate;
+  /**
+   * Call only after the durable transaction commits and readback succeeds.
+   * Readback mismatch/save failure keeps active provider and candidate intact.
+   * The base check additionally prevents overwriting an intervening mutation.
+   */
+  activate(active: Provider, persisted_readback: Uint8Array): Group;
+  /**
+   * Public cryptographic group identity; does not publish a usable Group.
+   */
+  group_id(): Uint8Array;
+}
 export class WrappedRecoveryKey {
   private constructor();
   free(): void;
@@ -885,137 +981,59 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly __wbg_addmessages_free: (a: number, b: number) => void;
-  readonly __wbg_commitbundle_free: (a: number, b: number) => void;
-  readonly __wbg_exportedepocharchivev2_free: (a: number, b: number) => void;
   readonly __wbg_externaljoinresult_free: (a: number, b: number) => void;
   readonly __wbg_group_free: (a: number, b: number) => void;
-  readonly __wbg_identity_free: (a: number, b: number) => void;
-  readonly __wbg_keypackage_free: (a: number, b: number) => void;
-  readonly __wbg_memberinfo_free: (a: number, b: number) => void;
-  readonly __wbg_proposalmessage_free: (a: number, b: number) => void;
-  readonly addmessages_commit: (a: number) => any;
-  readonly addmessages_group_info: (a: number) => [number, number];
-  readonly addmessages_proposal: (a: number) => any;
-  readonly addmessages_welcome: (a: number) => any;
-  readonly commitbundle_commit: (a: number) => [number, number];
-  readonly commitbundle_commit_as_uint8array: (a: number) => any;
-  readonly commitbundle_group_info: (a: number) => [number, number];
-  readonly commitbundle_has_welcome: (a: number) => number;
-  readonly commitbundle_welcome: (a: number) => [number, number];
-  readonly commitbundle_welcome_as_uint8array: (a: number) => any;
-  readonly exportedepocharchivev2_archive_bytes: (a: number) => [number, number];
-  readonly exportedepocharchivev2_snapshot_bytes: (a: number) => [number, number];
-  readonly exportedepocharchivev2_snapshot_hash: (a: number) => [number, number];
+  readonly __wbg_groupinfovalidation_free: (a: number, b: number) => void;
+  readonly __wbg_ratchettree_free: (a: number, b: number) => void;
   readonly externaljoinresult_commit: (a: number) => [number, number];
   readonly externaljoinresult_group: (a: number) => number;
-  readonly group_add_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_archive_current_epoch: (a: number) => [number, number, number, number];
-  readonly group_archive_epoch_v2: (a: number) => [number, number, number];
-  readonly group_cid: (a: number) => [number, number, number, number];
-  readonly group_clear_pending_commit: (a: number, b: number) => [number, number];
-  readonly group_clear_pending_proposals: (a: number, b: number) => [number, number];
-  readonly group_commit_group_changes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
-  readonly group_commit_member_add_with_removals: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
-  readonly group_commit_member_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_commit_pending_proposals: (a: number, b: number, c: number) => [number, number, number];
-  readonly group_commit_self_update_with_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
   readonly group_create_new: (a: number, b: number, c: number, d: number) => number;
   readonly group_create_with_cid: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_delete_state: (a: number, b: number) => [number, number];
-  readonly group_epoch: (a: number) => bigint;
-  readonly group_export_group_info: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-  readonly group_export_key: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
-  readonly group_export_ratchet_tree: (a: number) => number;
-  readonly group_group_id: (a: number) => [number, number];
-  readonly group_has_pending_commit: (a: number) => number;
-  readonly group_is_operational: (a: number) => number;
   readonly group_join: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_join_external: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_join_external_with_policy: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
   readonly group_join_with_welcome: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_join_with_welcome_typed: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_leave_group: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly group_join_with_welcome_with_policy: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
   readonly group_load: (a: number, b: number, c: number) => [number, number, number];
-  readonly group_member_by_user_id: (a: number, b: number, c: number) => number;
-  readonly group_members: (a: number) => [number, number];
-  readonly group_members_by_user_id: (a: number, b: number, c: number) => [number, number];
-  readonly group_merge_pending_commit: (a: number, b: number) => [number, number];
-  readonly group_own_leaf_index: (a: number) => number;
-  readonly group_pending_proposals_count: (a: number) => number;
-  readonly group_propose_add_member: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_propose_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
-  readonly group_propose_and_commit_add: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_propose_remove_member: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_propose_remove_member_by_user_id: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_propose_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
-  readonly group_propose_self_update: (a: number, b: number, c: number) => [number, number, number];
-  readonly group_remove_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly group_remove_users: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
   readonly group_save_state: (a: number, b: number) => [number, number];
-  readonly group_self_update: (a: number, b: number, c: number) => [number, number, number];
-  readonly identity_from_bytes: (a: number, b: number, c: number) => [number, number, number];
-  readonly identity_key_package: (a: number, b: number) => number;
-  readonly identity_key_packages: (a: number, b: number, c: number) => [number, number];
-  readonly identity_new: (a: number, b: number, c: number) => [number, number, number];
-  readonly identity_to_bytes: (a: number) => [number, number, number, number];
-  readonly identity_user_id: (a: number) => [number, number];
-  readonly keypackage_from_bytes: (a: number, b: number) => [number, number, number];
-  readonly keypackage_hash_ref: (a: number, b: number) => [number, number, number, number];
-  readonly keypackage_to_bytes: (a: number) => [number, number];
-  readonly memberinfo_encryption_key: (a: number) => [number, number];
-  readonly memberinfo_index: (a: number) => number;
-  readonly memberinfo_signature_key: (a: number) => [number, number];
-  readonly memberinfo_user_id: (a: number) => [number, number];
-  readonly proposalmessage_bytes: (a: number) => [number, number];
-  readonly proposalmessage_bytes_as_uint8array: (a: number) => any;
-  readonly proposalmessage_proposal_ref: (a: number) => [number, number];
-  readonly validate_key_package_bytes: (a: number, b: number) => number;
+  readonly group_validate_group_info_with_policy: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly groupinfovalidation_epoch: (a: number) => bigint;
+  readonly groupinfovalidation_group_id: (a: number) => [number, number];
+  readonly groupinfovalidation_ratchet_tree_sha256: (a: number) => [number, number];
+  readonly ratchettree_from_bytes: (a: number, b: number) => [number, number, number];
+  readonly ratchettree_to_bytes: (a: number) => [number, number];
   readonly group_create_with_group_id: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly group_load_with_group_id: (a: number, b: number, c: number) => [number, number, number];
+  readonly __wbg_welcomecandidate_free: (a: number, b: number) => void;
+  readonly provider_rebase_candidate: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly welcomecandidate_activate: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly welcomecandidate_cid: (a: number) => [number, number, number, number];
+  readonly welcomecandidate_create: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly welcomecandidate_epoch: (a: number) => [bigint, number, number];
+  readonly welcomecandidate_group_id: (a: number) => [number, number, number, number];
+  readonly welcomecandidate_provider_bytes: (a: number) => [number, number, number, number];
   readonly __wbg_archiveblobaad_free: (a: number, b: number) => void;
-  readonly __wbg_archivedmessage_free: (a: number, b: number) => void;
-  readonly __wbg_archivedsenderdata_free: (a: number, b: number) => void;
   readonly __wbg_archivekeywrapinfo_free: (a: number, b: number) => void;
   readonly __wbg_encryptedarchiveblob_free: (a: number, b: number) => void;
   readonly __wbg_hpkewrappedarchivedatakey_free: (a: number, b: number) => void;
-  readonly __wbg_processedmessage_free: (a: number, b: number) => void;
   readonly __wbg_provider_free: (a: number, b: number) => void;
-  readonly __wbg_ratchettree_free: (a: number, b: number) => void;
   readonly __wbg_recoverykeypair_free: (a: number, b: number) => void;
   readonly __wbg_wrappedrecoverykey_free: (a: number, b: number) => void;
   readonly archiveblobaad_forGeneration: (a: number, b: number, c: bigint, d: bigint, e: number, f: number, g: number, h: number, i: number, j: number) => number;
   readonly archiveblobaad_new: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number) => number;
   readonly archiveblobaad_to_bytes: (a: number) => [number, number, number, number];
-  readonly archivedmessage_aad: (a: number) => [number, number];
-  readonly archivedmessage_content: (a: number) => [number, number];
-  readonly archivedmessage_epoch: (a: number) => bigint;
-  readonly archivedmessage_generation: (a: number) => number;
-  readonly archivedmessage_own_message: (a: number) => number;
-  readonly archivedmessage_sender_index: (a: number) => number;
-  readonly archivedsenderdata_content_type: (a: number) => [number, number];
-  readonly archivedsenderdata_generation: (a: number) => number;
-  readonly archivedsenderdata_own_message: (a: number) => number;
-  readonly archivedsenderdata_sender_index: (a: number) => number;
   readonly archivekeywrapinfo_forGeneration: (a: number, b: number, c: bigint, d: bigint, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
   readonly archivekeywrapinfo_new: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
   readonly archivekeywrapinfo_to_bytes: (a: number) => [number, number, number, number];
   readonly decrypt_archive_blob: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
-  readonly decrypt_with_epoch_archive: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
-  readonly decrypt_with_epoch_archive_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
   readonly encrypt_archive_blob: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly encryptedarchiveblob_adk: (a: number) => [number, number];
   readonly encryptedarchiveblob_aead_aad: (a: number) => [number, number];
   readonly encryptedarchiveblob_ciphertext: (a: number) => [number, number];
   readonly encryptedarchiveblob_nonce: (a: number) => [number, number];
   readonly generate_recovery_keypair: (a: number) => [number, number, number];
-  readonly group_create_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
-  readonly group_create_message_with_aad: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
-  readonly group_process_message: (a: number, b: number, c: number, d: number) => [number, number, number];
-  readonly group_process_message_at: (a: number, b: number, c: number, d: number, e: bigint) => [number, number, number];
-  readonly group_process_message_raw: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-  readonly group_set_aad: (a: number, b: number, c: number) => void;
   readonly hash_channel_id: (a: number, b: number, c: number, d: number) => [number, number];
   readonly hpkewrappedarchivedatakey_ciphersuite: (a: number) => number;
   readonly hpkewrappedarchivedatakey_ciphertext: (a: number) => [number, number];
@@ -1023,18 +1041,9 @@ export interface InitOutput {
   readonly hpkewrappedarchivedatakey_hpke_info: (a: number) => [number, number];
   readonly hpkewrappedarchivedatakey_kem_output: (a: number) => [number, number];
   readonly hpkewrappedarchivedatakey_to_bytes: (a: number) => [number, number, number, number];
-  readonly peek_sender_data_from_archive: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-  readonly processedmessage_aad: (a: number) => [number, number];
-  readonly processedmessage_content: (a: number) => [number, number];
-  readonly processedmessage_is_application_message: (a: number) => number;
-  readonly processedmessage_is_commit: (a: number) => number;
-  readonly processedmessage_is_proposal: (a: number) => number;
-  readonly processedmessage_message_type: (a: number) => number;
   readonly provider_from_bytes: (a: number, b: number) => [number, number, number];
   readonly provider_new: () => number;
   readonly provider_to_bytes: (a: number) => [number, number, number, number];
-  readonly ratchettree_from_bytes: (a: number, b: number) => [number, number, number];
-  readonly ratchettree_to_bytes: (a: number) => [number, number];
   readonly recoverykeypair_key_id: (a: number) => [number, number];
   readonly recoverykeypair_private_key: (a: number) => [number, number];
   readonly recoverykeypair_public_key: (a: number) => [number, number];
@@ -1051,6 +1060,116 @@ export interface InitOutput {
   readonly init: () => void;
   readonly recoverykeypair_ciphersuite: (a: number) => number;
   readonly greet: () => void;
+  readonly __wbg_addmessages_free: (a: number, b: number) => void;
+  readonly __wbg_archivedmessage_free: (a: number, b: number) => void;
+  readonly __wbg_archivedsenderdata_free: (a: number, b: number) => void;
+  readonly __wbg_commitbundle_free: (a: number, b: number) => void;
+  readonly __wbg_exportedepocharchivev2_free: (a: number, b: number) => void;
+  readonly __wbg_identity_free: (a: number, b: number) => void;
+  readonly __wbg_keypackage_free: (a: number, b: number) => void;
+  readonly __wbg_memberinfo_free: (a: number, b: number) => void;
+  readonly __wbg_processedmessage_free: (a: number, b: number) => void;
+  readonly __wbg_proposalmessage_free: (a: number, b: number) => void;
+  readonly addmessages_commit: (a: number) => any;
+  readonly addmessages_group_info: (a: number) => [number, number];
+  readonly addmessages_proposal: (a: number) => any;
+  readonly addmessages_welcome: (a: number) => any;
+  readonly archivedmessage_aad: (a: number) => [number, number];
+  readonly archivedmessage_content: (a: number) => [number, number];
+  readonly archivedmessage_epoch: (a: number) => bigint;
+  readonly archivedmessage_generation: (a: number) => number;
+  readonly archivedmessage_own_message: (a: number) => number;
+  readonly archivedmessage_sender_index: (a: number) => number;
+  readonly archivedsenderdata_content_type: (a: number) => [number, number];
+  readonly archivedsenderdata_generation: (a: number) => number;
+  readonly archivedsenderdata_own_message: (a: number) => number;
+  readonly archivedsenderdata_sender_index: (a: number) => number;
+  readonly commitbundle_commit: (a: number) => [number, number];
+  readonly commitbundle_commit_as_uint8array: (a: number) => any;
+  readonly commitbundle_group_info: (a: number) => [number, number];
+  readonly commitbundle_has_welcome: (a: number) => number;
+  readonly commitbundle_welcome: (a: number) => [number, number];
+  readonly commitbundle_welcome_as_uint8array: (a: number) => any;
+  readonly decrypt_with_epoch_archive: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+  readonly decrypt_with_epoch_archive_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
+  readonly exportedepocharchivev2_archive_bytes: (a: number) => [number, number];
+  readonly exportedepocharchivev2_snapshot_bytes: (a: number) => [number, number];
+  readonly exportedepocharchivev2_snapshot_hash: (a: number) => [number, number];
+  readonly group_add_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_archive_current_epoch: (a: number) => [number, number, number, number];
+  readonly group_archive_epoch_v2: (a: number) => [number, number, number];
+  readonly group_cid: (a: number) => [number, number, number, number];
+  readonly group_clear_pending_commit: (a: number, b: number) => [number, number];
+  readonly group_clear_pending_proposals: (a: number, b: number) => [number, number];
+  readonly group_commit_group_changes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
+  readonly group_commit_member_add_with_removals: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+  readonly group_commit_member_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_commit_pending_proposals: (a: number, b: number, c: number) => [number, number, number];
+  readonly group_commit_self_update_with_removals: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_create_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+  readonly group_create_message_with_aad: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+  readonly group_epoch: (a: number) => bigint;
+  readonly group_export_group_info: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly group_export_key: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+  readonly group_export_ratchet_tree: (a: number) => number;
+  readonly group_group_id: (a: number) => [number, number];
+  readonly group_has_pending_commit: (a: number) => number;
+  readonly group_is_operational: (a: number) => number;
+  readonly group_leave_group: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly group_member_by_user_id: (a: number, b: number, c: number) => number;
+  readonly group_members: (a: number) => [number, number];
+  readonly group_members_by_user_id: (a: number, b: number, c: number) => [number, number];
+  readonly group_merge_pending_commit: (a: number, b: number) => [number, number];
+  readonly group_own_leaf_index: (a: number) => number;
+  readonly group_pending_proposals_count: (a: number) => number;
+  readonly group_process_application_message: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+  readonly group_process_message: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_process_message_at: (a: number, b: number, c: number, d: number, e: bigint) => [number, number, number];
+  readonly group_process_message_raw: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly group_process_message_with_context: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: bigint, l: bigint, m: number) => [number, number, number];
+  readonly group_propose_add_member: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_propose_add_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+  readonly group_propose_and_commit_add: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_propose_remove_member: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly group_propose_remove_member_by_user_id: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_propose_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+  readonly group_propose_self_update: (a: number, b: number, c: number) => [number, number, number];
+  readonly group_remove_members: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_remove_user: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_remove_users: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly group_self_update: (a: number, b: number, c: number) => [number, number, number];
+  readonly group_set_aad: (a: number, b: number, c: number) => void;
+  readonly identity_device_registration_signature: (a: number, b: number, c: number, d: number, e: number, f: bigint) => [number, number, number, number];
+  readonly identity_from_bytes: (a: number, b: number, c: number) => [number, number, number];
+  readonly identity_key_package: (a: number, b: number) => [number, number, number];
+  readonly identity_key_package_typed: (a: number, b: number) => [number, number, number];
+  readonly identity_key_packages: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly identity_key_packages_typed: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly identity_lor_request_signature: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly identity_new: (a: number, b: number, c: number) => [number, number, number];
+  readonly identity_owns_key_package_ref: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly identity_signature_public_key: (a: number) => [number, number];
+  readonly identity_to_bytes: (a: number) => [number, number, number, number];
+  readonly identity_user_id: (a: number) => [number, number];
+  readonly keypackage_from_bytes: (a: number, b: number) => [number, number, number];
+  readonly keypackage_hash_ref: (a: number, b: number) => [number, number, number, number];
+  readonly keypackage_to_bytes: (a: number) => [number, number, number, number];
+  readonly memberinfo_encryption_key: (a: number) => [number, number];
+  readonly memberinfo_index: (a: number) => number;
+  readonly memberinfo_signature_key: (a: number) => [number, number];
+  readonly memberinfo_user_id: (a: number) => [number, number];
+  readonly peek_sender_data_from_archive: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly processedmessage_aad: (a: number) => [number, number];
+  readonly processedmessage_content: (a: number) => [number, number];
+  readonly processedmessage_is_application_message: (a: number) => number;
+  readonly processedmessage_is_commit: (a: number) => number;
+  readonly processedmessage_is_proposal: (a: number) => number;
+  readonly processedmessage_message_type: (a: number) => number;
+  readonly proposalmessage_bytes: (a: number) => [number, number];
+  readonly proposalmessage_bytes_as_uint8array: (a: number) => any;
+  readonly proposalmessage_proposal_ref: (a: number) => [number, number];
+  readonly validate_key_package_bytes: (a: number, b: number) => number;
   readonly archivedsenderdata_epoch: (a: number) => bigint;
   readonly processedmessage_epoch: (a: number) => bigint;
   readonly processedmessage_sender_index: (a: number) => number;

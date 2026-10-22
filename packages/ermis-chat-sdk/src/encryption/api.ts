@@ -1,3 +1,6 @@
+import {validateContinuationResponse} from "./channel_recovery";
+import type {RecoveryContinuationRequest,RecoveryContinuationResponse} from "./channel_recovery";
+import {MlsRequestProofCoordinator, type MlsProofOwner} from './mls_request_proof';
 /**
  * E2EE (encryption) API methods for Ermis Chat
  *
@@ -6,6 +9,7 @@
  */
 
 import type { ErmisChat } from '../client';
+import type {GroupInfoValidationAckRequest, GroupInfoValidationAckResponse} from './validation_ack';
 import {
   E2EE_BYTES_HEADER,
   E2EE_BYTES_WIRE_FORMAT,
@@ -31,6 +35,7 @@ import type {
   E2eeSyncEvent,
   EnableE2eeRequest,
   ExternalJoinRequest,
+  ExternalJoinReceipt,
   GetGroupInfoResponse,
   GetKeyPackagesByCidResponse,
   GetKeyPackagesResponse,
@@ -42,6 +47,9 @@ import type {
   InitE2eeAttachmentRequest,
   InitE2eeAttachmentResponse,
   KeyPackageCountResponse,
+  KeyPackageOwnershipCursor,
+  KeyPackageOwnershipEntry,
+  KeyPackageOwnershipInventory,
   KeyRotationRequest,
   ListArchiveAvailabilityResponse,
   MemberKeyPackages,
@@ -177,7 +185,7 @@ function encodeEnableE2eeRequest(data: EnableE2eeRequest): Record<string, unknow
 }
 
 function encodeGroupInfoRequest(data: UploadGroupInfoRequest): Record<string, unknown> {
-  return { ...data, group_info: encodeBytesField(data.group_info, 'group_info') };
+  return { ...data, group_info: encodeBytesField(data.group_info, 'group_info'), ...(data.expected?{expected:{...data.expected,group_id:data.expected.group_id?encodeBytesField(data.expected.group_id,'group_id'):null}}:{}) };
 }
 
 function encodeExternalJoinRequest(data: ExternalJoinRequest): Record<string, unknown> {
@@ -325,9 +333,27 @@ function decodeMemberSnapshot(raw: RawMemberSnapshotRecord): MemberSnapshotRecor
  */
 export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> {
   private client: AnyClient;
+  private proofCoordinator?: MlsRequestProofCoordinator;
 
-  constructor(client: ErmisChat<ErmisChatGenerics>) {
+  constructor(client: ErmisChat<ErmisChatGenerics>, captureProofOwner?: () => MlsProofOwner) {
     this.client = client;
+    const capture = captureProofOwner || (() => {
+      const manager = (client as any).encryptionManager;
+      if (typeof manager?.captureMlsRequestProofOwner !== 'function') throw Object.assign(new Error('client_upgrade_required'), {code:'client_upgrade_required'});
+      return manager.captureMlsRequestProofOwner();
+    });
+    this.proofCoordinator = new MlsRequestProofCoordinator(client, capture);
+  }
+
+  async initializeMlsRequestProof(): Promise<void> {
+    await this.proofCoordinator!.ensureRegistration();
+  }
+
+  private _signedRequest<T>(operation: number, type: string, url: string, data?: unknown, options: any = {}): Promise<T> {
+    return this.client.doAxiosRequest(type, url, data, {timeout: 5000, ...options,
+      headers: {...this.deviceHeaders, ...(options.headers || {})},
+      __mlsDeadline: Math.min(options.__mlsDeadline ?? Infinity, Date.now() + 5000),
+      __mlsRequestProof: this.proofCoordinator!.prepare(operation, options.__mlsRequestId)});
   }
 
   private get baseURL(): string {
@@ -368,15 +394,29 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // ---- KeyPackage Management ----
 
   /** Upload TLS-serialized KeyPackages for the current device. Requires `X-Device-ID` header. */
-  async uploadKeyPackages(data: UploadKeyPackagesRequest): Promise<UploadKeyPackagesResponse> {
-    return await this._post(this.baseURL + '/v1/e2ee/key_packages', {
+  async uploadKeyPackages(data: UploadKeyPackagesRequest, operationId?: string, budget?: {signal: AbortSignal; deadline: number}): Promise<UploadKeyPackagesResponse> {
+    return await this._signedRequest(6, 'post', this.baseURL + '/v1/e2ee/key_packages', {
       key_packages: data.key_packages.map((kp) => encodeBytesField(kp, 'key_package')),
-    });
+    }, {__mlsRequestId: operationId, signal: budget?.signal, __mlsDeadline: budget?.deadline});
   }
 
   /** Check remaining KeyPackage count for the current user. */
   async getKeyPackageCount(reason: 'manual' | 'group_join' = 'manual'): Promise<KeyPackageCountResponse> {
     return await this._get(this.baseURL + '/v1/e2ee/key_packages/count', { reason });
+  }
+
+  async getKeyPackageOwnership(cursor?: KeyPackageOwnershipCursor, budget?: {signal: AbortSignal; deadline: number}): Promise<KeyPackageOwnershipInventory> {
+    const raw = await this._signedRequest<KeyPackageOwnershipInventory>(1, 'get', this.baseURL + '/v1/e2ee/key_packages/ownership/inventory', undefined,
+      {params: cursor ? { after_created_at: cursor.created_at, after_id: cursor.id } : {}, signal: budget?.signal, __mlsDeadline: budget?.deadline});
+    return { ...raw, entries: raw.entries.map((entry) => ({ ...entry,
+      key_package_ref: normalizeRequiredBytes(entry.key_package_ref, 'key_package_ref'),
+    })) };
+  }
+
+  async reconcileKeyPackageOwnership(missing: Pick<KeyPackageOwnershipEntry, 'id' | 'key_package_ref'>[], budget?: {signal: AbortSignal; deadline: number}): Promise<{ retired: number }> {
+    return this._signedRequest(2, 'post', this.baseURL + '/v1/e2ee/key_packages/ownership/reconcile', {
+      missing: missing.map((entry) => ({ id: entry.id, key_package_ref: encodeBytesField(entry.key_package_ref, 'key_package_ref') })),
+    }, {signal: budget?.signal, __mlsDeadline: budget?.deadline});
   }
 
   /** Submit a privacy-bounded batch through the authenticated device transport. */
@@ -771,10 +811,11 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
 
   /** Discover authoritative generation and repair state for up to 200 E2EE channels. */
   async discoverMlsRecovery(cids: string[], protocolVersion = 1): Promise<MlsRecoveryDiscoveryResponse> {
-    const raw = await this._post<RawMlsRecoveryDiscoveryResponse>(
-      this.baseURL + '/v1/e2ee/mls/recovery/discover',
-      { protocol_version: protocolVersion, cids },
-    );
+    if (cids.length > 200) throw new Error('Recovery discovery exceeds CID bound');
+    // One durable read observation maps to one POST; host auth renewal is separate.
+    const raw: RawMlsRecoveryDiscoveryResponse = await (this.client as any).doAxiosRequest('post',
+      this.baseURL + '/v1/e2ee/mls/recovery/discover', {protocol_version: protocolVersion, cids},
+      {headers: this.deviceHeaders, timeout: 5000, maxBodyLength: 131072, maxContentLength: 1048576, __tokenRefreshAttempted: true});
     return normalizeMlsRecoveryDiscoveryResponseBytes(raw) as MlsRecoveryDiscoveryResponse;
   }
 
@@ -797,8 +838,35 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     );
   }
 
+  /** One HTTP step per durable GI reservation; host credential renewal is independent. */
+  async observeGroupInfoRefresh(channelType:string,channelId:string):Promise<GroupInfoRefreshResponse> {
+    return (this.client as any).doAxiosRequest('get',this.baseURL+`/v1/e2ee/channels/${channelType}/${channelId}/group_info/refresh`,undefined,
+      {headers:this.deviceHeaders,timeout:5000,maxContentLength:65536,__tokenRefreshAttempted:true});
+  }
+  async reserveGroupInfoRefreshClaim(channelType:string,channelId:string,requestId:string):Promise<GroupInfoRefreshRequest> {
+    return (this.client as any).doAxiosRequest('post',this.baseURL+`/v1/e2ee/channels/${channelType}/${channelId}/group_info/refresh/claim`,{request_id:requestId},
+      {headers:this.deviceHeaders,timeout:5000,maxBodyLength:4096,maxContentLength:65536,__tokenRefreshAttempted:true});
+  }
+  async submitReservedGroupInfo(channelType:string,channelId:string,body:UploadGroupInfoRequest):Promise<UploadGroupInfoResponse> {
+    return (this.client as any).doAxiosRequest('post',this.baseURL+`/v1/e2ee/channels/${channelType}/${channelId}/group_info`,encodeGroupInfoRequest(body),
+      {headers:this.deviceHeaders,timeout:5000,maxBodyLength:2097152,maxContentLength:65536,__tokenRefreshAttempted:true});
+  }
+
   async getGroupInfoRefresh(channelType: string, channelId: string): Promise<GroupInfoRefreshResponse> {
     return await this._get(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/group_info/refresh`);
+  }
+
+  async continueRecovery(channelType:string,channelId:string,body:RecoveryContinuationRequest):Promise<RecoveryContinuationResponse> {
+    const result=await this._signedRequest<RecoveryContinuationResponse>(8,'post',this.baseURL+`/v1/e2ee/channels/${channelType}/${channelId}/recovery/continue`,body,
+      {timeout:5000,maxBodyLength:4096,maxContentLength:16384,__tokenRefreshAttempted:true});
+    validateContinuationResponse(result,`${channelType}:${channelId}`);return result;
+  }
+
+  async acknowledgeGroupInfoValidation(body: GroupInfoValidationAckRequest): Promise<GroupInfoValidationAckResponse> {
+    // Every ACK POST consumes a durable reservation. Credential renewal stays
+    // in the host auth flow; do not hide a second POST inside one reservation.
+    return this._signedRequest(3, 'post',this.baseURL + '/v1/e2ee/group_info/validation_ack',body,
+      {headers:this.deviceHeaders,timeout:5000,maxBodyLength:1024,maxContentLength:1024,__tokenRefreshAttempted:true});
   }
 
   async claimGroupInfoRefresh(
@@ -809,6 +877,11 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     return await this._post(this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/group_info/refresh/claim`, {
       request_id: requestId,
     });
+  }
+
+  async getGroupInfoPublicationMarker(channelType:string,channelId:string):Promise<{marker:null|{request_id:string;group_generation:number;epoch:number;observed_hash:string|null}}> {
+    return (this.client as any).doAxiosRequest('get',this.baseURL+`/v1/e2ee/channels/${channelType}/${channelId}/group_info/refresh`,undefined,
+      {headers:this.deviceHeaders,timeout:5000,maxContentLength:65536,__tokenRefreshAttempted:true});
   }
 
   async reportGroupInfoFailure(
@@ -843,10 +916,21 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     channelId: string,
     data: ExternalJoinRequest,
   ): Promise<EncryptionOperationResponse> {
-    return await this._post(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/external_join`,
-      encodeExternalJoinRequest(data),
+    const url = this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/external_join`;
+    if (!data.operation_id || !(data.group_info instanceof Uint8Array) || !data.group_info.length) {
+      throw Object.assign(new Error('External join requires an operation UUID and GroupInfo'), {code: 'client_upgrade_required'});
+    }
+    return this._signedRequest(4, 'post', url, encodeExternalJoinRequest(data));
+  }
+
+  async getExternalJoinReceipt(channelType: string, channelId: string, operationId: string): Promise<ExternalJoinReceipt> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(operationId)) {
+      throw new Error('[Encryption] Invalid External Join operation UUID');
+    }
+    const raw = await this._signedRequest<Omit<ExternalJoinReceipt, 'group_id'> & {group_id: unknown}>(5, 'get',
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/external_join/operations/${operationId}`,
     );
+    return {...raw, group_id: raw.group_id == null ? null : decodeBytesField(raw.group_id, 'group_id')};
   }
 
   async getMlsGenerationState(
@@ -854,10 +938,11 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     channelId: string,
     protocolVersion = 1,
   ): Promise<MlsGenerationStateResponse> {
-    const raw = await this._get<RawMlsGenerationStateResponse>(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/generation`,
-      { protocol_version: protocolVersion },
-    );
+    const raw: RawMlsGenerationStateResponse = await this.client.doAxiosRequest('get',
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/generation`, null, {
+        params: {protocol_version: protocolVersion}, headers: this.deviceHeaders, timeout: 5000,
+        __mlsDeadline: Date.now() + 5000,
+      });
     return {
       ...raw,
       group_id: raw.group_id == null ? null : decodeBytesField(raw.group_id, 'group_id'),

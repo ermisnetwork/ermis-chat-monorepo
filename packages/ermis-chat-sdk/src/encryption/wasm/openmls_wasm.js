@@ -102,71 +102,6 @@ function isLikeNone(x) {
     return x === undefined || x === null;
 }
 
-function debugString(val) {
-    // primitive types
-    const type = typeof val;
-    if (type == 'number' || type == 'boolean' || val == null) {
-        return  `${val}`;
-    }
-    if (type == 'string') {
-        return `"${val}"`;
-    }
-    if (type == 'symbol') {
-        const description = val.description;
-        if (description == null) {
-            return 'Symbol';
-        } else {
-            return `Symbol(${description})`;
-        }
-    }
-    if (type == 'function') {
-        const name = val.name;
-        if (typeof name == 'string' && name.length > 0) {
-            return `Function(${name})`;
-        } else {
-            return 'Function';
-        }
-    }
-    // objects
-    if (Array.isArray(val)) {
-        const length = val.length;
-        let debug = '[';
-        if (length > 0) {
-            debug += debugString(val[0]);
-        }
-        for(let i = 1; i < length; i++) {
-            debug += ', ' + debugString(val[i]);
-        }
-        debug += ']';
-        return debug;
-    }
-    // Test for built-in
-    const builtInMatches = /\[object ([^\]]+)\]/.exec(toString.call(val));
-    let className;
-    if (builtInMatches && builtInMatches.length > 1) {
-        className = builtInMatches[1];
-    } else {
-        // Failed to match the standard '[object ClassName]'
-        return toString.call(val);
-    }
-    if (className == 'Object') {
-        // we're a user defined class or Object
-        // JSON.stringify avoids problems with cycles, and is generally much
-        // easier than looping through ownProperties of `val`.
-        try {
-            return 'Object(' + JSON.stringify(val) + ')';
-        } catch (_) {
-            return 'Object';
-        }
-    }
-    // errors
-    if (val instanceof Error) {
-        return `${val.name}: ${val.message}\n${val.stack}`;
-    }
-    // TODO we could test for more things here, like `Set`s and `Map`s.
-    return className;
-}
-
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -178,12 +113,6 @@ function _assertClass(instance, klass) {
     }
 }
 
-function takeFromExternrefTable0(idx) {
-    const value = wasm.__wbindgen_export_2.get(idx);
-    wasm.__externref_table_dealloc(idx);
-    return value;
-}
-
 function passArray8ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 1, 1) >>> 0;
     getUint8ArrayMemory0().set(arg, ptr / 1);
@@ -191,154 +120,11 @@ function passArray8ToWasm0(arg, malloc) {
     return ptr;
 }
 
-function getArrayJsValueFromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    const mem = getDataViewMemory0();
-    const result = [];
-    for (let i = ptr; i < ptr + 4 * len; i += 4) {
-        result.push(wasm.__wbindgen_export_2.get(mem.getUint32(i, true)));
-    }
-    wasm.__externref_drop_slice(ptr, len);
-    return result;
+function takeFromExternrefTable0(idx) {
+    const value = wasm.__wbindgen_export_2.get(idx);
+    wasm.__externref_table_dealloc(idx);
+    return value;
 }
-
-function passArrayJsValueToWasm0(array, malloc) {
-    const ptr = malloc(array.length * 4, 4) >>> 0;
-    for (let i = 0; i < array.length; i++) {
-        const add = addToExternrefTable0(array[i]);
-        getDataViewMemory0().setUint32(ptr + 4 * i, add, true);
-    }
-    WASM_VECTOR_LEN = array.length;
-    return ptr;
-}
-
-let cachedUint32ArrayMemory0 = null;
-
-function getUint32ArrayMemory0() {
-    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
-        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
-    }
-    return cachedUint32ArrayMemory0;
-}
-
-function passArray32ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 4, 4) >>> 0;
-    getUint32ArrayMemory0().set(arg, ptr / 4);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
-/**
- * Validate raw key package bytes without constructing a KeyPackage object.
- *
- * Performs full validation: TLS deserialization, signature verification,
- * protocol version check, lifetime check, init_key ≠ encryption_key.
- *
- * # Arguments
- * * `bytes` - TLS-serialized KeyPackage bytes (from server API)
- *
- * # Returns
- * `true` if the KeyPackage is valid, `false` otherwise.
- *
- * # Example
- * ```javascript
- * const isValid = validate_key_package_bytes(kpBytes);
- * if (!isValid) console.warn("Invalid KeyPackage!");
- * ```
- * @param {Uint8Array} bytes
- * @returns {boolean}
- */
-export function validate_key_package_bytes(bytes) {
-    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.validate_key_package_bytes(ptr0, len0);
-    return ret !== 0;
-}
-
-/**
- * @param {Provider} provider
- * @returns {RecoveryKeypair}
- */
-export function generate_recovery_keypair(provider) {
-    _assertClass(provider, Provider);
-    const ret = wasm.generate_recovery_keypair(provider.__wbg_ptr);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return RecoveryKeypair.__wrap(ret[0]);
-}
-
-/**
- * @param {Provider} provider
- * @param {Uint8Array} adk
- * @param {Uint8Array} ciphertext
- * @param {Uint8Array} nonce
- * @param {Uint8Array} aead_aad
- * @returns {Uint8Array}
- */
-export function decrypt_archive_blob(provider, adk, ciphertext, nonce, aead_aad) {
-    _assertClass(provider, Provider);
-    const ptr0 = passArray8ToWasm0(adk, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(nonce, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(aead_aad, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.decrypt_archive_blob(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v5 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v5;
-}
-
-/**
- * @param {Provider} provider
- * @param {Uint8Array} archive_bytes
- * @param {ArchiveBlobAad} aad
- * @returns {EncryptedArchiveBlob}
- */
-export function encrypt_archive_blob(provider, archive_bytes, aad) {
-    _assertClass(provider, Provider);
-    const ptr0 = passArray8ToWasm0(archive_bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    _assertClass(aad, ArchiveBlobAad);
-    const ret = wasm.encrypt_archive_blob(provider.__wbg_ptr, ptr0, len0, aad.__wbg_ptr);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return EncryptedArchiveBlob.__wrap(ret[0]);
-}
-
-/**
- * @param {Provider} provider
- * @param {Uint8Array} recovery_private_key
- * @param {Uint8Array} kem_output
- * @param {Uint8Array} ciphertext
- * @param {Uint8Array} hpke_info
- * @returns {Uint8Array}
- */
-export function unwrap_archive_data_key_from_parts(provider, recovery_private_key, kem_output, ciphertext, hpke_info) {
-    _assertClass(provider, Provider);
-    const ptr0 = passArray8ToWasm0(recovery_private_key, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(kem_output, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(hpke_info, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.unwrap_archive_data_key_from_parts(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v5 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v5;
-}
-
 /**
  * @param {Provider} provider
  * @param {Uint8Array} adk
@@ -389,6 +175,93 @@ export function wrap_recovery_private_key(provider, pin, private_key, public_key
 
 /**
  * @param {Provider} provider
+ * @param {string} pin
+ * @param {WrappedRecoveryKey} wrapped
+ * @returns {Uint8Array}
+ */
+export function unwrap_recovery_private_key(provider, pin, wrapped) {
+    _assertClass(provider, Provider);
+    const ptr0 = passStringToWasm0(pin, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    _assertClass(wrapped, WrappedRecoveryKey);
+    const ret = wasm.unwrap_recovery_private_key(provider.__wbg_ptr, ptr0, len0, wrapped.__wbg_ptr);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * @param {Provider} provider
+ * @param {Uint8Array} recovery_private_key
+ * @param {Uint8Array} kem_output
+ * @param {Uint8Array} ciphertext
+ * @param {Uint8Array} hpke_info
+ * @returns {Uint8Array}
+ */
+export function unwrap_archive_data_key_from_parts(provider, recovery_private_key, kem_output, ciphertext, hpke_info) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(recovery_private_key, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(kem_output, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(hpke_info, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.unwrap_archive_data_key_from_parts(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v5 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v5;
+}
+
+/**
+ * @param {Provider} provider
+ * @param {Uint8Array} adk
+ * @param {Uint8Array} ciphertext
+ * @param {Uint8Array} nonce
+ * @param {Uint8Array} aead_aad
+ * @returns {Uint8Array}
+ */
+export function decrypt_archive_blob(provider, adk, ciphertext, nonce, aead_aad) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(adk, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(nonce, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(aead_aad, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.decrypt_archive_blob(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v5 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v5;
+}
+
+/**
+ * @param {Provider} provider
+ * @returns {RecoveryKeypair}
+ */
+export function generate_recovery_keypair(provider) {
+    _assertClass(provider, Provider);
+    const ret = wasm.generate_recovery_keypair(provider.__wbg_ptr);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return RecoveryKeypair.__wrap(ret[0]);
+}
+
+/**
+ * @param {Provider} provider
  * @param {Uint8Array} recovery_private_key
  * @param {HpkeWrappedArchiveDataKey} wrapped
  * @returns {Uint8Array}
@@ -409,29 +282,20 @@ export function unwrap_archive_data_key(provider, recovery_private_key, wrapped)
 
 /**
  * @param {Provider} provider
- * @param {string} pin
- * @param {WrappedRecoveryKey} wrapped
- * @returns {Uint8Array}
+ * @param {Uint8Array} archive_bytes
+ * @param {ArchiveBlobAad} aad
+ * @returns {EncryptedArchiveBlob}
  */
-export function unwrap_recovery_private_key(provider, pin, wrapped) {
+export function encrypt_archive_blob(provider, archive_bytes, aad) {
     _assertClass(provider, Provider);
-    const ptr0 = passStringToWasm0(pin, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const ptr0 = passArray8ToWasm0(archive_bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    _assertClass(wrapped, WrappedRecoveryKey);
-    const ret = wasm.unwrap_recovery_private_key(provider.__wbg_ptr, ptr0, len0, wrapped.__wbg_ptr);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
+    _assertClass(aad, ArchiveBlobAad);
+    const ret = wasm.encrypt_archive_blob(provider.__wbg_ptr, ptr0, len0, aad.__wbg_ptr);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
-}
-
-/**
- * Test function to verify the module is working
- */
-export function greet() {
-    wasm.greet();
+    return EncryptedArchiveBlob.__wrap(ret[0]);
 }
 
 /**
@@ -443,6 +307,22 @@ export function init() {
     wasm.init();
 }
 
+/**
+ * Test function to verify the module is working
+ */
+export function greet() {
+    wasm.greet();
+}
+
+function passArrayJsValueToWasm0(array, malloc) {
+    const ptr = malloc(array.length * 4, 4) >>> 0;
+    for (let i = 0; i < array.length; i++) {
+        const add = addToExternrefTable0(array[i]);
+        getDataViewMemory0().setUint32(ptr + 4 * i, add, true);
+    }
+    WASM_VECTOR_LEN = array.length;
+    return ptr;
+}
 /**
  * Compute the deterministic channel_id for E2EE Messaging (DM) channels.
  *
@@ -484,31 +364,32 @@ export function hash_channel_id(project_id, user_ids) {
     }
 }
 
-/**
- * Decrypt and verify an MLS private message using a V2 archive + snapshot.
- * @param {Provider} provider
- * @param {Uint8Array} archive
- * @param {Uint8Array} snapshot
- * @param {Uint8Array} ciphertext
- * @param {boolean} allow_own_messages
- * @param {number} max_forward_distance
- * @returns {ArchivedMessage}
- */
-export function decrypt_with_epoch_archive_v2(provider, archive, snapshot, ciphertext, allow_own_messages, max_forward_distance) {
-    _assertClass(provider, Provider);
-    const ptr0 = passArray8ToWasm0(archive, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(snapshot, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.decrypt_with_epoch_archive_v2(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, allow_own_messages, max_forward_distance);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getDataViewMemory0();
+    const result = [];
+    for (let i = ptr; i < ptr + 4 * len; i += 4) {
+        result.push(wasm.__wbindgen_export_2.get(mem.getUint32(i, true)));
     }
-    return ArchivedMessage.__wrap(ret[0]);
+    wasm.__externref_drop_slice(ptr, len);
+    return result;
 }
 
+let cachedUint32ArrayMemory0 = null;
+
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
+}
+
+function passArray32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
 /**
  * Decrypt sender data using an archived epoch without consuming the message ratchet.
  * @param {Provider} provider
@@ -554,6 +435,58 @@ export function decrypt_with_epoch_archive(provider, archive, ciphertext, allow_
 }
 
 /**
+ * Decrypt and verify an MLS private message using a V2 archive + snapshot.
+ * @param {Provider} provider
+ * @param {Uint8Array} archive
+ * @param {Uint8Array} snapshot
+ * @param {Uint8Array} ciphertext
+ * @param {boolean} allow_own_messages
+ * @param {number} max_forward_distance
+ * @returns {ArchivedMessage}
+ */
+export function decrypt_with_epoch_archive_v2(provider, archive, snapshot, ciphertext, allow_own_messages, max_forward_distance) {
+    _assertClass(provider, Provider);
+    const ptr0 = passArray8ToWasm0(archive, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(snapshot, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.decrypt_with_epoch_archive_v2(provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, allow_own_messages, max_forward_distance);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ArchivedMessage.__wrap(ret[0]);
+}
+
+/**
+ * Validate raw key package bytes without constructing a KeyPackage object.
+ *
+ * Performs full validation: TLS deserialization, signature verification,
+ * protocol version check, lifetime check, init_key ≠ encryption_key.
+ *
+ * # Arguments
+ * * `bytes` - TLS-serialized KeyPackage bytes (from server API)
+ *
+ * # Returns
+ * `true` if the KeyPackage is valid, `false` otherwise.
+ *
+ * # Example
+ * ```javascript
+ * const isValid = validate_key_package_bytes(kpBytes);
+ * if (!isValid) console.warn("Invalid KeyPackage!");
+ * ```
+ * @param {Uint8Array} bytes
+ * @returns {boolean}
+ */
+export function validate_key_package_bytes(bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.validate_key_package_bytes(ptr0, len0);
+    return ret !== 0;
+}
+
+/**
  * Type of processed message
  * @enum {0 | 1 | 2}
  */
@@ -573,7 +506,7 @@ export const MessageType = Object.freeze({
 });
 /**
  * Error codes for MLS operations
- * @enum {0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11}
+ * @enum {0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20}
  */
 export const MlsErrorCode = Object.freeze({
     /**
@@ -624,6 +557,15 @@ export const MlsErrorCode = Object.freeze({
      * A Welcome does not contain a KeyPackage owned by this provider
      */
     NoMatchingKeyPackage: 11, "11": "NoMatchingKeyPackage",
+    LifetimeRangeInvalid: 12, "12": "LifetimeRangeInvalid",
+    LeafNotYetValid: 13, "13": "LeafNotYetValid",
+    KeyPackageExpired: 14, "14": "KeyPackageExpired",
+    InvalidClock: 15, "15": "InvalidClock",
+    StorageCorruption: 16, "16": "StorageCorruption",
+    GroupInfoInvalid: 17, "17": "GroupInfoInvalid",
+    EpochConflict: 18, "18": "EpochConflict",
+    TransportUnknown: 19, "19": "TransportUnknown",
+    AcceptanceMetadataInvalid: 20, "20": "AcceptanceMetadataInvalid",
 });
 
 const AddMessagesFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -1295,6 +1237,27 @@ export class Group {
         wasm.__wbg_group_free(ptr, 0);
     }
     /**
+     * Same signature/tree/lifetime checks as production external join, with
+     * explicit policy and no commit build/finalize, storage writes or KP use.
+     * Embedded ratchet tree and external_pub are required by that boundary.
+     * @param {Provider} provider
+     * @param {Identity} identity
+     * @param {Uint8Array} group_info
+     * @param {boolean} allow_expired_tree_leaves
+     * @returns {GroupInfoValidation}
+     */
+    static validate_group_info_with_policy(provider, identity, group_info, allow_expired_tree_leaves) {
+        _assertClass(provider, Provider);
+        _assertClass(identity, Identity);
+        const ptr0 = passArray8ToWasm0(group_info, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.group_validate_group_info_with_policy(provider.__wbg_ptr, identity.__wbg_ptr, ptr0, len0, allow_expired_tree_leaves);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return GroupInfoValidation.__wrap(ret[0]);
+    }
+    /**
      * Create a new group (legacy API, uses group_id string directly)
      * @param {Provider} provider
      * @param {Identity} founder
@@ -1484,6 +1447,56 @@ export class Group {
             ptr1 = ratchet_tree.__destroy_into_raw();
         }
         const ret = wasm.group_join_with_welcome_typed(provider.__wbg_ptr, ptr0, len0, ptr1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
+     * Typed opt-in expiry policy; caller uses a pending isolated provider and
+     * waits for durable backend acceptance/checkpoints before publishing Ready.
+     * @param {Provider} provider
+     * @param {Identity} identity
+     * @param {Uint8Array} group_info
+     * @param {RatchetTree | null | undefined} ratchet_tree
+     * @param {boolean} allow_expired_tree_leaves
+     * @returns {ExternalJoinResult}
+     */
+    static join_external_with_policy(provider, identity, group_info, ratchet_tree, allow_expired_tree_leaves) {
+        _assertClass(provider, Provider);
+        _assertClass(identity, Identity);
+        const ptr0 = passArray8ToWasm0(group_info, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        let ptr1 = 0;
+        if (!isLikeNone(ratchet_tree)) {
+            _assertClass(ratchet_tree, RatchetTree);
+            ptr1 = ratchet_tree.__destroy_into_raw();
+        }
+        const ret = wasm.group_join_external_with_policy(provider.__wbg_ptr, identity.__wbg_ptr, ptr0, len0, ptr1, allow_expired_tree_leaves);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ExternalJoinResult.__wrap(ret[0]);
+    }
+    /**
+     * Opt-in checked AllowExpired for a Welcome tree. The caller mutates a
+     * candidate provider and persists it before publishing the new group.
+     * @param {Provider} provider
+     * @param {Uint8Array} welcome
+     * @param {RatchetTree | null | undefined} ratchet_tree
+     * @param {boolean} allow_expired_tree_leaves
+     * @returns {Group}
+     */
+    static join_with_welcome_with_policy(provider, welcome, ratchet_tree, allow_expired_tree_leaves) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        let ptr1 = 0;
+        if (!isLikeNone(ratchet_tree)) {
+            _assertClass(ratchet_tree, RatchetTree);
+            ptr1 = ratchet_tree.__destroy_into_raw();
+        }
+        const ret = wasm.group_join_with_welcome_with_policy(provider.__wbg_ptr, ptr0, len0, ptr1, allow_expired_tree_leaves);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -2270,6 +2283,54 @@ export class Group {
         return v3;
     }
     /**
+     * Application-only deferred validation: contextual AAD must pass before
+     * durable ratchet mutation. Any rejection reloads the previous durable group.
+     * @param {Provider} provider
+     * @param {Uint8Array} msg
+     * @param {Uint8Array | null} [expected_aad]
+     * @returns {ProcessedMessage}
+     */
+    process_application_message(provider, msg, expected_aad) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(msg, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(expected_aad) ? 0 : passArray8ToWasm0(expected_aad, wasm.__wbindgen_malloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.group_process_application_message(this.__wbg_ptr, provider.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ProcessedMessage.__wrap(ret[0]);
+    }
+    /**
+     * Context-verified handshake processing for both live and history lanes.
+     * @param {Provider} provider
+     * @param {Uint8Array} msg
+     * @param {string} context_json
+     * @param {string} event_id
+     * @param {string} cid
+     * @param {bigint} group_generation
+     * @param {bigint} event_epoch
+     * @param {boolean} defer_secret_persistence
+     * @returns {ProcessedMessage}
+     */
+    process_message_with_context(provider, msg, context_json, event_id, cid, group_generation, event_epoch, defer_secret_persistence) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(msg, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(context_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(event_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.group_process_message_with_context(this.__wbg_ptr, provider.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, group_generation, event_epoch, defer_secret_persistence);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ProcessedMessage.__wrap(ret[0]);
+    }
+    /**
      * Set Additional Authenticated Data (AAD) for the next outgoing message
      *
      * AAD is authenticated but NOT encrypted - use for metadata that needs
@@ -2284,6 +2345,58 @@ export class Group {
         const ptr0 = passArray8ToWasm0(aad, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         wasm.group_set_aad(this.__wbg_ptr, ptr0, len0);
+    }
+}
+
+const GroupInfoValidationFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_groupinfovalidation_free(ptr >>> 0, 1));
+
+export class GroupInfoValidation {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(GroupInfoValidation.prototype);
+        obj.__wbg_ptr = ptr;
+        GroupInfoValidationFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        GroupInfoValidationFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_groupinfovalidation_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get ratchet_tree_sha256() {
+        const ret = wasm.groupinfovalidation_ratchet_tree_sha256(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {bigint}
+     */
+    get epoch() {
+        const ret = wasm.groupinfovalidation_epoch(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get group_id() {
+        const ret = wasm.groupinfovalidation_group_id(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
 }
 
@@ -2424,7 +2537,10 @@ export class Identity {
     key_package(provider) {
         _assertClass(provider, Provider);
         const ret = wasm.identity_key_package(this.__wbg_ptr, provider.__wbg_ptr);
-        return KeyPackage.__wrap(ret);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return KeyPackage.__wrap(ret[0]);
     }
     /**
      * Generate multiple key packages for multi-device support
@@ -2439,9 +2555,101 @@ export class Identity {
     key_packages(provider, count) {
         _assertClass(provider, Provider);
         const ret = wasm.identity_key_packages(this.__wbg_ptr, provider.__wbg_ptr, count);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
         var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
+    }
+    /**
+     * Typed fallible generation for durable SDK candidate operations.
+     * @param {Provider} provider
+     * @returns {KeyPackage}
+     */
+    key_package_typed(provider) {
+        _assertClass(provider, Provider);
+        const ret = wasm.identity_key_package_typed(this.__wbg_ptr, provider.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return KeyPackage.__wrap(ret[0]);
+    }
+    /**
+     * The SDK bounds the batch and persists candidate/private keys before upload.
+     * @param {Provider} provider
+     * @param {number} count
+     * @returns {KeyPackage[]}
+     */
+    key_packages_typed(provider, count) {
+        _assertClass(provider, Provider);
+        const ret = wasm.identity_key_packages_typed(this.__wbg_ptr, provider.__wbg_ptr, count);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Read-only private-bundle ownership probe for selective pool reconciliation.
+     * @param {Provider} provider
+     * @param {Uint8Array} reference
+     * @returns {boolean}
+     */
+    owns_key_package_ref(provider, reference) {
+        _assertClass(provider, Provider);
+        const ptr0 = passArray8ToWasm0(reference, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.identity_owns_key_package_ref(this.__wbg_ptr, provider.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    signature_public_key() {
+        const ret = wasm.identity_signature_public_key(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Signs only a validated, domain-separated LOR control request.
+     * @param {string} context_json
+     * @returns {Uint8Array}
+     */
+    lor_request_signature(context_json) {
+        const ptr0 = passStringToWasm0(context_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.identity_lor_request_signature(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * @param {string} device_id
+     * @param {string} project_id
+     * @param {bigint} issued_at
+     * @returns {Uint8Array}
+     */
+    device_registration_signature(device_id, project_id, issued_at) {
+        const ptr0 = passStringToWasm0(device_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(project_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.identity_device_registration_signature(this.__wbg_ptr, ptr0, len0, ptr1, len1, issued_at);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
     }
     /**
      * Create a new identity for a user
@@ -2565,6 +2773,9 @@ export class KeyPackage {
      */
     to_bytes() {
         const ret = wasm.keypackage_to_bytes(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
@@ -2913,6 +3124,25 @@ export class Provider {
         wasm.__wbg_provider_free(ptr, 0);
     }
     /**
+     * Rebase a private candidate after HTTP/restart without losing unrelated
+     * current writes. This returns an isolated provider, never mutates active,
+     * and proves neither backend acceptance nor durable client activation.
+     * @param {Uint8Array} base
+     * @param {Uint8Array} candidate
+     * @returns {Provider}
+     */
+    rebase_candidate(base, candidate) {
+        const ptr0 = passArray8ToWasm0(base, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(candidate, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.provider_rebase_candidate(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Provider.__wrap(ret[0]);
+    }
+    /**
      * Restore a Provider from previously serialized bytes
      *
      * The crypto provider (RNG) is always fresh; only the key store
@@ -3073,6 +3303,134 @@ export class RecoveryKeypair {
     }
 }
 
+const WelcomeCandidateFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_welcomecandidate_free(ptr >>> 0, 1));
+
+export class WelcomeCandidate {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(WelcomeCandidate.prototype);
+        obj.__wbg_ptr = ptr;
+        WelcomeCandidateFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WelcomeCandidateFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_welcomecandidate_free(ptr, 0);
+    }
+    /**
+     * Private snapshot: persist in the same durable scope, never log/upload.
+     * @returns {Uint8Array}
+     */
+    provider_bytes() {
+        const ret = wasm.welcomecandidate_provider_bytes(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Public candidate identity for validating the checkpoint before activation.
+     * @returns {string}
+     */
+    cid() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.welcomecandidate_cid(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Candidate epoch for the durable group marker.
+     * @returns {bigint}
+     */
+    epoch() {
+        const ret = wasm.welcomecandidate_epoch(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return BigInt.asUintN(64, ret[0]);
+    }
+    /**
+     * The caller holds the one provider-wide SDK lock across create, save,
+     * readback, activate, checkpoint publication and active-group publication.
+     * @param {Provider} active
+     * @param {Uint8Array} welcome
+     * @param {RatchetTree | null | undefined} ratchet_tree
+     * @param {boolean} allow_expired_tree_leaves
+     * @returns {WelcomeCandidate}
+     */
+    static create(active, welcome, ratchet_tree, allow_expired_tree_leaves) {
+        _assertClass(active, Provider);
+        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        let ptr1 = 0;
+        if (!isLikeNone(ratchet_tree)) {
+            _assertClass(ratchet_tree, RatchetTree);
+            ptr1 = ratchet_tree.__destroy_into_raw();
+        }
+        const ret = wasm.welcomecandidate_create(active.__wbg_ptr, ptr0, len0, ptr1, allow_expired_tree_leaves);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return WelcomeCandidate.__wrap(ret[0]);
+    }
+    /**
+     * Call only after the durable transaction commits and readback succeeds.
+     * Readback mismatch/save failure keeps active provider and candidate intact.
+     * The base check additionally prevents overwriting an intervening mutation.
+     * @param {Provider} active
+     * @param {Uint8Array} persisted_readback
+     * @returns {Group}
+     */
+    activate(active, persisted_readback) {
+        _assertClass(active, Provider);
+        const ptr0 = passArray8ToWasm0(persisted_readback, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.welcomecandidate_activate(this.__wbg_ptr, active.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Group.__wrap(ret[0]);
+    }
+    /**
+     * Public cryptographic group identity; does not publish a usable Group.
+     * @returns {Uint8Array}
+     */
+    group_id() {
+        const ret = wasm.welcomecandidate_group_id(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+
 const WrappedRecoveryKeyFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wrappedrecoverykey_free(ptr >>> 0, 1));
@@ -3164,7 +3522,7 @@ async function __wbg_load(module, imports) {
 
             } catch (e) {
                 if (module.headers.get('Content-Type') != 'application/wasm') {
-                    globalThis.__ermisSdkLog?.('warn', "`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+                    console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
 
                 } else {
                     throw e;
@@ -3215,7 +3573,7 @@ function __wbg_get_imports() {
         try {
             deferred0_0 = arg0;
             deferred0_1 = arg1;
-            globalThis.__ermisSdkLog?.('error', getStringFromWasm0(arg0, arg1));
+            console.error(getStringFromWasm0(arg0, arg1));
         } finally {
             wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
         }
@@ -3320,13 +3678,6 @@ function __wbg_get_imports() {
         const ret = arg0.versions;
         return ret;
     };
-    imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {
-        const ret = debugString(arg1);
-        const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
-        getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
-    };
     imports.wbg.__wbindgen_error_new = function(arg0, arg1) {
         const ret = new Error(getStringFromWasm0(arg0, arg1));
         return ret;
@@ -3405,7 +3756,7 @@ function initSync(module) {
         if (Object.getPrototypeOf(module) === Object.prototype) {
             ({module} = module)
         } else {
-            globalThis.__ermisSdkLog?.('warn', 'using deprecated parameters for `initSync()`; pass a single object instead')
+            console.warn('using deprecated parameters for `initSync()`; pass a single object instead')
         }
     }
 
@@ -3430,7 +3781,7 @@ async function __wbg_init(module_or_path) {
         if (Object.getPrototypeOf(module_or_path) === Object.prototype) {
             ({module_or_path} = module_or_path)
         } else {
-            globalThis.__ermisSdkLog?.('warn', 'using deprecated parameters for the initialization function; pass a single object instead')
+            console.warn('using deprecated parameters for the initialization function; pass a single object instead')
         }
     }
 

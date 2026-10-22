@@ -4,6 +4,7 @@ import type {
   ExternalJoinReadinessState,
   GetKeyPackagesByCidResponse,
   MlsGroupGenerationMarker,
+  ProviderWriteGuard,
 } from './types';
 
 export const NO_MATCHING_KEY_PACKAGE = 'NoMatchingKeyPackage' as const;
@@ -110,14 +111,22 @@ export class PartialWelcomeJoinCoordinator {
     this.states.delete(cid);
   }
 
+  /** Publish in-memory readiness only after the caller confirms activation of the durable candidate. */
+  publishWelcomeJoin(cid: string): void { this.states.delete(cid); }
+
   async persistWelcomeJoin(
     cid: string,
     userId: string,
     deviceId: string,
     providerBytes: Uint8Array,
     generation?: MlsGroupGenerationMarker,
+    guard?: ProviderWriteGuard,
   ): Promise<void> {
+    if (this.storage.providerCheckpointCASVersion === 1 && (!guard || !this.storage.loadProviderCheckpoint)) {
+      throw Object.assign(new Error('Loaded-base provider guard required'), {code:'client_upgrade_required'});
+    }
     await this.storage.saveJoinCheckpoint({
+      provider_write_guard:guard,
       user_id: userId,
       device_id: deviceId,
       provider_bytes: providerBytes,
@@ -125,6 +134,13 @@ export class PartialWelcomeJoinCoordinator {
       readiness: null,
       generation,
     });
+    if (guard) {
+      const loaded = await this.storage.loadProviderCheckpoint!(userId,deviceId);
+      if (loaded.revision !== guard.next_revision || !loaded.provider_bytes || loaded.provider_bytes.length !== providerBytes.length ||
+          !loaded.provider_bytes.every((byte,index) => byte === providerBytes[index])) {
+        throw Object.assign(new Error('Join checkpoint readback unavailable'), {code:'provider_persistence_uncertain'});
+      }
+    }
     this.states.delete(cid);
   }
 
@@ -135,7 +151,11 @@ export class PartialWelcomeJoinCoordinator {
     deviceId: string,
     providerBytes: Uint8Array,
     generation?: MlsGroupGenerationMarker,
+    guard?: ProviderWriteGuard,
   ): Promise<ExternalJoinReadinessState> {
+    if (this.storage.providerCheckpointCASVersion === 1 && (!guard || !this.storage.loadProviderCheckpoint)) {
+      throw Object.assign(new Error('Loaded-base provider guard required'), {code:'client_upgrade_required'});
+    }
     const prior = await this.getState(cid);
     const joined: ExternalJoinReadinessState = {
       cid,
@@ -147,6 +167,7 @@ export class PartialWelcomeJoinCoordinator {
       updated_at: Date.now(),
     };
     await this.storage.saveJoinCheckpoint({
+      provider_write_guard:guard,
       user_id: userId,
       device_id: deviceId,
       provider_bytes: providerBytes,
@@ -154,6 +175,13 @@ export class PartialWelcomeJoinCoordinator {
       readiness: joined,
       generation,
     });
+    if (guard) {
+      const loaded = await this.storage.loadProviderCheckpoint!(userId,deviceId);
+      if (loaded.revision !== guard.next_revision || !loaded.provider_bytes || loaded.provider_bytes.length !== providerBytes.length ||
+          !loaded.provider_bytes.every((byte,index) => byte === providerBytes[index])) {
+        throw Object.assign(new Error('Join checkpoint readback unavailable'), {code:'provider_persistence_uncertain'});
+      }
+    }
     this.states.set(cid, joined);
     return joined;
   }

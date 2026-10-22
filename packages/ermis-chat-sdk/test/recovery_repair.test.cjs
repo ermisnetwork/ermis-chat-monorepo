@@ -1,7 +1,18 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { EncryptionManager, ErmisChat, PartialWelcomeJoinCoordinator } = require('../dist/index.cjs');
+require('fake-indexeddb/auto');
+const { EncryptionManager, ErmisChat, PartialWelcomeJoinCoordinator, IndexedDBEncryptionStorage } = require('../dist/index.cjs');
+let checkpointFixtureId=0;
+function installCheckpointBacking(manager) {
+  manager.userId ||= 'checkpoint-user';manager.deviceId ||= 'checkpoint-device';manager.identity ||= {};
+  manager.provider = {to_bytes:()=>Uint8Array.of(7)};
+  const backing=new IndexedDBEncryptionStorage(`orchestration-checkpoint-${++checkpointFixtureId}`);
+  manager.storage=Object.assign(backing,manager.storage);
+  // A new, unique fixture DB has an absent revision; no production load bypass.
+  manager._providerDurableBase={storage:manager.storage,userId:manager.userId,deviceId:manager.deviceId,revision:null};
+  return backing;
+}
 
 const makeProgress = (overrides = {}) => ({
   device_id: 'device-1',
@@ -20,7 +31,7 @@ const makeProgress = (overrides = {}) => ({
 });
 
 test('processed event cursor keeps its own event_id when server cursor is later in same timestamp', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const started = {
     created_at: '2026-06-13T00:00:00.000Z',
     event_id: '00000000-0000-0000-0000-000000000000',
@@ -45,7 +56,7 @@ test('processed event cursor keeps its own event_id when server cursor is later 
 });
 
 test('live ciphertext from an inactive generation never reaches the installed MLS provider', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'messaging:generation-fence';
   manager._groupGenerations.set(cid, {
     cid,
@@ -76,7 +87,7 @@ test('live ciphertext from an inactive generation never reaches the installed ML
 });
 
 test('durable ciphertext is terminal when its generation is no longer active', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'messaging:generation-fence';
   manager._groupGenerations.set(cid, {
     cid,
@@ -113,7 +124,7 @@ test('durable ciphertext is terminal when its generation is no longer active', a
 });
 
 test('a new failed message remains repairable in a completed epoch', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const progress = manager._upsertRepairIssueInProgress(
     makeProgress({ completed_epochs: [12] }),
     {
@@ -133,7 +144,7 @@ test('a new failed message remains repairable in a completed epoch', () => {
 });
 
 test('retries update one issue per message version instead of counting the epoch batch', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const message = {
     id: 'failed-message',
     cid: 'messaging:channel-1',
@@ -150,7 +161,7 @@ test('retries update one issue per message version instead of counting the epoch
 });
 
 test('message repair identity does not change when the same version is observed at another epoch', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const first = {
     id: 'same-version',
     created_at: '2026-06-13T00:00:00Z',
@@ -166,7 +177,7 @@ test('message repair identity does not change when the same version is observed 
 });
 
 test('pending invite defers realtime encryption messages before local group processing', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   manager.userId = 'user-1';
   const cid = 'messaging:channel-1';
   manager.client = {
@@ -196,8 +207,8 @@ test('pending invite defers realtime encryption messages before local group proc
   assert.equal(result, null);
 });
 
-test('open-channel readiness waits for the cold-start owner and reuses its persisted ready scope', async () => {
-  const manager = new EncryptionManager();
+test('public open cannot reuse legacy cached Ready without adapter capability', async () => {
+  const manager = componentRoutingManager();
   manager.initialized = true;
   const cid = 'messaging:channel-1';
   const cursor = {
@@ -264,14 +275,14 @@ test('open-channel readiness waits for the cold-start owner and reuses its persi
   releaseColdStart();
   const result = await readiness;
 
-  assert.equal(result.status, 'ready');
-  assert.equal(result.epoch, 12);
-  assert.equal(coldStartWaitCalls, 1);
+  assert.equal(result.status, 'needs_retry');
+  assert.equal(result.error, 'client_upgrade_required');
+  assert.equal(coldStartWaitCalls, 0);
   assert.equal(scopeSyncCalls, 0);
 });
 
-test('non-terminal initial batch state keeps the bounded per-CID catch-up', async () => {
-  const manager = new EncryptionManager();
+test('legacy orchestration non-terminal initial batch keeps bounded catch-up without common Ready proof', async () => {
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   const cursor = {
     created_at: '2026-06-13T00:00:10.000Z',
@@ -297,6 +308,7 @@ test('non-terminal initial batch state keeps the bounded per-CID catch-up', asyn
     loadScopeSyncCursor: async () => cursor,
     loadPendingE2eeSnapshots: async () => [],
   };
+  const checkpointStorage=installCheckpointBacking(manager);
   manager.e2eeClient = {
     scopeSync: async () => {
       scopeSyncCalls += 1;
@@ -316,17 +328,19 @@ test('non-terminal initial batch state keeps the bounded per-CID catch-up', asyn
     buffered_messages: 0,
   });
 
-  const result = await manager.ensureChannelReady('team', 'channel-1', cid, {
+  const result = await manager._ensureChannelReadyLegacy('team', 'channel-1', cid, {
     source: 'sync',
     initialScopeSyncCompleted: true,
   });
 
-  assert.equal(result.status, 'ready');
+  assert.equal(result.status, 'ready'); // Routing completion only; public/common Ready is separately proof-gated.
+  assert.notEqual(manager.getE2eeState(cid)?.state, 'ready');
   assert.equal(scopeSyncCalls, 1);
+  await checkpointStorage.close();
 });
 
 test('concurrent cold-start sync callers reuse one scope sync and one recovery discovery', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   manager.initialized = true;
   manager.userId = 'user-1';
   manager.deviceId = 'device-1';
@@ -353,6 +367,7 @@ test('concurrent cold-start sync callers reuse one scope sync and one recovery d
     loadRemovedSyncCursor: async () => null,
   };
   manager._restoreGroupsLocally = async () => {};
+  manager._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   manager._loadAllScopeSyncCursors = async () => ({});
   manager._saveEncryptionSyncCheckpoint = async () => {};
 
@@ -425,7 +440,7 @@ test('concurrent cold-start sync callers reuse one scope sync and one recovery d
 });
 
 test('startup uses one scope sync then one recovery discovery for every channel', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   manager.initialized = true;
   manager.userId = 'user-1';
   manager.deviceId = 'device-1';
@@ -458,6 +473,7 @@ test('startup uses one scope sync then one recovery discovery for every channel'
     loadChannelRepairState: async () => null,
   };
   manager._restoreGroupsLocally = async () => {};
+  manager._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   manager._loadAllScopeSyncCursors = async () => ({});
   manager._saveEncryptionSyncCheckpoint = async () => {};
   manager._markKnownChannelPendingRecoveryUnlock = async () => {};
@@ -522,8 +538,9 @@ test('startup uses one scope sync then one recovery discovery for every channel'
   assert.equal(scopeSyncCalls, 1);
   assert.equal(discoveryCalls, 1);
   assert.equal(generationCalls, 0);
-  assert.equal(manager.getSyncState('team:channel-1').status, 'ready');
-  assert.equal(manager.getSyncState('team:channel-2').status, 'ready');
+  assert.equal(manager.getSyncState('team:channel-1').status, 'needs_retry');
+  assert.equal(manager.getSyncState('team:channel-2').status, 'needs_retry');
+  assert.notEqual(manager.getE2eeState('team:channel-1')?.state, 'ready');
 });
 
 test('client owns one cold-start sync despite duplicate channel hydration signals', async () => {
@@ -552,12 +569,12 @@ test('client owns one cold-start sync despite duplicate channel hydration signal
   assert.equal(syncCalls, 1);
 });
 
-test('selected-channel open races by joining the real Client cold-start promise without another scope sync', async () => {
+test('real Client cold-start cannot turn an unsupported adapter cached snapshot into public Ready', async () => {
   const client = new ErmisChat('api-key', 'project-id', 'http://example.test', {
     browser: false,
     logger: () => {},
   });
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   const cursor = {
     created_at: '2026-06-13T00:00:10.000Z',
@@ -602,6 +619,8 @@ test('selected-channel open races by joining the real Client cold-start promise 
       id: 'channel-1',
       type: 'team',
       data: { mls_enabled: true },
+      _handleChannelEvent() {},
+      _callChannelListeners() {},
       state: { membership: { channel_role: 'member', created_at: '2026-06-13T00:00:00.000Z' } },
     },
   };
@@ -619,12 +638,13 @@ test('selected-channel open races by joining the real Client cold-start promise 
   releaseColdStart();
   const result = await readiness;
 
-  assert.equal(result.status, 'ready');
+  assert.equal(result.status, 'needs_retry');
+  assert.equal(result.error, 'client_upgrade_required');
   assert.equal(scopeSyncCalls, 0);
 });
 
 test('201 E2EE channels use deterministic recovery discovery chunks of 200 and 1', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   manager.initialized = true;
   manager.userId = 'user-1';
   manager.deviceId = 'device-1';
@@ -646,6 +666,7 @@ test('201 E2EE channels use deterministic recovery discovery chunks of 200 and 1
   };
   manager.storage = { loadRemovedSyncCursor: async () => null };
   manager._restoreGroupsLocally = async () => {};
+  manager._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   manager._loadAllScopeSyncCursors = async () => ({});
   manager._saveEncryptionSyncCheckpoint = async () => {};
   const chunks = [];
@@ -697,7 +718,7 @@ test('201 E2EE channels use deterministic recovery discovery chunks of 200 and 1
 });
 
 test('scope pagination completes before the single recovery discovery request', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   manager.initialized = true;
   manager.userId = 'user-1';
@@ -719,6 +740,7 @@ test('scope pagination completes before the single recovery discovery request', 
     saveRemovedSyncCursor: async () => {},
   };
   manager._restoreGroupsLocally = async () => {};
+  manager._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   manager._loadAllScopeSyncCursors = async () => ({});
   manager._saveEncryptionSyncCheckpoint = async () => {};
   const order = [];
@@ -752,7 +774,7 @@ test('scope pagination completes before the single recovery discovery request', 
 });
 
 test('unsupported discovery is cached and never falls back to per-channel generation fan-out', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cids = ['team:channel-1', 'team:channel-2'];
   manager.initialized = true;
   manager.userId = 'user-1';
@@ -765,6 +787,7 @@ test('unsupported discovery is cached and never falls back to per-channel genera
   };
   manager.storage = { loadRemovedSyncCursor: async () => null };
   manager._restoreGroupsLocally = async () => {};
+  manager._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   manager._loadAllScopeSyncCursors = async () => ({});
   manager._saveEncryptionSyncCheckpoint = async () => {};
   let discoveryCalls = 0;
@@ -796,7 +819,7 @@ test('unsupported discovery is cached and never falls back to per-channel genera
 });
 
 function missingGroupRecoveryManager(groupInfoResponse) {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   const readiness = new Map();
   manager.initialized = true;
@@ -821,6 +844,7 @@ function missingGroupRecoveryManager(groupInfoResponse) {
     loadExternalJoinReadiness: async (key) => readiness.get(key) || null,
     deleteExternalJoinReadiness: async (key) => readiness.delete(key),
   };
+  const checkpointStorage=installCheckpointBacking(manager);
   manager._partialWelcomeJoin = new PartialWelcomeJoinCoordinator(manager.storage);
   manager.e2eeClient = {
     scopeSync: async () => ({
@@ -830,17 +854,17 @@ function missingGroupRecoveryManager(groupInfoResponse) {
     }),
     getGroupInfo: async () => groupInfoResponse,
   };
-  return { manager, cid, readiness };
+  return { manager, cid, readiness, checkpointStorage };
 }
 
-test('exhausted sync uses the exact active-member recovery prerequisite and reuses GroupInfo', async () => {
+test('legacy join routing uses exact active-member prerequisite; completion does not prove common Ready', async () => {
   const groupInfo = {
     group_info: Uint8Array.from([1, 2, 3]),
     epoch: 1,
     hash: 'hash',
     external_join_prerequisite: { reason: 'active_member_recovery' },
   };
-  const { manager, cid, readiness } = missingGroupRecoveryManager(groupInfo);
+  const { manager, cid, readiness, checkpointStorage } = missingGroupRecoveryManager(groupInfo);
   let joinedWith;
   manager.joinExternal = async (_channelType, _channelId, _cid, initialGroupInfo) => {
     joinedWith = initialGroupInfo;
@@ -848,16 +872,18 @@ test('exhausted sync uses the exact active-member recovery prerequisite and reus
   };
   manager.syncAfterExternalJoin = async () => ({ cid, status: 'ready' });
 
-  const result = await manager.syncNewChannel('team', 'channel-1', cid);
+  const result = await manager._syncNewChannelLegacy('team', 'channel-1', cid);
 
   assert.equal(result.status, 'joined_external');
+  assert.notEqual(manager.getE2eeState(cid)?.state, 'ready');
   assert.equal(joinedWith, groupInfo);
   assert.equal(readiness.get(cid).reason, 'active_member_recovery');
+  await checkpointStorage.close();
 });
 
 test('missing or malformed recovery prerequisite remains fail closed after empty sync', async () => {
   for (const prerequisite of [undefined, { reason: 'sync_failed' }]) {
-    const { manager, cid, readiness } = missingGroupRecoveryManager({
+    const { manager, cid, readiness, checkpointStorage } = missingGroupRecoveryManager({
       group_info: Uint8Array.from([1, 2, 3]),
       epoch: 1,
       hash: 'hash',
@@ -871,11 +897,12 @@ test('missing or malformed recovery prerequisite remains fail closed after empty
 
     assert.equal(result.status, 'needs_retry');
     assert.equal(readiness.size, 0);
+    await checkpointStorage.close();
   }
 });
 
 test('recovery status does not invent incomplete restore for ready channel without progress record', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   manager.userId = 'user-1';
   manager.deviceId = 'device-1';
@@ -908,7 +935,7 @@ test('recovery status does not invent incomplete restore for ready channel witho
 });
 
 test('recovery status ignores passive decrypt repair issues for PIN gate', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   manager.userId = 'user-1';
   manager.deviceId = 'device-1';
@@ -939,7 +966,7 @@ test('recovery status ignores passive decrypt repair issues for PIN gate', async
 });
 
 test('recovery status treats pending unlock action as PIN-gated restore work', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   manager.userId = 'user-1';
   manager.deviceId = 'device-1';
@@ -960,7 +987,7 @@ test('recovery status treats pending unlock action as PIN-gated restore work', a
 });
 
 test('recovery status keeps active archive restore progress in PIN gate', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   manager.userId = 'user-1';
   manager.deviceId = 'device-1';
@@ -979,7 +1006,7 @@ test('recovery status keeps active archive restore progress in PIN gate', async 
 });
 
 test('bootstrap marks old known E2EE channels as pending recovery unlock when vault is locked', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   const saved = [];
   manager.initialized = true;
@@ -1014,7 +1041,7 @@ test('bootstrap marks old known E2EE channels as pending recovery unlock when va
 });
 
 test('bootstrap does not mark freshly accepted E2EE channels as pending recovery unlock', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:channel-1';
   const saved = [];
   manager.initialized = true;
@@ -1046,7 +1073,7 @@ test('bootstrap does not mark freshly accepted E2EE channels as pending recovery
 });
 
 test('inherited E2EE topic resolves encryption group from parent channel', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const parentCid = 'team:channel-1';
   const topicCid = 'topic:topic-1';
   manager.client = {
@@ -1066,7 +1093,7 @@ test('inherited E2EE topic resolves encryption group from parent channel', () =>
 });
 
 test('inherited E2EE topic decrypt gate follows parent membership', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const parentCid = 'team:channel-1';
   const topicCid = 'topic:topic-1';
   manager.userId = 'user-1';
@@ -1095,7 +1122,7 @@ test('inherited E2EE topic decrypt gate follows parent membership', () => {
 });
 
 test('decrypted inherited topic messages publish into topic state even when topic is only nested under parent', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const parentCid = 'team:channel-1';
   const topicCid = 'topic:topic-1';
   const dispatched = [];
@@ -1162,7 +1189,7 @@ test('decrypted inherited topic messages publish into topic state even when topi
 });
 
 test('forward secrecy consumed remains blocked and recoverable by an alternate archive', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const progress = manager._upsertRepairIssueInProgress(
     makeProgress(),
     {
@@ -1179,7 +1206,7 @@ test('forward secrecy consumed remains blocked and recoverable by an alternate a
 });
 
 test('clearing one message version does not erase another version of the same message', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const first = {
     id: 'edited-message',
     created_at: '2026-06-13T00:00:00.000Z',
@@ -1199,7 +1226,7 @@ test('clearing one message version does not erase another version of the same me
 });
 
 test('manual material failures replace the target issue without adding an epoch duplicate', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const message = {
     id: 'message-2',
     created_at: '2026-06-13T00:00:00.000Z',
@@ -1214,7 +1241,7 @@ test('manual material failures replace the target issue without adding an epoch 
 });
 
 test('manual repair marks failed issue no_archive when list epochs has no matching archive', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const message = {
     id: 'message-no-archive',
     created_at: '2026-06-13T00:00:00.000Z',
@@ -1234,7 +1261,7 @@ test('manual repair marks failed issue no_archive when list epochs has no matchi
 });
 
 test('legacy epoch progress is lazily exposed as repair issues', () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const progress = manager._normalizeProgress({
     ...makeProgress(),
     repair_issues: undefined,
@@ -1256,7 +1283,7 @@ test('legacy epoch progress is lazily exposed as repair issues', () => {
 });
 
 test('post-unlock recovery maintenance runs in the background and dedupes', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const calls = [];
   let releaseRecheck;
 
@@ -1297,7 +1324,7 @@ test('post-unlock recovery maintenance runs in the background and dedupes', asyn
 });
 
 test('repair republishes already-cached plaintext over an encrypted placeholder', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'messaging:channel-1';
   const messageId = 'cached-repaired-message';
   const createdAt = '2026-06-18T00:00:00.000Z';
@@ -1452,7 +1479,7 @@ test('repair republishes already-cached plaintext over an encrypted placeholder'
   );
 });
 test('encrypted channel repair requires recovery setup when the private key is unavailable', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   manager._recoveryPrivateKey = null;
   manager.getRecoveryStatus = async () => {
     throw new Error('repair must not fail open when no recovery vault exists');
@@ -1465,7 +1492,7 @@ test('encrypted channel repair requires recovery setup when the private key is u
 });
 
 test('encrypted channel repair dispatches a paired started and completed lifecycle', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const events = [];
   manager.client = {
     dispatchEvent: (event) => events.push(event),
@@ -1486,7 +1513,7 @@ test('encrypted channel repair dispatches a paired started and completed lifecyc
 });
 
 test('encrypted channel repair dispatches failed with the same repair id before rethrowing', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const events = [];
   const expectedError = new Error('repair failed safely');
   manager.client = {
@@ -1507,3 +1534,14 @@ test('encrypted channel repair dispatches failed with the same repair id before 
   assert.equal(events[1].repair_id, events[0].repair_id);
   assert.equal(events[1].error, expectedError.message);
 });
+
+
+// Component routing fixture only. Durable capability/atomicity is proved by actual-WASM discovery tests.
+function componentRoutingManager() {
+  const manager = new EncryptionManager();
+  const {RecoveryDiscoveryCoordinator} = require('../dist/encryption/index.cjs');
+  const coordinator = new RecoveryDiscoveryCoordinator(cids => manager._discoverMlsRecoveryStatesRaw(cids));
+  manager._getRecoveryDiscoveryCoordinator = () => coordinator;
+  manager._discoverMlsRecoveryStates = cids => coordinator.request(cids);
+  return manager;
+}

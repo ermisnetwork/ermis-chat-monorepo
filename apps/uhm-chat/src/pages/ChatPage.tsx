@@ -40,6 +40,7 @@ import { UhmPollMessage } from '@/features/chat/UhmPollMessage'
 import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
 import { SyncStatusBanner } from '@/features/chat/SyncStatusBanner'
+import { SecureSessionBanner } from '@/features/chat/SecureSessionBanner'
 import { MessageGapIndicator } from '@/features/chat/MessageGapIndicator'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
@@ -1074,6 +1075,7 @@ export function ChatPage() {
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
+          <SecureSessionBanner client={client} channel={activeChannel} />
 
           {/* Music Room Player for Group Channels */}
           {activeChannel && isGroupChannel(activeChannel) && (

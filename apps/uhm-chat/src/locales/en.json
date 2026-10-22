@@ -282,7 +282,14 @@
     "topic_inherited": "E2EE inherited from parent channel",
     "toggle_label": "End-to-end encrypted",
     "toggle_description": "Messages and attachments are encrypted for channel members.",
-    "unavailable": "E2EE is unavailable until encryption is initialized."
+    "unavailable": "E2EE is unavailable until encryption is initialized.",
+    "secure_session_refreshing": "Restoring secure messaging…",
+    "secure_session_preparing": "Preparing secure messaging…",
+    "secure_session_waiting_member": "Secure messaging is not ready on this device. Open this conversation on a device where it still works, then try again.",
+    "secure_session_retry": "Secure messaging could not be restored yet. Try again.",
+    "secure_session_upgrade": "Update this app to restore secure messaging.",
+    "secure_session_server_upgrade": "Secure messaging recovery is unavailable. Please contact support.",
+    "secure_session_history": "Secure messaging is ready. Some older messages could not be restored."
   },
   "recovery_pin": {
     "title": "Chat history PIN",

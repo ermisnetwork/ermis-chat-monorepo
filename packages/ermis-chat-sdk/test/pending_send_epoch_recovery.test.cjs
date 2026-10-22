@@ -32,7 +32,27 @@ function harness(extra = {}) {
     deletePendingE2eeSend: async () => { operations.push('delete'); current = null; },
     saveMessage: async (value) => { operations.push('cache'); cached.push(value); },
   };
-  manager.e2eeClient = { sendMessage: async (_type, _id, body) => {
+  manager.storage.loadMessage = async id => cached.findLast(m => m.id === id) || null;
+  manager.storage.savePendingE2eeSendOutcome = async (expected, next, message) => {
+    const actual = await manager.storage.loadPendingE2eeSend(expected.message_id);
+    if (!actual || !Buffer.from(actual.mls_ciphertext).equals(Buffer.from(expected.mls_ciphertext))) return false;
+    if (message) await manager.storage.saveMessage(message);
+    if (next) await manager.storage.savePendingE2eeSend(next); else await manager.storage.deletePendingE2eeSend(expected.message_id);
+    return true;
+  };
+  // Transport-only fixture; actual candidate/transaction durability lives in application_send_checkpoint.test.cjs.
+  manager._prepareApplicationSend = async (base, aad) => {
+    const ciphertext = manager.encryptMessage(base.e2ee_group_id, base.payload, aad);
+    await manager._persistProvider();
+    const next = {...base, mls_ciphertext: ciphertext, mls_epoch: epoch, group_generation: manager._groupGenerations.get(base.e2ee_group_id)?.group_generation || 0, status: 'sending', last_error: undefined};
+    await manager.storage.savePendingE2eeSend(next);
+    return next;
+  };
+  manager.e2eeClient = {
+    // Transport fixture implements the current scoped-generation contract;
+    // the production guard remains active before every restored send.
+    getMlsGenerationState: async () => ({ group_generation: manager._groupGenerations.get(record.e2ee_group_id)?.group_generation || 0, current_epoch: epoch }),
+    sendMessage: async (_type, _id, body) => {
     operations.push(`send:${body.message.mls_epoch}`); requests.push(structuredClone(body.message));
     if (body.message.mls_epoch === 20) throw new Error('epoch_stale: message encrypted with epoch 20, current group epoch is 25');
     return { message: { id: body.message.id, created_at: '2026-10-05T02:05:00Z' } };
@@ -49,7 +69,7 @@ test('persisted epoch20 send recovers once, saves retry before network and clear
   assert.equal(h.requests[1].quoted_message_id, 'quote');
   assert.deepEqual(h.requests[1].mentioned_users, ['peer']);
   assert.ok(h.requests.every(r => !('text' in r) && !('payload' in r)));
-  assert.deepEqual(h.operations, ['pending:20:sending', 'send:20', 'recover', 'encrypt', 'provider', 'pending:25:sending', 'send:25', 'cache', 'delete']);
+  assert.deepEqual(h.operations, ['pending:20:sending', 'send:20', 'recover', 'encrypt', 'provider', 'pending:25:sending', 'send:25', 'cache', 'pending:25:sent', 'delete']);
   assert.equal(h.cached[0].text, h.record.text);
   assert.equal(h.current(), null);
 });
@@ -183,7 +203,8 @@ for (const boundary of ['before send', 'after recovery']) {
 
 test('cache write failure after accepted retry retains new bytes for restart and avoids premature deletion', async () => {
   const h = harness();
-  h.manager.storage.saveMessage = async () => { throw new Error('cache unavailable'); };
+  const saveOutcome = h.manager.storage.savePendingE2eeSendOutcome;
+  h.manager.storage.savePendingE2eeSendOutcome = async (expected, next, message) => { if (message) throw new Error('cache unavailable'); return saveOutcome(expected, next); };
   await h.manager._processQueuedE2eeAttachmentMessage(h.record);
   assert.equal(h.requests.length, 2);
   assert.equal(h.current().mls_epoch, 25);
@@ -239,3 +260,19 @@ test('new send persists full retry payload and clears previous last_error', asyn
   assert.equal(h.current().status, 'sent');
   assert.equal(h.current().last_error, undefined);
 });
+
+for (const fault of ['missing capability', 'transient generation read', 'new server generation']) {
+ test(`restored exact ciphertext is retained before HTTP on ${fault}`,async()=>{
+  const h=harness();
+  if(fault==='missing capability')delete h.manager.e2eeClient.getMlsGenerationState;
+  else h.manager.e2eeClient.getMlsGenerationState=async()=>{
+   if(fault==='transient generation read')throw new Error('generation transport unavailable');
+   return {group_generation:1,current_epoch:1,group_id:Uint8Array.of(7)};
+  };
+  await h.manager._processQueuedE2eeAttachmentMessage(h.record);
+  assert.equal(h.requests.length,0);assert.equal(h.encryptedPayloads.length,0);
+  assert.equal(h.operations.includes('delete'),false);assert.equal(h.current().message_id,h.record.message_id);
+  assert.deepEqual(h.current().mls_ciphertext,h.record.mls_ciphertext);
+  if(fault==='new server generation')assert.equal(h.current().status,'failed_terminal');
+ });
+}

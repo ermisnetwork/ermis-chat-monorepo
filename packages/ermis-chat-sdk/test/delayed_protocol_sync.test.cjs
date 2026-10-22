@@ -62,6 +62,7 @@ test('ordinary global sync repairs a delayed Commit even when its saved applicat
   const h = harness();
   const advanced = { created_at: '2026-10-05T00:01:00Z', event_id: 'application-after-commit' };
   h.m._restoreGroupsLocally = async () => {};
+  h.m._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   h.m._loadAllScopeSyncCursors = async () => ({ [cid]: advanced });
   h.m.storage = { loadRemovedSyncCursor: async () => null };
   h.m._listKnownE2eeChannels = () => [{ cid }];
@@ -85,6 +86,7 @@ test(`${code} in a forward page holds its prefix but still reaches authoritative
   const advanced = { created_at: '2026-10-05T00:01:00Z', event_id: 'ahead' };
   let checkpoint;
   h.m._restoreGroupsLocally = async () => {};
+  h.m._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   h.m._loadAllScopeSyncCursors = async () => ({ [cid]: advanced });
   h.m.storage = { loadRemovedSyncCursor: async () => null };
   h.m._listKnownE2eeChannels = () => [{ cid }];
@@ -138,7 +140,11 @@ for (const type of ['commit', 'own-commit', 'welcome']) {
       reconcileMlsBootstrapWelcome: async () => {
         assert.equal(syncing, false);
       },
-      joinGroup: async () => { calls.push('welcome'); },
+      processMlsWelcome: async (_cid, _protocol, options) => {
+        assert.equal(syncing, false); assert.equal(options.historicalReplay, false);
+        calls.push('welcome'); return 'applied';
+      },
+      requestScopeSyncAfterRepair: () => assert.fail('successful gated processing needs no recovery wake'),
       processOwnMlsCommit: async () => { calls.push('own-commit'); },
       processCommit: async () => { calls.push('commit'); },
     };

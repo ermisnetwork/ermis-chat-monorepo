@@ -8,6 +8,7 @@ function makeSendHarness() {
   const cid = 'team:rapid-send';
   const sentBodies = [];
   const savedMessages = [];
+  let pending;
 
   manager.userId = 'sender';
   manager.client = {
@@ -20,11 +21,16 @@ function makeSendHarness() {
   manager.encryptMessage = () => new Uint8Array([1, 2, 3]);
   manager._persistProvider = async () => {};
   manager.storage = {
-    savePendingE2eeSend: async () => {},
+    savePendingE2eeSend: async r => { pending = structuredClone(r); },
+    loadPendingE2eeSend: async () => pending,
+    loadMessage: async id => savedMessages.findLast(m => m.id === id) || null,
+    savePendingE2eeSendOutcome: async (expected, next, message) => { if (!pending || !Buffer.from(pending.mls_ciphertext).equals(Buffer.from(expected.mls_ciphertext))) return false; if (message) savedMessages.push(message); pending = structuredClone(next); return true; },
     saveMessage: async (message) => {
       savedMessages.push(message);
     },
   };
+  // Isolate ordering projection; real atomic cryptography is exercised by application_send_checkpoint.
+  manager._prepareApplicationSend = async r => { const next = {...r, mls_ciphertext: manager.encryptMessage(), mls_epoch: 4}; await manager.storage.savePendingE2eeSend(next); return next; };
   manager.e2eeClient = {
     sendMessage: async (_channelType, _channelId, body) => {
       sentBodies.push(body);

@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
+import { mlsRepairCapture } from './dev/mlsRepairCapture';
+
+const projectDir = fileURLToPath(new URL('.', import.meta.url));
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -9,25 +13,26 @@ export default defineConfig({
     'process.env.PKG_VERSION': JSON.stringify('dev'),
   },
   plugins: [
+    mlsRepairCapture(),
     react(),
     tailwindcss(),
   ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(projectDir, './src'),
       // Use workspace sources in dev so Vite can hot-reload SDK/UI changes instantly.
-      react: path.resolve(__dirname, '../../node_modules/react'),
-      'react-dom': path.resolve(__dirname, '../../node_modules/react-dom'),
+      react: path.resolve(projectDir, '../../node_modules/react'),
+      'react-dom': path.resolve(projectDir, '../../node_modules/react-dom'),
       '@ermis-network/ermis-chat-react/dist/index.css': path.resolve(
-        __dirname,
+        projectDir,
         '../../packages/ermis-chat-react/src/styles/index.css',
       ),
       '@ermis-network/ermis-chat-react': path.resolve(
-        __dirname,
+        projectDir,
         '../../packages/ermis-chat-react/src/index.ts',
       ),
       '@ermis-network/ermis-chat-sdk': path.resolve(
-        __dirname,
+        projectDir,
         '../../packages/ermis-chat-sdk/src/index.ts',
       ),
     },

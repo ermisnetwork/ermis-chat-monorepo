@@ -1,3 +1,5 @@
+import acceptedFixture from './accepted_protocol_fixture.cjs';
+const {accepted, processOwnAccepted} = acceptedFixture;
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
@@ -16,14 +18,18 @@ function harness(generation = 1) {
   const groupId = new Uint8Array([255, 0, seq]);
   const group = generation ? wasm.Group.create_with_group_id(provider, identity, groupId) : wasm.Group.create_with_cid(provider,identity,cid);
   const storage = new IndexedDBEncryptionStorage(user);
-  function manager(p = provider, g = group) {
+  async function manager(p = provider, g = group) {
     const m = new EncryptionManager();
     m.initialized = true; m.userId = user; m.deviceId = 'device'; m.provider = p; m.identity = identity; m.storage = storage;
+    const durable = await storage.loadProviderCheckpoint(user, 'device');
+    m._providerDurableBase = {storage, userId:user, deviceId:'device', revision:durable.revision};
     m.groups.set(cid, g);
     m._groupGenerations.set(cid, { cid, group_generation: generation, group_id: generation ? groupId : null, status:'active', current_epoch:0, updated_at:Date.now() });
     m._collectPendingGhosts = async (_, ids = []) => ids;
     m._cleanupEvictedGhosts = async () => {};
     m.safeArchiveCurrentEpoch = async () => {};
+    m._injectedWasm=wasm;m._restoreOrCreateProvider=async()=>{};await m._initWasm();
+    await m._writeMlsMutation(cid,null);
     return m;
   }
   return { cid, user, provider, identity, group, groupId, storage, manager };
@@ -32,7 +38,7 @@ const pendingError = epoch => ({ response:{ status:503, data:{ reason:'mls_trans
 const protocol = p => ({ epoch:p.expected_epoch+1, group_generation:p.group_generation, group_id:p.group_id, commit:p.commit });
 for (const generation of [0, 1]) {
   test(`real WASM generation ${generation}: own logical device tag cannot skip an unapplied Commit from a different leaf`, async () => {
-    const h = harness(generation), m = h.manager();
+    const h = harness(generation), m = await h.manager();
     m._injectedWasm = wasm; m._restoreOrCreateProvider = async () => {}; await m._initWasm();
     m.safeArchiveCurrentEpochForCid = async () => {};
     const peerProvider = new wasm.Provider(), peerIdentity = new wasm.Identity(peerProvider, h.user);
@@ -45,6 +51,8 @@ for (const generation of [0, 1]) {
     const event = { type: 'protocol', cid: h.cid, event_id: 'own-tag', created_at: new Date().toISOString(),
       data: { type: 'commit', user: { id: h.user }, device_id: 'device',
         epoch: 2, group_generation: generation, ...(generation ? { group_id: h.groupId } : {}), commit: commit.commit } };
+    event.data.event_id = event.event_id;
+    event.data.acceptance_context = {...accepted(m,h.cid,commit.commit,2,generation).acceptanceContext,event_id:event.event_id};
     const result = await m._processChannelEvents(h.cid, [event], start);
     assert.equal(m.getEpoch(h.cid), 2);
     assert.equal(result.processedEvents, 1);
@@ -52,24 +60,28 @@ for (const generation of [0, 1]) {
     const reloaded = generation ? wasm.Group.load_with_group_id(saved, h.groupId) : wasm.Group.load(saved, h.cid);
     assert.equal(Number(reloaded.epoch()), 2);
     const ciphertext = peer.create_message(peerProvider, peerIdentity, new TextEncoder().encode(JSON.stringify({ text: 'own-tag-replayed' })));
-    assert.equal(m.decryptMessage(h.cid, ciphertext).payload.text, 'own-tag-replayed');
+    assert.equal((await receiveApplication(m, h.cid, ciphertext)).text, 'own-tag-replayed');
   });
 }
 
 test('real WASM genuinely self-authored Commit without its journal is not acknowledged or numerically merged', async () => {
-  const h = harness(), m = h.manager();
+  const h = harness(), m = await h.manager();
   m._injectedWasm = wasm; m._restoreOrCreateProvider = async () => {}; await m._initWasm();
   const before = h.provider.to_bytes();
   const bundle = h.group.commit_self_update_with_removals(h.provider, h.identity, []);
   h.group.merge_pending_commit(h.provider);
   m.provider = wasm.Provider.from_bytes(before);
   m.groups.set(h.cid, wasm.Group.load_with_group_id(m.provider, h.groupId));
-  await h.storage.saveProviderState(h.user, 'device', before);
+  const seedGuard=m._providerWriteGuard();
+  await h.storage.saveProviderState(h.user,'device',before,seedGuard);
+  await m._readProviderWrite(before,seedGuard,()=>{});
   const savedCursor = { created_at: new Date().toISOString(), event_id: 'safe-prefix' };
   await h.storage.saveScopeSyncCursor(h.cid, savedCursor);
   const event = { type: 'protocol', cid: h.cid, event_id: 'unrecoverable-own', created_at: new Date().toISOString(),
     data: { type: 'commit', user: { id: h.user }, device_id: 'device', epoch: 1,
       group_generation: 1, group_id: h.groupId, commit: bundle.commit } };
+  event.data.event_id = event.event_id;
+  event.data.acceptance_context = {...accepted(m,h.cid,bundle.commit,1,1).acceptanceContext,event_id:event.event_id};
   m.e2eeClient = { scopeSync: async () => ({ channels: { [h.cid]: {
     events: [event], next_cursor: { created_at: event.created_at, event_id: event.event_id }, has_more: false,
   } } }) };
@@ -81,19 +93,31 @@ test('real WASM genuinely self-authored Commit without its journal is not acknow
 });
 
 test('own-tagged malformed Commit cannot retire an unknown candidate; exact receipt still recovers after failure', async () => {
-  const h = harness(), m = h.manager();
+  const h = harness(), m = await h.manager();
   m._injectedWasm = wasm; m._restoreOrCreateProvider = async () => {}; await m._initWasm();
   m.e2eeClient = { keyRotation: async () => { throw new Error('lost response'); } };
   await assert.rejects(m.keyRotation(h.cid));
   const [candidate] = await h.storage.listPendingMlsMutations();
   const before = await h.storage.loadProviderState(h.user, 'device');
-  await assert.rejects(m.processOwnMlsCommit(h.cid, { ...protocol(candidate), commit: new Uint8Array([1]) }));
+  await assert.rejects(processOwnAccepted(m, h.cid, { ...protocol(candidate), commit: new Uint8Array([1]) }));
   assert.equal(m.getEpoch(h.cid), 0);
   assert.deepEqual(await h.storage.listPendingMlsMutations(), [candidate]);
   assert.deepEqual(await h.storage.loadProviderState(h.user, 'device'), before);
-  await m.processOwnMlsCommit(h.cid, protocol(candidate));
+  await processOwnAccepted(m, h.cid, protocol(candidate));
   assert.equal(m.getEpoch(h.cid), 1);
   assert.equal((await h.storage.listPendingMlsMutations()).length, 0);
   const restored = wasm.Provider.from_bytes(await h.storage.loadProviderState(h.user, 'device'));
   assert.equal(Number(wasm.Group.load_with_group_id(restored, h.groupId).epoch()), 1);
 });
+
+// Receive through the real atomic public path with the installed logical generation.
+let receivedApplicationSequence = 0;
+async function receiveApplication(manager, cid, ciphertext) {
+  const result = await manager.decryptApplicationMessages(cid, [{id: 'verified-fixture-' + (++receivedApplicationSequence),
+    cid, created_at: new Date().toISOString(), mls_ciphertext: ciphertext,
+    group_generation: manager._groupGenerations.get(cid)?.group_generation || 0}]);
+  assert.equal(result.buffered.length, 0);
+  assert.equal(result.decrypted.length, 1);
+  assert.equal(result.decrypted[0].mls_application_checkpoint_version, 1);
+  return result.decrypted[0];
+}

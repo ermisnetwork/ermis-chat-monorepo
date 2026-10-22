@@ -1,4 +1,5 @@
 /** Own logical-device Commit replay. Mutation journals remain owned by the manager. */
+import type { MlsProtocolProcessingOptions } from './acceptance_context';
 export interface OwnCommitProtocol {
   epoch?: number;
   group_generation?: number;
@@ -6,11 +7,7 @@ export interface OwnCommitProtocol {
   commit?: Uint8Array;
 }
 
-export interface OwnCommitReplayOptions {
-  flushPending?: boolean;
-  historicalReplay?: boolean;
-  serverAcceptedAt?: string;
-}
+export type OwnCommitReplayOptions = MlsProtocolProcessingOptions;
 
 export type OwnCommitReplayReason = 'own_commit_unresolved' | 'own_commit_candidate_mismatch'
   | 'own_commit_unjournaled_candidate' | 'own_commit_no_candidate';

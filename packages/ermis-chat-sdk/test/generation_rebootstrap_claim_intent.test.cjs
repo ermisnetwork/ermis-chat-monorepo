@@ -32,7 +32,7 @@ const boundary = {
 };
 
 test('activated generation remains joinable when Welcome delivery failed', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   manager.initialized = true;
   manager.userId = 'alice';
   manager.deviceId = 'web-a';
@@ -53,7 +53,7 @@ test('activated generation remains joinable when Welcome delivery failed', async
 });
 
 test('malformed or regressing authoritative state cannot join or claim', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   manager.initialized = true;
   manager.userId = 'alice';
   manager.deviceId = 'web-a';
@@ -126,7 +126,7 @@ test('new client classifies an old server route as upgrade required', () => {
 });
 
 test('old discovery server keeps generation zero compatible until repair deadline then requires server upgrade', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:legacy-discovery-server';
   let now = Date.parse('2026-09-11T08:00:00.000Z');
   manager.initialized = true;
@@ -187,7 +187,7 @@ test('unknown server errors fail closed as retryable infrastructure', () => {
 });
 
 test('expired durable candidate is discarded before authoritative recovery retries', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = boundary.cid;
   const deleted = [];
   manager.initialized = true;
@@ -233,7 +233,7 @@ test('expired durable candidate is discarded before authoritative recovery retri
 });
 
 test('generation recovery deadline retries use one-CID discovery without legacy GET loops', async () => {
-  const manager = new EncryptionManager();
+  const manager = componentRoutingManager();
   const cid = 'team:missing-generation';
   const recoveryEvents = [];
   let now = Date.parse('2026-09-11T07:45:30.000Z');
@@ -335,3 +335,14 @@ test('generation recovery deadline retries use one-CID discovery without legacy 
   assert.equal(ensureCalls, 0);
   assert.equal(recoveryEvents[1].status, 'client_upgrade_required');
 });
+
+
+// Component routing fixture only. Durable capability/atomicity is proved by actual-WASM discovery tests.
+function componentRoutingManager() {
+  const manager = new EncryptionManager();
+  const {RecoveryDiscoveryCoordinator} = require(bundle);
+  const coordinator = new RecoveryDiscoveryCoordinator(cids => manager._discoverMlsRecoveryStatesRaw(cids));
+  manager._getRecoveryDiscoveryCoordinator = () => coordinator;
+  manager._discoverMlsRecoveryStates = cids => coordinator.request(cids);
+  return manager;
+}

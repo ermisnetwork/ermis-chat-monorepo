@@ -159,7 +159,7 @@ export class V1EndUserClientApi<ErmisChatGenerics extends ExtendableGenerics = D
     const response = adaptEndUserV1AuthResponse(
       await this.transport.publicRequest<EndUserV1AuthResponse>('post', this.baseURL + '/auth/refresh', {
         refresh_token: refreshToken,
-      }),
+      }, {timeout: 5000}),
     );
     if (!response.token) throw new Error('Refresh token response did not include access_token');
     return { ...response, token: response.token, access_token: response.access_token || response.token };

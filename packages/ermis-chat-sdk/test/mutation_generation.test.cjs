@@ -3,41 +3,27 @@ const test = require('node:test');
 const { EncryptionManager, E2eeClient, Channel } = require('../dist/index.cjs');
 const cid = 'team:mutation-generation';
 const groupId = Uint8Array.from([255, 0, 42, 7]);
-function harness(generation = 1, storedId = groupId, actualId = groupId) {
-  const manager = new EncryptionManager();
-  const calls = { requests: [], stage: 0, merge: 0, epoch: 1 };
-  const group = {
-    epoch: () => calls.epoch,
-    group_id: () => actualId,
-    members_by_user_id: () => [{}],
-    commit_self_update_with_removals: () => {
-      calls.stage += 1;
-      return { commit: new Uint8Array([1]), group_info: new Uint8Array([2]) };
-    },
-    commit_member_removals: () => {
-      calls.stage += 1;
-      return { commit: new Uint8Array([1]), group_info: new Uint8Array([2]) };
-    },
-    clear_pending_commit: () => {},
-    merge_pending_commit: () => { calls.merge += 1; calls.epoch += 1; },
-  };
-  manager.initialized = true;
-  manager.provider = { to_bytes: () => new Uint8Array([calls.epoch]) };
-  manager.identity = {};
-  manager.storage = { listPendingMlsMutations: async () => [], saveMlsMutationCheckpoint: async () => {} };
-  manager.userId = 'alice';
-  manager.groups = new Map([[cid, group]]);
-  manager._groupGenerations = new Map([[cid, { cid, group_generation: generation, group_id: storedId, status: 'active' }]]);
-  const record = async (...args) => calls.requests.push(args.at(-1));
-  manager.e2eeClient = { keyRotation: record, commitEviction: record };
-  manager.client = { activeChannels: { [cid]: { removeMembersE2ee: record } } };
-  manager._requireCompositeCommitMethods = () => {};
-  manager._collectPendingGhosts = async (_, extra = []) => extra;
-  manager._cleanupEvictedGhosts = async () => {};
-  manager._saveGroup = async () => {};
-  manager._persistProvider = async () => {};
-  manager.safeArchiveCurrentEpoch = async () => {};
-  return { manager, calls };
+const {IndexedDBEncryptionStorage}=require('../dist/index.cjs');
+const fs=require('node:fs'),{indexedDB,IDBKeyRange}=require('fake-indexeddb');
+globalThis.indexedDB=indexedDB;globalThis.IDBKeyRange=IDBKeyRange;
+let wasm,seq=0;
+test.before(async()=>{wasm=await import('../src/encryption/wasm/openmls_wasm.js');await wasm.default({module_or_path:fs.readFileSync(require.resolve('../src/encryption/wasm/openmls_wasm_bg.wasm'))});});
+async function harness(generation = 1, storedId = groupId, actualId = groupId) {
+  const manager = new EncryptionManager(),calls={requests:[],stage:0,merge:0};
+  manager.userId='codec-'+(++seq);manager.deviceId='device';manager.initialized=true;
+  manager.provider=new wasm.Provider();manager.identity=new wasm.Identity(manager.provider,manager.userId);
+  manager.storage=new IndexedDBEncryptionStorage(manager.userId);manager._injectedWasm=wasm;manager._restoreOrCreateProvider=async()=>{};await manager._initWasm();
+  manager._providerDurableBase={storage:manager.storage,userId:manager.userId,deviceId:'device',revision:null};
+  const group=generation?wasm.Group.create_with_group_id(manager.provider,manager.identity,actualId):wasm.Group.create_with_cid(manager.provider,manager.identity,cid);
+  const pp=new wasm.Provider(),peer=new wasm.Identity(pp,'bob');group.add_members(manager.provider,manager.identity,[peer.key_package(pp)]);group.merge_pending_commit(manager.provider);
+  manager.groups.set(cid,group);manager._groupGenerations.set(cid,{cid,group_generation:generation,group_id:storedId,status:'active',current_epoch:1});
+  await manager._writeMlsMutation(cid,null);
+  const record=async(...args)=>calls.requests.push(args.at(-1));manager.e2eeClient={keyRotation:record,commitEviction:record};manager.client={activeChannels:{[cid]:{removeMembersE2ee:record}}};
+  manager._collectPendingGhosts=async(_,extra=[])=>extra;manager._cleanupEvictedGhosts=async()=>{};manager.safeArchiveCurrentEpoch=async()=>{};
+  const prepare=manager._prepareMlsMutation.bind(manager),finish=manager._finishMlsMutation.bind(manager);
+  manager._prepareMlsMutation=(key,admit,work)=>prepare(key,admit,(...args)=>{calls.stage++;return work(...args);});
+  manager._finishMlsMutation=async(...args)=>{await finish(...args);calls.merge++;};
+  return {manager,calls};
 }
 for (const [name, invoke] of [
   ['rotation', m => m.keyRotation(cid)],
@@ -45,7 +31,7 @@ for (const [name, invoke] of [
   ['self-left cleanup', m => m.evictMember('team', 'mutation-generation', cid, 'bob', true)],
 ]) {
   test(`${name} sends the installed generation and exact binary GroupId`, async () => {
-    const { manager, calls } = harness(3);
+    const { manager, calls } = await harness(3);
     await invoke(manager);
     assert.equal(calls.requests.length, 1);
     assert.equal(calls.requests[0].group_generation, 3);
@@ -53,20 +39,20 @@ for (const [name, invoke] of [
     assert.equal(calls.merge, 1);
   });
   test(`${name} rejects mismatched local GroupId before staging or sending`, async () => {
-    const { manager, calls } = harness(1, groupId, new Uint8Array([9]));
+    const { manager, calls } = await harness(1, groupId, new Uint8Array([9]));
     await assert.rejects(invoke(manager), /generation marker/);
     assert.equal(calls.stage, 0);
     assert.equal(calls.requests.length, 0);
   });
 }
 test('legacy rotation sends generation zero without inventing a GroupId', async () => {
-  const { manager, calls } = harness(0, null);
+  const { manager, calls } = await harness(0, null);
   await manager.keyRotation(cid);
   assert.equal(calls.requests[0].group_generation, 0);
   assert.equal(calls.requests[0].group_id, undefined);
 });
 test('historical generation cannot mutate', async () => {
-  const { manager, calls } = harness();
+  const { manager, calls } = await harness();
   manager._groupGenerations.get(cid).status = 'historical';
   await assert.rejects(manager.keyRotation(cid), /not active/);
   assert.equal(calls.stage, 0);

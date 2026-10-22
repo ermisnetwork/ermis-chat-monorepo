@@ -41,6 +41,7 @@ export type APIResponse = {
 
 export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> =
   ErmisChatGenerics['channelType'] & {
+    e2ee?: import('./encryption/channel_recovery').ChannelE2ee | null;
     cid: string;
     id: string;
     type: string;
@@ -386,6 +387,12 @@ export type Event<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics
   hash?: string;
   retry_after_ms?: number;
   repair_status?: string;
+  /** Local durable recovery control; server metadata alone does not establish Ready. */
+  recovery_revision?: string | null;
+  provider_revision?: string | null;
+  state?: 'pending_external_join' | 'repairing' | 'manual_intervention_required' | 'upgrade_required' | 'ready';
+  group_generation?: number;
+  retryable?: boolean;
   reaction?: ReactionResponse<ErmisChatGenerics>;
   received_at?: string | Date;
   refresh_token?: string;

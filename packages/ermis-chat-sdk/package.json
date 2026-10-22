@@ -9,31 +9,36 @@
     "url": "git+https://github.com/ermisnetwork/ermis-chat-monorepo.git"
   },
   "openmlsBuild": {
-    "commit": "ea2310f46d716e29e28422c18b310dba06515267",
-    "sourceDiffSha256": "8334a89434b11ea090467f81c5637e92c3d96a944a316138dfd24c8dc375a7cf",
-    "patches": [
-      {
-        "path": "wasm-build/join-typed-welcome.patch",
-        "sha256": "dd475c8f4cdf0d0381030780d4f538eed75f2ee60a62a5e23cbbb7cfc36943d6"
-      },
-      {
-        "path": "wasm-build/historical-validation-time.patch",
-        "sha256": "7c3ae96d90db911d60d3740d6779ee2da943ac3bf627cd454524aac8cb8b9a3e"
-      }
-    ],
-    "cargoLockSha256": "202c66eb84ce92571bac3af92a5cdb82d0ff26b6d691d24ec6cee8ca81056d31",
+    "commit": "e6815e370865c0ee273b1e01f01373e7d467fed3",
+    "sourceDiffSha256": "d47cc4e8cf95e36daa272532b84ee2dcff3c5c737fec1293eab27f82c0189114",
+    "patches": [],
+    "cargoLockSha256": "ce58625488f14f67b8391802e066191dd5ea2f4bed846a1f5cebecd6d46f6c0b",
     "wasmPack": "wasm-pack 0.13.1",
     "cargo": "cargo 1.94.1 (29ea6fb6a 2026-03-24)",
     "rustc": "rustc 1.94.1 (e408947bf 2026-03-25)",
-    "wasmSha256": "4169a5786267e32ca27da90c8ed9f79e3ecdb6a211980b2baa19383a20e9fc4a",
-    "wasmSize": 2515709,
+    "wasmSha256": "61059544b75131ebfec7c508bd46bd43a228e68c451aac7e597a98064f2b4359",
+    "wasmSize": 2664028,
     "contracts": [
-      "typed_welcome",
-      "trusted_historical_time",
+      "recovery_pin",
+      "epoch_archive",
+      "epoch_archive_v2",
       "explicit_group_id",
       "group_generation",
-      "epoch_archive_v2"
-    ]
+      "typed_welcome",
+      "trusted_historical_time",
+      "private_key_package_ownership",
+      "validated_application_ratchet",
+      "fallible_key_package_generation_serialization",
+      "isolated_welcome_candidate",
+      "checked_allow_expired_tree_policy",
+      "canonical_acceptance_context",
+      "device_registration_proof",
+      "mls_control_request_proof_v1",
+      "three_way_candidate_rebase",
+      "readonly_group_info_validation"
+    ],
+    "sourceFilesSha256": "7c447f7570cde120f267169d3741e7cd72045bb8fd32be5ecd39400c3a69774c",
+    "localOnly": true
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",

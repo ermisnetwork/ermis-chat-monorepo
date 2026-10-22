@@ -15,6 +15,14 @@ const MAX_REPAIR_ATTEMPTS = 3;
 const RETRY_BASE_MS = 250;
 const RETRY_CAP_MS = 2000;
 
+/** Compare complete GI metadata without treating property/row order as authority. */
+export function sameGroupInfoRefreshRecords(a: StoredGroupInfoRefreshRequest[], b: StoredGroupInfoRefreshRequest[]): boolean {
+  const key = (rows: StoredGroupInfoRefreshRequest[]) => JSON.stringify(rows.map(row =>
+    Object.fromEntries(Object.entries(row).sort(([left], [right]) => left.localeCompare(right))))
+    .sort((left, right) => String(left.request_id).localeCompare(String(right.request_id))));
+  return key(a) === key(b);
+}
+
 export interface GroupInfoRepairApi {
   getGroupInfoRefresh(channelType: string, channelId: string): Promise<{ request: GroupInfoRefreshRequest | null }>;
   claimGroupInfoRefresh(channelType: string, channelId: string, requestId: string): Promise<GroupInfoRefreshRequest>;
@@ -28,6 +36,9 @@ export interface GroupInfoRepairApi {
 }
 
 export interface GroupInfoRepairCallbacks {
+  captureScope?(cid: string): () => void;
+  /** Production manager supplies exact durable read-set CAS; component adapters remain separate. */
+  captureCheckpoint?(cid: string, observed?: StoredGroupInfoRefreshRequest[]): Promise<(change: (requests: StoredGroupInfoRefreshRequest[]) => StoredGroupInfoRefreshRequest[]) => Promise<void>>;
   localEpoch(cid: string): number | null;
   exportGroupInfo(cid: string): Uint8Array;
   isEligible(cid: string): boolean;
@@ -97,29 +108,37 @@ export class GroupInfoRepairCoordinator {
     );
   }
 
-  async applyAuthoritativeSnapshot(snapshot: Record<string, GroupInfoRefreshRequest | null>): Promise<void> {
+  async applyAuthoritativeSnapshot(snapshot: Record<string, GroupInfoRefreshRequest | null>,
+    observed?: Record<string, StoredGroupInfoRefreshRequest[]>): Promise<void> {
     if (!this.supported) return;
     await Promise.all(
       Object.entries(snapshot).map(async ([cid, request]) => {
+        const assertCurrent = this.callbacks.captureScope?.(cid) || (() => {});
+        const checkpoint = await this.captureCheckpoint(cid, observed?.[cid]); assertCurrent();
         if (!request) {
-          await this.storage.deleteGroupInfoRefreshRequests!(cid);
+          await this.deleteRequests(cid, undefined, undefined, checkpoint); assertCurrent();
           this.callbacks.emit({ cid, status: 'ready' });
           return;
         }
-        await this.persist({ ...request, cid });
+        await this.persist({ ...request, cid }, checkpoint);
         await this.singleFlight(cid, () => this.process(cid, request));
       }),
     );
   }
 
   async handleRequested(event: GroupInfoRefreshRequestedEvent): Promise<void> {
+    const assertCurrent = this.callbacks.captureScope?.(event.cid) || (() => {});
+    assertCurrent();
+    const checkpoint = await this.captureCheckpoint(event.cid); assertCurrent();
     if (!this.supported || event.version !== 1 || !channelParts(event.cid)) return;
-    await this.persist(event);
+    await this.persist(event, checkpoint);
+    assertCurrent();
     this.wake(event.cid);
     return this.singleFlight(event.cid, async () => {
       try {
         await this.process(event.cid, event);
       } catch (_) {
+      assertCurrent();
         this.callbacks.emit({
           cid: event.cid,
           status: 'retryable',
@@ -133,35 +152,58 @@ export class GroupInfoRepairCoordinator {
   }
 
   async handleUploaded(event: GroupInfoUploadedEvent): Promise<void> {
+    const assertCurrent = this.callbacks.captureScope?.(event.cid) || (() => {});
+    assertCurrent();
+    const checkpoint = await this.captureCheckpoint(event.cid); assertCurrent();
     if (!this.supported || event.version !== 1 || !channelParts(event.cid)) return;
-    await this.storage.deleteGroupInfoRefreshRequests!(event.cid, event.epoch, event.request_id);
+    await this.deleteRequests(event.cid, event.epoch, event.request_id, checkpoint);
+    assertCurrent();
     this.wake(event.cid);
     this.callbacks.emit({ cid: event.cid, status: 'ready', request_id: event.request_id });
   }
 
+  /** Runtime notification only; atomic group cleanup retains durable repair evidence. */
+  notifyRemoved(cid: string): void {
+    this.wake(cid);
+    this.callbacks.emit({cid, status: 'removed'});
+  }
+
   async handleRemoved(cid: string): Promise<void> {
+    const assertCurrent = this.callbacks.captureScope?.(cid) || (() => {});
+    assertCurrent();
+    const checkpoint = await this.captureCheckpoint(cid); assertCurrent();
     if (!this.supported) return;
-    await this.storage.deleteGroupInfoRefreshRequests!(cid);
+    await this.deleteRequests(cid, undefined, undefined, checkpoint);
+    assertCurrent();
     this.wake(cid);
     this.callbacks.emit({ cid, status: 'removed' });
   }
 
   async reconcile(cid: string): Promise<void> {
+    const assertCurrent = this.callbacks.captureScope?.(cid) || (() => {});
+    assertCurrent();
+    const checkpoint = await this.captureCheckpoint(cid); assertCurrent();
     if (!this.supported) return;
     const parts = channelParts(cid);
     if (!parts) return;
     try {
       const response = await this.api.getGroupInfoRefresh(parts.channelType, parts.channelId);
+      assertCurrent();
       if (!response.request) {
-        await this.storage.deleteGroupInfoRefreshRequests!(cid);
+        await this.deleteRequests(cid, undefined, undefined, checkpoint);
+        assertCurrent();
         this.callbacks.emit({ cid, status: 'ready' });
         return;
       }
-      await this.persist({ ...response.request, cid });
+      await this.persist({ ...response.request, cid }, checkpoint);
+      assertCurrent();
       await this.singleFlight(cid, () => this.process(cid, response.request!));
+      assertCurrent();
     } catch (error) {
+    assertCurrent();
       if ([401, 403, 404].includes(httpStatus(error) ?? 0)) {
-        await this.handleRemoved(cid);
+        this.notifyRemoved(cid);
+      assertCurrent();
         return;
       }
       this.callbacks.emit({ cid, status: 'retryable', reason: 'reconcile_failed' });
@@ -172,15 +214,18 @@ export class GroupInfoRepairCoordinator {
     cid: string,
     body: ReportGroupInfoFailureRequest,
   ): Promise<GroupInfoRefreshRequest | null> {
+    const assertCurrent = this.callbacks.captureScope?.(cid) || (() => {}); assertCurrent();
+    const checkpoint = await this.captureCheckpoint(cid); assertCurrent();
     const parts = channelParts(cid);
     if (!parts) return null;
     try {
-      const response = await this.api.reportGroupInfoFailure(parts.channelType, parts.channelId, body);
-      if (response.request && this.supported) await this.persist({ ...response.request, cid });
+      const response = await this.api.reportGroupInfoFailure(parts.channelType, parts.channelId, body); assertCurrent();
+      if (response.request && this.supported) await this.persist({ ...response.request, cid }, checkpoint);
       return response.request;
     } catch (error) {
+      assertCurrent();
       const request = repairRequestFromError(error);
-      if (request && this.supported) await this.persist({ ...request, cid });
+      if (request && this.supported) await this.persist({ ...request, cid }, checkpoint);
       this.callbacks.emit({
         cid,
         status: 'retryable',
@@ -199,6 +244,7 @@ export class GroupInfoRepairCoordinator {
     observedHash: string,
     attempts = MAX_REPAIR_ATTEMPTS,
   ): Promise<GetGroupInfoResponse | null> {
+    const assertCurrent = this.callbacks.captureScope?.(cid) || (() => {}); assertCurrent();
     const parts = channelParts(cid);
     if (!parts) return null;
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -210,11 +256,12 @@ export class GroupInfoRepairCoordinator {
         reason: 'awaiting_newer_group_info',
         retry_after_ms: retryAfter,
       });
-      await this.waitForWakeOrTimeout(cid, generation, retryAfter);
+      await this.waitForWakeOrTimeout(cid, generation, retryAfter); assertCurrent();
       try {
-        const response = await this.api.getGroupInfo(parts.channelType, parts.channelId);
+        const response = await this.api.getGroupInfo(parts.channelType, parts.channelId); assertCurrent();
         if (!response.is_stale && (response.epoch > observedEpoch || response.hash !== observedHash)) return response;
       } catch (_) {
+        assertCurrent();
         // The next bounded attempt re-fetches durable server state.
       }
     }
@@ -222,6 +269,9 @@ export class GroupInfoRepairCoordinator {
   }
 
   private async process(cid: string, initial?: GroupInfoRefreshRequest): Promise<void> {
+    const assertCurrent = this.callbacks.captureScope?.(cid) || (() => {});
+    assertCurrent();
+    const checkpoint = await this.captureCheckpoint(cid); assertCurrent();
     const parts = channelParts(cid);
     if (!parts) return;
     if (!this.callbacks.isEligible(cid)) {
@@ -239,16 +289,20 @@ export class GroupInfoRepairCoordinator {
     for (let attempt = 0; attempt < MAX_REPAIR_ATTEMPTS; attempt++) {
       if (!request) {
         const response = await this.api.getGroupInfoRefresh(parts.channelType, parts.channelId);
+        assertCurrent();
         if (!response.request) {
-          await this.storage.deleteGroupInfoRefreshRequests!(cid);
+          await this.deleteRequests(cid, undefined, undefined, checkpoint);
+          assertCurrent();
           this.callbacks.emit({ cid, status: 'ready' });
           return;
         }
         request = response.request;
-        await this.persist({ ...request, cid });
+        await this.persist({ ...request, cid }, checkpoint);
+        assertCurrent();
       }
       if (Date.parse(request.expires_at) <= Date.now()) {
-        await this.storage.deleteGroupInfoRefreshRequests!(cid, undefined, request.request_id);
+        await this.deleteRequests(cid, undefined, request.request_id, checkpoint);
+        assertCurrent();
         return;
       }
       this.callbacks.emit({
@@ -261,9 +315,11 @@ export class GroupInfoRepairCoordinator {
       });
       try {
         const lease = await this.api.claimGroupInfoRefresh(parts.channelType, parts.channelId, request.request_id);
+        assertCurrent();
         if (!lease.lease_token) throw new Error('GroupInfo refresh claim omitted lease_token');
         if (!this.callbacks.isEligible(cid)) {
-          await this.handleRemoved(cid);
+          this.notifyRemoved(cid);
+      assertCurrent();
           return;
         }
         const localEpoch = this.callbacks.localEpoch(cid);
@@ -280,18 +336,24 @@ export class GroupInfoRepairCoordinator {
           request_id: request.request_id,
           lease_token: lease.lease_token,
         });
+        assertCurrent();
         const reconciled = await this.api.getGroupInfoRefresh(parts.channelType, parts.channelId);
+        assertCurrent();
         if (!reconciled.request) {
-          await this.storage.deleteGroupInfoRefreshRequests!(cid, localEpoch, request.request_id);
+          await this.deleteRequests(cid, localEpoch, request.request_id, checkpoint);
+          assertCurrent();
           this.callbacks.emit({ cid, status: 'ready', request_id: request.request_id });
           return;
         }
         request = reconciled.request;
-        await this.persist({ ...request, cid });
+        await this.persist({ ...request, cid }, checkpoint);
+        assertCurrent();
       } catch (error) {
+      assertCurrent();
         const status = httpStatus(error);
         if ([401, 403, 404].includes(status ?? 0)) {
-          await this.handleRemoved(cid);
+          this.notifyRemoved(cid);
+      assertCurrent();
           return;
         }
         if (attempt + 1 >= MAX_REPAIR_ATTEMPTS) {
@@ -307,13 +369,28 @@ export class GroupInfoRepairCoordinator {
         }
         const retryAfter = Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** attempt) * (0.75 + this.random() * 0.5);
         await this.sleep(retryAfter);
+        assertCurrent();
         request = undefined;
       }
     }
   }
 
-  private async persist(request: StoredGroupInfoRefreshRequest): Promise<void> {
-    await this.storage.saveGroupInfoRefreshRequest!(request);
+  private async captureCheckpoint(cid: string, observed?: StoredGroupInfoRefreshRequest[]) {
+    return this.callbacks.captureCheckpoint ? this.callbacks.captureCheckpoint(cid, observed) : undefined;
+  }
+
+  private async deleteRequests(cid: string, throughEpoch?: number, requestId?: string,
+    checkpoint?: Awaited<ReturnType<GroupInfoRepairCoordinator['captureCheckpoint']>>): Promise<void> {
+    if (!checkpoint) { await this.storage.deleteGroupInfoRefreshRequests!(cid, throughEpoch, requestId); return; }
+    await checkpoint(records => records.filter(row => requestId ? row.request_id !== requestId ||
+      (throughEpoch !== undefined && row.minimum_epoch > throughEpoch) : false));
+  }
+
+  private async persist(request: StoredGroupInfoRefreshRequest,
+    checkpoint?: Awaited<ReturnType<GroupInfoRepairCoordinator['captureCheckpoint']>>): Promise<void> {
+    const owned = checkpoint || await this.captureCheckpoint(request.cid);
+    if (owned) await owned(records => [...records.filter(row => row.request_id !== request.request_id), request]);
+    else await this.storage.saveGroupInfoRefreshRequest!(request);
   }
 
   private singleFlight(cid: string, operation: () => Promise<void>): Promise<void> {

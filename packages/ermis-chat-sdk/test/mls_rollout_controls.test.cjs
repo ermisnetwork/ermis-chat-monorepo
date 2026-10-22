@@ -193,36 +193,20 @@ test('historical replay requires the durable server timestamp before provider mu
     manager.processCommit('messaging:private', new Uint8Array([1]), 2, undefined, {
       historicalReplay: true,
     }),
-    (error) => error.code === 'historical_acceptance_time_invalid',
+    (error) => error.code === 'acceptance_metadata_invalid',
   );
   assert.equal(providerSnapshotted, false);
   assert.equal(processCalled, false);
 });
 
-test('historical replay passes the authoritative timestamp to the contextual WASM API', async () => {
+test('a raw durable timestamp cannot substitute for event-bound acceptance metadata', async () => {
   const manager = new EncryptionManager();
-  const calls = [];
-  manager.provider = {
-    to_bytes: () => new Uint8Array([7]),
-  };
-  manager._persistProvider = async () => {};
-  manager.safeArchiveCurrentEpochForCid = async () => {};
-  manager.groups.set('messaging:private', {
-    epoch: () => 1n,
-    process_message_at(provider, bytes, acceptedAtSeconds) {
-      calls.push({ provider, bytes: Array.from(bytes), acceptedAtSeconds });
-      return { message_type: 'commit' };
-    },
-  });
-
-  await manager.processCommit('messaging:private', new Uint8Array([1, 2, 3]), 2, undefined, {
-    historicalReplay: true,
-    serverAcceptedAt: '2026-09-08T01:02:03.999Z',
-  });
-
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].bytes, [1, 2, 3]);
-  assert.equal(calls[0].acceptedAtSeconds, 1788829323n);
+  let mutated = false;
+  manager.provider = {to_bytes: () => {mutated = true; return new Uint8Array([7]);}};
+  await assert.rejects(manager.processCommit('messaging:private', new Uint8Array([1,2,3]), 2, undefined,
+    {historicalReplay: true, serverAcceptedAt: '2026-09-08T01:02:03.999Z'}),
+    error => error.code === 'acceptance_metadata_invalid');
+  assert.equal(mutated, false);
 });
 
 test('historical replay fails closed when the deployed WASM artifact lacks contextual processing', async () => {
@@ -239,9 +223,9 @@ test('historical replay fails closed when the deployed WASM artifact lacks conte
   await assert.rejects(
     manager.processCommit('messaging:private', new Uint8Array([1]), 2, undefined, {
       historicalReplay: true,
-      serverAcceptedAt: '2026-09-08T01:02:03Z',
+      ...require('./accepted_protocol_fixture.cjs').accepted(manager, 'messaging:private', new Uint8Array([1]), 2),
     }),
-    (error) => error.code === 'historical_replay_unsupported',
+    (error) => error.code === 'client_upgrade_required',
   );
   assert.equal(liveProcessCalled, false);
 });

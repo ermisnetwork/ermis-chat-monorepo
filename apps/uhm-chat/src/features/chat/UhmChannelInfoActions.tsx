@@ -178,7 +178,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
         setIsRepairing(true);
         setRepairResult(null);
         try {
-          const result = await repairEncryptedChannel(repairChannelType, repairChannelId, { mode });
+          const result = await repairEncryptedChannel(repairChannelType, repairChannelId, { mode, validateManualGroupInfo: mode === 'replay' });
           setChannelRepairResult(result);
           if (result.messageRepair) setRepairResult(result.messageRepair);
           const latestProgress = await loadRepairProgress();

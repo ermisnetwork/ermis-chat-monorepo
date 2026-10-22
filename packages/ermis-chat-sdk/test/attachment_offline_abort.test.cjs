@@ -23,6 +23,14 @@ function flush() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+async function waitForState(predicate, details=()=>null) {
+  const deadline=Date.now()+5000;
+  while(!predicate()) {
+    assert(Date.now()<deadline,`Expected attachment state did not settle: ${JSON.stringify(details())}`);
+    await new Promise(resolve=>setTimeout(resolve,1));
+  }
+}
+
 test('connection loss pauses a standard attachment upload and resumes it with the same presign session', async () => {
   const previousXhr = global.XMLHttpRequest;
   const xhrInstances = [];
@@ -43,6 +51,7 @@ test('connection loss pauses a standard attachment upload and resumes it with th
       this.body = body;
       if (xhrInstances.length === 1) return;
       this.upload.onprogress?.({ loaded: body.size });
+      resolveProfile({ id: 'offline-user', name: 'Offline user' });
       this.status = 200;
       this.onload?.();
     }
@@ -51,6 +60,9 @@ test('connection loss pauses a standard attachment upload and resumes it with th
       this.onabort?.();
     }
   }
+  let resolveProfile;
+  let profileQueries = 0;
+  const profilePromise = new Promise(resolve => { resolveProfile = resolve; });
   let resolveConfirm;
   const confirmPromise = new Promise((resolve) => {
     resolveConfirm = resolve;
@@ -58,6 +70,7 @@ test('connection loss pauses a standard attachment upload and resumes it with th
 
   global.XMLHttpRequest = ResumableXMLHttpRequest;
   const { client, suffix } = createClient('standard-offline');
+  client.queryUser = async () => { profileQueries += 1; return await profilePromise; };
   const deletedIds = [];
   let presignCount = 0;
   client.messageStorage = {
@@ -95,10 +108,10 @@ test('connection loss pauses a standard attachment upload and resumes it with th
     const file = new File([new Uint8Array(16)], 'offline.png', { type: 'image/png' });
     const result = await channel.enqueueAttachmentMessage({ text: 'cancel me' }, [file]);
     const messageId = result.message.id;
-    await flush();
+    await waitForState(()=>xhrInstances.length===1 && xhrInstances[0].body);
     assert.equal(xhrInstances.length, 1);
     client.dispatchEvent({ type: 'connection.changed', online: false });
-    await flush();
+    await waitForState(()=>channel.state.findMessage(messageId)?.status==='failed_offline');
 
     assert.equal(xhrInstances[0].aborted, true);
     assert.equal(channel.state.findMessage(messageId).status, 'failed_offline');
@@ -106,21 +119,16 @@ test('connection loss pauses a standard attachment upload and resumes it with th
     assert.deepEqual(deletedIds, []);
 
     client.dispatchEvent({ type: 'connection.changed', online: true });
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      await flush();
-      if (xhrInstances.length === 2) break;
-    }
+    await waitForState(()=>xhrInstances.length===2 && channel.state.findMessage(messageId)?.attachments[0].upload_progress===99,()=>({xhrs:xhrInstances.length,message:channel.state.findMessage(messageId)?.status,progress:channel.state.findMessage(messageId)?.attachments[0].upload_progress,pending:channel._pendingStandardAttachmentSends.get(messageId)?.fileStates?.[0]?.progress,paused:channel._pendingStandardAttachmentSends.get(messageId)?.paused}));
     assert.equal(channel.state.findMessage(messageId).attachments[0].upload_progress, 99);
     resolveConfirm({ file: 'https://cdn.example.test/offline.png' });
 
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      await flush();
-      if (channel.state.findMessage(messageId)?.status === 'received') break;
-    }
+    await waitForState(()=>channel.state.findMessage(messageId)?.status==='received');
 
     assert.equal(xhrInstances.length, 2);
     assert.equal(xhrInstances[1].url, 'https://storage.example.test/offline-standard');
     assert.equal(presignCount, 1);
+    assert.equal(profileQueries, 0, 'already-applied optimistic event must not replay after delayed profile enrichment');
     assert.equal(channel.state.findMessage(messageId).status, 'received');
   } finally {
     if (previousXhr === undefined) delete global.XMLHttpRequest;
@@ -470,14 +478,24 @@ test('failed E2EE final send retries persisted MLS ciphertext without re-uploadi
   const progress = [];
   const savedPending = [];
   manager.e2eeClient = {
+    getMlsGenerationState: async () => ({group_generation: 0, group_id: null, current_epoch: 9}),
     sendMessage: async () => {
       sent += 1;
       return { message: { id: messageId, content_type: 'mls' } };
     },
   };
+  let currentPending = structuredClone(record);
   manager.storage = {
+    loadPendingE2eeSend: async () => currentPending,
+    loadMessage: async id => stored.findLast(m => m.id === id) || null,
+    savePendingE2eeSendOutcome: async (expected, next, message) => {
+      if (!currentPending || !Buffer.from(currentPending.mls_ciphertext).equals(Buffer.from(expected.mls_ciphertext))) return false;
+      if (message) stored.push(message);
+      if (next) { currentPending = structuredClone(next); savedPending.push(next); } else { currentPending = null; deleted.push(expected.message_id); }
+      return true;
+    },
     deletePendingE2eeSend: async (id) => deleted.push(id),
-    savePendingE2eeSend: async (pending) => savedPending.push(pending),
+    savePendingE2eeSend: async (pending) => { currentPending = structuredClone(pending); savedPending.push(pending); },
     saveMessage: async (message) => stored.push(message),
   };
   manager.uploadE2eeAttachments = async () => {
@@ -616,4 +634,15 @@ test('F5 restore shows 99% when the E2EE attachment manifest is already durable'
   });
 
   assert.equal(channel.state.findMessage(messageId).attachments[0].upload_progress, 99);
+});
+
+
+test('unsealed text intent restores the original Channel message without files and confirms its UUID', async () => {
+  const {client,suffix}=createClient('unsealed-intent'),channel=client.channel('messaging','unsealed-'+suffix),id='unsealed-'+suffix;
+  const record={message_id:id,cid:channel.cid,e2ee_group_id:channel.cid,channel_type:'messaging',channel_id:channel.id,text:'original durable text',payload:{text:'original durable text'},unsealed_intent_version:1,status:'failed_retryable',retry_count:0,created_at:Date.now(),updated_at:Date.now()};
+  const manager=new EncryptionManager();manager.client=client;manager.storage={listPendingE2eeSends:async()=>[record],loadPendingE2eeSend:async()=>record};
+  await manager._restorePendingE2eeAttachmentPresentations();
+  assert.equal(channel.state.findMessage(id).text,record.text);assert.equal(channel.state.findMessage(id).id,id);assert.deepEqual(channel.state.findMessage(id).attachments,[]);
+  const live=manager._liveParamsForPendingE2eeSend(record);live.onSuccess({message:{id,cid:channel.cid,content_type:'standard',text:record.text,user:client.user,created_at:new Date().toISOString()}});
+  assert.equal(channel.state.findMessage(id).status,'received');assert.equal(channel.state.findMessage(id).text,record.text);
 });

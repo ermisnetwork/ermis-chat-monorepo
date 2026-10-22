@@ -1,3 +1,4 @@
+import type {E2eeStateSnapshot} from '@ermis-network/ermis-chat-sdk';
 import { useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import type { Event } from '@ermis-network/ermis-chat-sdk';
 import type { VListHandle } from 'virtua';
@@ -739,6 +740,9 @@ export function useChannelMessages({
       activeChannel
         .query({ messages_seq: { limit: 30 } })
         .then(() => {
+          // Acceptance may replace the membership while the first MLS owner is
+          // awaiting storage. Start a fresh bounded continuation after hydration.
+          ensureE2eeChannelReady();
           syncMessagesWithCache({ includeStoredWindow: true });
           scheduleScrollToBottom(false);
           activeChannel.markRead().catch(() => {});
@@ -859,6 +863,9 @@ export function useChannelMessages({
     const sub16 = eventClient.on('e2ee.message_decrypted' as any, handleE2eeDecrypted);
     const sub17 = eventClient.on('e2ee.post_join_sync' as any, handleE2eeRefresh);
     const sub18 = eventClient.on('e2ee.channel_ready' as any, handleE2eeRefresh);
+    const sub18a = client.encryptionManager?.subscribeE2eeState(effectCid, (snapshot: E2eeStateSnapshot) => {
+      if (isCurrentEffect() && snapshot.state === 'ready') handleE2eeRefresh({cid: effectCid});
+    });
     const sub19 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
     const sub19a = eventClient.on('e2ee.repair_started' as any, handleE2eeRepairStarted);
     const sub19b = eventClient.on('e2ee.repair_completed' as any, handleE2eeRepairCompleted);
@@ -896,6 +903,7 @@ export function useChannelMessages({
       sub16.unsubscribe();
       sub17.unsubscribe();
       sub18.unsubscribe();
+      sub18a?.unsubscribe();
       sub19.unsubscribe();
       sub19a.unsubscribe();
       sub19b.unsubscribe();
