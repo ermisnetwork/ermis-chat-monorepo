@@ -293,3 +293,37 @@ test('initial websocket handshake retries once with a refreshed token after clos
   assert.equal(refreshCalls, 1);
   assert.equal(connectCalls, 2);
 });
+
+const qaJwt = claims => Buffer.from('{}').toString('base64url')+'.'+Buffer.from(JSON.stringify(claims)).toString('base64url')+'.qa-scheduling-hint';
+for(const unit of ['milliseconds','seconds'])test('access expiry scheduling supports '+unit+' without granting token authority',async()=>{
+ const c=makeClient(),now=1700000000000,encode=n=>unit==='seconds'?Math.floor(n/1000):n;
+ for(const delta of [-1000,0,1000]){c.tokenManager.setToken(qaJwt({exp:encode(now+delta)}));assert.equal(c.tokenManager.isAccessTokenExpired(now),delta<=0);}
+});
+test('missing malformed or nonnumeric expiry provides no scheduling hint',()=>{
+ const c=makeClient();for(const value of ['opaque-token',qaJwt({}),qaJwt({exp:'expired'}),qaJwt({exp:-1}),'a.'+'x'.repeat(16385)+'.b']){c.tokenManager.setToken(value);assert.equal(c.tokenManager.isAccessTokenExpired(),false);}
+});
+test('known expired access is refreshed before constructing the first WS handshake',async()=>{
+ const c=makeClient(),order=[];c.tokenManager.setToken(qaJwt({exp:Date.now()-1000}));
+ c.refreshNewToken=async()=>{order.push('refresh');return{token:qaJwt({exp:Date.now()+60000}),refresh_token:'rotated-qa-refresh'};};
+ const connection=new StableWSConnection({client:c});connection._connect=async()=>{order.push('connect');assert.equal(c.tokenManager.isAccessTokenExpired(),false);return{type:'health.check'};};connection._waitForHealthy=async()=>({type:'health.check'});
+ await connection.connect();assert.deepEqual(order,['refresh','connect']);
+});
+test('untyped refresh HTTP400 cannot prove credential rejection or loop expired WS handshakes',async()=>{
+ const c=makeClient(),events=[];let refreshes=0,handshakes=0;c.tokenManager.setToken(qaJwt({exp:Date.now()-1}));c.on('auth.refresh_failed',e=>events.push(e));
+ c.refreshNewToken=async()=>{refreshes++;throw Object.assign(Error('QA refresh rejected'),{response:{status:400,data:{}}});};
+ const connection=new StableWSConnection({client:c});connection._connect=async()=>{handshakes++;};
+ await assert.rejects(connection.connect(),e=>e.response?.status===400);assert.equal(refreshes,1);assert.equal(handshakes,0);assert.equal(events.length,1);assert.equal(events[0].reason,'refresh_failed');assert.equal(events[0].status,400);
+});
+for(const expired of [false,true])test('WS1006 '+(expired?'with local expiry refreshes':'without expiry remains a transport reconnect'),()=>{
+ const c=makeClient();c.tokenManager.setToken(qaJwt({exp:Date.now()+(expired?-1000:60000)}));const connection=new StableWSConnection({client:c});let next;
+ connection.wsID=5;connection.isResolved=true;connection._setHealth=()=>{};connection._reconnect=options=>{next=options||{};};connection.onclose(5,{code:1006,reason:''});
+ assert.deepEqual(next,expired?{interval:0,refreshToken:true}:{});
+});
+test('a delayed reconnect cannot refresh or connect a retired auth owner',async()=>{
+ let current=true,refreshes=0,connects=0;const c={logger(){},_captureAuthScope:()=>({isCurrent:()=>current}),refreshAccessToken:async()=>{refreshes++;}};
+ const connection=new StableWSConnection({client:c});connection._connect=async()=>{connects++;};const work=connection._reconnect({interval:0,refreshToken:true});current=false;await work;assert.equal(refreshes,0);assert.equal(connects,0);
+});
+
+test('typed legacy refresh400 rejection remains terminal authentication evidence',async()=>{
+ const c=makeClient(),events=[];c.on('auth.refresh_failed',e=>events.push(e));c.refreshNewToken=async()=>{throw Object.assign(Error('QA typed rejection'),{response:{status:400,data:{error:'REFRESH_TOKEN_INVALID'}}});};await assert.rejects(c.refreshAccessToken());assert.equal(events[0].reason,'refresh_rejected');assert.equal(events[0].status,400);
+});

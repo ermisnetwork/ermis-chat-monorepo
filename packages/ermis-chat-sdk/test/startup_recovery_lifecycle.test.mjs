@@ -58,14 +58,54 @@ for(const method of ['listPendingMlsMutations','loadPendingEvictions'])for(const
 for(const dimension of ['pending','eviction'])test('held full candidate-page proof cannot publish issue before original '+dimension+' continuation check',async()=>{const h=await fixture(),entered=latch(),release=latch();try{const db=await h.s.getDB(),tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({version:99},'external_candidate:v1:'+h.cid);await new Promise((yes,no)=>{tx.oncomplete=yes;tx.onabort=()=>no(tx.error);});const take=h.s.takeExternalJoinCandidatePage.bind(h.s);h.s.takeExternalJoinCandidatePage=async(...a)=>{const page=await take(...a);entered.open();await release.promise;return page;};const old=h.m._restoreGroupsLocally(),observed=old.catch(e=>e);await entered.promise;if(dimension==='pending')h.m._pendingMlsMutations.set(h.cid,{request:{operation_id:'replacement'}});else h.m._pendingEvictions.set(h.cid,new Set(['replacement']));release.open();assert.equal((await observed)?.code,'recovery_scope_changed');assert.equal(h.m._externalJoinCandidateIssues.has(h.cid),false);assert.equal(h.m._externalJoinCandidates.has(h.cid),false);await h.privateProof();}finally{release.open();await h.close();}});
 
 
-test('timer-driven discovery retired by legitimate same-provider Ready revision is recreated for fresh reconnect work',async()=>{
+test('timer-driven discovery retired by legitimate same-provider private checkpoint revision is recreated for fresh reconnect work',async()=>{
  const h=await fixture(),entered=latch(),release=latch();let old,clock;try{
   const original=h.c.doAxiosRequest;let discoveries=0;h.c.doAxiosRequest=async(...a)=>{if(new URL(a[1]).pathname.endsWith('/mls/recovery/discover')){discoveries++;if(discoveries===1){entered.open();await release.promise;}}return original(...a);};
   old=h.m._getRecoveryDiscoveryCoordinator();const hint={cid:h.cid,data:{version:1,event_id:crypto.randomUUID(),group_generation:0,incident_id:null,recovery_revision:'1'}};
   await h.m.handleMlsRecoveryChanged(hint);let entryTimeout;try{await Promise.race([entered.promise,new Promise((_,no)=>{entryTimeout=setTimeout(()=>no(Error('timer discovery did not enter')),4000);})]);}finally{clearTimeout(entryTimeout);}const reserved=(await h.s.loadRecoveryDiscoveryWork('device',[h.cid]))[h.cid];assert.equal(reserved.attempts,1);assert.ok(reserved.lease_id);const provider=h.m._activeProvider,revision=h.m._providerDurableBase.revision;
-  assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');assert.equal(h.m._activeProvider,provider);assert.notEqual(h.m._providerDurableBase.revision,revision);
+  assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');assert.equal(h.m._providerDurableBase.revision,revision,'Ready observation must not retire discovery');await h.m._persistProviderStrict();assert.equal(h.m._activeProvider,provider);assert.notEqual(h.m._providerDurableBase.revision,revision);
   release.open();for(let i=0;i<50&&!old.stopped;i++)await new Promise(r=>setTimeout(r,5));assert.equal(old.stopped,true);
   const next=h.m._getRecoveryDiscoveryCoordinator();assert.notEqual(next,old,'cache reused terminal discovery coordinator after per-job revision retirement');assert.deepEqual((await h.s.loadRecoveryDiscoveryWork('device',[h.cid]))[h.cid],reserved,'cache retirement must preserve original job/attempt/lease/due');
   clock=timers();await h.m.handleMlsRecoveryChanged({...hint,data:{...hint.data,event_id:crypto.randomUUID(),recovery_revision:'2'}});const followup=(await h.s.loadRecoveryDiscoveryWork('device',[h.cid]))[h.cid];assert.notEqual(followup.job_id,reserved.job_id);assert.ok(followup.retry_at>=reserved.retry_at);await clock.advance(h.m);if(next.work)await next.work;await h.c.recoverState();assert.ok(!next.stopped);assert.ok(discoveries>=2);await h.privateProof();
  }finally{release.open();if(old?.work)await old.work.catch(()=>{});await h.close();clock?.restore();}
+});
+
+
+test('restored pending presentation cannot consume cold start before actual hydration; native checkpoint runs once after hydration',async()=>{
+ const h=await fixture();try{
+  h.c.messageStorage=h.s;
+  const id=crypto.randomUUID(),pending={unsealed_intent_version:1,operation_kind:'send',checkpoint_user_id:h.user,checkpoint_device_id:'device',signing_identity_sha256:sha256Hex(h.m.identity.signature_public_key()),message_id:id,cid:h.cid,e2ee_group_id:h.cid,channel_type:'team',channel_id:h.cid.slice(5),text:'QA restored intent',payload:{text:'QA restored intent'},status:'failed_retryable',retry_count:1,created_at:1,updated_at:1};
+  await h.s.savePendingE2eeSend(pending);await h.m._restorePendingE2eeAttachmentPresentations();
+  const placeholder=h.c.activeChannels[h.cid];assert.ok(placeholder);assert.equal(placeholder.initialized,false);
+  let admissions=0;h.m.sync=async()=>{admissions++;assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');};
+  h.c._scheduleHydratedColdStartSync();await h.c._waitForHydratedColdStartSync();
+  assert.equal(admissions,0,'presentation-only Channel consumed the sole startup sync before list hydration');assert.equal(h.c._coldStartSyncState,'waiting_for_channels');assert.equal(h.m.getE2eeState(h.cid),null);assert.deepEqual(await h.s.loadPendingE2eeSend(id),pending);
+  h.c.hydrateChannels([{channel:{type:'team',id:h.cid.slice(5),cid:h.cid,mls_enabled:true},messages:[],members:[],membership:{user_id:h.user,channel_role:'member'}}]);
+  assert.equal(h.c.activeChannels[h.cid],placeholder);assert.equal(placeholder.initialized,true);
+  h.c._scheduleHydratedColdStartSync();const owned=h.c._coldStartSyncPromise;h.c._scheduleHydratedColdStartSync();assert.equal(h.c._coldStartSyncPromise,owned);await h.c._waitForHydratedColdStartSync();
+  assert.equal(admissions,1);assert.equal(h.c._coldStartSyncState,'ready');assert.equal(h.m.getE2eeState(h.cid).state,'ready');assert.deepEqual(await h.s.loadPendingE2eeSend(id),pending);await h.privateProof();assert.equal(h.calls.some(x=>x.path.endsWith('/message')||x.path.endsWith('/external_join')),false);
+ }finally{await h.close();}
+});
+
+test('startup vault metadata and KeyPackage inventory overlap but both finish before groups and Ready',async()=>{
+ const user='startup-prerequisites-'+ ++sequence,s=new IndexedDBEncryptionStorage(user),{c}=host(user),m=new EncryptionManager(),entered=latch(),release=latch(),count=latch();let work,normalized=false,restored=false;
+ const request=c.doAxiosRequest.bind(c),normalize=m._normalizeStaleRestoreProgress.bind(m),restore=m._restoreGroupsLocally.bind(m);
+ c.doAxiosRequest=async(method,url,data)=>{const p=new URL(url).pathname;if(p.endsWith('/recovery/vault')){entered.open();await release.promise;}if(p.endsWith('/key_packages/count'))count.open();return request(method,url,data)};
+ m._normalizeStaleRestoreProgress=async()=>{await normalize();normalized=true};m._restoreGroupsLocally=async()=>{restored=true;return restore()};
+ try{
+  work=m.initialize(c,user,options(s));await entered.promise;let timer;
+  try{await Promise.race([count.promise,new Promise((_,no)=>{timer=setTimeout(()=>no(Error('KeyPackage inventory remained serialized behind recovery metadata')),1000)})]);}finally{clearTimeout(timer)}
+  assert.equal(normalized,true);assert.equal(restored,false);assert.equal(m.initialized,false);assert.equal(c.encryptionManager,undefined);
+  release.open();await work;assert.equal(restored,true);assert.equal(m.initialized,true);
+ }finally{release.open();if(work)await work.catch(()=>{});m.destroy();await s.close()}
+});
+
+for(const dimension of ['account','device','storage'])test('held startup vault cannot publish metadata after '+dimension+' replacement',async()=>{
+ const user='startup-vault-owner-'+ ++sequence,s=new IndexedDBEncryptionStorage(user),{c}=host(user),m=new EncryptionManager(),entered=latch(),release=latch();let work,next;
+ const request=c.doAxiosRequest.bind(c);c.doAxiosRequest=async(method,url,data)=>{if(new URL(url).pathname.endsWith('/recovery/vault')){entered.open();await release.promise;}return request(method,url,data)};
+ try{
+  work=m.initialize(c,user,options(s));const observed=work.catch(e=>e);await entered.promise;
+  if(dimension==='account')m.userId=user+'-replacement';if(dimension==='device')m.deviceId='new-device';if(dimension==='storage'){next=new IndexedDBEncryptionStorage(user+'-replacement');m.storage=next;}
+  release.open();const failure=await observed;assert.equal(failure?.code,'recovery_scope_changed');assert.equal(m.initialized,false);assert.equal(m._recoveryVaultKnown,null,'late404 cannot overwrite replacement vault knowledge');
+ }finally{release.open();if(work)await work.catch(()=>{});m.destroy();await s.close();await next?.close()}
 });

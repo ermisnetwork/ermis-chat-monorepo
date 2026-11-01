@@ -9,6 +9,15 @@ const MLS_REASON: Record<string, string> = {
   InvalidState: 'mls_invalid_state', TransportUnknown: 'transport_unknown',
 };
 
+const JOIN_ADMISSION_FAILURES = new Set([
+  'key_package_expired', 'leaf_not_yet_valid', 'lifetime_range_invalid', 'invalid_clock',
+  'group_info_invalid', 'mls_crypto_error', 'mls_invalid_message', 'mls_invalid_state',
+  'acceptance_metadata_invalid', 'storage_error', 'storage_corruption',
+]);
+/** Bounded producer reasons safe to expose before a join candidate exists. */
+export const isMlsJoinAdmissionFailure = (reason: unknown): reason is string =>
+  typeof reason === 'string' && JOIN_ADMISSION_FAILURES.has(reason);
+
 /** Route by typed producer code; never parse a crypto exception message. */
 export function normalizeMlsOperationError(value: unknown): unknown {
   const error = value as {code_name?: string | (() => string); free?: () => void};

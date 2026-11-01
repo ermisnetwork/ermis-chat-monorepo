@@ -1,0 +1,10 @@
+const test=require('node:test'),assert=require('node:assert/strict');
+const {EncryptionApiClient}=require('../dist/encryption/index.cjs');
+const body={message:{id:'00000000-0000-4000-8000-000000000001',mls_ciphertext:Uint8Array.of(1,2,3),mls_epoch:4,group_generation:0,e2ee_group_id:'team:channel'}};
+const canonical=()=>({message:{id:body.message.id,cid:'team:channel',device_id:'device',content_type:'mls',mls_ciphertext:'AQID',mls_epoch:4,group_generation:0,e2ee_group_id:'team:channel',msg_seq:91,last_event_seq:94,created_at:'2026-10-30T00:00:00Z'}});
+function api(reply){const requests=[],client={baseURL:'https://clone.example.test',deviceId:'device',doAxiosRequest:async(...args)=>{requests.push(args);return reply;}};return {value:new EncryptionApiClient(client),requests};}
+test('canonical reconciliation uses its distinct route and preserves UUID/ciphertext',async()=>{const h=api(canonical()),r=await h.value.sendMessage('team','channel',body,{reconcileOnly:true});assert.equal(r.message.msg_seq,91);assert.equal(h.requests.length,1);assert.equal(h.requests[0][1],'https://clone.example.test/v1/e2ee/channels/team/channel/message/reconcile');assert.equal(h.requests[0][2].message.id,body.message.id);assert.equal(h.requests[0][2].message.mls_ciphertext,'AQID');});
+for(const fault of ['empty','local-only','id','cid','device_id','mls_epoch','group_generation','e2ee_group_id','ciphertext','msg_seq','last_event_seq','created_at'])test('HTTP200 cannot settle invalid canonical receipt: '+fault,async()=>{
+ const r=canonical();if(fault==='empty')delete r.message;else if(fault==='local-only')r.message={id:body.message.id,text:'optimistic'};else if(fault==='ciphertext')r.message.mls_ciphertext='BAUG';else if(fault==='mls_epoch'||fault==='group_generation')r.message[fault]=5;else if(fault==='msg_seq'||fault==='last_event_seq')delete r.message[fault];else r.message[fault]='other';
+ const h=api(r);await assert.rejects(h.value.sendMessage('team','channel',body,{reconcileOnly:true}),e=>e.code==='application_receipt_invalid');assert.equal(h.requests.length,1);
+});

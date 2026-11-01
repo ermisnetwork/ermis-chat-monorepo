@@ -39,3 +39,31 @@ test('old publication finally cannot clear a replacement in-flight CID owner',as
   h.m.deviceId='replacement';const replacement=Promise.resolve();h.m._channelEvidenceLocks.set(h.cid,replacement);gate.resolve();assert.ok(await observed instanceof Error);assert.equal(h.m._channelEvidenceLocks.get(h.cid),replacement);
  }finally{gate.resolve();await h.close();}
 });
+
+test('returning channel subscriber re-admits its genuine Ready proof after a private write while unmounted',async()=>{
+ const h=await fixture('ready');let sub;try{
+  assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');
+  sub=h.m.subscribeE2eeState(h.cid,()=>{});sub.unsubscribe();
+  await h.m._persistProviderStrict();assert.equal(h.m.getE2eeState(h.cid).reason,'local_checkpoint_pending');
+  assert.equal(h.m._subscribedReadyRequests.size,0,'unmounted channel has no background proof obligation');
+  const before=await h.s.loadProviderCheckpoint(h.user,h.device),seen=[];h.calls.length=0;
+  sub=h.m.subscribeE2eeState(h.cid,x=>seen.push(x));assert.equal(seen[0].reason,'local_checkpoint_pending','stale proof cannot be called Ready synchronously');
+  await h.m._subscribedReadyRevalidation;
+  assert.equal(seen.at(-1).state,'ready');assert.equal(h.m.getE2eeState(h.cid).state,'ready');
+  assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),before,'readmission performs no private rewrite');assert.equal(h.calls.length,0,'local proof readmission performs no HTTP');await privatePreserved(h);
+ }finally{sub?.unsubscribe();await h.close();}
+});
+
+for(const stop of ['unsubscribe','owner','manual'])test('returning subscriber checkpoint wake preserves '+stop+' fences',async()=>{
+ const h=await fixture('ready'),entered=latch(),release=latch();let writer,sub;try{
+  await h.m.refreshE2eeState(h.cid);await h.m._persistProviderStrict();
+  const save=h.s.saveProviderState.bind(h.s);h.s.saveProviderState=async(...a)=>{entered.resolve();await release.promise;return save(...a)};
+  writer=h.m._persistProviderStrict();await entered.promise;
+  const seen=[];sub=h.m.subscribeE2eeState(h.cid,x=>seen.push(x));
+  if(stop==='unsubscribe')sub.unsubscribe();
+  if(stop==='owner')h.m.client={activeChannels:{}};
+  if(stop==='manual'){const control={version:1,user_id:h.user,device_id:h.device,cid:h.cid,signing_identity_sha256:sdk.sha256Hex(h.m.identity.signature_public_key()),group_generation:0,incident_id:crypto.randomUUID(),recovery_action:'manual_intervention_required',recovery_revision:'2',repair_retry_until:null};h.m._recoveryControls.set(h.cid,control);await h.s.saveRecoveryControlCheckpoint(control);}
+  release.resolve();await writer;await h.m._subscribedReadyRevalidation;
+  assert.ok(seen.every(x=>x.state!=='ready'));assert.notEqual(h.m.getE2eeState(h.cid)?.state,'ready');
+ }finally{release.resolve();if(writer)await writer;sub?.unsubscribe();await h.close();}
+});

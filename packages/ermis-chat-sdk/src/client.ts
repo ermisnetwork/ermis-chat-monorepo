@@ -346,6 +346,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   private _dispatchRefreshFailed(error: unknown, reason = 'refresh_failed') {
     const status = (error as any)?.response?.status || (error as any)?.status;
+    // This classification is scoped to the generated refresh operation, never
+    // a business endpoint's 400 or an ambiguous websocket close.
+    const body = (error as any)?.response?.data;
+    const code = body?.code || body?.error?.code || body?.error;
+    if ([401, 403].includes(status) || status === 400 &&
+        ['REFRESH_TOKEN_INVALID', 'REFRESH_TOKEN_EXPIRED', 'invalid_grant'].includes(code)) reason = 'refresh_rejected';
     this.dispatchEvent({ type: 'auth.refresh_failed', reason, status } as Event<ErmisChatGenerics>);
   }
 
@@ -536,8 +542,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       }
 
       if (this.browser && !this.deviceId) {
+        // The account checkpoint owns the logical ID. A global preference can
+        // belong to another account or survive restoration of a different DB.
+        const encryptionStorage = new IndexedDBEncryptionStorage(connectionUser.id, this.logger, this.options.localStorageNamespace);
         try {
-          const encryptionStorage = new IndexedDBEncryptionStorage('', this.logger);
           const deviceId = await encryptionStorage.getDeviceId(); assertCurrent();
           this.deviceId = deviceId; expected.deviceId = deviceId;
           this.logger('info', `client:connectUser() - deviceId initialized: ${this.deviceId}`, {
@@ -545,10 +553,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
           });
         } catch (err) {
           assertCurrent();
+          if ((err as {code?: string})?.code === 'provider_checkpoint_invalid') throw err;
           this.logger('warn', 'client:connectUser() - Failed to initialize deviceId from storage', {
             tags: ['connection', 'client', 'e2ee'],
             err,
           });
+        } finally {
+          await encryptionStorage.close();
         }
       }
 
@@ -562,7 +573,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       if (this.browser && !this.messageStorage) {
         try {
           const { IndexedDBEncryptionStorage } = await import('./encryption/storage'); assertCurrent();
-          this.messageStorage = new IndexedDBEncryptionStorage(connectionUser.id, this.logger); expected.messageStorage = this.messageStorage;
+          this.messageStorage = new IndexedDBEncryptionStorage(connectionUser.id, this.logger, this.options.localStorageNamespace); expected.messageStorage = this.messageStorage;
         } catch (err) {
           assertCurrent();
           this.logger('warn', 'client:connectUser() - Failed to initialize messageStorage', {
@@ -1124,8 +1135,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     return this.doAxiosRequest<T>('put', url, data);
   }
 
-  post<T>(url: string, data?: unknown, params?: AxiosRequestConfig['params']) {
-    return this.doAxiosRequest<T>('post', url, data, { params });
+  post<T>(url: string, data?: unknown, params?: AxiosRequestConfig['params'], requestOptions?: AxiosRequestConfig) {
+    return this.doAxiosRequest<T>('post', url, data, { ...requestOptions, params });
   }
 
   patch<T>(url: string, data?: unknown) {
@@ -1321,11 +1332,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   _updateMemberWatcherReferences = (user: UserResponse<ErmisChatGenerics>) => {
     const scope = this._captureAuthScope(); scope.assertCurrent();
+    const selfMemberUpdates: string[] = [];
     // Iterate through all active channels to ensure we update members even if they haven't sent messages yet
     Object.values(this.activeChannels).forEach((channel) => {
       if (channel?.state) {
         let hasChange = false;
         if (channel.state.members[user.id]) {
+          if (user.id === this.userID) selfMemberUpdates.push(channel.cid);
           channel.state.members = {
             ...channel.state.members,
             [user.id]: {
@@ -1394,6 +1407,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         }
       }
     });
+    scope.assertCurrent();
+    if (selfMemberUpdates.length) this.encryptionManager?.handleSelfMemberReadSetUpdated?.(selfMemberUpdates);
   };
 
   _updateUserReferences = this._updateMemberWatcherReferences;
@@ -2140,7 +2155,15 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       ...options,
     };
 
-    const data = await this.post<QueryChannelsAPIResponse<ErmisChatGenerics>>(this.baseURL + '/channels', payload);
+    // A received status line is not a complete channel snapshot. Bound the
+    // whole read, including an incomplete body, so the existing list error /
+    // explicit retry UI can retire loading without hydrating partial data.
+    const configuredTimeouts = [this.options.timeout, this.options.axiosRequestConfig?.timeout]
+      .filter((timeout): timeout is number => typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0);
+    const timeout = Math.min(5000, ...configuredTimeouts);
+    const data = await this.post<QueryChannelsAPIResponse<ErmisChatGenerics>>(
+      this.baseURL + '/channels', payload, undefined, {timeout},
+    );
 
     // Sort channels by latest message created_at (including topics if present)
     data.channels.sort((a, b) => {
@@ -2282,7 +2305,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   _scheduleHydratedColdStartSync = (): void => {
     const scope = this._captureHostSyncScope();
     scope.manager?.handleChannelsHydrated?.();
-    if (!scope.isCurrent() || Object.keys(this.activeChannels).length === 0 || !scope.manager?.initialized) return;
+    // Restoring a pending intent creates a presentation-only Channel before
+    // queryChannels hydrates its membership and MLS metadata. It must not
+    // consume the cold-start run with an empty set of encryption scopes.
+    const hasHydratedChannel = Object.values(this.activeChannels).some((channel) => channel.initialized);
+    if (!scope.isCurrent() || !hasHydratedChannel || !scope.manager?.initialized) return;
     // A replacement session must not join or inherit the old ready/retryable state.
     if (this._coldStartScopeIsCurrent && !this._coldStartScopeIsCurrent()) {
       this._coldStartSyncState = 'waiting_for_channels';
@@ -2411,9 +2438,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this._syncInProgress = true;
     this._syncScopeIsCurrent = scope.isCurrent;
     // Own the promise before invoking hooks: a synchronous hook may replace the session.
+    let releaseUnclaimedSyncGate: (() => void) | undefined;
     const sync = Promise.resolve().then(async () => {
       scope.assertCurrent();
-      if (scope.manager?.initialized) { scope.manager.markSyncStart(); scope.assertCurrent(); }
+      if (scope.manager?.initialized) { releaseUnclaimedSyncGate = scope.manager.markSyncStart(); scope.assertCurrent(); }
       await Promise.all([
         this._performSyncInternal(scope.assertCurrent),
         Promise.resolve().then(() => { scope.assertCurrent(); return scope.manager?.initialized ? scope.manager.sync() : undefined; }),
@@ -2422,6 +2450,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       this._lastSyncCompletedAt = Date.now();
       this._lastSyncScopeIsCurrent = scope.isCurrent;
     }).finally(() => {
+      releaseUnclaimedSyncGate?.();
       if (this._syncPromise === sync) {
         this._syncInProgress = false;
         this._syncPromise = null;
@@ -2446,10 +2475,14 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   private async _removeChannelLocally(
     cid: string,
-    removedEvent?: { channel_id?: string; channel_type?: string; removal_type?: string },
+    removedEvent?: { channel_id?: string; channel_type?: string; removal_type?: string; removed_at?: string },
     assertCurrent = this._captureHostSyncScope().assertCurrent,
   ): Promise<void> {
     assertCurrent();
+    // Global sync also carries historical removals for E2EE channels. Apply
+    // the same authenticated re-add check as MLS replay before clearing any
+    // messages, cursor, or hydrated channel from a newer membership.
+    if (this.userID && this.encryptionManager?.isObsoleteMlsRemoval(cid, this.userID, removedEvent?.removed_at)) return;
     const channel = this.activeChannels[cid];
     const [fallbackType, fallbackId] = cid.split(':');
     const channelType = removedEvent?.channel_type || channel?.type || fallbackType;

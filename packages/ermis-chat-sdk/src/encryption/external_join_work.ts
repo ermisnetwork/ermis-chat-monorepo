@@ -110,7 +110,13 @@ export function validateExternalJoinReadyBase(base: ExternalJoinWorkBase, user: 
       receipt.epoch > marker.current_epoch || readiness?.status !== 'joined_external' || readiness.first_decryptable_epoch !== receipt.epoch ||
       base.rejected || !receipt.event_id || base.state.cleanup.metadata[`external_candidate:v1:${cid}`]) throw recoveryControlError('canonical_receipt_pending');
   validateMlsAcceptanceContextDigest(receipt.acceptance_context, {event_id: receipt.event_id, cid, group_generation: marker.group_generation, epoch: receipt.epoch}, receipt.commit_sha256);
-  if (readiness.welcome_event_cursor) {
+  if (readiness.welcome_event_cursor && (!integer(readiness.welcome_generation) || readiness.welcome_generation! > marker.group_generation)) {
+    throw recoveryControlError('canonical_receipt_pending');
+  }
+  // An accepted join binds this generation's live group. A retained Welcome
+  // from an earlier generation remains historical; this receipt cannot label
+  // it superseded_by_recovery or make its old keys available.
+  if (readiness.welcome_event_cursor && readiness.welcome_generation === marker.group_generation) {
     const row = base.welcome_primary[externalWelcomePrefix(cid, device) + encodeURIComponent(readiness.welcome_event_cursor.event_id)];
     const linked = row?.checkpoint?.receipt, joined = row?.checkpoint?.marker;
     if (!row || !equal(row.event_cursor, readiness.welcome_event_cursor) || row.status !== 'superseded_by_recovery' ||

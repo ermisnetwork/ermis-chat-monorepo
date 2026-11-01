@@ -9,15 +9,15 @@
     "url": "git+https://github.com/ermisnetwork/ermis-chat-monorepo.git"
   },
   "openmlsBuild": {
-    "commit": "e6815e370865c0ee273b1e01f01373e7d467fed3",
-    "sourceDiffSha256": "d47cc4e8cf95e36daa272532b84ee2dcff3c5c737fec1293eab27f82c0189114",
+    "commit": "2976e664a74d8dcb1d9896977339b25c0f9fce21",
+    "sourceDiffSha256": "9aca875c29d220d3c34e13c19d58957e542fcb1762031c930fa99694a53bd25e",
     "patches": [],
     "cargoLockSha256": "ce58625488f14f67b8391802e066191dd5ea2f4bed846a1f5cebecd6d46f6c0b",
     "wasmPack": "wasm-pack 0.13.1",
     "cargo": "cargo 1.94.1 (29ea6fb6a 2026-03-24)",
     "rustc": "rustc 1.94.1 (e408947bf 2026-03-25)",
-    "wasmSha256": "61059544b75131ebfec7c508bd46bd43a228e68c451aac7e597a98064f2b4359",
-    "wasmSize": 2664028,
+    "wasmSha256": "a01ab2dde693149feab82e8d4c90f89af16cdf0f5ea8a188aed759f5a66ee054",
+    "wasmSize": 2664173,
     "contracts": [
       "recovery_pin",
       "epoch_archive",
@@ -37,7 +37,7 @@
       "three_way_candidate_rebase",
       "readonly_group_info_validation"
     ],
-    "sourceFilesSha256": "7c447f7570cde120f267169d3741e7cd72045bb8fd32be5ecd39400c3a69774c",
+    "sourceFilesSha256": "c4ac90775658b265f83dc92e9574c5fb0921476f0ebb6289272b37fa5bf674ee",
     "localOnly": true
   },
   "main": "./dist/index.cjs",

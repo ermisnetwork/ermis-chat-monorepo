@@ -655,11 +655,30 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   // ---- E2EE Messaging & Sync ----
 
   /** Send an encrypted E2EE message. */
-  async sendMessage(channelType: string, channelId: string, data: SendE2eeMessageRequest): Promise<APIResponse> {
-    return await this._post(
-      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/message`,
+  async sendMessage(channelType: string, channelId: string, data: SendE2eeMessageRequest, options: {reconcileOnly?: boolean} = {}): Promise<APIResponse> {
+    const response = await this._post<APIResponse>(
+      this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/message${options.reconcileOnly ? '/reconcile' : ''}`,
       encodeSendMessageRequest(data),
     );
+    if (options.reconcileOnly) {
+      // A generic HTTP200 or optimistic/local record cannot settle an unknown
+      // ciphertext. The new endpoint must return the canonical bound message.
+      const value = (response as any)?.message;
+      let matches = false;
+      try {
+        const cipher = decodeBytesField(value?.mls_ciphertext, 'message.mls_ciphertext');
+        matches = value?.id === data.message.id && value.cid === `${channelType}:${channelId}` &&
+          value.device_id === this.client.deviceId && value.content_type === 'mls' &&
+          value.mls_epoch === data.message.mls_epoch && (value.group_generation || 0) === (data.message.group_generation || 0) &&
+          (!data.message.e2ee_group_id || value.e2ee_group_id === data.message.e2ee_group_id) &&
+          Number.isSafeInteger(value.msg_seq) && value.msg_seq > 0 &&
+          Number.isSafeInteger(value.last_event_seq) && value.last_event_seq > 0 &&
+          typeof value.created_at === 'string' && Number.isFinite(Date.parse(value.created_at)) &&
+          cipher.length === data.message.mls_ciphertext.length && cipher.every((byte, i) => byte === data.message.mls_ciphertext[i]);
+      } catch { matches = false; }
+      if (!matches) throw Object.assign(new Error('Canonical application receipt is missing or invalid'), {code: 'application_receipt_invalid', retryable: true});
+    }
+    return response;
   }
 
   /** Initialize E2EE attachment upload and receive presigned PUT URLs. */
@@ -805,7 +824,24 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     if (removedCursor !== undefined) {
       body.removed_cursor = removedCursor;
     }
-    const raw = await this._post<ScopeSyncResponse>(this.baseURL + '/v1/e2ee/scope_sync', body);
+    let raw: ScopeSyncResponse;
+    try {
+      // A successful status line is insufficient: an incomplete response body
+      // must not hold the manager's global receive gate indefinitely. The host
+      // carries this read budget through token renewal and any auth retry.
+      raw = await (this.client as any).doAxiosRequest('post', this.baseURL + '/v1/e2ee/scope_sync', body, {
+        headers: this.deviceHeaders,
+        timeout: 5000,
+      });
+    } catch (error) {
+      const code = (error as {code?: string})?.code;
+      if (code && ['key_package_ownership_deadline', 'ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK', 'ECONNRESET'].includes(code)) {
+        throw Object.assign(new Error('[Encryption] Scope sync transport outcome unknown'), {
+          code: 'transport_unknown', retryable: true,
+        });
+      }
+      throw error;
+    }
     return normalizeScopeSyncResponseBytes(raw);
   }
 

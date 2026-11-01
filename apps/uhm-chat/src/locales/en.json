@@ -55,6 +55,8 @@
     "update": "Update"
   },
   "chat": {
+    "channel_restore_slow": "This conversation is taking longer to load. It will open when ready.",
+    "channel_restore_failed": "Could not open this conversation. You can try again.",
     "loading_messages": "Loading...",
     "retry_load": "Retry loading messages",
     "load_missing": "Load {{count}} missing messages",
@@ -515,6 +517,9 @@
     "confirm_reset_encrypted_message": "Are you sure you want to reset the encryption session for this channel?"
   },
   "message_actions": {
+    "retry_send": "Retry send",
+    "retry_error": "Could not retry this message",
+
     "reply": "Reply",
     "forward": "Forward",
     "more": "More",

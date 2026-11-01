@@ -1,3 +1,5 @@
+import {bytesEqual} from './aad';
+
 /** Exact structured checkpoint equality, including bytes/dates and cyclic plain records. */
 export function sameSyncCheckpointValue(a: unknown, b: unknown, seen = new WeakMap<object, object>()): boolean {
   if (Object.is(a, b)) return true;
@@ -7,7 +9,7 @@ export function sameSyncCheckpointValue(a: unknown, b: unknown, seen = new WeakM
     if (Object.prototype.toString.call(a) !== Object.prototype.toString.call(b)) return false;
     const bytes = (v: ArrayBuffer | ArrayBufferView) => v instanceof ArrayBuffer ? new Uint8Array(v) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
     const left = bytes(a as ArrayBuffer | ArrayBufferView), right = bytes(b as ArrayBuffer | ArrayBufferView);
-    return left.length === right.length && left.every((value, index) => value === right[index]);
+    return bytesEqual(left, right);
   }
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   if (Array.isArray(a) && Array.isArray(b)) { if (a.length !== b.length) return false; }

@@ -20,14 +20,18 @@ export type MlsProtocolProcessingOptions = {
   acceptanceEnvelope?: MlsAcceptanceEnvelope;
 };
 
-export function acceptanceMetadataError(): Error & {code: string} {
-  const error = new Error('[Encryption] Event-bound backend acceptance metadata is missing or invalid') as Error & {code: string};
-  error.code = 'acceptance_metadata_invalid'; return error;
+export type MlsAcceptanceFailureReason = 'payload_type' | 'context_missing' | 'envelope_missing' |
+  'context_serialization' | 'context_size' | 'clock' | 'version' | 'event_id' | 'cid' |
+  'generation' | 'epoch' | 'accepted_at' | 'provenance' | 'payload_digest';
+
+export function acceptanceMetadataError(reason: MlsAcceptanceFailureReason = 'context_missing'): Error & {code: string; reason: MlsAcceptanceFailureReason} {
+  const error = new Error('[Encryption] Event-bound backend acceptance metadata is missing or invalid') as Error & {code: string; reason: MlsAcceptanceFailureReason};
+  error.code = 'acceptance_metadata_invalid'; error.reason = reason; return error;
 }
 
 /** Also guards own pending settlement, which does not feed its own Commit back into OpenMLS. */
 export function validateMlsAcceptanceContext(value: unknown, expected: MlsAcceptanceEnvelope | undefined, bytes: Uint8Array): MlsAcceptanceContext {
-  if (!(bytes instanceof Uint8Array)) throw acceptanceMetadataError();
+  if (!(bytes instanceof Uint8Array)) throw acceptanceMetadataError('payload_type');
   return validateMlsAcceptanceContextDigest(value, expected, sha256Hex(bytes));
 }
 
@@ -38,18 +42,21 @@ export function validateMlsAcceptanceContextDigest(value: unknown, expected: Mls
     new TextEncoder().encode(s).length <= limit && !/[\u0000-\u001f\u007f]/.test(s);
   const integer = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
   const now = Date.now();
+  if (!cp || typeof cp !== 'object' || Array.isArray(cp)) throw acceptanceMetadataError('context_missing');
+  if (!expected) throw acceptanceMetadataError('envelope_missing');
   let serialized: string | undefined;
-  try { serialized = JSON.stringify(value); } catch { throw acceptanceMetadataError(); }
-  if (!cp || !expected || !serialized || new TextEncoder().encode(serialized).length > 4096 ||
-      !Number.isFinite(now) || now <= 0 || cp.version !== 1 ||
-      !textValid(cp.event_id, 128) || !textValid(cp.cid, 512) ||
-      cp.event_id !== expected.event_id || cp.cid !== expected.cid ||
-      !integer(expected.group_generation) || !integer(expected.epoch) ||
-      cp.group_generation !== expected.group_generation || cp.epoch !== expected.epoch ||
-      !integer(cp.accepted_at) || cp.accepted_at === 0 || cp.accepted_at > Math.floor(now / 1000) + 300 ||
-      !['bellboy_transition_v1', 'bellboy_legacy_acceptance_v1'].includes(cp.provenance) ||
-      typeof cp.payload_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(cp.payload_sha256) ||
-      !/^[0-9a-f]{64}$/.test(digest) || cp.payload_sha256 !== digest) throw acceptanceMetadataError();
+  try { serialized = JSON.stringify(value); } catch { throw acceptanceMetadataError('context_serialization'); }
+  if (!serialized || new TextEncoder().encode(serialized).length > 4096) throw acceptanceMetadataError('context_size');
+  if (!Number.isFinite(now) || now <= 0) throw acceptanceMetadataError('clock');
+  if (cp.version !== 1) throw acceptanceMetadataError('version');
+  if (!textValid(cp.event_id, 128) || cp.event_id !== expected.event_id) throw acceptanceMetadataError('event_id');
+  if (!textValid(cp.cid, 512) || cp.cid !== expected.cid) throw acceptanceMetadataError('cid');
+  if (!integer(expected.group_generation) || cp.group_generation !== expected.group_generation) throw acceptanceMetadataError('generation');
+  if (!integer(expected.epoch) || cp.epoch !== expected.epoch) throw acceptanceMetadataError('epoch');
+  if (!integer(cp.accepted_at) || cp.accepted_at === 0 || cp.accepted_at > Math.floor(now / 1000) + 300) throw acceptanceMetadataError('accepted_at');
+  if (!['bellboy_transition_v1', 'bellboy_legacy_acceptance_v1'].includes(cp.provenance)) throw acceptanceMetadataError('provenance');
+  if (typeof cp.payload_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(cp.payload_sha256) ||
+      !/^[0-9a-f]{64}$/.test(digest) || cp.payload_sha256 !== digest) throw acceptanceMetadataError('payload_digest');
   return cp;
 }
 
@@ -57,7 +64,7 @@ export function validateMlsAcceptanceContextDigest(value: unknown, expected: Mls
 export function mlsProtocolProcessingOptions(envelope: any, protocol: any, cid: string, historicalReplay: boolean): MlsProtocolProcessingOptions {
   const id = protocol?.event_id || envelope?.event_id;
   const context = protocol?.acceptance_context || envelope?.acceptance_context;
-  if (protocol?.event_id && envelope?.event_id && protocol.event_id !== envelope.event_id) throw acceptanceMetadataError();
+  if (protocol?.event_id && envelope?.event_id && protocol.event_id !== envelope.event_id) throw acceptanceMetadataError('event_id');
   return {historicalReplay, acceptanceContext: context, acceptanceEnvelope: {
     event_id: id, cid, group_generation: protocol?.group_generation ?? 0, epoch: protocol?.epoch,
   }};

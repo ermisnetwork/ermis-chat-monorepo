@@ -21,7 +21,8 @@ async function fixture(){
   const info=()=>{const bytes=group.export_group_info(m.provider,m.identity,true);return{group_info:bytes,group_generation:0,group_id:null,epoch:0,hash:sha256Hex(bytes),is_stale:false};};
   const state=(revision='1',id=incident,action='repair')=>({group_generation:0,group_id:null,current_epoch:0,membership_version:'1',state:'repairing',
     reason:'group_info_invalid',retryable:true,incident_id:id,recovery_action:action,recovery_revision:revision,
-    repair_retry_until:new Date(Date.now()+900000).toISOString(),capability:{protocol_version:1}});
+    repair_retry_until:new Date(Date.now()+900000).toISOString(),capability:{protocol_version:1,automatic_enabled:false,
+      repair_timeout_seconds:900,max_group_info_bytes:1048576,max_ratchet_tree_bytes:1048576,max_welcome_recipients:1000,max_welcome_bytes:1048576}});
   await m._applyRecoveryControl(cid,state());requireValidationMetadata(m,cid);
   const accepted=(revision='2')=>({accepted:true,idempotent:false,recovery_action:'none',recovery_revision:revision});
   return{m,manager,wasm,storage,user,device,cid,group,marker,info,state,accepted,events,artifact};

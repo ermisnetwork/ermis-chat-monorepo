@@ -102,6 +102,22 @@ export function hasE2eeAadMetadata(params: Partial<E2eeMessageAadParams>): boole
 export function bytesEqual(a?: Uint8Array | null, b?: Uint8Array | null): boolean {
   if (!a || !b || a.length !== b.length) return false;
   let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a[i] ^ b[i];
+  let i = 0;
+  if (a.length >= 64) {
+    if (a.byteOffset % 4 === 0 && b.byteOffset % 4 === 0) {
+      const words = Math.floor(a.length / 4);
+      const left = new Uint32Array(a.buffer, a.byteOffset, words);
+      const right = new Uint32Array(b.buffer, b.byteOffset, words);
+      // Both views use the same native endian mapping. Scan every word;
+      // neither object identity nor a digest substitutes for actual bytes.
+      for (let word = 0; word < words; word += 1) diff |= left[word] ^ right[word];
+      i = words * 4;
+    } else {
+      const left = new DataView(a.buffer, a.byteOffset, a.byteLength);
+      const right = new DataView(b.buffer, b.byteOffset, b.byteLength);
+      for (; i + 4 <= a.length; i += 4) diff |= left.getUint32(i, true) ^ right.getUint32(i, true);
+    }
+  }
+  for (; i < a.length; i += 1) diff |= a[i] ^ b[i];
   return diff === 0;
 }

@@ -85,3 +85,13 @@ test('metadata byte/control/integer bounds and projection disagreement fail clos
   }
   assert.throws(() => mlsProtocolProcessingOptions({event_id: 'e'}, {event_id: 'other'}, 'team:test', true), e => e.code === 'acceptance_metadata_invalid');
 });
+
+
+test('acceptance diagnostics name the failing field without exposing event payload',()=>{
+ const bytes=Uint8Array.of(1),envelope={event_id:'e',cid:'team:old',group_generation:0,epoch:1};
+ const context={version:1,...envelope,accepted_at:Math.floor(Date.now()/1000),payload_sha256:sha256Hex(bytes),provenance:'bellboy_transition_v1'};
+ for(const [patch,reason] of [[null,'context_missing'],[{event_id:'wrong'},'event_id'],[{cid:'wrong'},'cid'],
+   [{group_generation:1},'generation'],[{epoch:2},'epoch'],[{provenance:'guessed'},'provenance'],[{payload_sha256:'0'.repeat(64)},'payload_digest']]){
+  assert.throws(()=>validateMlsAcceptanceContext(patch===null?null:{...context,...patch},envelope,bytes),e=>e.code==='acceptance_metadata_invalid'&&e.reason===reason);
+ }
+});

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import {createRequire} from 'node:module';
 import {indexedDB,IDBKeyRange} from 'fake-indexeddb';
 import init,* as wasm from '../src/encryption/wasm/openmls_wasm.js';
-const {EncryptionManager,IndexedDBEncryptionStorage,sha256Hex}=createRequire(import.meta.url)('../dist/index.cjs');
+const {ErmisChat,EncryptionManager,IndexedDBEncryptionStorage,sha256Hex}=createRequire(import.meta.url)('../dist/index.cjs');
 globalThis.indexedDB=indexedDB;globalThis.IDBKeyRange=IDBKeyRange;
 const wasmBytes=fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url));
 await init({module_or_path:wasmBytes});let seq=0;
@@ -63,6 +63,24 @@ test('Ready cannot rebase to a foreign revision even when the private provider b
  assert.equal((await h.s.loadProviderCheckpoint(h.user,h.device)).revision,'foreign-winner');assert.equal(h.events.some(e=>e.state==='ready'),false);
 });
 async function restart(h){const n=new EncryptionManager();Object.assign(n,{userId:h.user,deviceId:h.device,storage:new IndexedDBEncryptionStorage(h.user),_injectedWasm:wasm,_wasmArtifactSha256:sha256Hex(wasmBytes)});await n._initWasm();await n._initIdentity();await n._restoreGroupsLocally();n.client={activeChannels:{[h.cid]:h.channel}};n.e2eeClient={};n.initialized=true;return n;}
+test('Ready observation committed before self-member replacement retires view without poisoning proven private state',async()=>{
+ const h=await fixture(),save=h.s.saveMlsReadyCheckpoint.bind(h.s);let changed=false;
+ h.s.saveMlsReadyCheckpoint=async(cp,owner)=>{await save(cp,owner);if(!changed){changed=true;h.channel.state.members[h.user]={user_id:h.user,created_at:'2026-10-11T00:00:00Z',name:'new presentation'};}};
+ await assert.rejects(h.m.refreshE2eeState(h.cid),e=>e.code==='recovery_scope_changed');
+ assert.equal(changed,true);assert.equal(h.m._providerPersistenceUncertain,false);
+ assert.equal(h.events.some(e=>e.state==='ready'),false);assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),h.base);
+ assert.deepEqual(h.m._activeProvider.to_bytes(),h.bytes);assert.equal(h.m.identity.owns_key_package_ref(h.m.provider,h.ref),true);
+ assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');
+});
+for(const conflict of ['foreign-revision','read-lost'])test('Ready observation owner replacement preserves uncertainty for '+conflict,async()=>{
+ const h=await fixture(),save=h.s.saveMlsReadyCheckpoint.bind(h.s),load=h.s.loadMlsReadyBase.bind(h.s);let changed=false;
+ h.s.saveMlsReadyCheckpoint=async(cp,owner)=>{await save(cp,owner);if(!changed){changed=true;h.channel.state.members[h.user]={user_id:h.user,created_at:'2026-10-11T00:00:00Z'};
+  if(conflict==='foreign-revision')await h.s.saveProviderState(h.user,h.device,h.bytes,{expected_revision:h.base.revision,next_revision:'foreign-after-observation'});
+  else h.s.loadMlsReadyBase=async()=>{throw Error('QA readback unavailable')};}};
+ await assert.rejects(h.m.refreshE2eeState(h.cid),e=>e.code==='recovery_scope_changed');
+ assert.equal(h.m._providerPersistenceUncertain,true);assert.equal(h.events.some(e=>e.state==='ready'),false);
+ h.s.loadMlsReadyBase=load;assert.equal((await h.m.refreshE2eeState(h.cid)).reason,'provider_persistence_uncertain');
+});
 test('five-state late subscription and semantic dedupe retain reason/revision/generation changes',async()=>{
  const h=await fixture(),seen=[];const sub=h.m.subscribeE2eeState(h.cid,s=>seen.push(s));assert.equal(seen.length,1);assert.equal(seen[0].state,'repairing');
  let state=h.m._commonSnapshot(h.cid,'repairing','storage_checkpoint_failed');h.m._publishCommonState(state);h.m._publishCommonState({...state});assert.equal(seen.length,2);
@@ -72,7 +90,7 @@ test('five-state late subscription and semantic dedupe retain reason/revision/ge
 });
 test('Ready requires actual tree validation/CAS/full proof before publication and retains private KP',async()=>{const h=await fixture();h.s.verifyMlsReadyCheckpoint=async function(cp){assert.equal(h.events.some(e=>e.state==='ready'),false);return IndexedDBEncryptionStorage.prototype.verifyMlsReadyCheckpoint.call(this,cp);};const state=await h.m.refreshE2eeState(h.cid);assert.equal(state.state,'ready');assert.equal(h.m.getE2eeState(h.cid).state,'ready');assert.equal((await h.s.loadMlsReadyBase(h.user,h.device,h.cid)).ready.provider_revision,state.provider_revision);assert.deepEqual(h.m.provider.to_bytes(),h.bytes);assert.equal(h.m.identity.owns_key_package_ref(h.m.provider,h.ref),true);const late=[];h.m.subscribeE2eeState(h.cid,s=>late.push(s));assert.equal(late[0].state,'ready');});
 for(const cap of ['readyCheckpointVersion','providerCheckpointCASVersion','loadMlsReadyBase','saveMlsReadyCheckpoint','verifyMlsReadyCheckpoint'])test('missing Ready capability '+cap+' preserves private state',async()=>{const h=await fixture();h.s[cap]=undefined;assert.equal((await h.m.refreshE2eeState(h.cid)).state,'upgrade_required');assert.deepEqual(h.m.provider.to_bytes(),h.bytes);assert.equal(h.events.some(e=>e.state==='ready'),false);});
-test('actual transaction abort keeps active and original durable provider/revision',async()=>{const h=await fixture(),write=h.s._writeProviderCheckpoint.bind(h.s);h.s._writeProviderCheckpoint=(tx,...args)=>{write(tx,...args);tx.abort();};const state=await h.m.refreshE2eeState(h.cid);assert.equal(state.state,'repairing');assert.equal(h.m._providerPersistenceUncertain,false);assert.deepEqual(h.m.provider.to_bytes(),h.bytes);assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),h.base);assert.equal((await h.s.loadMlsReadyBase(h.user,h.device,h.cid)).ready,null);});
+test('actual transaction abort keeps active and original durable provider/revision',async()=>{const h=await fixture(),read=h.s._readMlsReadyBase.bind(h.s);h.s._readMlsReadyBase=(tx,...args)=>{read(tx,...args);if(tx.mode==='readwrite')tx.abort();};const state=await h.m.refreshE2eeState(h.cid);assert.equal(state.state,'repairing');assert.equal(h.m._providerPersistenceUncertain,false);assert.deepEqual(h.m.provider.to_bytes(),h.bytes);assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),h.base);assert.equal((await h.s.loadMlsReadyBase(h.user,h.device,h.cid)).ready,null);});
 for(const mode of ['unknown','readback'])test('Ready committed '+mode+' fails closed; restart revalidates exact durable winner',async()=>{const h=await fixture(),save=h.s.saveMlsReadyCheckpoint.bind(h.s),verify=h.s.verifyMlsReadyCheckpoint.bind(h.s);if(mode==='unknown')h.s.saveMlsReadyCheckpoint=async(...args)=>{await save(...args);throw Error('commit outcome unknown');};else h.s.verifyMlsReadyCheckpoint=async cp=>{if(mode==='readback')throw Error('readback lost');await h.s.saveScopeSyncCursor(h.cid,{created_at:'2026-10-12T00:00:00Z',event_id:'winning'});return verify(cp);};assert.equal((await h.m.refreshE2eeState(h.cid)).state,'repairing');assert.equal(h.m._providerPersistenceUncertain,true);assert.equal(h.events.some(e=>e.state==='ready'),false);assert.deepEqual(h.m._activeProvider.to_bytes(),h.bytes);const n=await restart(h);assert.equal((await n.refreshE2eeState(h.cid)).state,'ready');assert.equal(n.identity.owns_key_package_ref(n.provider,h.ref),true);if(mode==='metadata')assert.equal((await n.storage.loadScopeSyncCursor(h.cid)).event_id,'winning');});
 for(const kind of ['local','remote','marker','pending','removal'])test('Ready intervening '+kind+' writer cannot overwrite winner',async()=>{const h=await fixture(),save=h.s.saveMlsReadyCheckpoint.bind(h.s);let winning;h.s.saveMlsReadyCheckpoint=async(cp,guard)=>{if(kind==='local'){const kp=h.m.identity.key_package(h.m._activeProvider);kp.free();winning=h.m._activeProvider.to_bytes();}if(kind==='remote'){const p=wasm.Provider.from_bytes(h.bytes),i=wasm.Identity.from_bytes(p,h.m.identity.to_bytes()),kp=i.key_package(p);kp.free();winning=p.to_bytes();await h.s.saveProviderState(h.user,h.device,winning,{expected_revision:h.base.revision,next_revision:'winner'});}if(kind==='marker')await h.s.saveGroupState(h.cid,{...h.marker,status:'historical'});if(kind==='pending')await h.s.saveMlsMutationCheckpoint({user_id:h.user,device_id:h.device,cid:h.cid,provider_bytes:h.bytes,marker:h.marker,pending:{cid:h.cid,accepted:true}});if(kind==='removal'){const db=await h.s.openDB();await new Promise((yes,no)=>{const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({group_generation:0},'mls_removal:v1:'+h.cid);tx.oncomplete=yes;tx.onabort=no;});}return save(cp,guard);};let state;if(kind==='local')await assert.rejects(h.m.refreshE2eeState(h.cid),e=>e.code==='recovery_scope_changed');else {state=await h.m.refreshE2eeState(h.cid);assert.notEqual(state.state,'ready');}assert.equal(h.events.some(e=>e.state==='ready'),false);assert.deepEqual(h.m._activeProvider.to_bytes(),kind==='local'?winning:h.bytes);if(kind==='remote')assert.deepEqual(await h.s.loadProviderState(h.user,h.device),winning);});
 for(const dimension of ['account','device','storage','transport','artifact','group','marker','membership'])test('delayed Ready cannot publish '+dimension+' replacement',async()=>{const h=await fixture(),enter=latch(),release=latch(),save=h.s.saveMlsReadyCheckpoint.bind(h.s);h.s.saveMlsReadyCheckpoint=async(...args)=>{enter.resolve();await release.promise;return save(...args);};const work=h.m.refreshE2eeState(h.cid);await enter.promise;const replacement={replacement:true};if(dimension==='account')h.m.userId='other';if(dimension==='device')h.m.deviceId='other';if(dimension==='storage')h.m.storage=new IndexedDBEncryptionStorage(h.user);if(dimension==='transport')h.m.e2eeClient=replacement;if(dimension==='artifact')h.m._wasmArtifactSha256='other';if(dimension==='group')h.m.groups.set(h.cid,replacement);if(dimension==='marker')h.m._groupGenerations.set(h.cid,replacement);if(dimension==='membership')h.channel.state.members[h.user]=replacement;release.resolve();await assert.rejects(work);assert.equal(h.events.some(e=>e.state==='ready'),false);assert.equal((await h.s.loadMlsReadyBase(h.user,h.device,h.cid)).ready,null);});
@@ -118,4 +136,135 @@ test('Ready promise sharing excludes old membership owner; old result cannot pub
 test('nonzero local generation without authoritative binding stays typed deferred despite actual usable MLS bytes',async()=>{
  const h=await fixture(),marker={...h.marker,group_generation:1,group_id:h.group.group_id()};h.m._groupGenerations.set(h.cid,marker);await h.m._writeMlsMutation(h.cid,null);
  const state=await h.m.refreshE2eeState(h.cid);assert.equal(state.state,'repairing');assert.equal(state.reason,'mls_generation_binding_pending');assert.equal(h.events.some(e=>e.state==='ready'),false);assert.equal((await h.s.loadMlsReadyBase(h.user,h.device,h.cid)).ready,null);
+});
+
+async function secondGroup(h){
+ const cid=h.cid+'-second',group=wasm.Group.create_with_cid(h.m.provider,h.m.identity,cid),marker={...h.marker,cid};
+ h.m.groups.set(cid,group);h.m._groupGenerations.set(cid,marker);h.m.client.activeChannels[cid]={data:{mls_enabled:true},state:{members:{[h.user]:{user_id:h.user,created_at:'2026-10-11T00:00:00Z'}}}};
+ await h.m._writeMlsMutation(cid,null);return cid;
+}
+test('real multi-group Ready observations retain provider revision and both exact proofs',async()=>{
+ const h=await fixture(),other=await secondGroup(h),before=await h.s.loadProviderCheckpoint(h.user,h.device);
+ assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');
+ assert.equal((await h.m.refreshE2eeState(other)).state,'ready');
+ assert.equal(h.m.getE2eeState(h.cid).state,'ready');assert.equal(h.m.getE2eeState(other).state,'ready');
+ assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),before);
+ assert.equal((await h.s.loadMlsReadyBase(h.user,h.device,h.cid)).ready.provider_revision,before.revision);
+ assert.equal((await h.s.loadMlsReadyBase(h.user,h.device,other)).ready.provider_revision,before.revision);
+});
+test('real provider mutation invalidates before subscribed listener access and re-admits without revision ping-pong',async()=>{
+ const h=await fixture(),other=await secondGroup(h);await h.m.refreshE2eeState(h.cid);await h.m.refreshE2eeState(other);
+ const seen=[];let staleReady=false;
+ h.m.subscribeE2eeState(h.cid,s=>{seen.push(s.state);if(s.state==='repairing'&&h.m.getE2eeState(h.cid).state==='ready')staleReady=true;});
+ h.m.subscribeE2eeState(other,()=>{});
+ const kp=h.m.identity.key_package(h.m.provider);kp.free();await h.m._saveEncryptionSyncCheckpoint();
+ const committed=await h.s.loadProviderCheckpoint(h.user,h.device);
+ // Drain the actual coalesced continuation, not an arbitrary timer/retry loop.
+ await h.m._subscribedReadyRevalidation;
+ assert.equal(staleReady,false);assert.ok(seen.includes('repairing'));assert.equal(seen.at(-1),'ready');
+ assert.equal(h.m.getE2eeState(h.cid).state,'ready');assert.equal(h.m.getE2eeState(other).state,'ready');
+ assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),committed);assert.equal(h.m._providerPersistenceUncertain,false);
+});
+
+for(const mode of ['unsubscribe','membership','manual','destroy'])test('subscribed re-admission respects '+mode+' before queue release',async()=>{
+ const h=await fixture();await h.m.refreshE2eeState(h.cid);const seen=[];
+ const sub=h.m.subscribeE2eeState(h.cid,s=>{seen.push(s.state);if(s.state==='repairing'){
+  if(mode==='unsubscribe')sub.unsubscribe();
+  if(mode==='membership')h.channel.state.members[h.user]={user_id:h.user,created_at:'replacement'};
+  if(mode==='manual')h.m._recoveryControls.set(h.cid,control(h,'9','manual_intervention_required'));
+ }});
+ const kp=h.m.identity.key_package(h.m.provider);kp.free();await h.m._saveEncryptionSyncCheckpoint();
+ const work=h.m._subscribedReadyRevalidation;
+ if(mode==='destroy'){h.m.destroy();}
+ await work;
+ assert.notEqual(seen.at(-1),'ready');
+ if(mode!=='destroy')assert.notEqual(h.m.getE2eeState(h.cid)?.state,'ready');
+});
+test('Ready observation rejects a forged private revision and v2 fallback still writes fresh CAS revision',async()=>{
+ const h=await fixture(),save=h.s.saveMlsReadyCheckpoint.bind(h.s);let captured;
+ h.s.saveMlsReadyCheckpoint=async(cp,owner)=>{captured=structuredClone(cp);return save(cp,owner);};
+ await h.m.refreshE2eeState(h.cid);assert.equal(captured.provider_observation,true);
+ const before=await h.s.loadProviderCheckpoint(h.user,h.device);
+ const forged=structuredClone(captured);forged.provider_write_guard.next_revision='forged';forged.snapshot.provider_revision='forged';
+ await assert.rejects(save(forged,()=>{}),/revision invalid/);assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),before);
+ Object.defineProperty(h.s,'readyObservationVersion',{value:undefined});
+ assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');assert.equal(captured.provider_observation,undefined);
+ assert.notEqual((await h.s.loadProviderCheckpoint(h.user,h.device)).revision,before.revision);
+});
+
+test('an unowned native handle replacement cannot inherit a queued Ready continuation',async()=>{
+ const h=await fixture(),entered=latch(),gate=latch(),seen=[];await h.m.refreshE2eeState(h.cid);h.m.subscribeE2eeState(h.cid,s=>seen.push(s.state));
+ const write=h.m._withProviderMutation(async(provider,assertCurrent)=>{const kp=h.m.identity.key_package(provider);kp.free();const bytes=provider.to_bytes(),guard=h.m._providerWriteGuard();await h.s.saveProviderState(h.user,h.device,bytes,guard);assertCurrent();await h.m._readProviderWrite(bytes,guard,assertCurrent);entered.resolve();await gate.promise;});
+ await entered.promise;h.m.groups.set(h.cid,wasm.Group.load(h.m._activeProvider,h.cid));gate.resolve();await write;await h.m._subscribedReadyRevalidation;
+ assert.notEqual(seen.at(-1),'ready');assert.notEqual(h.m.getE2eeState(h.cid)?.state,'ready');assert.equal(h.m._providerPersistenceUncertain,false);
+});
+
+async function profileFixture(){
+ const h=await fixture(),c=new ErmisChat('fixture-key','fixture-project','http://fixture.invalid',{browser:false,logger:()=>{}});
+ c._setUser({id:h.user,name:'same profile'});c.deviceId=h.device;
+ await c.tokenManager.setTokenOrProvider('fixture-token',{id:h.user});
+ c.encryptionManager=h.m;h.m.client=c;
+ const channel=c.channel('team',h.user);channel.initialized=true;channel.data={mls_enabled:true,type:'team'};
+ channel.state.membership={user:{id:h.user,name:'same profile'},channel_role:'member',created_at:'2026-10-11T00:00:00Z'};
+ channel.state.members[h.user]=channel.state.membership;
+ h.channel=channel;h.c=c;
+ assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');
+ return h;
+}
+const drainPresentation=h=>Promise.resolve().then(async()=>{await h.m._subscribedReadyRevalidation;});
+test('self profile enrichment coalesces actual native Ready reproof without HTTP, cursor or private KeyPackage changes',async()=>{
+ const h=await profileFixture(),seen=[];
+ h.m.subscribeE2eeState(h.cid,s=>seen.push(s.state));
+ const prior=h.m._commonStates.get(h.cid),base=await h.s.loadProviderCheckpoint(h.user,h.device),cursor=await h.s.loadScopeSyncCursor(h.cid);
+ let proofs=0;const refresh=h.m.refreshE2eeState.bind(h.m);h.m.refreshE2eeState=async(...args)=>{proofs++;return refresh(...args);};
+ for(let n=0;n<3;n++)h.c._updateMemberWatcherReferences({id:h.user,name:'same profile'});
+ assert.throws(()=>prior.proof(),e=>e.code==='recovery_scope_changed');
+ assert.notEqual(h.m.getE2eeState(h.cid).state,'ready');
+ await drainPresentation(h);
+ assert.equal(h.m.getE2eeState(h.cid).state,'ready');assert.equal(seen.at(-1),'ready');assert.ok(seen.includes('repairing'));assert.equal(proofs,1);
+ assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),base);assert.deepEqual(await h.s.loadScopeSyncCursor(h.cid),cursor);
+ assert.deepEqual(h.m.provider.to_bytes(),h.bytes);assert.equal(h.m.identity.owns_key_package_ref(h.m.provider,h.ref),true);
+});
+test('other member profile enrichment does not enqueue or retire self Ready',async()=>{
+ const h=await profileFixture();h.m.subscribeE2eeState(h.cid,()=>{});h.channel.state.members.other={user:{id:'other'}};
+ h.c._updateMemberWatcherReferences({id:'other',name:'other profile'});await drainPresentation(h);
+ assert.equal(h.m.getE2eeState(h.cid).state,'ready');assert.equal(h.m._subscribedReadyRevalidation,null);
+});
+for(const mode of ['unsubscribe','route','membership','destroy','manual'])test('self profile Ready wake respects '+mode+' while actual provider writer is pending',async()=>{
+ const h=await profileFixture(),seen=[],entered=latch(),gate=latch();
+ const sub=h.m.subscribeE2eeState(h.cid,s=>seen.push(s.state));
+ const writer=h.m._withProviderMutation(async()=>{entered.resolve();await gate.promise;});const settled=writer.catch(()=>{});
+ await entered.promise;h.c._updateMemberWatcherReferences({id:h.user,name:'same profile'});
+ const work=h.m._subscribedReadyRevalidation;
+ if(mode==='unsubscribe')sub.unsubscribe();
+ if(mode==='route')h.c.baseURL='http://replacement.invalid';
+ if(mode==='membership')h.channel.state.members[h.user]={user:{id:h.user},created_at:'replacement'};
+ if(mode==='manual')h.m._recoveryControls.set(h.cid,control(h,'9','manual_intervention_required'));
+ if(mode==='destroy')h.m.destroy();
+ gate.resolve();await settled;await work;
+ assert.notEqual(seen.at(-1),'ready');
+ if(mode!=='destroy')assert.notEqual(h.m.getE2eeState(h.cid)?.state,'ready');
+});
+
+test('normal channel query replacing the self member readset wakes a fresh local Ready proof',async()=>{
+ const h=await profileFixture(),seen=[];let sub;try{
+  sub=h.m.subscribeE2eeState(h.cid,s=>seen.push(s.state));
+  const prior=h.m._commonStates.get(h.cid),base=await h.s.loadProviderCheckpoint(h.user,h.device),cursor=await h.s.loadScopeSyncCursor(h.cid);let proofs=0;
+  const refresh=h.m.refreshE2eeState.bind(h.m);h.m.refreshE2eeState=async(...args)=>{proofs++;return refresh(...args)};
+  for(let n=0;n<3;n++)h.channel._initializeState({channel:{cid:h.cid,type:'team',id:h.user,mls_enabled:true,members:[structuredClone(h.channel.state.members[h.user])]},membership:structuredClone(h.channel.state.membership),messages:[],pinned_messages:[]});
+  assert.throws(()=>prior.proof(),e=>e.code==='recovery_scope_changed');assert.notEqual(h.m.getE2eeState(h.cid).state,'ready');
+  await drainPresentation(h);assert.equal(h.m.getE2eeState(h.cid).state,'ready');assert.equal(seen.at(-1),'ready');assert.equal(proofs,1);
+  assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),base);assert.deepEqual(await h.s.loadScopeSyncCursor(h.cid),cursor);assert.deepEqual(h.m.provider.to_bytes(),h.bytes);
+ }finally{sub?.unsubscribe();h.m.destroy();await h.s.close();}
+});
+
+for(const stop of ['unsubscribe','route','manual'])test('normal query readset wake keeps '+stop+' guard while the provider is held',async()=>{
+ const h=await profileFixture(),seen=[],entered=latch(),release=latch();let writer,sub;try{
+  sub=h.m.subscribeE2eeState(h.cid,s=>seen.push(s.state));
+  writer=h.m._withProviderMutation(async()=>{entered.resolve();await release.promise});await entered.promise;
+  h.channel._initializeState({channel:{cid:h.cid,type:'team',id:h.user,mls_enabled:true,members:[structuredClone(h.channel.state.members[h.user])]},membership:structuredClone(h.channel.state.membership),messages:[],pinned_messages:[]});
+  if(stop==='unsubscribe')sub.unsubscribe();if(stop==='route')h.c.baseURL='http://replacement.invalid';
+  if(stop==='manual')h.m._recoveryControls.set(h.cid,control(h,'9','manual_intervention_required'));
+  release.resolve();await writer;await drainPresentation(h);assert.notEqual(h.m.getE2eeState(h.cid)?.state,'ready');assert.notEqual(seen.at(-1),'ready');
+ }finally{release.resolve();if(writer)await writer;sub?.unsubscribe();h.m.destroy();await h.s.close();}
 });

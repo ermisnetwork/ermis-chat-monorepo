@@ -548,7 +548,7 @@ test('client owns one cold-start sync despite duplicate channel hydration signal
     browser: false,
     logger: () => {},
   });
-  client.activeChannels = { 'team:channel-1': {} };
+  client.activeChannels = { 'team:channel-1': { initialized: true } };
   client.encryptionManager = { initialized: true, handleChannelsHydrated() {} };
   let restoreCalls = 0;
   let syncCalls = 0;
@@ -617,6 +617,7 @@ test('real Client cold-start cannot turn an unsupported adapter cached snapshot 
     [cid]: {
       cid,
       id: 'channel-1',
+      initialized: true,
       type: 'team',
       data: { mls_enabled: true },
       _handleChannelEvent() {},

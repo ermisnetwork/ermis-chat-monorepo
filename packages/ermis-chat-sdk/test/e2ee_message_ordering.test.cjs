@@ -30,7 +30,7 @@ function makeSendHarness() {
     },
   };
   // Isolate ordering projection; real atomic cryptography is exercised by application_send_checkpoint.
-  manager._prepareApplicationSend = async r => { const next = {...r, mls_ciphertext: manager.encryptMessage(), mls_epoch: 4}; await manager.storage.savePendingE2eeSend(next); return next; };
+  manager._prepareApplicationSend = async r => { const next = {...r, mls_ciphertext: manager.encryptMessage(), mls_epoch: 4}; await manager.storage.savePendingE2eeSend(next); manager._freshApplicationSendRecords.add(next); return next; };
   manager.e2eeClient = {
     sendMessage: async (_channelType, _channelId, body) => {
       sentBodies.push(body);

@@ -58,6 +58,39 @@ or retry an external commit already accepted by Bellboy.
 
 ## Client Configuration
 
+### Browser device identity
+
+<details><summary>Change log</summary>
+
+- `2026-10-27`: `connectUser` resolves the account's IndexedDB device binding before WebSocket/auth initialization. Retained private state restores its ID; an empty private database reserves a fresh ID even when localStorage survives. Existing database names and private identity bytes are preserved. Incomplete or ambiguous private tuples return `provider_checkpoint_invalid`; do not clear them or retry with a different identity to hide this error.
+
+</details>
+
+LocalStorage is an optional cache. A sole legacy account provider/identity tuple can recover its device ID without the cache; concurrent tabs reserve one ID atomically. Global migration-only storage retains its legacy ID lookup, but a fresh account database does not inherit that ID without private state. Custom encryption storage adapters remain responsible for their own durable device binding.
+
+### Resuming a pending External Join
+
+<details><summary>Change log</summary>
+
+- `2026-10-27`: Replaying the same typed `NoMatchingKeyPackage` failure retains its existing Welcome/history work and does not request a fresh pool refill; the native package match is still re-evaluated, so a valid private restore can use that Welcome. Normal readiness can share its own freshly validated evidence checkpoint while the exact owner proof remains current; any intervening revision requires fresh validation.
+
+- `2026-10-27`: A targeted Welcome following its same-epoch Add Commit in a sync page is validated through the existing durable Welcome path before replaying that Commit. A missing group retains its exact protocol cursor and reaches typed recovery admission. Startup isolates recoverable scope failures, and installed groups still run their normal Ready proof when public discovery has exhausted its budget. Discovery attempts and recovery deadlines are unchanged. If own Commit replay activates the original join UUID before its HTTP completes, one owner-guarded readiness continuation runs after both original operations settle; replacement owners remain fenced.
+
+- `2026-10-27`: Channel readiness/open and unsealed sends can resume a retained join using the original operation UUID. A server-accepted operation must finish native rebase, durable activation, sync and Ready before application encryption. Unknown results retain the same candidate; manual/deadline/provider/owner fences and existing exact ciphertext stay protected. No candidate deletion, new operation UUID or background polling is required.
+
+</details>
+
+### Isolated local environments
+
+<details><summary>Change log</summary>
+
+- `2026-10-23`: Optional `ErmisChatOptions.localStorageNamespace` isolates IndexedDB and the browser device-ID cache. Omit it to keep existing names and data. An explicit namespace imports no legacy device ID; use a stable, different value for each backend snapshot. It does not change API keys, user IDs, project IDs or authentication. Never copy private providers between active environments.
+
+</details>
+
+Uhm development builds can select this option with `VITE_QA_DATA_SCOPE`. Use an OAuth-authorized browser origin (currently `localhost:3001` for the local test setup). Changing this value starts a separate local identity; it does not repair or erase another namespace.
+
+
 ### MLS mutations with delayed delivery
 
 <details><summary>Change log</summary>
@@ -136,11 +169,20 @@ const client = ErmisChat.getInstance({
 
 ## Legacy USS And End User v1
 
+<details>
+<summary>Change log</summary>
+
+- `2026-10-27`: Refresh failures with HTTP401/403, or HTTP400 carrying `REFRESH_TOKEN_INVALID`/`REFRESH_TOKEN_EXPIRED`/`invalid_grant`, emit `auth.refresh_failed` with `reason: refresh_rejected`. This applies only to the generated refresh operation; business400 and generic WS1006 are not logout authority. Expired access credentials are refreshed before the first WS handshake using an untrusted `exp` scheduling hint (Ermis millisecond epoch or second epoch). A1006 close uses that refresh path only when expiry is locally evident. Normal transport errors keep reconnect behavior.
+  - Integrator action: retire pending bootstrap callbacks and return to login on `refresh_rejected`/missing refresh credentials. Preserve private MLS storage and exact pending intents/ciphertexts. Retry network/5xx without clearing authentication credentials. Reconnect callbacks from a retired host/account cannot refresh a newer session.
+  - Compatibility/default: existing single-flight refresh and deadlines remain; no issuer/signing/token validation change. The application owns logout and presentation. JWT decoding never authenticates a user or establishes MLS Ready.
+
+</details>
+
 - Legacy routes include `/auth/get_otp_new`, `/auth/otp_login`, `/refresh_token`, legacy users/profile, SSE, wallet, and external auth. V1 routes include `/auth/otp/request`, `/auth/otp/verify`, `/auth/google`, `/auth/refresh`, and targeted users/profile endpoints.
 - Auth responses expose compatibility aliases: `success: true`, `token = access_token`, and top-level `user_id` when v1 returns it or when it can be read from the JWT payload.
 - `ErmisChat` calls the selected adapter's refresh endpoint when authenticated HTTP requests return 401, 403, or `TOKEN_EXPIRED`, then retries the original request once. Concurrent HTTP/WS failures share one refresh promise; WebSocket close `4001`/`JWT Expire` refreshes, reconnects, and recovers state without surfacing a handshake error to the app.
 - Use `refreshToken: () => localStorage.getItem('refresh_token')` and `onTokenRefresh` to keep app storage in sync with rotated access/refresh tokens.
-- Successful refreshes dispatch `auth.token_refreshed`; terminal refresh failures dispatch `auth.refresh_failed` so applications can clear the session.
+- Successful refreshes dispatch `auth.token_refreshed`; failures dispatch `auth.refresh_failed`. Only `refresh_rejected` (refresh HTTP401/403 or explicitly typed legacy400) or `missing_refresh_token` requires login; untyped400/timeout/offline/5xx remain retryable. Uhm navigates directly to login with an expiry message, retires late bootstrap work and preserves IndexedDB MLS state.
 - V1 user APIs call `/users/:id`, `/users/batch`, `/users/search`, `/users/me`, and `/users/me/avatar`. The v1 adapter throws `UnsupportedEndUserFeatureError` with code `END_USER_FEATURE_UNSUPPORTED` for wallet, SSE, unrestricted listing, external auth, and `about_me`.
 - `searchUsers(query, limit)` is the preferred overload. The legacy `searchUsers(page, page_size, name)` overload maps to `q=name&limit=page_size` and ignores `page`.
 - The SDK no longer preloads all users after `connectUser()`. Browser cache hydration remains local-only, and cache entries are refreshed by `queryUser`, `getBatchUsers`, `searchUsers`, message/member enrichment, `updateProfile`, and `uploadAvatar`.
@@ -202,6 +244,16 @@ await client.connectUser(user, externalToken, { externalAuth: true }); // legacy
 </details>
 
 ## E2EE Channel Helpers
+
+<details>
+<summary>Change log</summary>
+
+- `2026-10-27`: IndexedDB advertises `readyObservationVersion:1`. A fresh native-validated Ready checkpoint uses `provider_observation:true` with the unchanged captured provider revision, full transactional private/scoped CAS and full readback. It writes Ready/admission metadata only. Other adapters keep the v2 provider writer. Genuine private writes still invalidate every old Ready proof; previously Ready scopes with live subscribers receive coalesced fresh local admission after the writer releases. No join or polling is triggered by that continuation.
+  - Reason: observing Ready for one group must not manufacture a private revision and invalidate other groups or discovery jobs.
+  - Integrator action: custom adapters must advertise the capability only if they implement the unchanged-revision observation contract; keep all private, receipt, owner and metadata checks. Snapshots remain informational; send still requires async admission.
+  - Compatibility/default: additive optional capability, no IndexedDB schema/key migration or backend contract change; v2-only adapters retain existing behavior.
+
+</details>
 
 - `channel.removeMembersE2ee(members, e2eeOptions)` removes other members from an E2EE channel with an encryption commit and sends `self_remove: false`.
 - `channel.leaveChannelE2ee(userId)` self-leaves an E2EE channel by sending `self_remove: true`; this path does not include an encryption commit from the leaving user.
@@ -318,3 +370,78 @@ Final producer/consumer regressions:1138 PASS/0 FAIL/0 skipped/0 cancelled acros
 </details>
 
 Completed-upload generation admission (2026-10-21): a pending upload's recorded `group_generation` remains the intended instance before ciphertext exists. Application preparation compares that retained generation after Ready admission and again inside the provider checkpoint queue. A replacement group cannot silently receive an older completed upload intent; retain its UUID/manifest with terminal `old_group_generation`, no HTTP or new ratchet. Existing exact-ciphertext reconciliation priority is unchanged; no extra network roundtrip or wire/persistence migration.
+
+Application send acknowledgement remains independent of temporary private-provider writer availability after HTTP completes. Pre-dispatch owner, generation, pending-mutation and provider checks remain enforced. An existing durable `sent` checkpoint reuses its saved message projection without a second POST; a missing projection fails closed. Queued continuation skips `sent`. Neither acceptance nor cache reuse grants common Ready, and unknown HTTP outcomes still retain original ciphertext/UUID for reconciliation. See the [canonical LOR journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md); cross-request server idempotence and physical-peer acceptance remain separate gates.
+
+
+### Reconnect synchronization ownership
+
+With `recoverStateOnReconnect: false`, the SDK leaves channel-state recovery to
+the consumer and does not open an automatic MLS synchronization barrier. MLS
+receive still verifies its generation, epoch, AAD and durable private checkpoint.
+With automatic recovery enabled, the pre-handshake barrier prevents realtime
+receive from racing protocol catch-up. Failed or skipped recovery releases only
+an unclaimed barrier; an actual `EncryptionManager.sync()` owns its barrier until
+that work settles. A retired WebSocket cannot refresh or recover a replacement
+connection.
+
+Internal integrations that call `markSyncStart()` before asynchronous setup may
+use its returned release callback in `finally`. The callback retires only that
+unclaimed ticket and cannot close another session's barrier or active MLS sync.
+It does not publish Ready, advance cursors, authorize re-encryption or cancel a
+server-accepted operation. Existing callers that immediately run `sync()` may
+ignore the return value. See the [canonical LOR implementation](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md)
+and [ledger](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_ledger.md).
+
+`EncryptionApiClient.scopeSync()` bounds each mixed protocol/application read to
+5 seconds, including token readiness, authentication renewal/retry and completion
+of the response body. A status of HTTP 200 alone does not complete synchronization.
+An expired/incomplete transport reports retryable `transport_unknown`; it does
+not advance cursors, retry a scope request automatically, or establish Ready.
+The existing sync owner releases its receive gate through its failure path.
+A later normal sync reuses the durable cursor; authentication errors, malformed
+responses and ownership changes retain their existing validation and fences.
+This budget changes only the scope read, not mutation acceptance or retry rules.
+See the [canonical LOR plan](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md)
+and [ledger](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_ledger.md)
+for the partial-body reproduction, retained failures and final-artifact gates.
+
+Checkpoint and AAD byte equality scans every byte. Aligned buffers use native
+32-bit views; unaligned buffers retain the DataView path, and both compare the
+remaining tail bytes. No reference, cached hash or digest replaces an exact
+comparison. This reduces CPU cost without changing provider/CAS proof semantics,
+readiness policy, channel loading or network fanout.
+
+
+Self profile enrichment replaces the member presentation object and invalidates an
+existing Ready proof. The SDK publishes the computed pending state and coalesces
+a fresh native/checkpoint validation for installed groups with live E2EE state
+subscribers. Validation waits for existing sync, send and private-writer owners;
+a changed session, route, membership or subscription retires the old wake. Other
+users' profile changes do not schedule self Ready validation. This continuation
+does not fetch or join missing groups and makes no recovery-policy, cursor or
+wire-format change.
+
+<details>
+<summary>Change log</summary>
+
+- `2026-10-29`: Self member presentation updates wake subscribed Ready validation.
+  - Reason: profile enrichment could leave a usable local group in `repairing` until another action requested a proof.
+  - Integrator action: retain `subscribeE2eeState` for the active view; continue to await normal send admission.
+  - Compatibility/default: same native validation, durable CAS and membership/auth fences; no additional HTTP or missing-group bootstrap.
+
+</details>
+
+
+Application reconciliation and returning channel views (2026-10-30): newly sealed pending sends keep `application_http_started:false`; first-dispatch CAS sets true before physical HTTP. Unknown/restarted or legacy sealed rows use `/message/reconcile` only with exact UUID/ciphertext. A valid canonical message/sequence is required; missing history remains unresolved. Direct sends wait within the existing five-second budget for the actual provider checkpoint, then recheck scope/cancel/generation/mutation guards; no native handle survives an await or HTTP. Existing queued wake semantics remain. Returning subscribers to installed groups with `local_checkpoint_pending` schedule the existing local Ready revalidation worker, which validates native state and full durable proof without network or private ratchet changes. Unsubscribe/owner/manual/uncertain-provider fences remain; stale pending is emitted before asynchronous revalidation. Whole native/mixed-version/performance acceptance remains separately tracked in the canonical LOR ledger.
+
+
+Local outgoing presentation (2026-10-30): cached plaintext is not a send receipt. `IndexedDBEncryptionStorage.getMessages` and bulk `loadMessages` read the returned page/UUIDs and their exact pending-send records in one readonly transaction. Unsettled new sends project as sending/error, including canceled/terminal outcomes; update operations and other CID/account records do not relabel accepted history. Channel cache seeding preserves that status. Reads do not rewrite the pending intent, private provider or cache. A positive normal server acceptance still settles the existing outcome atomically. No schema/IDB version or wire changes.
+
+Channel-list transport (2026-10-30): `queryChannels` bounds its HTTP read at five seconds, including an unfinished response body, while retaining shorter positive caller timeouts. Failure rejects through the existing ChannelList error/retry path; it does not hydrate partial snapshots or automatically resend. Auth scope continues to reject late responses from a retired session. This deadline does not certify the network or make global MLS Ready.
+
+### Retrying failed encrypted messages
+
+`channel.retryMessage(messageId)` routes E2EE retries through the original durable pending intent. It retains the UUID and original payload. A sealed operation with an unknown HTTP outcome reconciles the exact ciphertext; it never falls through to the ordinary plaintext endpoint. Missing, foreign-channel, canceled, terminal and edit checkpoints fail closed. Failed unsealed intents remain failed after reload until explicit retry; interrupted work and sealed reconciliation retain their existing resume behavior. Acceptance comes from the server receipt, not the retry button or optimistic cache.
+
+After an accepted rebootstrap installs the founder group, the SDK observes and durably binds authoritative recovery control through the existing bounded discovery flow. Failed observation retains the installed group; a newer manual/repair control still governs it. No identity reset or second rebootstrap is implied. See the [canonical LOR journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md).

@@ -278,6 +278,8 @@ export type ErmisChatOptions = AxiosRequestConfig & {
    * Base URL for ermis_end_user API. Root host, /v1, and /uss/v1 inputs normalize to /uss/v1.
    */
   userBaseURL?: string;
+  /** Opt-in local cache/MLS namespace. Does not change account identity or API credentials. */
+  localStorageNamespace?: string;
   browser?: boolean;
   enableInsights?: boolean;
   /**

@@ -115,6 +115,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
   private _isTokenExpiredCloseEvent(event: WebSocket.CloseEvent) {
     return (
       Number(event.code) === chatCodes.WS_TOKEN_EXPIRED ||
+      (Number(event.code) === 1006 && this.client.tokenManager?.isAccessTokenExpired?.() === true) ||
       event.reason === 'JWT Expire' ||
       this._isTokenExpiredMessage(event.reason)
     );
@@ -131,6 +132,11 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
 
     this.isDisconnected = false;
 
+    // An expired access credential may be rejected during HTTP upgrade, leaving
+    // only browser-synthesized 1006. Avoid that handshake when exp is already known.
+    const refreshedBeforeConnect = this.client.tokenManager?.isAccessTokenExpired?.() === true;
+    if (refreshedBeforeConnect) await this.client.refreshAccessToken();
+
     try {
       const healthCheck = await this._connect();
       this.consecutiveFailures = 0;
@@ -140,13 +146,13 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
       this.isHealthy = false;
       this.consecutiveFailures += 1;
 
-      if (this._isTokenExpiredError(error)) {
+      if (this._isTokenExpiredError(error) && !refreshedBeforeConnect) {
         this._log('connect() - WS failure due to expired token; refreshing token before retry', {}, 'warn');
         await this.client.refreshAccessToken();
         const healthCheck = await this._connect();
         this.consecutiveFailures = 0;
         this._log(`connect() - Re-established ws connection after token refresh: ${healthCheck}`);
-      } else if (!error.isWSFailure) {
+      } else if (this._isTokenExpiredError(error) || !error.isWSFailure) {
         // API rejected the connection and we should not retry
         throw new Error(
           JSON.stringify({
@@ -348,6 +354,12 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
    */
   async _reconnect(options: { interval?: number; refreshToken?: boolean } = {}): Promise<void> {
     this._log('_reconnect() - Initiating the reconnect');
+    const client = this.client;
+    const authScope = (client as any)._captureAuthScope?.();
+    const isCurrent = () => this.client === client && client.wsConnection === this &&
+      (!authScope?.isCurrent || authScope.isCurrent());
+    if (!isCurrent()) return;
+    let releaseUnclaimedSyncGate: (() => void) | undefined;
 
     // only allow 1 connection at the time
     if (this.isConnecting || this.isHealthy) {
@@ -363,6 +375,7 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     }
     // reconnect, or try again after a little while...
     await sleep(interval);
+    if (!isCurrent()) return;
 
     // Check once again if by some other call to _reconnect is active or connection is
     // already restored, then no need to proceed.
@@ -382,20 +395,24 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
     this._destroyCurrentWSConnection();
 
     try {
-      if (options.refreshToken) {
+      if (options.refreshToken || this.client.tokenManager?.isAccessTokenExpired?.() === true) {
         this._log('_reconnect() - Refreshing token before websocket reconnect');
         await this.client.refreshAccessToken();
       }
-      if (this.client.encryptionManager?.initialized) {
-        this.client.encryptionManager.markSyncStart();
+      if (!isCurrent()) return;
+      if (client.recoverStateOnReconnect && client.encryptionManager?.initialized) {
+        releaseUnclaimedSyncGate = client.encryptionManager.markSyncStart();
       }
       await this._connect();
+      if (!isCurrent()) return;
       this._log('_reconnect() - Waiting for recoverCallBack');
-      await this.client.recoverState();
+      await client.recoverState();
+      if (!isCurrent()) return;
       this._log('_reconnect() - Finished recoverCallBack');
 
       this.consecutiveFailures = 0;
     } catch (error: any) {
+      if (!isCurrent()) return;
       this.isHealthy = false;
       this.consecutiveFailures += 1;
 
@@ -409,6 +426,8 @@ export class StableWSConnection<ErmisChatGenerics extends ExtendableGenerics = D
 
         this._reconnect();
       }
+    } finally {
+      releaseUnclaimedSyncGate?.();
     }
     this._log('_reconnect() - == END ==');
   }

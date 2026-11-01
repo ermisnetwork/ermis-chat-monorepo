@@ -5,8 +5,47 @@ const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const {webcrypto} = require('node:crypto');
 require('fake-indexeddb/auto'); globalThis.crypto ??= webcrypto;
-const {EncryptionManager, IndexedDBEncryptionStorage, E2eeClient, sha256Hex} = require('../dist/encryption/index.cjs');
+const {EncryptionManager, IndexedDBEncryptionStorage, E2eeClient, sha256Hex, validateExternalJoinReadyBase} = require('../dist/encryption/index.cjs');
 let unique = 0, wasmPromise;
+
+test('generation-one exact join becomes Ready while retaining a failed generation-zero Welcome', async () => {
+  const f = await welcomeFixture();
+  const held = {created_at: '2026-10-08T00:00:00Z', event_id: 'before-old-welcome'};
+  await f.m._processChannelEvents(f.cid, [f.event], held);
+  const oldWelcome = await f.storage.loadWelcomeRecoveryCheckpoint(f.cid, f.device, f.cursor.event_id);
+  assert.equal(oldWelcome.status, 'pending_external_join');
+  const groupId = crypto.getRandomValues(new Uint8Array(32));
+  const current = f.wasm.Group.create_with_group_id(f.a, f.alice, groupId);
+  await f.m._applyRecoveryControl(f.cid, {group_generation: 1, group_id: groupId, current_epoch: 0,
+    incident_id: null, recovery_action: 'none', recovery_revision: '2', repair_retry_until: null});
+  f.api.getGroupInfo = async () => ({group_info: current.export_group_info(f.a, f.alice, true),
+    epoch: Number(current.epoch()), hash: 'generation-one', is_stale: false, group_generation: 1, group_id: groupId});
+  const post = f.api.externalJoin;
+  f.api.externalJoin = async (...args) => {await post(...args); current.process_message(f.a, args[2].commit);};
+  await join(f);
+  const base = await f.storage.loadExternalJoinWorkBase(f.user, f.device, f.cid, '');
+  assert.equal(base.accepted.group_generation, 1);
+  assert.equal(base.state.cleanup.marker.status, 'active');
+  assert.equal(base.state.cleanup.metadata['external_join_readiness:' + f.cid].welcome_generation, 0);
+  const before = sha256Hex(f.m.provider.to_bytes());
+  validateExternalJoinReadyBase(base, f.user, f.device, f.cid, sha256Hex(f.m.identity.signature_public_key()));
+  assert.equal(sha256Hex(f.m.provider.to_bytes()), before, 'validation cannot rewrite private state');
+  assert.deepEqual(await f.storage.loadWelcomeRecoveryCheckpoint(f.cid, f.device, f.cursor.event_id), oldWelcome);
+  assert.equal(await f.storage.loadScopeSyncCursor(f.cid), null, 'no cursor jump through old history');
+  const plaintext = new TextEncoder().encode('generation-one live message');
+  const ciphertext = f.m.groups.get(f.cid).create_message(f.m.provider, f.m.identity, plaintext);
+  assert.deepEqual(current.process_application_message(f.a, ciphertext).content, plaintext);
+  for (const generation of [undefined, -1, 1, 2]) {
+    const invalid = structuredClone(base);
+    invalid.state.cleanup.metadata['external_join_readiness:' + f.cid].welcome_generation = generation;
+    assert.throws(() => validateExternalJoinReadyBase(invalid, f.user, f.device, f.cid,
+      sha256Hex(f.m.identity.signature_public_key())), e => e.code === 'canonical_receipt_pending');
+  }
+  const invalid = structuredClone(base); invalid.accepted.acceptance_context.payload_sha256 = '0'.repeat(64);
+  assert.throws(() => validateExternalJoinReadyBase(invalid, f.user, f.device, f.cid,
+    sha256Hex(f.m.identity.signature_public_key())), e => e.code === 'acceptance_metadata_invalid');
+  await f.storage.close();
+});
 async function fixture() {
   const wasm = await (wasmPromise ??= (async () => {
     const w = await import(pathToFileURL(path.resolve(__dirname, '../src/encryption/wasm/openmls_wasm.js')));

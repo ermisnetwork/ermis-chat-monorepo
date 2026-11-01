@@ -121,3 +121,103 @@ test('new-generation independent peer decrypt continues after retained old-histo
  const message={id:randomUUID(),cid:f.cid,group_generation:1,mls_epoch:1,user:{id:'current-peer'},created_at:'2026-10-20T00:00:00Z'};message.mls_ciphertext=peerGroup.create_message(peerProvider,peer,new TextEncoder().encode(JSON.stringify({text:'new generation still decrypts'})));
  assert.equal((await f.m.processE2eeMessage(f.cid,message)).text,'new generation still decrypts');assert.equal(f.m._groupGenerations.get(f.cid).group_generation,1);peerGroup.free();peer.free();peerProvider.free();await f.close();
 });
+
+
+// A supported manual-recovery reconnect must not strand real MLS receives
+// behind an early global gate which no synchronization work will claim.
+test('manual reconnect does not orphan the sync gate before real MLS receive',async()=>{
+ const f=await fixture(),{ErmisChat,StableWSConnection}=require('../dist/index.cjs');let receive;
+ try{
+  const c=new ErmisChat('fixture-key','00000000-0000-4000-8000-000000000083','http://fixture.invalid',{browser:false,logger:()=>{},recoverStateOnReconnect:false});
+  c._setUser({id:f.user});c.deviceId=f.device;await c.tokenManager.setTokenOrProvider('fixture-not-a-jwt',{id:f.user});c.encryptionManager=f.m;f.m.client=c;
+  const ch=c.channel('team',f.cid.slice(5));ch.initialized=true;ch.data={type:'team',mls_enabled:true};ch.state.membership={user:{id:f.user},channel_role:'member'};ch.state.members[f.user]=ch.state.membership;
+  const connection=new StableWSConnection({client:c});c.wsConnection=connection;connection._connect=async()=>{};
+  const msg=f.message('actual MLS after manual reconnect');
+  await connection._reconnect({interval:0});
+  receive=f.m.processE2eeMessage(f.cid,msg);await new Promise(setImmediate);
+  assert.equal(f.m.isSyncing(),false,'no automatic synchronization was requested; an early orphan gate blocks all native receives');
+  assert.equal((await receive).text,'actual MLS after manual reconnect');
+  assert.equal((await f.m.storage.loadMessage(msg.id)).mls_application_checkpoint_version,1);
+ }finally{
+  // Failed baseline cleanup only: release its orphan so this test never leaves
+  // a pending native task. The assertions above must pass without this step.
+  if(f.m.isSyncing()&&!f.m._syncWorkPromise)f.m._finishSyncGate();
+  if(receive)await receive.catch(()=>{});
+  await f.close();
+ }
+});
+
+async function reconnectHost(f,{recover=true,channel=true}={}){
+ const {ErmisChat,StableWSConnection}=require('../dist/index.cjs');
+ const c=new ErmisChat('fixture-key','00000000-0000-4000-8000-000000000083','http://fixture.invalid',{browser:false,logger:()=>{},recoverStateOnReconnect:recover});
+ c._setUser({id:f.user});c.deviceId=f.device;await c.tokenManager.setTokenOrProvider('fixture-not-a-jwt',{id:f.user});c.encryptionManager=f.m;f.m.client=c;
+ if(channel){const ch=c.channel('team',f.cid.slice(5));ch.initialized=true;ch.data={type:'team',mls_enabled:true};ch.state.membership={user:{id:f.user},channel_role:'member'};ch.state.members[f.user]=ch.state.membership;}
+ const connection=new StableWSConnection({client:c});c.wsConnection=connection;connection._connect=async()=>{};
+ return{c,connection,StableWSConnection};
+}
+for(const failure of ['no_channels','handshake','before_sync'])test('reconnect releases only its unclaimed gate after '+failure+'; real receive survives',async()=>{
+ const f=await fixture();try{
+  const h=await reconnectHost(f,{channel:failure!=='no_channels'});
+  if(failure==='handshake')h.connection._connect=async()=>{throw Error('controlled handshake failure');};
+  if(failure==='before_sync')h.c.recoverState=async()=>{throw Error('controlled recovery failed before sync claim');};
+  const message=f.message('receive after '+failure);await h.connection._reconnect({interval:0});
+  assert.equal(f.m.isSyncing(),false);assert.equal((await f.m.processE2eeMessage(f.cid,message)).text,'receive after '+failure);
+ }finally{if(f.m.isSyncing()&&!f.m._syncWorkPromise)f.m._finishSyncGate();await f.close();}
+});
+test('retired transport cannot refresh, handshake or open a sync gate on replacement connection',async()=>{
+ const f=await fixture();try{
+  const h=await reconnectHost(f),replacement=new h.StableWSConnection({client:h.c});let refresh=0,connect=0;
+  h.c.refreshAccessToken=async()=>{refresh++;};h.connection._connect=async()=>{connect++;};
+  const old=h.connection._reconnect({interval:0,refreshToken:true});h.c.wsConnection=replacement;await old;
+  assert.equal(refresh,0);assert.equal(connect,0);assert.equal(f.m.isSyncing(),false);
+  assert.equal((await f.m.processE2eeMessage(f.cid,f.message('receiver after transport replacement'))).text,'receiver after transport replacement');
+ }finally{if(f.m.isSyncing()&&!f.m._syncWorkPromise)f.m._finishSyncGate();await f.close();}
+});
+for(const host of ['reconnect','performSync'])test(host+' cleanup cannot release a gate claimed by real manager sync',async()=>{
+ const f=await fixture(),release=latch();let sync,receive;
+ try{
+  const h=await reconnectHost(f);f.m._syncAndRestoreGroups=async()=>{await release.promise;};
+  if(host==='reconnect'){
+   h.c.recoverState=async()=>{sync=f.m.sync();throw Error('controlled sibling recovery failure');};
+   await h.connection._reconnect({interval:0});
+  }else{
+   h.c._performSyncInternal=async()=>{throw Error('controlled standard metadata failure');};
+   await assert.rejects(h.c.performSync(true),/controlled standard metadata failure/);sync=f.m._syncWorkPromise;
+  }
+  assert.ok(sync);assert.equal(f.m.isSyncing(),true);
+  const msg=f.message('receive after owned sync');let finished=false;receive=f.m.processE2eeMessage(f.cid,msg).then(x=>{finished=true;return x;});await new Promise(setImmediate);
+  assert.equal(finished,false);assert.equal(await f.m.storage.loadMessage(msg.id),null);
+  release.open();await sync;assert.equal((await receive).text,'receive after owned sync');assert.equal(f.m.isSyncing(),false);
+ }finally{release.open();if(sync)await sync.catch(()=>{});if(receive)await receive.catch(()=>{});await f.close();}
+});
+test('old early gate ticket cannot finish a replacement semantic gate',async()=>{
+ const f=await fixture();try{
+  const h=await reconnectHost(f),old=f.m.markSyncStart(),oldPromise=f.m.waitForSync();
+  h.c.baseURL='https://replacement.fixture.invalid';const current=f.m.markSyncStart(),currentPromise=f.m.waitForSync();
+  assert.notEqual(currentPromise,oldPromise);old();assert.equal(f.m.isSyncing(),true);assert.equal(f.m.waitForSync(),currentPromise);
+  current();await oldPromise;await currentPromise;assert.equal(f.m.isSyncing(),false);
+ }finally{if(f.m.isSyncing()&&!f.m._syncWorkPromise)f.m._finishSyncGate();await f.close();}
+});
+
+test('partial HTTP200 scope body fails within its read budget without cursor advance or stranding a real MLS receive',{timeout:12000},async()=>{
+ const http=require('node:http'),{ErmisChat,EncryptionApiClient}=require('../dist/index.cjs'),f=await fixture(),arrived=latch();let response,syncOutcome,receive;const sockets=new Set();let posts=0;
+ const server=http.createServer((req,res)=>{req.resume();req.on('end',()=>{if(req.url.split('?')[0]!=='/v1/e2ee/scope_sync'){res.writeHead(500);res.end('{}');return;}posts++;response=res;res.writeHead(200,{'Content-Type':'application/json'});res.write('{"channels":{');arrived.open();});});server.on('connection',s=>{sockets.add(s);s.on('close',()=>sockets.delete(s));});
+ try{
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
+  const c=new ErmisChat('fixture-key','00000000-0000-4000-8000-000000000083',origin,{browser:false,logger:()=>{}});c._setUser({id:f.user});c.deviceId=f.device;await c.tokenManager.setTokenOrProvider('fixture-not-a-jwt',{id:f.user});c.axiosInstance.defaults.proxy=false;c.encryptionManager=f.m;f.m.client=c;f.m.e2eeClient=new EncryptionApiClient(c);
+  const ch=c.channel('team',f.cid.slice(5));ch.initialized=true;ch.data={type:'team',mls_enabled:true};ch.state.membership={user:{id:f.user},channel_role:'member'};ch.state.members[f.user]=ch.state.membership;
+  f.m._wasmArtifactSha256=require('node:crypto').createHash('sha256').update(fs.readFileSync(path.resolve(__dirname,'../src/encryption/wasm/openmls_wasm_bg.wasm'))).digest('hex');await f.m._writeMlsMutation(f.cid,null);
+  const before=await f.m.storage.loadAllScopeSyncCursors(),base=await f.m.storage.loadProviderCheckpoint(f.user,f.device),message=f.message('actual MLS after partial scope transport failure');
+  syncOutcome=f.m.sync().then(()=>({ok:true}),e=>({ok:false,code:e.code,stack:e.stack}));await Promise.race([arrived.promise,syncOutcome.then(x=>{throw Error('Fixture sync ended before partial HTTP: '+x.code+' '+x.stack);}),new Promise((_,reject)=>setTimeout(()=>reject(Error('Fixture HTTP request did not reach server')),1500))]);
+  let received=false;receive=f.m.processE2eeMessage(f.cid,message).then(value=>{received=true;return value;});await new Promise(r=>setTimeout(r,25));
+  assert.equal(f.m.isSyncing(),true);assert.equal(received,false);assert.equal(await f.m.storage.loadMessage(message.id),null);assert.deepEqual(await f.m.storage.loadProviderCheckpoint(f.user,f.device),base);
+  const result=await Promise.race([syncOutcome,new Promise(r=>setTimeout(()=>r({pending:true}),5700))]);
+  assert.equal(result.pending,undefined,'an incomplete200 body must not hold the global crypto gate indefinitely');assert.equal(result.ok,false);assert.equal(result.code,'transport_unknown');
+  assert.equal(posts,1,'transport expiry must not silently retry the scope request');assert.equal(f.m.isSyncing(),false);assert.equal(f.m._syncWorkPromise,null);assert.deepEqual(await f.m.storage.loadAllScopeSyncCursors(),before);
+  assert.equal((await receive).text,'actual MLS after partial scope transport failure');assert.equal((await f.m.storage.loadMessage(message.id)).mls_application_checkpoint_version,1);
+ }finally{
+  // End the real failed transport only after assertions; baseline must fail
+  // without a manual release of the SDK sync gate or a simulated Ready result.
+  response?.destroy();for(const socket of sockets)socket.destroy();if(syncOutcome)await syncOutcome;if(receive)await receive.catch(()=>{});await new Promise(r=>server.close(r));await f.close();
+ }
+});

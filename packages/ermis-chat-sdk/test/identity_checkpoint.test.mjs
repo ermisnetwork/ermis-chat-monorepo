@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import {createRequire} from 'node:module';
 import {indexedDB,IDBKeyRange} from 'fake-indexeddb';
 import init,* as wasm from '../src/encryption/wasm/openmls_wasm.js';
-const {EncryptionManager,IndexedDBEncryptionStorage,sha256Hex}=createRequire(import.meta.url)('../dist/index.cjs');
+const {ErmisChat,EncryptionManager,IndexedDBEncryptionStorage,sha256Hex}=createRequire(import.meta.url)('../dist/index.cjs');
 globalThis.indexedDB=indexedDB;globalThis.IDBKeyRange=IDBKeyRange;
 await init({module_or_path:fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url))});
 let seq=0;
@@ -84,4 +84,97 @@ for(const stage of ['private-read','provider-present'])test(`durable identity lo
 });
 test('metadata-only signer replacement before final initialization checkpoint cannot publish usable runtime',async()=>{
  const user='startup-'+(++seq),s=new IndexedDBEncryptionStorage(user),m=new EncryptionManager(),events=[];startup(m);const winner=new Uint8Array([9]);m._resumeExternalJoinCandidates=async()=>{await s.saveIdentity(user,'device',winner);};const client={deviceId:'device',dispatchEvent:e=>events.push(e)};await assert.rejects(m.initialize(withRegistration(client),user,{storage:s,wasmModule:wasm,wasmArtifactSha256:sha256Hex(fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url)))}),e=>e.code==='provider_checkpoint_conflict');assert.equal(m.initialized,false);assert.equal(client.encryptionManager,undefined);assert.deepEqual(events,[]);assert.deepEqual(await s.loadIdentity(user,'device'),winner);assert.equal(m._providerPersistenceUncertain,true);
+});
+
+
+test('checkpoint-bound device survives missing or changed localStorage without rotating signer',async()=>{
+ const h=await fixture(true);await h.m._initIdentity();const identity=h.m.identity.to_bytes();
+ const previous=globalThis.localStorage,values=new Map();globalThis.localStorage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
+ try{
+  assert.equal(await h.s.getDeviceId(),'device');
+  for(const key of values.keys())values.set(key,'web-wrong-id');
+  assert.equal(await h.s.getDeviceId(),'device');
+  assert.deepEqual(await h.s.loadIdentity(h.user,'device'),identity);
+ }finally{globalThis.localStorage=previous;await h.s.close();}
+});
+
+function browserLogin(){
+ const c=new ErmisChat('fixture-key','fixture-project','http://example.test',{browser:true,logger:()=>{}});
+ c._hydrateUserCacheFromStorage=async()=>{};c._restorePendingStandardAttachmentUploads=async()=>{};
+ let opened=0;c.openConnection=async()=>{opened++;c.wsConnection={disconnect:async()=>{}};return {type:'health.check'};};
+ c.queryUser=async id=>({id});return {c,opened:()=>opened};
+}
+test('connectUser selects account checkpoint before WS and restores actual signer despite another account cache',async()=>{
+ const h=await fixture(true);await h.m._initIdentity();const bytes=h.m.identity.to_bytes();
+ const previous=globalThis.localStorage,values=new Map([['ermis_device_id','web-other-account']]);
+ globalThis.localStorage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
+ const {c,opened}=browserLogin();
+ try{
+  await c.connectUser({id:h.user},'fixture-token');
+  assert.equal(opened(),1);assert.equal(c.deviceId,'device');
+  const restored=new EncryptionManager();startup(restored);
+  // This case owns login/identity admission; refill and cold-sync have separate
+  // real-WASM coverage and must not race the ownership assertion below.
+  restored.reconcileKeyPackageOwnership=async()=>{};c._scheduleHydratedColdStartSync=()=>{};
+  await restored.initialize(withRegistration(c),h.user,{storage:h.s,wasmModule:wasm,wasmArtifactSha256:sha256Hex(fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url)))});
+  assert.equal(restored.deviceId,'device');assert.deepEqual(restored.identity.to_bytes(),bytes);
+  await restored._withProviderMutation(async provider=>assert.equal(restored.identity.owns_key_package_ref(provider,h.m.ref),true));
+  await c.disconnectUser();
+ }finally{await c.messageStorage?.close();await h.s.close();globalThis.localStorage=previous;}
+});
+test('connectUser rejects incomplete account binding before WS or token writes',async()=>{
+ const user='corrupt-login-'+(++seq),s=new IndexedDBEncryptionStorage(user),db=await s.getDB();
+ await new Promise((resolve,reject)=>{const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put('lost-device',`device_binding:${user}`);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});
+ const {c,opened}=browserLogin();
+ try{await assert.rejects(c.connectUser({id:user},'fixture-token'),e=>e.code==='provider_checkpoint_invalid');assert.equal(opened(),0);assert.equal(c.userID,undefined);assert.equal(c.tokenManager.token,undefined);}
+ finally{await c.messageStorage?.close();await s.close();}
+});
+
+test('explicit environment scopes preserve default identity and restore only their own signer',async()=>{
+ const previous=globalThis.localStorage,values=new Map([['ermis_device_id','web-production']]);
+ globalThis.localStorage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
+ const user='environment-'+(++seq),stores=[];
+ const storage=scope=>{const s=new IndexedDBEncryptionStorage(user,undefined,scope);stores.push(s);return s;};
+ try{
+  const original=storage(),a=storage('snapshot-A'),b=storage('snapshot-B');
+  const idA=await a.getDeviceId(),idB=await b.getDeviceId();
+  assert.notEqual(idA,idB);assert.notEqual(idA,'web-production');
+  const initialize=async(s,device)=>{const m=new EncryptionManager();Object.assign(m,{storage:s,userId:user,deviceId:device,_injectedWasm:wasm});await m._initWasm();await m._initIdentity();return m;};
+  const prod=await initialize(original,'web-production'),ma=await initialize(a,idA),mb=await initialize(b,idB);
+  assert.equal(await original.getDeviceId(),'web-production');
+  const prodIdentity=prod.identity.to_bytes(),aIdentity=ma.identity.to_bytes();
+  assert.notDeepEqual(aIdentity,prodIdentity);assert.notDeepEqual(aIdentity,mb.identity.to_bytes());
+  assert.equal(await a.loadIdentity(user,idB),null);assert.equal(await b.loadIdentity(user,idA),null);
+  for(const key of [...values.keys()])if(key!=='ermis_device_id')values.delete(key);
+  const reopened=storage('snapshot-A');assert.equal(await reopened.getDeviceId(),idA);
+  const restored=await initialize(reopened,idA);assert.deepEqual(restored.identity.to_bytes(),aIdentity);
+  assert.equal(values.get('ermis_device_id'),'web-production');
+  assert.deepEqual(await original.loadIdentity(user,'web-production'),prodIdentity);
+ }finally{for(const s of stores)await s.close();globalThis.localStorage=previous;}
+});
+
+test('fresh private DB ignores stale global ID; concurrent tabs reserve one ID and DB loss gets a new ID',async()=>{
+ const previous=globalThis.localStorage,values=new Map([['ermis_device_id','web-registered-old']]);
+ globalThis.localStorage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
+ const user='fresh-install-'+(++seq),a=new IndexedDBEncryptionStorage(user),b=new IndexedDBEncryptionStorage(user);
+ try{
+  const [first,other]=await Promise.all([a.getDeviceId(),b.getDeviceId()]);
+  assert.equal(first,other);assert.notEqual(first,'web-registered-old');
+  await a.close();await b.close();
+  await new Promise((resolve,reject)=>{const r=indexedDB.deleteDatabase(`ermis_data_${user}`);r.onsuccess=resolve;r.onerror=()=>reject(r.error);});
+  assert.notEqual(await a.getDeviceId(),first);
+ }finally{await a.close();await b.close();globalThis.localStorage=previous;}
+});
+test('legacy private tuple survives lost cache and preference access denied without signer rotation',async()=>{
+ const h=await fixture(true),before=await h.s.loadIdentity(h.user,'device'),previous=globalThis.localStorage;
+ globalThis.localStorage={getItem:()=>{throw Error('cache denied');},setItem:()=>{throw Error('cache denied');}};
+ try{assert.equal(await h.s.getDeviceId(),'device');await h.m._initIdentity();assert.deepEqual(h.m.identity.to_bytes(),before);}
+ finally{await h.s.close();globalThis.localStorage=previous;}
+});
+for(const mode of ['orphan','ambiguous'])test(`legacy ${mode} private tuples reject instead of creating a replacement`,async()=>{
+ const h=await fixture(true);
+ if(mode==='orphan'){const db=await h.s.getDB();await new Promise((resolve,reject)=>{const tx=db.transaction('identity','readwrite');tx.objectStore('identity').delete(`${h.user}:device`);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
+ else{await h.s.saveProviderState(h.user,'other',h.bytes);await h.s.saveIdentity(h.user,'other',h.identity);}
+ try{await assert.rejects(h.s.getDeviceId(),e=>e.code==='provider_checkpoint_invalid');assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,'device'),h.cp);}
+ finally{await h.s.close();}
 });

@@ -123,3 +123,64 @@ test('changed account/signer after HTTP discards response; write/readback failur
   assert.equal(f.m.getRecoveryControlSnapshot(f.cid).recovery_action,'manual_intervention_required');
   await f.storage.close();
 });
+
+async function acceptedFounderFixture() {
+  const f=await fixture();
+  await f.m._applyRecoveryControl(f.cid,f.state('1','waiting_for_evidence'));
+  const peerProvider=new f.wasm.Provider(),peer=new f.wasm.Identity(peerProvider,'founder-peer');
+  const candidateProvider=f.wasm.Provider.from_bytes(f.m.provider.to_bytes());
+  const groupId=crypto.getRandomValues(new Uint8Array(32));
+  const candidate=f.wasm.Group.create_with_group_id(candidateProvider,f.m.identity,groupId);
+  const bundle=candidate.add_members(candidateProvider,f.m.identity,[peer.key_package(peerProvider)]);candidate.merge_pending_commit(candidateProvider);candidate.save_state(candidateProvider);
+  const receiver=f.wasm.Group.join_with_welcome(peerProvider,bundle.welcome,candidate.export_ratchet_tree());
+  const operation=crypto.randomUUID(),checkpoint={user_id:f.user,device_id:f.device,provider_bytes:candidateProvider.to_bytes(),
+    marker:{cid:f.cid,group_generation:1,group_id:groupId,current_epoch:1,status:'candidate',operation_id:operation,updated_at:Date.now()}};
+  const receipt={operation_id:operation,cid:f.cid,state:'activated',reason:'repair_timeout_elapsed',expected_generation:0,current_generation:1,current_epoch:1,group_id:groupId,membership_version:'one',activated_at:new Date().toISOString(),retryable:false,delivery_pending:0};
+  const current={...f.state('2','none',1),group_id:groupId,current_epoch:1,incident_id:null,repair_retry_until:null,state:'activated',reason:'repair_timeout_elapsed',retryable:false};
+  let reads=0;
+  f.m.e2eeClient={discoverMlsRecovery:async()=>{reads++;return{protocol_version:1,capability:current.capability,states:{[f.cid]:{result:'state',generation:current,group_info_refresh:null}}}},
+    claimMlsRebootstrap:async()=>assert.fail('accepted founder cannot claim a new generation'),completeMlsRebootstrap:async()=>assert.fail('accepted founder cannot complete a new operation')};
+  return{...f,checkpoint,receipt,current,receiver,peerProvider,reads:()=>reads};
+}
+test('accepted founder adopts authoritative control and validates real Ready without reload',async()=>{
+ const f=await acceptedFounderFixture();try{
+  const result=await f.m._reconcileRebootstrapReceipt(f.cid,f.checkpoint,f.receipt);
+  assert.equal(result.status,'recovered');assert.equal(f.reads(),1);
+  const control=await f.storage.loadRecoveryControlCheckpoint(f.cid,f.device);
+  assert.equal(control.group_generation,1);assert.equal(control.recovery_revision,'2');
+  assert.equal((await f.m.refreshE2eeState(f.cid)).state,'ready');
+  const plaintext=new TextEncoder().encode('founder live without reload');
+  const cipher=f.m.groups.get(f.cid).create_message(f.m.provider,f.m.identity,plaintext);
+  assert.deepEqual(f.receiver.process_application_message(f.peerProvider,cipher).content,plaintext);
+ }finally{await f.storage.close()}
+});
+test('postactivation discovery failure retains installed founder and cannot claim local Ready',async()=>{
+ const f=await acceptedFounderFixture();try{
+  f.m.e2eeClient.discoverMlsRecovery=async()=>{throw Error('discovery offline')};
+  const result=await f.m._reconcileRebootstrapReceipt(f.cid,f.checkpoint,f.receipt);
+  assert.equal(result.status,'waiting_for_repair');assert.equal(f.m.getEpoch(f.cid),1);assert.equal(f.m.groups.has(f.cid),true);
+  assert.equal((await f.storage.loadRecoveryControlCheckpoint(f.cid,f.device)).group_generation,0);
+  assert.notEqual((await f.m.refreshE2eeState(f.cid)).state,'ready');
+ }finally{await f.storage.close()}
+});
+test('postactivation retired account cannot apply late recovery control',async()=>{
+ const f=await acceptedFounderFixture();let entered,release;const waiting=new Promise(r=>entered=r),gate=new Promise(r=>release=r);
+ try{f.m.e2eeClient.discoverMlsRecovery=async()=>{entered();await gate;return{protocol_version:1,capability:f.current.capability,states:{[f.cid]:{result:'state',generation:f.current,group_info_refresh:null}}}};
+  const work=f.m._reconcileRebootstrapReceipt(f.cid,f.checkpoint,f.receipt);await waiting;f.m.userId='replacement';release();
+  await assert.rejects(work,e=>e.code==='recovery_scope_changed');assert.equal((await f.storage.loadRecoveryControlCheckpoint(f.cid,f.device)).group_generation,0);
+ }finally{release?.();await f.storage.close()}
+});
+
+for(const action of ['manual_intervention_required','repair','waiting_for_evidence'])test('newer postactivation '+action+' control overrides old success receipt',async()=>{
+ const f=await acceptedFounderFixture();try{
+  f.current.recovery_action=action;f.current.recovery_revision='3';f.current.incident_id='00000000-0000-4000-8000-000000000002';f.current.state='repairing';f.current.repair_retry_until=action==='repair'?'2027-01-01T00:00:00Z':null;
+  const result=await f.m._reconcileRebootstrapReceipt(f.cid,f.checkpoint,f.receipt);
+  assert.equal(result.status,action==='manual_intervention_required'?'manual_intervention_required':'waiting_for_repair');
+  assert.equal(result.retryable,action==='repair');assert.equal(f.m.groups.has(f.cid),true);
+  assert.equal((await f.storage.loadRecoveryControlCheckpoint(f.cid,f.device)).recovery_action,action);
+  assert.equal(f.events.some(e=>e.type==='e2ee.state_changed'&&e.state==='ready'),false,'receipt intake itself cannot publish Ready');
+  // Manual authority remains closed. Repair/evidence may prove an already
+  // installed valid native group through the normal validation path.
+  assert.equal((await f.m.refreshE2eeState(f.cid)).state,action==='manual_intervention_required'?'manual_intervention_required':'ready');
+ }finally{await f.storage.close()}
+});

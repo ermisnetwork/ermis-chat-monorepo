@@ -40,6 +40,8 @@
     "missing_refresh_token": "Thiếu mã làm mới phiên"
   },
   "chat": {
+    "channel_restore_slow": "Cuộc trò chuyện đang tải lâu hơn dự kiến và sẽ tự mở khi sẵn sàng.",
+    "channel_restore_failed": "Không thể mở cuộc trò chuyện. Bạn có thể thử lại.",
     "loading_messages": "Đang tải...",
     "retry_load": "Thử tải lại tin nhắn",
     "load_missing": "Tải {{count}} tin nhắn còn thiếu",
@@ -515,6 +517,9 @@
     "confirm_reset_encrypted_message": "Bạn có chắc chắn muốn đặt lại phiên mã hóa cho kênh này?"
   },
   "message_actions": {
+    "retry_send": "Gửi lại",
+    "retry_error": "Không thể gửi lại tin nhắn này",
+
     "reply": "Trả lời",
     "forward": "Chuyển tiếp",
     "more": "Thêm",

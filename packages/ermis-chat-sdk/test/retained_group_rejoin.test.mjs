@@ -7,10 +7,11 @@ import { createRequire } from 'node:module';
 import { indexedDB, IDBKeyRange } from 'fake-indexeddb';
 import init, * as wasm from '../src/encryption/wasm/openmls_wasm.js';
 const require = createRequire(import.meta.url);
-const { EncryptionManager, IndexedDBEncryptionStorage } = require('../dist/index.cjs');
+const { EncryptionManager, IndexedDBEncryptionStorage, sha256Hex } = require('../dist/index.cjs');
 const { PartialWelcomeJoinCoordinator } = require('../dist/encryption/index.cjs');
 globalThis.indexedDB = indexedDB; globalThis.IDBKeyRange = IDBKeyRange;
-await init({ module_or_path: fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url)) });
+const wasmBinary = fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url));
+await init({ module_or_path: wasmBinary });
 let seq = 0;
 function harness(generation = 1) {
   const cid = 'team:retained-rejoin-' + (++seq), user = 'checkpoint-' + seq;
@@ -19,8 +20,12 @@ function harness(generation = 1) {
   const group = generation ? wasm.Group.create_with_group_id(provider, identity, groupId) : wasm.Group.create_with_cid(provider,identity,cid);
   const storage = new IndexedDBEncryptionStorage(user);
   async function manager(p = provider, g = group) {
+    // This historical fixture installs an existing signer directly. Its private
+    // identity must also be present for the current full checkpoint proof.
+    if (!await storage.loadIdentity(user, 'device')) await storage.saveIdentity(user, 'device', identity.to_bytes());
     const m = new EncryptionManager();
     m.initialized = true; m.userId = user; m.deviceId = 'device'; m.provider = p; m.identity = identity; m.storage = storage;
+    m._wasmArtifactSha256 = sha256Hex(wasmBinary);
     const durable = await storage.loadProviderCheckpoint(user, 'device');
     m._providerDurableBase = {storage, userId:user, deviceId:'device', revision:durable.revision};
     m.groups.set(cid, g);
@@ -51,6 +56,8 @@ async function setup(generation = 1) {
   m._groupGenerations.get(h.cid).current_epoch = 1;
   await m._persistProviderStrict();
   await h.storage.saveGroupState(h.cid, m._groupGenerations.get(h.cid));
+  await m._applyRecoveryControl(h.cid,{group_generation:generation,group_id:generation?h.groupId:null,
+    recovery_action:'none',recovery_revision:'1',incident_id:null,repair_retry_until:null});
   await h.storage.saveMessage({ id: 'kept-'+h.cid, cid: h.cid, content_type: 'standard', text: 'retained plaintext', created_at: new Date().toISOString() });
   const snapshot = { cid:h.cid, message_id:'cipher-'+h.cid, version:'cipher-'+h.cid, kind:'application',
     message:{id:'cipher-'+h.cid,mls_epoch:2,mls_ciphertext:new Uint8Array([9])}, mls_epoch:2 };
@@ -162,7 +169,9 @@ test('definitive initial rejection restores reloaded old group; retry rejection 
   assert.equal(Number(restoredGroup.epoch()),1);
   assert.deepEqual(restoredGroup.group_id(),h.groupId);
   assert.equal((await receiveApplication(h.m, h.cid, priorCipher)).text,'prior-ratchet');
-  assert.ok((await prepareFixtureSend(h.m, h.cid, 'restored state remains usable')).mls_ciphertext.length > 0);
+  // Rollback keeps the old ratchet usable for receive, but the public GI is at
+  // epoch2 while this group remains at1. It cannot authorize fresh encryption.
+  await assert.rejects(prepareFixtureSend(h.m, h.cid, 'must wait for missing predecessor'),e=>e.code==='local_repair_pending');
   assert.equal((await h.storage.listPendingMlsMutations()).length,0);
   h.m.e2eeClient.externalJoin=async()=>{throw new Error('unknown response');};
   await h.m._resetEncryptedChannelState('team',h.cid.slice(5),h.cid,h.cid);
@@ -177,6 +186,8 @@ test('provider repair gate defers concurrent sync/receive/send and preserves ano
   const h=await setup();const second='team:retained-other',secondId=new Uint8Array([20,21,22]);
   const other=wasm.Group.create_with_group_id(h.m.provider,h.identity,secondId);
   h.m.groups.set(second,other);h.m._groupGenerations.set(second,{cid:second,group_generation:1,group_id:secondId,current_epoch:0,status:'active',updated_at:Date.now()});
+  await h.m._persistProviderStrict();await h.storage.saveGroupState(second,h.m._groupGenerations.get(second));
+  await h.m._applyRecoveryControl(second,{group_generation:1,group_id:secondId,recovery_action:'none',recovery_revision:'1',incident_id:null,repair_retry_until:null});
   let release,entered;const pendingSend=new Promise(resolve=>{release=resolve;});const started=new Promise(resolve=>{entered=resolve;});
   const send=h.m.e2eeClient.externalJoin;h.m.e2eeClient.externalJoin=async(...args)=>{entered();await pendingSend;return send(...args);};
   const work=h.m._resetEncryptedChannelState('team',h.cid.slice(5),h.cid,h.cid);await started;

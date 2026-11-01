@@ -49,6 +49,7 @@ import { useSyncStatus } from '@/hooks/useSyncStatus'
 import { useRecoveryGateAcknowledgement } from '@/hooks/useRecoveryGateAcknowledgement'
 import { isSafari } from '@/utils/browser'
 import { toast } from 'sonner'
+import { beginUrlChannelRestore } from '@/utils/urlChannelRestore'
 
 const CHANNEL_LIST_FILTERS = { type: ['messaging', 'team'] } as any
 const UHM_MESSAGE_RENDERERS = { signal: UhmSignalMessage, poll: UhmPollMessage }
@@ -131,6 +132,9 @@ export function ChatPage() {
   // Track if we are currently restoring from URL
   const isRestoringRef = useRef(false)
   const [hasAttemptedRestore, setHasAttemptedRestore] = useState(false)
+  const [urlRestoreNotice, setUrlRestoreNotice] = useState<'none' | 'slow' | 'error'>('none')
+  const [urlRestoreAttempt, setUrlRestoreAttempt] = useState(0)
+  const previouslySelectedCidRef = useRef<string | null>(null)
   // Skeleton stays until the message list signals it has loaded and scrolled.
   // This prevents the "double flash" gap between skeleton unmount and fadeListIn.
   const [isMessageListReady, setIsMessageListReady] = useState(false)
@@ -151,12 +155,23 @@ export function ChatPage() {
     }
 
     isRestoringRef.current = true
+    setUrlRestoreNotice('none')
+    const ownerUser = client.userID, ownerHost = client.baseURL
+    const auth = (client as any)._captureAuthScope?.()
+    let disposed = false
+    const isCurrent = () => {
+      if (disposed || client.userID !== ownerUser || client.baseURL !== ownerHost) return false
+      try { auth?.assertCurrent(); return true } catch { return false }
+    }
 
     /** Apply the restored channel to React state.
      *  Do NOT call markChannelAsFullyQueried here — queryChannels only loads
      *  ~1 message per channel (sidebar preview). useChannelMessages must still
      *  call channel.query() to load the full 25 messages for the chat view. */
     const applyChannel = (ch: ChannelType) => {
+      if (!isCurrent()) return
+      isRestoringRef.current = false
+      setUrlRestoreNotice('none')
 
       if (isTopicChannel(ch) && ch.data?.parent_cid) {
         const parentCid = ch.data.parent_cid as string
@@ -177,83 +192,54 @@ export function ChatPage() {
       }
 
       setHasAttemptedRestore(true)
-      requestAnimationFrame(() => { isRestoringRef.current = false })
     }
 
-    // Fast path: channel already hydrated (e.g. queryChannels finished first)
     const cid = `${channelType}:${channelId}`
-    const cached = client.activeChannels[cid]
-    if (cached?.initialized) {
-      applyChannel(cached)
-      return
-    }
-
-    // Normal path: wait for ChannelList's queryChannels to finish
-    let resolved = false
-    const tryResolve = () => {
-      if (resolved) return false
-      const ch = client.activeChannels[cid]
-      if (ch?.initialized) {
-        resolved = true
-        sub.unsubscribe()
-        applyChannel(ch)
-        return true
-      }
-      return false
-    }
-
-    const sub = client.on('channels.queried', () => {
-      if (tryResolve()) return
-
-      // Fallback: channel not in queryChannels results — fetch individually
-      resolved = true
-      sub.unsubscribe()
-      const fallback = client.channel(channelType, channelId)
-      fallback.watch({ messages: { limit: 25 } })
-        .then(() => applyChannel(fallback))
-        .catch((e) => {
-          console.error("Failed to restore channel from URL:", e)
-          setHasAttemptedRestore(true)
-          requestAnimationFrame(() => { isRestoringRef.current = false })
-        })
-    })
-
-    // Safety: recheck immediately in case the event already fired before we subscribed
-    const recheckId = setTimeout(() => tryResolve(), 100)
-
-    // Ultimate safety net: if restore doesn't complete in 5s, drop the skeleton
-    const safetyId = setTimeout(() => {
-      if (!resolved) {
-        resolved = true
-        sub.unsubscribe()
-        console.warn('[ChatPage] URL restore timed out after 5s, dropping skeleton overlay')
+    const cancel = beginUrlChannelRestore<ChannelType>({
+      getCached: () => {
+        if (!isCurrent()) throw new Error('URL restore owner changed')
+        const ch = client.activeChannels[cid]
+        return ch?.initialized ? ch : undefined
+      },
+      subscribe: onChannels => {
+        const sub = client.on('channels.queried', onChannels)
+        return () => sub.unsubscribe()
+      },
+      loadFallback: async () => {
+        if (!isCurrent()) throw new Error('URL restore owner changed')
+        const fallback = client.channel(channelType, channelId)
+        await fallback.watch({ messages: { limit: 25 } })
+        return fallback
+      },
+      onReady: applyChannel,
+      onSlow: () => { if (isCurrent()) setUrlRestoreNotice('slow') },
+      onError: () => {
+        if (!isCurrent()) return
+        isRestoringRef.current = false
+        setUrlRestoreNotice('error')
         setHasAttemptedRestore(true)
-        requestAnimationFrame(() => { isRestoringRef.current = false })
-      }
-    }, 5000)
-
+      },
+    })
     return () => {
-      sub.unsubscribe()
-      clearTimeout(recheckId)
-      clearTimeout(safetyId)
+      disposed = true
+      cancel()
+      isRestoringRef.current = false
     }
-  }, [client?.userID, searchParams, activeChannel, hasAttemptedRestore, setActiveChannel])
+  }, [client, client?.userID, searchParams, activeChannel, hasAttemptedRestore, setActiveChannel, urlRestoreAttempt])
 
-  // 2. Sync active channel to URL when it changes
+  // 2. Sync actual selection to URL. A slow/failed initial restore is not a deselection.
   useEffect(() => {
-    if (isRestoringRef.current || !hasAttemptedRestore) return;
-
+    if (isRestoringRef.current) return
     if (activeChannel?.id) {
-      const currentId = searchParams.get('channel')
-      const currentType = searchParams.get('type')
+      previouslySelectedCidRef.current = activeChannel.cid
+      if (!hasAttemptedRestore) setHasAttemptedRestore(true)
+      const currentId = searchParams.get('channel'), currentType = searchParams.get('type')
       if (currentId !== activeChannel.id || currentType !== activeChannel.type) {
         setSearchParams({ channel: activeChannel.id, type: activeChannel.type }, { replace: true })
       }
-    } else {
-      const currentId = searchParams.get('channel')
-      if (currentId) {
-        setSearchParams({}, { replace: true })
-      }
+    } else if (hasAttemptedRestore && previouslySelectedCidRef.current) {
+      previouslySelectedCidRef.current = null
+      if (searchParams.get('channel')) setSearchParams({}, { replace: true })
     }
   }, [activeChannel?.id, activeChannel?.type, setSearchParams, searchParams, hasAttemptedRestore])
 
@@ -854,7 +840,7 @@ export function ChatPage() {
   // This ensures the user never sees intermediate scroll jumps or blank states.
   const hasUrlChannel = !!searchParams.get('channel')
   const isSyncing = syncState.status === 'syncing'
-  const isRestoringFromUrl = hasUrlChannel && (!hasAttemptedRestore || isSyncing || !isMessageListReady)
+  const isRestoringFromUrl = hasUrlChannel && urlRestoreNotice === 'none' && (!hasAttemptedRestore || isSyncing || !isMessageListReady)
 
   const CustomMemberItem = useCallback((props: any) => (
     <UhmMemberItem {...props} onUserClick={setProfileUserId} />
@@ -1060,6 +1046,16 @@ export function ChatPage() {
           {/* Connection Status Banner — Slack-style, non-blocking, outside Channel to always render */}
           <ConnectionStatusBanner status={status} onRetry={retryConnection} />
           {/* Sync Progress Banner — shows during active sync */}
+          {hasUrlChannel && urlRestoreNotice !== 'none' && !activeChannel && (
+            <div role="status" data-url-channel-restore={urlRestoreNotice} className="pointer-events-auto flex items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+              <span>{t(urlRestoreNotice === 'slow' ? 'chat.channel_restore_slow' : 'chat.channel_restore_failed')}</span>
+              {urlRestoreNotice === 'error' && (
+                <button type="button" onClick={() => { setHasAttemptedRestore(false); setUrlRestoreAttempt(value => value + 1) }} className="shrink-0 font-semibold text-violet-600">
+                  {t('app.retry', 'Try Again')}
+                </button>
+              )}
+            </div>
+          )}
           <SyncStatusBanner syncState={syncState} />
         </div>
 

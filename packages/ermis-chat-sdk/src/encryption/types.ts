@@ -527,6 +527,7 @@ export interface EncryptionStorageAdapter {
   saveApplicationReceiveCheckpoint?(checkpoint: ApplicationReceiveCheckpoint): Promise<void>;
   verifyApplicationReceiveCheckpoint?(checkpoint: ApplicationReceiveCheckpoint): Promise<boolean>;
   loadMessage(messageId: string): Promise<StoredMessage | null>;
+  /** Bulk display read; unresolved outgoing outcomes must retain sending/error presentation. */
   loadMessages?(messageIds: string[]): Promise<Map<string, StoredMessage>>;
   deleteMessage(messageId: string): Promise<void>;
   deleteMessagesBefore(cid: string, seqThreshold: number): Promise<void>;
@@ -636,6 +637,8 @@ export interface EncryptionStorageAdapter {
   saveGroupInfoRefreshCheckpoint?(userId: string, deviceId: string, cid: string, expected: MlsReadyBase,
     next: StoredGroupInfoRefreshRequest[], assertOwner: () => void, workScope?: GroupInfoWorkScope): Promise<void>;
   readyCheckpointVersion?: 2;
+  /** saveMlsReadyCheckpoint accepts provider_observation with an unchanged private revision. */
+  readyObservationVersion?: 1;
   loadMlsReadyBase?(userId: string, deviceId: string, cid: string): Promise<MlsReadyBase>;
   saveMlsReadyCheckpoint?(checkpoint: MlsReadyCheckpoint, assertOwner: () => void): Promise<void>;
   verifyMlsReadyCheckpoint?(checkpoint: MlsReadyCheckpoint): Promise<boolean>;
@@ -797,6 +800,8 @@ export interface UploadKeyPackagesResponse extends APIResponse {
 }
 
 export interface KeyPackageCountResponse extends APIResponse {
+  /** Advisory: upload one durable, locally-owned package to repair signer routing. */
+  signer_recovery_required?: boolean;
   remaining: number;
   target?: number;
   low_watermark?: number;
@@ -819,7 +824,7 @@ export interface MemberKeyPackages {
   user_id: string;
   key_packages: DeviceKeyPackage[];
 }
-export type KeyPackageConsumeOutcome = 'selected' | 'empty' | 'only_near_expiry' | 'expiry_unknown' | 'contended';
+export type KeyPackageConsumeOutcome = 'selected' | 'empty' | 'only_near_expiry' | 'expiry_unknown' | 'contended' | 'signer_conflict';
 export interface DeviceKeyPackageOutcome {
   device_id: string;
   outcome: KeyPackageConsumeOutcome;
@@ -1320,6 +1325,8 @@ export interface PendingE2eeAttachmentUploadCheckpoint {
 }
 
 export interface PendingE2eeSendRecord {
+  /** Durable dispatch fence. Absent legacy values have an unknown HTTP outcome. */
+  application_http_started?: boolean;
   /** Original intent reserved before Ready or ciphertext; never an acceptance claim. */
   unsealed_intent_version?: 1;
   /** Omitted legacy records use the create-message endpoint. */

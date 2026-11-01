@@ -293,7 +293,6 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         return response;
       } catch (error: any) {
         const isOfflineError =
-          !error.response ||
           error.code === 'ERR_NETWORK' ||
           error.isWSFailure ||
           !this.getClient().wsConnection?.isHealthy;
@@ -508,11 +507,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (existingPendingSend) existingPendingSend.phase = phase;
     else this._pendingE2eeAttachmentSends.set(record.message_id, { localAttachments, phase });
 
+    const restoredStatus = record.status === 'failed_retryable' ? 'error' : 'sending';
     const existing = this._findLocalMessageById(record.message_id);
     if (existing) {
       this.state.updateMessageById(record.message_id, (message) => ({
         ...message,
-        status: 'sending',
+        status: restoredStatus,
         attachments: ((message.attachments?.length || 0) === localAttachments.length
           ? message.attachments || []
           : localAttachments
@@ -541,7 +541,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         upload_status: phase,
         upload_progress: progressByAttachment[index] || 0,
       })),
-      status: 'sending',
+      status: restoredStatus,
       created_at: createdAt,
       updated_at: createdAt,
       user: this.getClient().user,
@@ -1263,6 +1263,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async retryMessage(messageId: string) {
     const stateMsg = this.state.messages.find((m) => m.id === messageId);
     if (!stateMsg) throw new Error(`Message ${messageId} not found in state`);
+
+    const client = this.getClient(), manager = client.encryptionManager;
+    const authScope = (client as any)._captureAuthScope?.();
+    const pendingE2ee = await manager?.storage?.loadPendingE2eeSend?.(messageId);
+    authScope?.assertCurrent();
+    if (client.encryptionManager !== manager) throw new Error('Retry account changed');
+    // A durable encrypted obligation also fences a stale/missing channel flag.
+    // E2EE must never fall through to the standard plaintext retry endpoint.
+    if (pendingE2ee || stateMsg.mls_ciphertext != null || this._isEffectiveE2ee()) {
+      if (!manager?.retryPendingE2eeSend) throw new Error('Encrypted retry requires an initialized encryption manager');
+      return await manager.retryPendingE2eeSend(messageId, this.cid);
+    }
 
     if (this._pendingStandardAttachmentSends.has(messageId)) {
       this.state.updateMessageById(messageId, (msg) => ({
@@ -4566,7 +4578,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 message.user_id === this.getClient().userID ? this.getClient().user : undefined,
               ),
               quoted_message: quotedMessage,
-              status: 'received',
+              status: message.status || 'received',
             } as MessageResponse<ErmisChatGenerics>;
           })
           .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
@@ -4589,6 +4601,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     updateUserIds?: (id: string) => void,
   ) {
     const { state: clientState, user, userID } = this.getClient();
+    const previousMembership = this.state.membership, previousSelf = userID ? this.state.members[userID] : undefined;
     this.getClient().encryptionManager?.observeChannelE2ee?.(state.channel.e2ee);
     // Query responses are authoritative snapshots. Apply the clear-history
     // boundary before any returned/cache message can enter ChannelState.
@@ -4704,6 +4717,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     if (state.channel.type === 'team' && state.channel.topics_enabled && state.topics) {
       const users = Object.values(this.getClient().state.users);
       this._processTopics(state.topics, users);
+    }
+
+    // An authoritative query/watch snapshot replaces the self-member objects
+    // captured by Ready proof/wake owners. Retire those owners, then let the
+    // existing local proof coordinator capture this newly applied readset.
+    if (this.state.membership !== previousMembership || (userID && this.state.members[userID] !== previousSelf)) {
+      this.getClient().encryptionManager?.handleSelfMemberReadSetUpdated?.([this.cid]);
     }
 
     return {

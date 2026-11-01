@@ -77,6 +77,20 @@ export class TokenManager<ErmisChatGenerics extends ExtendableGenerics = Default
     return this.refreshToken;
   };
 
+  /** Untrusted scheduling hint only. Bellboy uses millisecond exp; some issuers use seconds. */
+  isAccessTokenExpired = (now = Date.now()): boolean => {
+    if (!this.token || !Number.isFinite(now)) return false;
+    try {
+      const parts = this.token.replace(/^Bearer\s+/i, '').split('.');
+      if (parts.length !== 3 || parts[1].length > 16384) return false;
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const payload = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')));
+      if (typeof payload.exp !== 'number' || !Number.isSafeInteger(payload.exp) || payload.exp <= 0) return false;
+      const expiresAt = payload.exp >= 100000000000 ? payload.exp : payload.exp * 1000;
+      return now >= expiresAt;
+    } catch { return false; }
+  };
+
   /**
    * Resets the token manager.
    */

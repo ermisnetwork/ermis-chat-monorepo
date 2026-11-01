@@ -14,6 +14,55 @@ async function fixture(generation=0){
  const calls=[];m.e2eeClient={getMlsGenerationState:async()=>({group_generation:generation,group_id:generation?groupId:null,current_epoch:m.getEpoch(cid)}),sendMessage:async(t,id,body)=>{calls.push({kind:'send',body:structuredClone(body)});return{message:{id:body.message.id,created_at:'2026-10-01T00:00:00Z'}};},updateMessage:async(t,id,mid,body)=>{calls.push({kind:'update',body:structuredClone(body)});return{message:{id:mid,created_at:'2026-10-01T00:00:00Z'}};}};
  return{w,m,user,device,cid,calls,manager,groupId,loadGroup:n=>{n.groups.set(cid,generation?w.Group.load_with_group_id(n.provider,groupId):w.Group.load(n.provider,cid));n._groupGenerations.set(cid,{...m._groupGenerations.get(cid)});if(m._recoveryControls.has(cid))n._recoveryControls.set(cid,structuredClone(m._recoveryControls.get(cid)));},send:(text='fixture',id=randomUUID())=>m.sendMessage('team',cid.slice(5),cid,text,id),close:()=>m.storage.close()};
 }
+test('unknown sealed intent overrides legacy plaintext cache through storage and channel reopen',async()=>{
+ const f=await fixture(),id=randomUUID();let reopened;
+ try{
+  f.m.e2eeClient.sendMessage=async()=>{throw{response:{status:503,data:{reason:'message_delivery_unknown'}}}};
+  await assert.rejects(f.send('retained unsent',id));const pending=await f.m.storage.loadPendingE2eeSend(id),provider=f.m._activeProvider.to_bytes();
+  // Reproduce the old optimistic cache writer: text exists without delivery
+  // status or a positive server sequence. It is not an acceptance receipt.
+  await f.m.storage.saveMessage({id,cid:f.cid,user_id:f.user,text:'retained unsent',content_type:'standard',type:'regular',created_at:'2026-10-30T00:00:00Z'});
+  reopened=new IndexedDBEncryptionStorage(f.user);
+  const rows=await reopened.getMessages(f.cid,25);assert.equal(rows.find(x=>x.id===id).status,'error');
+  assert.equal((await reopened.loadMessages([id])).get(id).status,'error','targeted React cache refresh must use the same pending outcome');
+  const {ErmisChat}=require('../dist/index.cjs'),c=new ErmisChat('fixture','project','http://fixture.invalid',{browser:false,logger:()=>{}});
+  c._setUser({id:f.user});c.deviceId=f.device;c.encryptionManager=f.m;f.m.client=c;
+  const ch=c.channel('team',f.cid.slice(5));ch.data={mls_enabled:true};const loaded=new Promise(resolve=>c.on('e2ee.local_messages_loaded',resolve));
+  ch._seedE2eeStateFromLocalCache({messages:{limit:25}},'latest');await loaded;
+  assert.equal(ch.state.messages.find(x=>x.id===id).status,'error');assert.equal(ch.state.messages.find(x=>x.id===id).msg_seq,undefined);
+  assert.deepEqual(await reopened.loadPendingE2eeSend(id),pending);assert.deepEqual(f.m._activeProvider.to_bytes(),provider);
+  assert.equal((await reopened.loadMessage(id)).status,undefined,'read projection never rewrites cache as a receipt');
+ }finally{await reopened?.close();await f.close()}
+});
+for(const status of ['sending','failed_terminal','canceled'])test('pending new-send '+status+' cannot hydrate as accepted from cache',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  f.m.e2eeClient.sendMessage=async()=>{throw Error('unknown')};await assert.rejects(f.send('opaque',id));const held=await f.m.storage.loadPendingE2eeSend(id);
+  await f.m.storage.savePendingE2eeSendOutcome(held,{...held,status});await f.m.storage.saveMessage({id,cid:f.cid,user_id:f.user,text:'opaque',content_type:'standard',type:'regular',created_at:'2026-10-30T00:00:00Z',status:'received'});
+  assert.equal((await f.m.storage.getMessages(f.cid)).find(x=>x.id===id).status,status==='sending'?'sending':'error');
+  assert.equal((await f.m.storage.loadMessages([id])).get(id).status,status==='sending'?'sending':'error');
+ }finally{await f.close()}
+});
+for(const mode of ['accepted','edit','other-cid','other-account'])test('pending presentation leaves '+mode+' history unchanged',async()=>{
+ const f=await fixture(),id=randomUUID();let other;try{
+  f.m.e2eeClient.sendMessage=async()=>{throw Error('unknown')};await assert.rejects(f.send('one',id));const held=await f.m.storage.loadPendingE2eeSend(id),message={id,cid:f.cid,user_id:f.user,text:'accepted history',content_type:'standard',type:'regular',status:'received',msg_seq:100,created_at:'2026-10-30T00:00:00Z'};
+  if(mode==='accepted')await f.m.storage.savePendingE2eeSendOutcome(held,{...held,status:'sent'},message);
+  if(mode==='edit')await f.m.storage.savePendingE2eeSend({...held,operation_kind:'update'});
+  if(mode==='other-cid')await f.m.storage.savePendingE2eeSend({...held,cid:'team:other'});
+  const storage=mode==='other-account'?(other=new IndexedDBEncryptionStorage(f.user+'-other')):f.m.storage;
+  if(mode!=='accepted')await storage.saveMessage(message);
+  assert.equal((await storage.getMessages(f.cid)).find(x=>x.id===id).status,'received');
+  assert.equal((await storage.loadMessages([id])).get(id).status,'received');
+ }finally{await other?.close();await f.close()}
+});
+test('pending presentation read abort cannot return cached accepted status',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  f.m.e2eeClient.sendMessage=async()=>{throw Error('unknown')};await assert.rejects(f.send('one',id));
+  await f.m.storage.saveMessage({id,cid:f.cid,user_id:f.user,text:'one',content_type:'standard',type:'regular',status:'received',created_at:'2026-10-30T00:00:00Z'});
+  const db=await f.m.storage.openDB(),transaction=db.transaction.bind(db);db.transaction=(...args)=>{const tx=transaction(...args);queueMicrotask(()=>tx.abort());return tx};
+  await assert.rejects(f.m.storage.getMessages(f.cid));db.transaction=transaction;
+  assert.equal((await f.m.storage.getMessages(f.cid)).find(x=>x.id===id).status,'error');
+ }finally{await f.close()}
+});
 for(const cap of ['readyCheckpointVersion','saveMlsReadyCheckpoint','verifyMlsReadyCheckpoint'])test(`loaded provider without ${cap} cannot create ciphertext or POST`,async()=>{
  const f=await fixture(),id=randomUUID(),bytes=f.m.provider.to_bytes();f.m.storage[cap]=undefined;
  await assert.rejects(f.send('must be admitted',id),e=>e.code==='client_upgrade_required');
@@ -34,7 +83,7 @@ test('unknown accepted ciphertext keeps exact retry priority without new admissi
  f.m.e2eeClient.sendMessage=async(_t,_c,body)=>{sent=body.message.mls_ciphertext;return{message:{id}};};await f.send('exact',id);
  assert.deepEqual(sent,prior.mls_ciphertext);assert.equal((await f.m.storage.loadPendingE2eeSend(id)).mls_ciphertext_sha256,prior.mls_ciphertext_sha256);await f.close();
 });
-test('unsealed original intent survives Ready failure and restart with the same UUID and payload',async()=>{
+test('failed unsealed intent waits across restart for explicit retry with the same UUID and payload',async()=>{
  const f=await fixture(),id=randomUUID(),verify=f.m.storage.verifyMlsReadyCheckpoint;
  f.m.storage.readyCheckpointVersion=undefined;await assert.rejects(f.send('retained intent',id),e=>e.code==='client_upgrade_required');
  const held=await f.m.storage.loadPendingE2eeSend(id);assert.equal(held.message_id,id);assert.equal(held.payload.text,'retained intent');assert.equal(held.mls_ciphertext,undefined);
@@ -42,7 +91,7 @@ test('unsealed original intent survives Ready failure and restart with the same 
  const resumed=await f.manager();f.loadGroup(resumed);let posted;resumed.e2eeClient={sendMessage:async(_t,_c,body)=>{posted=body.message;return{message:{id}};}};
  resumed.client.channel=()=>({restorePendingE2eeAttachmentUpload:()=>{},updatePendingE2eeAttachmentUpload:()=>{},completePendingE2eeAttachmentUpload:()=>{},failPendingE2eeAttachmentUpload:()=>{}});
  let job;const process=resumed._processQueuedE2eeAttachmentMessage.bind(resumed);resumed._processQueuedE2eeAttachmentMessage=record=>(job=process(record));
- await resumed.resumePendingE2eeSends();assert.ok(job,'production resume selects the unsealed intent');await job;assert.equal(posted.id,id);assert.ok(posted.mls_ciphertext.length);assert.equal(await resumed.storage.loadPendingE2eeSend(id),null);
+ await resumed.resumePendingE2eeSends();assert.equal(job,undefined,'reload must retain an explicitly failed unsealed intent');await resumed.retryPendingE2eeSend(id,f.cid);await job;assert.equal(posted.id,id);assert.ok(posted.mls_ciphertext.length);assert.equal(await resumed.storage.loadPendingE2eeSend(id),null);
  await resumed.storage.close();await f.close();
 });
 test('unsealed intent cannot change payload or silently cross a generation',async()=>{
@@ -88,7 +137,7 @@ for(const failure of ['save','clone','abort','verify'])test(`${failure} failure 
  if(failure==='verify')s.verifyEncryptionSyncCheckpoint=async()=>false;
  await assert.rejects(f.send('never posted',id));restore();assert.equal(f.calls.length,0);assert.equal(f.m._activeProvider,provider);assert.equal(f.m.getGroup(f.cid),group);assert.deepEqual(provider.to_bytes(),active);
  if(failure==='verify'){assert.equal(f.m._providerPersistenceUncertain,true);assert.ok((await s.loadPendingE2eeSend(id)).mls_ciphertext);assert.notEqual((await s.loadProviderCheckpoint(f.user,f.device)).revision,base.revision);}
- else{assert.equal(f.m._providerPersistenceUncertain,false);const held=await s.loadPendingE2eeSend(id);if(failure==='abort')assert.equal(held,null);else{assert.equal(held.unsealed_intent_version,1);assert.equal(held.mls_ciphertext,undefined);}const current=await s.loadProviderCheckpoint(f.user,f.device);assert.deepEqual(current.provider_bytes,base.provider_bytes);if(failure==='abort')assert.equal(current.revision,base.revision);else{const admitted=await s.loadMlsReadyBase(f.user,f.device,f.cid);assert.equal(current.revision,admitted.ready.provider_revision);assert.notEqual(current.revision,base.revision);}}await f.close();
+ else{assert.equal(f.m._providerPersistenceUncertain,false);const held=await s.loadPendingE2eeSend(id);if(failure==='abort')assert.equal(held,null);else{assert.equal(held.unsealed_intent_version,1);assert.equal(held.mls_ciphertext,undefined);}const current=await s.loadProviderCheckpoint(f.user,f.device);assert.deepEqual(current.provider_bytes,base.provider_bytes);if(failure==='abort')assert.equal(current.revision,base.revision);else{const admitted=await s.loadMlsReadyBase(f.user,f.device,f.cid);assert.equal(current.revision,admitted.ready.provider_revision);assert.equal(current.revision,base.revision);}}await f.close();
 });
 test('stale sender cannot overwrite winner private KP, provider/cursor or pending job',async()=>{
  const f=await fixture(),other=await f.manager();f.loadGroup(other);const kp=other.identity.key_package_typed(other.provider),ref=kp.hash_ref(other.provider);kp.free();await other._saveEncryptionSyncCheckpoint({scopeCursors:{[f.cid]:{created_at:'2026-10-01T00:00:01Z',event_id:randomUUID()}}});const winner=await other.storage.loadProviderCheckpoint(f.user,f.device);
@@ -98,12 +147,12 @@ test('missing outbound capability rejects before mutation or HTTP',async()=>{
  const f=await fixture(),p=f.m._activeProvider,before=p.to_bytes();f.m.storage.applicationSendCheckpointVersion=undefined;await assert.rejects(f.send(),e=>e.code==='client_upgrade_required');assert.deepEqual(p.to_bytes(),before);assert.equal(f.calls.length,0);await f.close();
 });
 test('ambiguous retry and restart preserve exact ciphertext and edit endpoint',async()=>{
- for(const kind of ['send','update']){const f=await fixture(1),id=randomUUID();f.m.e2eeClient[kind==='send'?'sendMessage':'updateMessage']=async(...args)=>{f.calls.push(structuredClone(args.at(-1)));throw new Error('lost response');};const work=()=>kind==='send'?f.send('unchanged',id):f.m.updateMessage('team',f.cid.slice(5),f.cid,id,'unchanged');await assert.rejects(work());const record=await f.m.storage.loadPendingE2eeSend(id),revision=(await f.m.storage.loadProviderCheckpoint(f.user,f.device)).revision;
+ for(const kind of ['send','update']){const f=await fixture(1),id=randomUUID();f.m.e2eeClient[kind==='send'?'sendMessage':'updateMessage']=async(...args)=>{f.calls.push(structuredClone(args[kind==='send'?2:3]));throw new Error('lost response');};const work=()=>kind==='send'?f.send('unchanged',id):f.m.updateMessage('team',f.cid.slice(5),f.cid,id,'unchanged');await assert.rejects(work());const record=await f.m.storage.loadPendingE2eeSend(id),revision=(await f.m.storage.loadProviderCheckpoint(f.user,f.device)).revision;
  await assert.rejects(work());assert.deepEqual(f.calls[0].message.mls_ciphertext,f.calls[1].message.mls_ciphertext);assert.equal((await f.m.storage.loadProviderCheckpoint(f.user,f.device)).revision,revision);
  const resumed=await f.manager();f.loadGroup(resumed);let endpoint;resumed.e2eeClient={getMlsGenerationState:async()=>({group_generation:1,group_id:f.groupId,current_epoch:0}),sendMessage:async()=>{endpoint='send';return{message:{id}};},updateMessage:async(_t,_c,_id,body)=>{endpoint='update';assert.deepEqual(body.message.mls_ciphertext,record.mls_ciphertext);return{message:{id}};}};await resumed._sendPersistedPendingE2eeRecord(record);assert.equal(endpoint,kind);assert.equal((await resumed.storage.loadPendingE2eeSend(id)).status,'sent');await resumed.storage.close();await f.close();}
 });
 test('one epoch-stale retry replaces durable bytes; second failure/reopen retain updated job',async()=>{
- const f=await fixture(),id=randomUUID();f.m._recoverEpochStaleGroup=async()=>{const g=f.m.getGroup(f.cid);g.self_update(f.m.provider,f.m.identity);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);};f.m.e2eeClient.sendMessage=async(_t,_c,body)=>{f.calls.push(structuredClone(body));throw new Error('epoch_stale: current epoch differs');};await assert.rejects(f.send('retry',id));assert.equal(f.calls.length,2);assert.notDeepEqual(f.calls[0].message.mls_ciphertext,f.calls[1].message.mls_ciphertext);const pending=await f.m.storage.loadPendingE2eeSend(id);assert.deepEqual(pending.mls_ciphertext,f.calls[1].message.mls_ciphertext);assert.equal(pending.mls_epoch,1);assert.equal(pending.status,'failed_retryable');await f.close();const s=new IndexedDBEncryptionStorage(f.user);assert.deepEqual((await s.loadPendingE2eeSend(id)).mls_ciphertext,pending.mls_ciphertext);await s.close();
+ const f=await fixture(),id=randomUUID();f.m._recoverEpochStaleGroup=async()=>{const g=f.m.getGroup(f.cid);g.self_update(f.m.provider,f.m.identity);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);};f.m.e2eeClient.sendMessage=async(_t,_c,body)=>{f.calls.push(structuredClone(body));throw {response:{status:400,data:{message:'epoch_stale: current epoch differs'}}};};await assert.rejects(f.send('retry',id));assert.equal(f.calls.length,2);assert.notDeepEqual(f.calls[0].message.mls_ciphertext,f.calls[1].message.mls_ciphertext);const pending=await f.m.storage.loadPendingE2eeSend(id);assert.deepEqual(pending.mls_ciphertext,f.calls[1].message.mls_ciphertext);assert.equal(pending.mls_epoch,1);assert.equal(pending.status,'failed_retryable');await f.close();const s=new IndexedDBEncryptionStorage(f.user);assert.deepEqual((await s.loadPendingE2eeSend(id)).mls_ciphertext,pending.mls_ciphertext);await s.close();
 });
 test('stale HTTP outcome/update/delete cannot replace a newer ciphertext job',async()=>{
  const f=await fixture(),id=randomUUID(),entered=latch(),release=latch();f.m.e2eeClient.sendMessage=async()=>{entered.open();await release.promise;return{message:{id}};};const work=f.send('old',id),rejected=assert.rejects(work,e=>e.code==='pending_send_conflict');await entered.promise;const old=await f.m.storage.loadPendingE2eeSend(id),newer={...old,mls_ciphertext:Uint8Array.of(99),mls_ciphertext_sha256:'replacement'};await f.m.storage.savePendingE2eeSend(newer);assert.equal(await f.m.storage.savePendingE2eeSendOutcome(old,null),false);release.open();await rejected;assert.deepEqual(await f.m.storage.loadPendingE2eeSend(id),newer);assert.equal(await f.m.storage.loadMessage(id),null);await f.close();
@@ -237,4 +286,206 @@ test('completed attachment from an old generation cannot silently create ciphert
 
 test('completed upload generation remains pinned through a concurrent Ready wait',async()=>{
  const f=await fixture(),id=randomUUID(),asset=randomUUID(),row={message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),group_generation:0,text:'',manifest:[{version:1,attachment_id:asset,attachment_type:'voiceRecording'}],e2ee_attachment_ids:[asset],status:'uploaded',created_at:1,updated_at:1,retry_count:0};await f.m.storage.savePendingE2eeSend(row);const admit=f.m.refreshE2eeState.bind(f.m);f.m.refreshE2eeState=async cid=>{const value=await admit(cid);f.m._groupGenerations.set(cid,{...f.m._groupGenerations.get(cid),group_generation:1});return value;};const bytes=f.m.provider.to_bytes();await f.m._processQueuedE2eeAttachmentMessage(await f.m.storage.loadPendingE2eeSend(id));assert.equal(f.calls.length,0);const kept=await f.m.storage.loadPendingE2eeSend(id);assert.equal(kept.group_generation,0);assert.equal(kept.status,'failed_terminal');assert.equal(kept.mls_ciphertext,undefined);assert.deepEqual(f.m.provider.to_bytes(),bytes);await f.close();
+});
+
+
+test('old-channel acceptance failure before POST retains unsent intent and closed reason across reload',async()=>{
+ const f=await fixture(),id=randomUUID();f.m.groups.delete(f.cid);
+ f.m.ensureChannelReady=async()=>{const error=new Error('invalid context');error.code='acceptance_metadata_invalid';error.reason='context_missing';throw error;};
+ await assert.rejects(f.send('unsent old channel',id),e=>e.code==='acceptance_metadata_invalid');
+ assert.equal(f.calls.length,0);const held=await f.m.storage.loadPendingE2eeSend(id);
+ assert.equal(held.status,'failed_retryable');assert.equal(held.last_error,'acceptance_metadata_invalid:context_missing');
+ assert.equal(held.mls_ciphertext,undefined);assert.equal(await f.m.storage.loadMessage(id),null);
+ const reopened=new IndexedDBEncryptionStorage(f.user);assert.equal((await reopened.loadPendingE2eeSend(id)).message_id,id);
+ await reopened.close();await f.close();
+});
+
+test('actual application provider swap re-admits subscribed Ready without another private write or POST',async()=>{
+ const f=await fixture(1),seen=[],peerProvider=new f.w.Provider(),peerIdentity=new f.w.Identity(peerProvider,'owned-swap-peer');
+ const group=f.m.groups.get(f.cid),bundle=group.add_members(f.m.provider,f.m.identity,[peerIdentity.key_package(peerProvider)]);group.merge_pending_commit(f.m.provider);
+ // join_with_welcome consumes the RatchetTree handle.
+ const tree=group.export_ratchet_tree(),peer=f.w.Group.join_with_welcome(peerProvider,bundle.welcome,tree);
+ f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:1});await f.m._writeMlsMutation(f.cid,null);
+ await f.m.refreshE2eeState(f.cid);const sub=f.m.subscribeE2eeState(f.cid,s=>seen.push(s.state));
+ try{
+  const old=f.m._activeProvider,id=randomUUID();await f.send('owned provider transition',id);const afterSend=await f.m.storage.loadProviderCheckpoint(f.user,f.device);
+  await f.m._subscribedReadyRevalidation;
+  assert.notEqual(f.m._activeProvider,old);assert.ok(seen.includes('repairing'));assert.equal(seen.at(-1),'ready');
+  assert.equal(f.m.getE2eeState(f.cid).state,'ready');assert.equal(f.calls.length,1);assert.equal(f.calls[0].body.message.id,id);
+  assert.deepEqual(await f.m.storage.loadProviderCheckpoint(f.user,f.device),afterSend);
+  const decrypted=peer.process_message(peerProvider,new Uint8Array(f.calls[0].body.message.mls_ciphertext));
+  assert.equal(JSON.parse(new TextDecoder().decode(decrypted.content)).text,'owned provider transition');
+ }finally{sub.unsubscribe();const storage=f.m.storage;f.m.destroy();await storage.close();peer.free();peerIdentity.free();peerProvider.free();}
+});
+
+for(const outcome of ['unknown','canceled'])test('subscribed owned-swap wake preserves '+outcome+' ciphertext without a transport retry',async()=>{
+ const f=await fixture(1),id=randomUUID(),seen=[];await f.m.refreshE2eeState(f.cid);const sub=f.m.subscribeE2eeState(f.cid,s=>seen.push(s.state));let posts=0;
+ f.m.e2eeClient.sendMessage=async()=>{posts++;if(outcome==='canceled')await f.m.cancelPendingE2eeSend(id);throw Error('ambiguous QA transport');};
+ try{
+  await assert.rejects(f.send('preserve exact unknown intent',id));const held=await f.m.storage.loadPendingE2eeSend(id);assert.ok(held.mls_ciphertext.length);
+  await f.m._subscribedReadyRevalidation;
+  assert.equal(posts,1);assert.deepEqual(await f.m.storage.loadPendingE2eeSend(id),held);
+  assert.equal(held.status,outcome==='canceled'?'canceled':'failed_retryable');assert.equal(seen.at(-1),'ready');assert.equal(f.m._providerPersistenceUncertain,false);
+ }finally{sub.unsubscribe();const storage=f.m.storage;f.m.destroy();await storage.close();}
+});
+
+test('accepted restored ciphertext is not submitted twice when a private writer overlaps HTTP completion',async()=>{
+ const f=await fixture(),id=randomUUID(),peerProvider=new f.w.Provider(),peerIdentity=new f.w.Identity(peerProvider,'ack-peer');
+ let peer,writer;const entered=latch(),release=latch();
+ try{
+  const g=f.m.groups.get(f.cid),bundle=g.add_members(f.m.provider,f.m.identity,[peerIdentity.key_package_typed(peerProvider)]);
+  g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);
+  peer=f.w.Group.join(peerProvider,bundle.welcome,g.export_ratchet_tree());
+  f.m.e2eeClient.sendMessage=async()=>{throw Error('initial unavailable transport');};
+  await assert.rejects(f.send('one durable intent',id));
+  const record=await f.m.storage.loadPendingE2eeSend(id),before=f.m._activeProvider.to_bytes();let posts=0,success=0,failures=0;
+  f.m.client.channel=()=>({restorePendingE2eeAttachmentUpload:()=>{},updatePendingE2eeAttachmentUpload:()=>{},completePendingE2eeAttachmentUpload:()=>success++,failPendingE2eeAttachmentUpload:()=>failures++});
+  f.m.e2eeClient.sendMessage=async(_t,_c,body)=>{
+   posts++;assert.equal(body.message.id,id);assert.deepEqual(body.message.mls_ciphertext,record.mls_ciphertext);
+   if(posts===1){assert.equal(JSON.parse(new TextDecoder().decode(peer.process_application_message(peerProvider,body.message.mls_ciphertext,undefined).content)).text,'one durable intent');
+    writer=f.m._withProviderMutation(async()=>{entered.open();await release.promise;});await entered.promise;
+   }
+   return{message:{id,msg_seq:posts,last_event_seq:posts,created_at:'2026-10-28T00:00:00Z'}};
+  };
+  await f.m._processQueuedE2eeAttachmentMessage(record,{onSuccess:()=>success++,onError:()=>failures++});
+  release.open();await writer;
+  for(let n=0;n<100;n++)await new Promise(r=>setImmediate(r));
+  assert.equal(posts,1,'a local provider writer cannot revoke an accepted HTTP result or authorize a second POST');
+  assert.equal(success,1);assert.equal(failures,0);assert.equal(await f.m.storage.loadPendingE2eeSend(id),null);
+  const message=await f.m.storage.loadMessage(id);assert.equal(message.msg_seq,1);assert.equal(message.status,'received');assert.deepEqual(f.m._activeProvider.to_bytes(),before);
+ }finally{release.open();if(writer)await writer;peer?.free();peerIdentity.free();peerProvider.free();await f.close();}
+});
+
+test('accepted send UUID returns its durable projection without another transport attempt',async()=>{
+ const f=await fixture(),id=randomUUID();try{await f.send('accepted once',id);const before=f.m._activeProvider.to_bytes();const response=await f.send('accepted once',id);assert.equal(f.calls.length,1);assert.equal(response.message.id,id);assert.equal(response.message.text,'accepted once');assert.deepEqual(f.m._activeProvider.to_bytes(),before);assert.equal((await f.m.storage.loadPendingE2eeSend(id)).status,'sent');}finally{await f.close();}
+});
+test('accepted send with a missing projection fails closed without resubmission',async()=>{
+ const f=await fixture(),id=randomUUID();try{await f.send('accepted projection',id);await f.m.storage.deleteMessage(id);await assert.rejects(f.send('accepted projection',id),e=>e.code==='application_checkpoint_missing');assert.equal(f.calls.length,1);assert.equal((await f.m.storage.loadPendingE2eeSend(id)).status,'sent');}finally{await f.close();}
+});
+test('accepted immutable ciphertext remains acknowledged while uncertain private state blocks new encryption',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  f.m.e2eeClient.sendMessage=async()=>{throw Error('before acceptance offline');};await assert.rejects(f.send('retained accepted',id));const record=await f.m.storage.loadPendingE2eeSend(id),before=f.m._activeProvider.to_bytes();let posts=0,success=0;
+  f.m.e2eeClient.sendMessage=async(_t,_c,body)=>{posts++;assert.deepEqual(body.message.mls_ciphertext,record.mls_ciphertext);f.m._providerPersistenceUncertain=true;return{message:{id,msg_seq:1,last_event_seq:1}};};
+  await f.m._processQueuedE2eeAttachmentMessage(record,{onSuccess:()=>success++});assert.equal(posts,1);assert.equal(success,1);assert.equal(await f.m.storage.loadPendingE2eeSend(id),null);assert.equal((await f.m.storage.loadMessage(id)).msg_seq,1);assert.equal(f.m.getE2eeState(f.cid).reason,'provider_persistence_uncertain');
+  const next=randomUUID();await assert.rejects(f.send('must still be blocked',next));assert.equal(posts,1);assert.equal((await f.m.storage.loadPendingE2eeSend(next))?.mls_ciphertext,undefined);assert.deepEqual(f.m._activeProvider.to_bytes(),before);
+ }finally{await f.close();}
+});
+
+
+test('lost ACK, reopen and missing legacy marker reconcile exact ciphertext without a fresh dispatch',async()=>{
+ const f=await fixture(),id=randomUUID(),requests=[];
+ f.m.e2eeClient.sendMessage=async(_t,_c,body,options)=>{requests.push({body:structuredClone(body),options});throw {response:{status:503,data:{reason:'message_delivery_unknown'}}};};
+ await assert.rejects(f.send('one intent',id));const held=await f.m.storage.loadPendingE2eeSend(id);
+ assert.equal(held.application_http_started,true);assert.equal(requests[0].options.reconcileOnly,false);
+ await assert.rejects(f.send('one intent',id));assert.equal(requests[1].options.reconcileOnly,true);
+ const restored=await f.manager();f.loadGroup(restored);restored.e2eeClient={...f.m.e2eeClient};const restoredBefore=restored.provider.to_bytes(),restoredCheckpoint=await restored.storage.loadProviderCheckpoint(f.user,f.device);
+ await assert.rejects(restored._sendPersistedPendingE2eeRecord(await restored.storage.loadPendingE2eeSend(id)));
+ assert.equal(requests[2].options.reconcileOnly,true);assert.deepEqual(requests.map(r=>r.body),[requests[0].body,requests[0].body,requests[0].body]);
+ const legacy={...await restored.storage.loadPendingE2eeSend(id)};delete legacy.application_http_started;await restored.storage.savePendingE2eeSend(legacy);
+ await assert.rejects(restored._sendPersistedPendingE2eeRecord(legacy));assert.equal(requests[3].options.reconcileOnly,true);
+ assert.notEqual((await restored.storage.loadPendingE2eeSend(id)).status,'sent');assert.equal(await restored.storage.loadMessage(id),null);
+ assert.deepEqual(restored.provider.to_bytes(),restoredBefore);assert.deepEqual(await restored.storage.loadProviderCheckpoint(f.user,f.device),restoredCheckpoint);await restored.storage.close();await f.close();
+});
+
+test('dispatch marker CAS has one winner and stale outcomes cannot clear it',async()=>{
+ const f=await fixture(),id=randomUUID(),row=await f.m._prepareApplicationSend({message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),operation_kind:'send',payload:{text:'one'},status:'sending',created_at:1,updated_at:1});
+ assert.equal(row.application_http_started,false);
+ const mark=()=>f.m.storage.savePendingE2eeSendOutcome(row,{...row,application_http_started:true});
+ const outcomes=await Promise.all([mark(),mark()]);assert.deepEqual(outcomes.sort(),[false,true]);
+ assert.equal(await f.m.storage.savePendingE2eeSendOutcome(row,{...row,last_error:'stale HTTP outcome'}),true);
+ assert.equal((await f.m.storage.loadPendingE2eeSend(id)).application_http_started,true);await f.close();
+});
+
+for(const status of [400,503])test('reconcile epoch error '+status+' cannot create replacement ciphertext',async()=>{
+ const f=await fixture(),id=randomUUID();f.m.e2eeClient.sendMessage=async()=>{throw Error('lost ACK');};await assert.rejects(f.send('same',id));
+ const held=await f.m.storage.loadPendingE2eeSend(id),provider=f.m.provider.to_bytes();let recovery=0,options;
+ f.m._recoverEpochStaleGroup=async()=>{recovery++;};f.m.e2eeClient.sendMessage=async(_t,_c,_body,o)=>{options=o;throw {response:{status,data:{message:'epoch_stale: current epoch differs'}}};};
+ await assert.rejects(f.send('same',id));assert.equal(options.reconcileOnly,true);assert.equal(recovery,0);
+ assert.deepEqual((await f.m.storage.loadPendingE2eeSend(id)).mls_ciphertext,held.mls_ciphertext);assert.deepEqual(f.m.provider.to_bytes(),provider);await f.close();
+});
+
+test('ambiguous first dispatch with epoch text in a 503 cannot reencrypt or retry',async()=>{
+ const f=await fixture(),id=randomUUID();let recovery=0,posts=0;f.m._recoverEpochStaleGroup=async()=>{recovery++;};
+ f.m.e2eeClient.sendMessage=async()=>{posts++;throw {response:{status:503,data:{message:'epoch_stale: transport result unknown'}}};};
+ await assert.rejects(f.send('one',id));assert.equal(posts,1);assert.equal(recovery,0);assert.equal((await f.m.storage.loadPendingE2eeSend(id)).application_http_started,true);await f.close();
+});
+
+test('sealed ciphertext dispatch waits for an actual concurrent provider checkpoint before HTTP',async()=>{
+ const f=await fixture(),id=randomUUID(),p=new f.w.Provider(),identity=new f.w.Identity(p,'dispatch-peer'),entered=latch(),release=latch();let peer,writer;
+ const persist=f.m.storage.saveProviderState.bind(f.m.storage),prepare=f.m._prepareApplicationSend.bind(f.m);
+ try{
+  const g=f.m.getGroup(f.cid),bundle=g.add_members(f.m.provider,f.m.identity,[identity.key_package_typed(p)]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);peer=f.w.Group.join(p,bundle.welcome,g.export_ratchet_tree());
+  f.m._prepareApplicationSend=async(...args)=>{const row=await prepare(...args);f.m.storage.saveProviderState=async(...a)=>{entered.open();await release.promise;return persist(...a);};writer=f.m._persistProviderStrict();await entered.promise;return row;};
+  let posts=0;f.m.e2eeClient.sendMessage=async(_t,_c,body,options)=>{
+   posts++;assert.equal(options.reconcileOnly,false);
+   assert.equal(JSON.parse(new TextDecoder().decode(peer.process_application_message(p,body.message.mls_ciphertext,undefined).content)).text,'one checkpointed intent');
+   return{message:{id,msg_seq:99,last_event_seq:100,created_at:'2026-10-30T00:00:00Z'}};
+  };
+  let settled=false;const work=f.send('one checkpointed intent',id);work.then(()=>{settled=true;},()=>{settled=true;});await entered.promise;await new Promise(r=>setImmediate(r));assert.equal(settled,false);assert.equal(posts,0);assert.throws(()=>f.m.provider,e=>e.code==='provider_mutation_busy');release.open();await work;assert.equal(posts,1);const row=await f.m.storage.loadPendingE2eeSend(id);assert.equal(row.application_http_started,true);assert.equal(row.status,'sent');
+ }finally{release.open();if(writer)await writer;peer?.free();identity.free();p.free();await f.close();}
+});
+
+test('sealed dispatch still fails closed on provider persistence uncertainty before HTTP',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  const row=await f.m._prepareApplicationSend({message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),operation_kind:'send',payload:{text:'retain'},status:'sending',created_at:1,updated_at:1});
+  f.m._providerPersistenceUncertain=true;await assert.rejects(f.m._sendPersistedPendingE2eeRecord(row),e=>e.code==='provider_persistence_uncertain');
+  assert.equal(f.calls.length,0);assert.deepEqual(await f.m.storage.loadPendingE2eeSend(id),row);
+ }finally{await f.close();}
+});
+
+function retryChannel(f){
+ const {ErmisChat}=require('../dist/index.cjs'),c=new ErmisChat('fixture','project','http://fixture.invalid',{browser:false,logger:()=>{}});
+ c._setUser({id:f.user});c.deviceId=f.device;c.encryptionManager=f.m;f.m.client=c;
+ const ch=c.channel('team',f.cid.slice(5));ch.data={mls_enabled:true};ch.initialized=true;
+ let plain=0;c.post=async()=>{plain++;throw Error('plaintext retry forbidden')};
+ return{c,ch,plain:()=>plain,seed:(id,text)=>ch.state.addMessageSorted({id,text,user:{id:f.user},status:'error',created_at:new Date()},true)};
+}
+test('Channel retry uses original unsealed intent UUID and native peer decrypts original payload',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  const pp=new f.w.Provider(),pi=new f.w.Identity(pp,'authorized-peer'),g=f.m.groups.get(f.cid);
+  const bundle=g.add_members(f.m.provider,f.m.identity,[pi.key_package(pp)]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);
+  const receiver=f.w.Group.join_with_welcome(pp,bundle.welcome,g.export_ratchet_tree());
+  f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:1});await f.m._writeMlsMutation(f.cid,null);
+  f.m.storage.readyCheckpointVersion=undefined;await assert.rejects(f.send('original retry payload',id));f.m.storage.readyCheckpointVersion=2;
+  const h=retryChannel(f);h.seed(id,'changed optimistic UI text');
+  let posted;f.m.e2eeClient.sendMessage=async(_t,_c,b)=>{posted=structuredClone(b.message);return{message:{id,created_at:'2026-10-31T00:00:00Z'}}};
+  await h.ch.retryMessage(id);assert.equal(h.plain(),0);assert.equal(posted.id,id);
+  const decoded=JSON.parse(new TextDecoder().decode(receiver.process_application_message(pp,new Uint8Array(posted.mls_ciphertext)).content));
+  assert.equal(decoded.text,'original retry payload');assert.equal(await f.m.storage.loadPendingE2eeSend(id),null);
+  assert.equal(h.ch.state.messages.find(m=>m.id===id).status,'received');
+ }finally{await f.close()}
+});
+test('Channel retry reconciles sealed unknown outcome with exact ciphertext and no fresh ratchet',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  f.m.e2eeClient.sendMessage=async()=>{throw Error('lost ACK')};await assert.rejects(f.send('unknown',id));
+  const before=await f.m.storage.loadPendingE2eeSend(id),bytes=f.m._activeProvider.to_bytes(),h=retryChannel(f);h.seed(id,'unknown');
+  // A durable obligation fences even a stale false channel encryption flag.
+  h.ch.data.mls_enabled=false;
+  let options;f.m.e2eeClient.sendMessage=async(_t,_c,b,o)=>{options=o;assert.equal(b.message.id,id);assert.deepEqual(b.message.mls_ciphertext,before.mls_ciphertext);return{message:{id}}};
+  await h.ch.retryMessage(id);assert.equal(h.plain(),0);assert.equal(options.reconcileOnly,true);assert.deepEqual(f.m._activeProvider.to_bytes(),bytes);
+  assert.equal(await f.m.storage.loadPendingE2eeSend(id),null);
+ }finally{await f.close()}
+});
+for(const kind of ['missing','canceled','failed_terminal','foreign-cid','update'])test('encrypted retry fails closed for '+kind+' durable obligation',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  f.m.storage.readyCheckpointVersion=undefined;await assert.rejects(f.send('retain',id));const record=await f.m.storage.loadPendingE2eeSend(id);
+  if(kind==='missing')await f.m.storage.deletePendingE2eeSend(id);
+  else await f.m.storage.savePendingE2eeSend({...record,...(kind==='foreign-cid'?{cid:'team:foreign'}:kind==='update'?{operation_kind:'update'}:{status:kind})});
+  const h=retryChannel(f);h.seed(id,'retain');await assert.rejects(h.ch.retryMessage(id));assert.equal(h.plain(),0);assert.equal(f.calls.length,0);
+ }finally{await f.close()}
+});
+test('standard message retry keeps the existing ordinary send endpoint',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  const h=retryChannel(f);h.ch.data.mls_enabled=false;h.seed(id,'ordinary');let posted;
+  h.c.post=async(url,payload)=>{posted={url,payload};return{message:{id,text:'ordinary',created_at:new Date().toISOString()}}};
+  await h.ch.retryMessage(id);assert.equal(posted.payload.message.id,id);assert.equal(posted.payload.message.text,'ordinary');assert.equal(posted.payload.message.mls_ciphertext,undefined);
+ }finally{await f.close()}
+});
+
+test('cipher-bearing message cannot fall through to plaintext with a stale channel flag and missing pending record',async()=>{
+ const f=await fixture(),id=randomUUID();try{
+  const h=retryChannel(f);h.ch.data.mls_enabled=false;h.seed(id,'must stay encrypted');
+  h.ch.state.updateMessageById(id,m=>({...m,mls_ciphertext:[1,2,3]}));
+  await assert.rejects(h.ch.retryMessage(id));assert.equal(h.plain(),0);
+ }finally{await f.close()}
 });

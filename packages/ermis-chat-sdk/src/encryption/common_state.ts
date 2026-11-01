@@ -32,6 +32,8 @@ export interface MlsReadyCheckpoint {
   cid: string;
   expected: MlsReadyBase;
   provider_write_guard: ProviderWriteGuard;
+  /** Opt-in private-noop Ready admission: full CAS/readback, unchanged provider revision. */
+  provider_observation?: true;
   snapshot: E2eeStateSnapshot;
   admission: GroupInfoValidationAdmission | null;
   /** Joined-external Ready additionally proves exact canonical receipt/Welcome records. */

@@ -268,14 +268,20 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
    *                 database name so each user's encryption state is isolated.
    *                 Pass empty string for legacy/global access (migration only).
    */
-  constructor(userId: string = '', logger?: Logger) {
+  private readonly deviceIdStorageKey: string;
+  private readonly hasExplicitNamespace: boolean;
+
+  constructor(userId: string = '', logger?: Logger, namespace?: string) {
     this.accountId=userId;
+    const scope = namespace ? sha256Hex(new TextEncoder().encode(namespace)) : null;
+    this.hasExplicitNamespace = scope !== null;
+    this.deviceIdStorageKey = scope ? `${DEVICE_ID_LS_KEY}:scope:${scope}` : DEVICE_ID_LS_KEY;
     if (logger) setSdkLogger(logger);
     if (userId) {
-      this.dbName = `${DB_NAME_PREFIX}_${userId}`;
+      this.dbName = scope ? `${DB_NAME_PREFIX}_scope_${scope}_${userId}` : `${DB_NAME_PREFIX}_${userId}`;
     } else {
       // Legacy fallback — global DB (used during device_id migration)
-      this.dbName = DB_NAME_LEGACY;
+      this.dbName = scope ? `${DB_NAME_PREFIX}_scope_${scope}` : DB_NAME_LEGACY;
     }
   }
 
@@ -427,18 +433,80 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     }
   }
 
-  // ---- Device ID (global, per-browser via localStorage) ----
+  // ---- Device ID: account private state owns binding; preferences are hints ----
 
   async getDeviceId(): Promise<string> {
+    if (this.accountId) {
+      const db = await this.openDB();
+      const selected = await new Promise<string>((resolve, reject) => {
+        // Reserve before identity creation. Concurrent tabs must choose one ID;
+        // a surviving preference must never bind a new private identity to an
+        // earlier installation. Read keys only, never copy private provider bytes.
+        const tx = db.transaction([STORE_META, STORE_IDENTITY], 'readwrite');
+        const meta = tx.objectStore(STORE_META), identities = tx.objectStore(STORE_IDENTITY);
+        const binding = meta.get(`device_binding:${this.accountId}`);
+        let device: string | null = null;
+        const valid = (value: unknown): value is string => typeof value === 'string' && value.length > 0 &&
+          value.length <= 256 && !/[\u0000-\u001f\u007f]/.test(value);
+        const verifyPair = (id: string) => {
+          const provider = meta.getKey(`provider:${this.accountId}:${id}`);
+          const identity = identities.getKey(`${this.accountId}:${id}`);
+          let completed = 0;
+          const ready = () => {
+            if (++completed !== 2) return;
+            if (provider.result === undefined || identity.result === undefined) { tx.abort(); return; }
+            device = id;
+          };
+          provider.onsuccess = ready; identity.onsuccess = ready;
+        };
+        binding.onsuccess = () => {
+          if (binding.result != null) {
+            if (!valid(binding.result)) { tx.abort(); return; }
+            verifyPair(binding.result); return;
+          }
+          // Before binding metadata existed, a sole complete private tuple can
+          // recover its ID even when the global preference was lost/replaced.
+          const prefix = `${this.accountId}:`;
+          const keys = identities.getAllKeys(IDBKeyRange.bound(prefix, prefix + '\uffff'), 2);
+          keys.onsuccess = () => {
+            if (keys.result.length > 1) { tx.abort(); return; }
+            if (keys.result.length === 1) {
+              const key = keys.result[0];
+              const id = typeof key === 'string' ? key.slice(prefix.length) : null;
+              if (!valid(id)) { tx.abort(); return; }
+              verifyPair(id); return;
+            }
+            const providerPrefix = `provider:${this.accountId}:`;
+            const providers = meta.getAllKeys(IDBKeyRange.bound(providerPrefix, providerPrefix + '\uffff'), 1);
+            providers.onsuccess = () => {
+              if (providers.result.length) { tx.abort(); return; }
+              const reservationKey = `device_installation:${this.accountId}`;
+              const reserved = meta.get(reservationKey);
+              reserved.onsuccess = () => {
+                if (reserved.result != null && !valid(reserved.result)) { tx.abort(); return; }
+                device = reserved.result ?? `web-${randomId()}`;
+                if (reserved.result == null) meta.put(device, reservationKey);
+              };
+            };
+          };
+        };
+        tx.oncomplete = () => device ? resolve(device) : reject(recoveryControlError('provider_checkpoint_invalid'));
+        tx.onerror = () => reject(tx.error || recoveryControlError('provider_checkpoint_invalid'));
+        tx.onabort = () => reject(Object.assign(new Error('MLS device binding is incomplete or ambiguous'), {code:'provider_checkpoint_invalid'}));
+      });
+      // Preferences cannot prevent recovery of a valid private installation.
+      try { if (typeof localStorage !== 'undefined') localStorage.setItem(this.deviceIdStorageKey, selected); } catch { /* Optional cache. */ }
+      return selected;
+    }
     // 1. Check localStorage first
     if (typeof localStorage !== 'undefined') {
-      const stored = localStorage.getItem(DEVICE_ID_LS_KEY);
+      const stored = localStorage.getItem(this.deviceIdStorageKey);
       if (stored) return stored;
     }
 
     // 2. Backward compat: migrate from legacy global IndexedDB
     try {
-      const legacyId = await this._migrateLegacyDeviceId();
+      const legacyId = this.hasExplicitNamespace ? null : await this._migrateLegacyDeviceId();
       if (legacyId) return legacyId;
     } catch (_) {
       // IndexedDB unavailable — generate new
@@ -447,7 +515,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     // 3. Generate new device ID
     const deviceId = `web-${randomId()}`;
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(DEVICE_ID_LS_KEY, deviceId);
+      localStorage.setItem(this.deviceIdStorageKey, deviceId);
     }
     return deviceId;
   }
@@ -592,7 +660,10 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
             tx.abort(); return;
           }
           this._writeProviderCheckpoint(tx, submitted.user_id, submitted.device_id, submitted.provider_bytes,
-            submitted.provider_write_guard, () => identities.put(submitted.identity_bytes, key), error => { failure = error; });
+            submitted.provider_write_guard, () => {
+              identities.put(submitted.identity_bytes, key);
+              if (this.accountId === submitted.user_id) tx.objectStore(STORE_META).put(submitted.device_id, `device_binding:${submitted.user_id}`);
+            }, error => { failure = error; });
         } catch (error) { failure = error; tx.abort(); }
       };
     });
@@ -846,7 +917,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
 
     const db = await this.openDB();
     return new Promise<Map<string, StoredMessage>>((resolve, reject) => {
-      const tx = db.transaction(STORE_MESSAGES, 'readonly');
+      const tx = db.transaction([STORE_MESSAGES, STORE_PENDING_SENDS], 'readonly');
       const store = tx.objectStore(STORE_MESSAGES);
       const results = new Map<string, StoredMessage>();
 
@@ -854,7 +925,9 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         const request = store.get(id);
         request.onsuccess = () => {
           if (request.result) {
-            results.set(id, request.result as StoredMessage);
+            const message = request.result as StoredMessage;
+            const pending = tx.objectStore(STORE_PENDING_SENDS).get(id);
+            pending.onsuccess = () => results.set(id, this._pendingMessagePresentation(message, pending.result));
           }
         };
         request.onerror = () => reject(request.error);
@@ -862,7 +935,15 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
 
       tx.oncomplete = () => resolve(results);
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Message presentation read aborted'));
     });
+  }
+
+  private _pendingMessagePresentation(message: StoredMessage, record?: PendingE2eeSendRecord): StoredMessage {
+    if (!record || record.message_id !== message.id || record.cid !== message.cid || record.operation_kind === 'update' ||
+        record.status === 'sent') return message;
+    const failed = record.status === 'failed_retryable' || record.status === 'failed_terminal' || record.status === 'canceled';
+    return {...message, status: failed ? 'error' : 'sending'};
   }
 
   async deleteMessage(messageId: string): Promise<void> {
@@ -889,17 +970,29 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   async getMessages(cid: string, limit = 50): Promise<StoredMessage[]> {
     const db = await this.openDB();
     return new Promise<StoredMessage[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_MESSAGES, 'readonly');
+      // Cached plaintext is also used for optimistic presentation. Read the
+      // exact outgoing obligations in the same snapshot so a reload cannot
+      // turn an unknown/failed send into an accepted message.
+      const tx = db.transaction([STORE_MESSAGES, STORE_PENDING_SENDS], 'readonly');
       const store = tx.objectStore(STORE_MESSAGES);
       const index = store.index('cid');
       const request = index.getAll(cid);
+      let results: StoredMessage[] = [];
       request.onsuccess = () => {
         const msgs = (request.result as StoredMessage[]) || [];
         // Sort by created_at descending, take limit
         msgs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        resolve(msgs.slice(0, limit));
+        results = msgs.slice(0, limit);
+        for (let n = 0; n < results.length; n++) {
+          const message = results[n], pending = tx.objectStore(STORE_PENDING_SENDS).get(message.id);
+          pending.onsuccess = () => {
+            results[n] = this._pendingMessagePresentation(message, pending.result);
+          };
+        }
       };
-      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => resolve(results);
+      tx.onerror = () => reject(tx.error || new Error('Message presentation read failed'));
+      tx.onabort = () => reject(tx.error || new Error('Message presentation read aborted'));
     });
   }
 
@@ -1098,7 +1191,11 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       request.onsuccess = () => {
         try {
           if (!request.result || !sameSyncCheckpointValue(binding(submitted), binding(request.result))) return;
-          const currentStatus = (request.result as PendingE2eeSendRecord).status;
+          const currentRecord = request.result as PendingE2eeSendRecord;
+          if (replacement?.application_http_started === true && submitted.application_http_started === false &&
+              currentRecord.application_http_started !== false) return;
+          if (replacement && currentRecord.application_http_started === true) replacement.application_http_started = true;
+          const currentStatus = currentRecord.status;
           if (replacement && ((currentStatus === 'sent' && replacement.status !== 'sent') ||
               (currentStatus === 'canceled' && replacement.status !== 'canceled' && replacement.status !== 'sent') ||
               (currentStatus === 'failed_terminal' && replacement.status !== 'failed_terminal' && replacement.status !== 'sent'))) return;
@@ -3702,6 +3799,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   }
 
   readonly readyCheckpointVersion = 2 as const;
+  readonly readyObservationVersion = 1 as const;
 
   private _readMlsReadyBase(tx: IDBTransaction, userId: string, deviceId: string, cid: string,
     done: (base: MlsReadyBase) => void): void {
@@ -3756,6 +3854,9 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
 
   async saveMlsReadyCheckpoint(checkpoint: MlsReadyCheckpoint, assertOwner: () => void): Promise<void> {
     const cp = structuredClone(checkpoint), marker = cp.expected.cleanup.marker as MlsGroupGenerationMarker | null;
+    if (cp.provider_observation && (this.readyObservationVersion !== 1 ||
+        typeof cp.expected.revision !== 'string' || !cp.expected.revision.length ||
+        cp.provider_write_guard.next_revision !== cp.expected.revision)) throw new Error('Ready observation revision invalid');
     if (cp.user_id !== this.accountId || !cp.provider_write_guard || !cp.expected.provider_bytes || !marker ||
         marker.status !== 'active' || cp.snapshot.state !== 'ready' || cp.snapshot.cid !== cp.cid ||
         cp.snapshot.group_generation !== marker.group_generation || cp.snapshot.epoch !== marker.current_epoch ||
@@ -3783,13 +3884,17 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
             throw Object.assign(new Error('Ready owner/read set conflict'),
               {code: samePrivateBase ? 'local_checkpoint_pending' : 'provider_checkpoint_conflict'});
           }
-          this._writeProviderCheckpoint(tx, cp.user_id, cp.device_id, cp.expected.provider_bytes!, cp.provider_write_guard,
-            () => { assertOwner(); if (cp.admission) { validateValidationAdmission(cp.admission);
+          const writeMetadata = () => { assertOwner(); if (cp.admission) { validateValidationAdmission(cp.admission);
               if(cp.expected.admission)tx.objectStore(STORE_META).delete(validationAdmissionPendingKey(cp.expected.admission));
               if(cp.admission.outcome==='pending'){tx.objectStore(STORE_META).put(cp.admission,validationAdmissionPendingKey(cp.admission));tx.objectStore(STORE_META).delete(`gi_validation_admission_paused:v1:${encodeURIComponent(cp.device_id)}:${encodeURIComponent(cp.cid)}`);}
               tx.objectStore(STORE_META).put(cp.admission, `gi_validation_admission:v1:${encodeURIComponent(cp.device_id)}:${encodeURIComponent(cp.cid)}`); }
               tx.objectStore(STORE_META).put(cp.snapshot,
-              `mls_ready:v1:${encodeURIComponent(cp.device_id)}:${encodeURIComponent(cp.cid)}`); }, error => { failure = error; });
+              `mls_ready:v1:${encodeURIComponent(cp.device_id)}:${encodeURIComponent(cp.cid)}`); };
+          // The full private/scoped readset above is compared in this SAME write
+          // transaction. Observation cannot replace provider/identity authority.
+          if (cp.provider_observation) writeMetadata();
+          else this._writeProviderCheckpoint(tx, cp.user_id, cp.device_id, cp.expected.provider_bytes!,
+            cp.provider_write_guard, writeMetadata, error => { failure = error; });
         } catch (error) { failure = error; tx.abort(); }
       };
       if (cp.external_join_base) this._readExternalJoinWorkBase(tx, cp.user_id, cp.device_id, cp.cid,

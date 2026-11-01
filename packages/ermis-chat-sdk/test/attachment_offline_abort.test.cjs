@@ -646,3 +646,14 @@ test('unsealed text intent restores the original Channel message without files a
   const live=manager._liveParamsForPendingE2eeSend(record);live.onSuccess({message:{id,cid:channel.cid,content_type:'standard',text:record.text,user:client.user,created_at:new Date().toISOString()}});
   assert.equal(channel.state.findMessage(id).status,'received');assert.equal(channel.state.findMessage(id).text,record.text);
 });
+
+
+test('reload of a failed unsealed text intent preserves error status instead of showing sending or received',()=>{
+ const {client,suffix}=createClient('failed-text-reload'),channel=client.channel('messaging',`failed-text-${suffix}`);
+ const id=`unsent-${suffix}`;const record={message_id:id,cid:channel.cid,e2ee_group_id:channel.cid,
+  channel_type:'messaging',channel_id:channel.id,text:'not delivered',payload:{text:'not delivered'},
+  unsealed_intent_version:1,status:'failed_retryable',last_error:'acceptance_metadata_invalid:context_missing',
+  retry_count:0,created_at:Date.now(),updated_at:Date.now()};
+ channel.restorePendingE2eeAttachmentUpload(record);assert.equal(channel.state.findMessage(id).status,'error');
+ channel.restorePendingE2eeAttachmentUpload(record);assert.equal(channel.state.findMessage(id).status,'error');
+});

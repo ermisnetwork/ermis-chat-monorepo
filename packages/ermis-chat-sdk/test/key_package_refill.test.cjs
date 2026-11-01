@@ -136,3 +136,11 @@ test('provider checkpoint failure sends no HTTP and cannot create an accepted ba
   await h.manager.handleKeyPackageRefill(refillEvent(1));assert.equal(h.state().uploadCalls,0);assert.equal(await h.storage.loadPendingKeyPackageUpload(h.user,'device-a'),null);
  }finally{await h.close();}
 });
+
+
+test('signer recovery hint cannot resolve a binding conflict by generating another package',async(t)=>{
+ const h=await managerHarness({initialRemaining:80});t.after(()=>h.close());
+ h.manager.e2eeClient.getKeyPackageCount=async()=>({remaining:80,target:100,low_watermark:50,requested_delta:20,refill_generation:null,signer_recovery_required:true});
+ const uploaded=[];h.manager._uploadKeyPackages=async(count)=>{uploaded.push(count);return{stored:count};};
+ await h.manager.ensureKeyPackagesFromServer();assert.deepEqual(uploaded,[]);
+});

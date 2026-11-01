@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { ChatProvider } from '@ermis-network/ermis-chat-react';
 import {
@@ -19,7 +19,7 @@ import { UhmChannelListError } from '@/components/custom/UhmChannelListError';
 import { SafariCallGuard } from '@/components/custom/SafariCallGuard';
 import { loadUhmOpenMlsWasm } from '@/lib/openmls';
 import { installMlsRepairDiagnostics } from '@/utils/mlsRepairDiagnostics';
-import { requiresLoginAfterRefreshFailure } from '@/utils/authFailure';
+import { requiresLoginAfterRefreshFailure, createBootstrapSessionGuard } from '@/utils/authFailure';
 import { waitForBrowserPaint } from '@/utils/browserPaint';
 import i18n from './i18n';
 import { toast, Toaster } from 'sonner';
@@ -32,6 +32,7 @@ const E2EE_ATTACHMENT_UPLOAD_DEBUG = import.meta.env.VITE_E2EE_ATTACHMENT_UPLOAD
 const E2EE_HISTORICAL_REPLAY_ENABLED = import.meta.env.VITE_E2EE_HISTORICAL_REPLAY !== 'false';
 const E2EE_PARTIAL_WELCOME_FALLBACK_ENABLED = import.meta.env.VITE_E2EE_PARTIAL_WELCOME_FALLBACK !== 'false';
 const E2EE_GROUP_INFO_REPAIR_ENABLED = import.meta.env.VITE_E2EE_GROUP_INFO_REPAIR !== 'false';
+const E2EE_ALLOW_EXPIRED_JOIN_TREE_LEAVES = import.meta.env.VITE_E2EE_ALLOW_EXPIRED_JOIN_TREE_LEAVES === 'true';
 const E2EE_MLS_ROLLOUT_TELEMETRY_ENABLED = import.meta.env.VITE_E2EE_MLS_ROLLOUT_TELEMETRY !== 'false';
 
 function parseOptionalPositiveInteger(value: unknown): number | undefined {
@@ -55,6 +56,7 @@ function getStoredRefreshToken() {
 }
 
 const chatClientOptions: ErmisChatOptions = {
+  ...(import.meta.env.DEV && import.meta.env.VITE_QA_DATA_SCOPE ? { localStorageNamespace: import.meta.env.VITE_QA_DATA_SCOPE } : {}),
   endUserApiMode: API_DEFAULTS.END_USER_API_MODE,
   recoverStateOnReconnect: true,
   recoveryConfig: {
@@ -98,7 +100,7 @@ let e2eeInitPromise: Promise<void> | null = null;
 async function initializeE2ee(userId: string) {
   if (chatClient.encryptionManager?.initialized) return;
   if (!e2eeInitPromise) {
-    e2eeInitPromise = (async () => {
+    const work = (async () => {
       const wasmModule = await loadUhmOpenMlsWasm('/openmls_wasm_bg.wasm');
       await encryptionManager.initialize(chatClient, userId, {
         wasmModule,
@@ -107,12 +109,14 @@ async function initializeE2ee(userId: string) {
         enableHistoricalReplay: E2EE_HISTORICAL_REPLAY_ENABLED,
         enablePartialWelcomeFallback: E2EE_PARTIAL_WELCOME_FALLBACK_ENABLED,
         enableGroupInfoRepair: E2EE_GROUP_INFO_REPAIR_ENABLED,
+        allowExpiredJoinTreeLeaves: E2EE_ALLOW_EXPIRED_JOIN_TREE_LEAVES,
         enableMlsRolloutTelemetry: E2EE_MLS_ROLLOUT_TELEMETRY_ENABLED,
       });
     })().catch((err) => {
-      e2eeInitPromise = null;
+      if (e2eeInitPromise === work) e2eeInitPromise = null;
       throw err;
     });
+    e2eeInitPromise = work;
   }
   await e2eeInitPromise;
 }
@@ -233,6 +237,9 @@ function AppContent() {
 
   const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) === 'dark' ? 'dark' : 'light';
   const navigate = useNavigate();
+  const bootstrapOwner = useMemo(createBootstrapSessionGuard, []);
+  const authExpiryTransition = useRef(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // Custom UI component overrides for Ermis Chat SDK
   const chatComponents = useMemo(
@@ -255,8 +262,29 @@ function AppContent() {
     localStorage.removeItem(STORAGE_KEYS.CALL_SESSION_ID);
   }, []);
 
+  const handleAuthRefreshFailed = useCallback(async () => {
+    if (authExpiryTransition.current) return;
+    authExpiryTransition.current = true;
+    bootstrapOwner.retire();
+    e2eeInitPromise = null;
+    clearSavedSession();
+    setPendingBootstrap(null);
+    setChatReady(false);
+    setIsAuthenticated(false);
+    setSessionExpired(true);
+    setBootstrapError(null);
+    setBootstrapAction(null);
+    setBootstrapPhase('idle');
+    navigate('/login', { replace: true });
+    try { await chatClient.disconnectUser(); }
+    catch { console.warn('[Auth] Expired session transport cleanup deferred'); }
+  }, [bootstrapOwner, clearSavedSession, navigate]);
+
   const bootstrapSession = useCallback(
     async (userId: string, token: string, options: { navigateToChat?: boolean; refreshToken: string }) => {
+      const isCurrent = bootstrapOwner.begin();
+      authExpiryTransition.current = false;
+      setSessionExpired(false);
       const refreshToken = options.refreshToken;
       setPendingBootstrap({ userId, token, refreshToken });
       setBootstrapError(null);
@@ -267,13 +295,16 @@ function AppContent() {
       try {
         setBootstrapPhase('connecting');
         await chatClient.connectUser({ id: userId }, token, { refreshToken });
+        if (!isCurrent()) return;
 
         setBootstrapPhase('e2ee');
         // Commit the secure-startup screen before synchronous WASM/KeyPackage
         // work can occupy the main thread. This does not report the app ready
         // early or move any cryptographic prerequisite into the background.
         await waitForBrowserPaint();
+        if (!isCurrent()) return;
         await initializeE2ee(userId);
+        if (!isCurrent()) return;
 
         setIsAuthenticated(true);
         setChatReady(true);
@@ -283,6 +314,7 @@ function AppContent() {
           navigate('/chat', { replace: true });
         }
       } catch (err: any) {
+        if (!isCurrent()) return;
         const parsed = (() => {
           try {
             return JSON.parse(err?.message);
@@ -291,16 +323,13 @@ function AppContent() {
           }
         })();
         const status = err?.response?.status || parsed?.status;
-        const isAuthFailure = status === 401 || status === 403;
+        const reason = err?.response?.data?.reason || parsed?.reason;
+        const isAuthFailure = reason !== 'mls_device_unauthorized' && (status === 401 || status === 403);
 
         setChatReady(false);
         setIsAuthenticated(false);
         if (isAuthFailure) {
-          clearSavedSession();
-          setPendingBootstrap(null);
-          setBootstrapPhase('error');
-          setBootstrapAction('login');
-          setBootstrapError(i18n.t('app.session_expired', 'Your session has expired. Please sign in again.'));
+          void handleAuthRefreshFailed();
           return;
         }
 
@@ -310,7 +339,7 @@ function AppContent() {
         console.error('[Bootstrap] Failed to initialize chat:', err);
       }
     },
-    [clearSavedSession, navigate],
+    [bootstrapOwner, handleAuthRefreshFailed, navigate],
   );
 
   const goToLogin = useCallback(() => {
@@ -319,21 +348,6 @@ function AppContent() {
     setBootstrapAction(null);
     navigate('/login', { replace: true });
   }, [navigate]);
-
-  const handleAuthRefreshFailed = useCallback(async () => {
-    clearSavedSession();
-    setPendingBootstrap(null);
-    setChatReady(false);
-    setIsAuthenticated(false);
-    setBootstrapPhase('error');
-    setBootstrapAction('login');
-    setBootstrapError(i18n.t('app.session_expired', 'Your session has expired. Please sign in again.'));
-    try {
-      await chatClient.disconnectUser();
-    } catch (error) {
-      console.error('[Auth] Failed to disconnect after refresh failure:', error);
-    }
-  }, [clearSavedSession]);
 
   useEffect(() => {
     const tokenSubscription = chatClient.on('auth.token_refreshed', (event) => {
@@ -442,7 +456,7 @@ function AppContent() {
         <Route
           path="/login"
           element={
-            isAuthenticated ? <Navigate to="/chat" replace /> : <LoginPage onLoginSuccess={handleLoginSuccess} />
+            isAuthenticated ? <Navigate to="/chat" replace /> : <LoginPage onLoginSuccess={handleLoginSuccess} sessionExpired={sessionExpired} />
           }
         />
 

@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { Forward, Pin, PinOff, Pencil, Copy, Trash2, MoreHorizontal, MessageSquareQuote, XCircle } from 'lucide-react';
+import { Forward, Pin, PinOff, Pencil, Copy, Trash2, MoreHorizontal, MessageSquareQuote, XCircle, RotateCw } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +15,7 @@ import {
   useChatComposer,
   useChatCore,
   useMessageActions,
+  useChannelCapabilities,
 } from '@ermis-network/ermis-chat-react';
 import { UhmConfirmDialog } from './UhmConfirmDialog';
 
@@ -49,7 +50,9 @@ export function UhmMessageActions({
 }: UhmMessageActionsProps) {
   const { t } = useTranslation();
   const { activeChannel, syncMessages } = useChatCore();
+  const { hasCapability } = useChannelCapabilities();
   const { setQuotedMessage, setEditingMessage, setForwardingMessage } = useChatComposer();
+  const [isRetrying, setIsRetrying] = useState(false);
 
   if (message.type === 'signal') {
     return null;
@@ -69,6 +72,8 @@ export function UhmMessageActions({
     message.status === 'sending' &&
     Array.isArray(message.attachments) &&
     message.attachments.some((attachment: any) => attachment?.local_object_url && attachment?.upload_status);
+  const canRetrySend = isOwnMessage && hasCapability('send-message') &&
+    (message.status === 'error' || message.status === 'failed_offline');
 
   /* --- Confirm dialog state for destructive actions --- */
   const [pendingDelete, setPendingDelete] = useState<{
@@ -137,6 +142,19 @@ export function UhmMessageActions({
     }
   }, [activeChannel, message.id, syncMessages, t]);
 
+  const handleRetrySend = useCallback(async () => {
+    if (!activeChannel || !message.id || isRetrying) return;
+    setIsRetrying(true);
+    try {
+      await activeChannel.retryMessage(message.id);
+    } catch (err) {
+      toast.error(t('message_actions.retry_error', 'Could not retry this message'));
+    } finally {
+      syncMessages();
+      setIsRetrying(false);
+    }
+  }, [activeChannel, message.id, isRetrying, syncMessages, t]);
+
   /* --- Actual delete logic (called after confirm) --- */
   const executeDeleteForEveryone = useCallback(async () => {
     if (!activeChannel) return;
@@ -196,6 +214,7 @@ export function UhmMessageActions({
 
   /* --- Check if we have any dropdown actions --- */
   const hasDropdownActions =
+    canRetrySend ||
     canCancelPendingSend ||
     actions.canPin ||
     actions.canEdit ||
@@ -275,6 +294,18 @@ export function UhmMessageActions({
                     actions.canCopy ||
                     actions.canDelete ||
                     actions.canDeleteForMe) && <DropdownMenuSeparator className="my-1" />}
+
+                {canRetrySend && (
+                  <DropdownMenuItem
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-[13px] rounded-md cursor-pointer"
+                    onClick={handleRetrySend}
+                    disabled={isRetrying}
+                  >
+                    <RotateCw className={`w-4 h-4 ${isRetrying ? 'animate-spin' : ''}`} />
+                    <span>{t('message_actions.retry_send', 'Retry send')}</span>
+                  </DropdownMenuItem>
+                )}
+                {canRetrySend && <DropdownMenuSeparator className="my-1" />}
 
                 {/* Pin */}
                 {actions.canPin && (

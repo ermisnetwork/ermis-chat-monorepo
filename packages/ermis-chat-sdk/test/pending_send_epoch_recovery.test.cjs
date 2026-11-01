@@ -2,13 +2,15 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { EncryptionManager } = require('../dist/index.cjs');
 
+// These transport fixtures start before their first physical HTTP dispatch.
+// Unknown/restarted legacy rows are exercised with actual MLS in application_send_checkpoint.
 function harness(extra = {}) {
   const manager = new EncryptionManager();
   const record = {
     message_id: '00000000-0000-4000-8000-000000000001', cid: 'messaging:retained',
     e2ee_group_id: 'messaging:retained', channel_type: 'messaging', channel_id: 'retained',
     text: 'durable text', mls_ciphertext: new Uint8Array([20]), mls_epoch: 20,
-    group_generation: 0, retry_count: 1, status: 'failed_retryable',
+    group_generation: 0, retry_count: 1, status: 'failed_retryable', application_http_started: false,
     created_at: 1, updated_at: 2, ...extra,
   };
   let current = structuredClone(record);
@@ -44,7 +46,7 @@ function harness(extra = {}) {
   manager._prepareApplicationSend = async (base, aad) => {
     const ciphertext = manager.encryptMessage(base.e2ee_group_id, base.payload, aad);
     await manager._persistProvider();
-    const next = {...base, mls_ciphertext: ciphertext, mls_epoch: epoch, group_generation: manager._groupGenerations.get(base.e2ee_group_id)?.group_generation || 0, status: 'sending', last_error: undefined};
+    const next = {...base, application_http_started: false, mls_ciphertext: ciphertext, mls_epoch: epoch, group_generation: manager._groupGenerations.get(base.e2ee_group_id)?.group_generation || 0, status: 'sending', last_error: undefined};
     await manager.storage.savePendingE2eeSend(next);
     return next;
   };
@@ -54,7 +56,7 @@ function harness(extra = {}) {
     getMlsGenerationState: async () => ({ group_generation: manager._groupGenerations.get(record.e2ee_group_id)?.group_generation || 0, current_epoch: epoch }),
     sendMessage: async (_type, _id, body) => {
     operations.push(`send:${body.message.mls_epoch}`); requests.push(structuredClone(body.message));
-    if (body.message.mls_epoch === 20) throw new Error('epoch_stale: message encrypted with epoch 20, current group epoch is 25');
+    if (body.message.mls_epoch === 20) throw {response:{status:400,data:{message:'epoch_stale: message encrypted with epoch 20, current group epoch is 25'}}};
     return { message: { id: body.message.id, created_at: '2026-10-05T02:05:00Z' } };
   } };
   return { manager, record, operations, requests, encryptedPayloads, cached, current: () => current };
@@ -69,7 +71,7 @@ test('persisted epoch20 send recovers once, saves retry before network and clear
   assert.equal(h.requests[1].quoted_message_id, 'quote');
   assert.deepEqual(h.requests[1].mentioned_users, ['peer']);
   assert.ok(h.requests.every(r => !('text' in r) && !('payload' in r)));
-  assert.deepEqual(h.operations, ['pending:20:sending', 'send:20', 'recover', 'encrypt', 'provider', 'pending:25:sending', 'send:25', 'cache', 'pending:25:sent', 'delete']);
+  assert.deepEqual(h.operations, ['pending:20:sending', 'pending:20:sending', 'send:20', 'recover', 'encrypt', 'provider', 'pending:25:sending', 'pending:25:sending', 'send:25', 'cache', 'pending:25:sent', 'delete']);
   assert.equal(h.cached[0].text, h.record.text);
   assert.equal(h.current(), null);
 });
@@ -143,7 +145,7 @@ test('durable full payload and attachment/forward AAD survive stale recovery', a
 
 test('a second stale rejection is bounded and retains updated durable retry material', async () => {
   const h = harness();
-  h.manager.e2eeClient.sendMessage = async (_t, _i, body) => { h.requests.push(structuredClone(body.message)); throw new Error('epoch_stale: current group epoch is 26'); };
+  h.manager.e2eeClient.sendMessage = async (_t, _i, body) => { h.requests.push(structuredClone(body.message)); throw {response:{status:400,data:{message:'epoch_stale: current group epoch is 26'}}}; };
   await h.manager._processQueuedE2eeAttachmentMessage(h.record);
   assert.equal(h.requests.length, 2);
   assert.equal(h.current().mls_epoch, 25);
@@ -222,7 +224,8 @@ test('actual IndexedDB adapter retains recovered retry through reopen and remove
   await storage.savePendingE2eeSend(h.record);
   h.manager.e2eeClient.sendMessage = async (_t, _i, body) => {
     h.requests.push(structuredClone(body.message));
-    throw new Error(body.message.mls_epoch === 20 ? 'epoch_stale: current group epoch is 25' : 'network unavailable');
+    if (body.message.mls_epoch === 20) throw {response:{status:400,data:{message:'epoch_stale: current group epoch is 25'}}};
+    throw new Error('network unavailable');
   };
   await h.manager._processQueuedE2eeAttachmentMessage(h.record);
   (await storage.getDB()).close();

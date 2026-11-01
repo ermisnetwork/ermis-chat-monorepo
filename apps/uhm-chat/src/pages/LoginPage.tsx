@@ -16,6 +16,7 @@ import { SEO } from '../components/SEO'
 
 interface LoginPageProps {
   onLoginSuccess: (userId: string, token: string, refreshToken: string) => void
+  sessionExpired?: boolean
 }
 
 function createAuthProvider() {
@@ -33,7 +34,7 @@ function createAuthProvider() {
       })
 }
 
-export function LoginPage({ onLoginSuccess }: LoginPageProps) {
+export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageProps) {
   const { t } = useTranslation()
   const [loginMode, setLoginMode] = useState<'email' | 'phone'>('email')
   const [identifier, setIdentifier] = useState('')
@@ -44,6 +45,10 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [fieldError, setFieldError] = useState('')
   const [countdown, setCountdown] = useState(0)
   const authProviderRef = useRef<ErmisAuthProvider | null>(null)
+
+  useEffect(() => {
+    if (sessionExpired) setError(t('app.session_expired', 'Your session has expired. Please sign in again.'))
+  }, [sessionExpired, t])
 
   useEffect(() => {
     let timer: NodeJS.Timeout

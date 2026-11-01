@@ -22,8 +22,77 @@ async function fixture(pending=true,channelType="team"){
  const rejection=()=>({version:1,operation_id:job.body.operation_id,cid,state:'rejected',delivery_pending:false,group_generation:0,epoch:job.body.epoch,group_id:null,commit_sha256:job.commit_sha256,group_info_sha256:job.group_info_sha256,event_id:null,acceptance_context:null,rejection_reason:'head_conflict',rejected_at:new Date().toISOString()});
  const preserve=async()=>{assert.deepEqual(await s.loadProviderCheckpoint(user,device),base);const q=wasm.Provider.from_bytes(base.provider_bytes),id=wasm.Identity.from_bytes(q,await s.loadIdentity(user,device));assert.equal(id.owns_key_package_ref(q,ref),true);id.free();q.free();};
  const close=async()=>{await s.close();g.free();i.free();p.free();};
- return{m,s,user,device,cid,api,info,job,join,unknown,rejection,base,events,posts:()=>posts,reads:()=>reads,bumpAuth:()=>{auth++;},preserve,close};
+ return{m,s,user,device,cid,api,info,job,join,unknown,rejection,base,events,issuer:{provider:p,identity:i,group:g},privateRef:ref,posts:()=>posts,reads:()=>reads,bumpAuth:()=>{auth++;},preserve,close};
 }
+function acceptedReceipt(h){
+ const event='00000000-0000-4000-8000-000000000017',body=h.job.body;
+ return {version:1,operation_id:body.operation_id,cid:h.cid,state:'accepted',delivery_pending:false,
+  group_generation:0,epoch:body.epoch,group_id:null,commit_sha256:sha256Hex(body.commit),group_info_sha256:sha256Hex(body.group_info),event_id:event,
+  acceptance_context:{version:1,event_id:event,cid:h.cid,group_generation:0,epoch:body.epoch,accepted_at:Math.floor(Date.now()/1000),payload_sha256:sha256Hex(body.commit),provenance:'bellboy_transition_v1'}};
+}
+function acceptedReadiness(h){
+ h.issuer.group.process_message(h.issuer.provider,h.job.body.commit);
+ h.api.getExternalJoinReceipt=async(_t,_id,op)=>{assert.equal(op,h.job.body.operation_id);return acceptedReceipt(h);};
+ h.api.externalJoin=async()=>{assert.fail('accepted candidate must not POST another commit');};
+ // This fixture has no application backlog. Keep the real receipt, rebase,
+ // IDB checkpoint and Ready validation; only historical transport is empty.
+ h.m._syncChannelFromCursor=async()=>({cid:h.cid,status:'ready',epoch:1,has_more:false,needs_retry:false});
+}
+test('normal channel readiness resumes accepted pending UUID instead of dead-ending before receipt',async()=>{
+ const h=await fixture();acceptedReadiness(h);const before=h.posts();
+ const result=await h.m.ensureChannelReady('team',h.user,h.cid,{source:'open'});
+ assert.equal(result.status,'ready');assert.equal(h.m.getE2eeState(h.cid).state,'ready');
+ assert.equal(h.posts(),before);assert.equal(await h.s.loadExternalJoinCandidateCheckpoint(h.cid),null);
+ assert.equal(Number(h.m.groups.get(h.cid).epoch()),1);assert.equal(h.m.identity.owns_key_package_ref(h.m.provider,h.privateRef),true);await h.close();
+});
+test('unsealed application send resumes accepted join then encrypts and peer decrypts once',async()=>{
+ const h=await fixture();acceptedReadiness(h);const id=crypto.randomUUID();let sends=0;
+ h.m.client.user={id:h.user};h.m.client.state={users:{}};h.m._buildFullMessageWithQuoted=async x=>x;
+ h.api.sendMessage=async(_t,_id,body)=>{sends++;assert.equal(body.message.id,id);
+  const clear=h.issuer.group.process_application_message(h.issuer.provider,body.message.mls_ciphertext,undefined);
+  assert.equal(JSON.parse(new TextDecoder().decode(clear.content)).text,'retained old channel send');
+  return {message:{id,msg_seq:1,last_event_seq:1,created_at:new Date().toISOString()}};};
+ await h.m.sendMessage('team',h.user,h.cid,'retained old channel send',id);
+ assert.equal(sends,1);assert.equal(await h.s.loadExternalJoinCandidateCheckpoint(h.cid),null);
+ const pending=await h.s.loadPendingE2eeSend(id);assert.ok(pending===null||pending.status==='sent');await h.close();
+});
+test('normal readiness unknown receipt retains exact candidate and does not publish Ready',async()=>{
+ const h=await fixture(),before=h.posts();let replay;
+ h.api.externalJoin=async(_t,_id,body)=>{replay=body;};
+ const result=await h.m.ensureChannelReady('team',h.user,h.cid,{source:'send'});
+ assert.equal(result.status,'pending_external_join');assert.deepEqual(replay,h.job.body);assert.equal(h.posts(),before);
+ assert.deepEqual(await h.s.loadExternalJoinCandidateCheckpoint(h.cid),h.job);await h.preserve();await h.close();
+});
+for(const fence of ['manual','uncertain','expired'])test(`normal pending receipt recovery preserves ${fence} fence`,async()=>{
+ const h=await fixture();let reads=0;h.api.getExternalJoinReceipt=async()=>{reads++;throw Error('fenced HTTP forbidden');};
+ if(fence==='manual')h.m._recoveryControls.set(h.cid,{recovery_action:'manual_intervention_required',recovery_revision:'1'});
+ else if(fence==='expired')h.m._recoveryControls.set(h.cid,{recovery_action:'repair',repair_retry_until:new Date(Date.now()-1000).toISOString(),recovery_revision:'1'});
+ else h.m._providerPersistenceUncertain=true;
+ const result=await h.m.ensureChannelReady('team',h.user,h.cid,{source:'send'});assert.notEqual(result.status,'ready');assert.equal(reads,0);
+ assert.deepEqual(await h.s.loadExternalJoinCandidateCheckpoint(h.cid),h.job);await h.preserve();await h.close();
+});
+test('normal pending receipt recovery cannot install after transport owner replacement',async()=>{
+ const h=await fixture(),entered=latch(),release=latch();
+ h.api.getExternalJoinReceipt=async()=>{entered.resolve();await release.promise;return acceptedReceipt(h);};
+ const work=h.m.ensureChannelReady('team',h.user,h.cid,{source:'open'}),failed=assert.rejects(work,e=>e.code==='recovery_scope_changed');
+ await entered.promise;h.m.e2eeClient={};release.resolve();await failed;
+ assert.equal(h.m.groups.has(h.cid),false);assert.deepEqual(await h.s.loadExternalJoinCandidateCheckpoint(h.cid),h.job);await h.preserve();await h.close();
+});
+test('POST accepted before recovery-control change retires attempt; next normal open adopts same UUID',async()=>{
+ const h=await fixture(false);let receipt,posts=0;
+ h.api.getExternalJoinReceipt=async(_t,_id,op)=>receipt??h.unknown(op);
+ h.api.externalJoin=async(_t,_id,body)=>{
+  posts++;assert.equal(posts,1);h.job=await h.s.loadExternalJoinCandidateCheckpoint(h.cid);receipt=acceptedReceipt(h);
+  h.issuer.group.process_message(h.issuer.provider,body.commit);
+  await h.m._applyRecoveryControl(h.cid,{group_generation:0,group_id:null,incident_id:null,recovery_action:'none',recovery_revision:'1',repair_retry_until:null});
+ };
+ await assert.rejects(h.join(),e=>e.code==='recovery_scope_changed');
+ assert.equal(h.m.groups.has(h.cid),false);assert.ok(await h.s.loadExternalJoinCandidateCheckpoint(h.cid));
+ h.m._syncChannelFromCursor=async()=>({cid:h.cid,status:'ready',epoch:1,has_more:false,needs_retry:false});
+ const result=await h.m.ensureChannelReady('team',h.user,h.cid,{source:'open'});
+ assert.equal(result.status,'ready');assert.equal(posts,1);assert.equal(await h.s.loadExternalJoinCandidateCheckpoint(h.cid),null);
+ assert.equal(h.m.identity.owns_key_package_ref(h.m.provider,h.privateRef),true);await h.close();
+});
 async function put(h,key,value,store='meta'){const db=await h.s.openDB();await new Promise((yes,no)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).put(value,key);tx.oncomplete=yes;tx.onabort=()=>no(tx.error);});}
 for(const scope of ['account','device','identity','storage','transport','client','artifact','provider','marker','control','pending','candidate','cleanup','route','auth'])test('held External Join receipt cannot continue after '+scope+' replacement',async()=>{
  const h=await fixture(),gate=latch(),entered=latch(),before=h.posts(),events=h.events.length;

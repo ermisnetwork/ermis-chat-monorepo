@@ -26,10 +26,43 @@ function host(){
  m.handleChannelsHydrated=()=>{};m.markSyncStart=()=>{};m.sync=async()=>{};
  c.userID=id;c.deviceId='device';c.messageStorage=storage;c.encryptionManager=m;
  const state={lastSyncedEventSeq:1,lastSyncedAt:null,hiddenEventSeqs:new Set(),hiddenMessageSeqs:new Set()};
- const channel={cid:'team:host',state,data:{mls_enabled:false},applySyncResult:async()=>{},syncUntilCaughtUp:async()=>{}};
+ const channel={cid:'team:host',initialized:true,state,data:{mls_enabled:false},applySyncResult:async()=>{},syncUntilCaughtUp:async()=>{}};
  c.activeChannels={'team:host':channel};c.globalSync=async()=>({channels:{}});const events=[];c.dispatchEvent=e=>{events.push(e.type);};
  return{c,m,storage,channel,events,close:()=>storage.close()};
 }
+test('delayed host removal preserves an authenticated re-add, durable MLS group and message cursor',async()=>{
+ const f=await fixture(),h=host(),entered=latch(),release=latch();
+ const membership={user_id:f.user,channel_role:'member',created_at:'2026-10-17T07:31:54.149837Z'};
+ const state={...h.channel.state,membership,members:{[f.user]:membership},messages:[],clearMessages(){this.messages=[];},resetSyncState(){this.lastSyncedEventSeq=0;}};
+ const channel={...h.channel,cid:f.cid,id:f.cid.slice(5),type:'team',data:{mls_enabled:true},state,_disconnect(){}};
+ Object.assign(h.c,{userID:f.user,deviceId:f.device,messageStorage:f.m.storage,encryptionManager:f.m,activeChannels:{[f.cid]:channel}});
+ f.m.client=h.c;f.m.markSyncStart=()=>{};f.m.sync=async()=>{};
+ h.c._removedSyncCursor={removed_at:'2026-10-16T00:00:00.000000000Z',event_id:randomUUID()};
+ const beforeMessage=f.message('before delayed host removal');await f.m.processE2eeMessage(f.cid,beforeMessage);
+ await f.m.storage.saveSyncStateBatch([{version:2,cid:f.cid,lastSyncedEventSeq:7,hiddenEventSeqs:[],hiddenMessageSeqs:[],updatedAt:new Date().toISOString()}]);
+ channel.state.lastSyncedEventSeq=7;
+ const providerBefore=await f.m.storage.loadProviderCheckpoint(f.user,f.device),groupBefore=f.m.groups.get(f.cid);
+ const tombstone={cid:f.cid,event_id:randomUUID(),removed_at:'2026-10-17T07:29:27.519035Z',removal_type:'kicked'};
+ h.c.globalSync=async()=>{entered.open();await release.promise;return{channels:{},removed_channels:{events:[tombstone],next_cursor:{removed_at:tombstone.removed_at,event_id:tombstone.event_id}}};};
+ const sync=h.c.performSync(true);await entered.promise;
+ // The authenticated channel response can re-add this member while an older sync response is in flight.
+ channel.state.membership={...membership,created_at:'2026-10-17T07:31:54.149837001Z'};
+ channel.state.members={[f.user]:channel.state.membership};release.open();await sync;
+ assert.equal(h.c.activeChannels[f.cid],channel);assert.equal(h.events.includes('channel.deleted'),false);
+ assert.equal(f.m.groups.get(f.cid),groupBefore);assert.deepEqual(await f.m.storage.loadProviderCheckpoint(f.user,f.device),providerBefore);
+ assert.equal((await f.m.storage.loadMessage(beforeMessage.id)).text,'before delayed host removal');
+ assert.equal((await f.m.storage.loadSyncState(f.cid)).lastSyncedEventSeq,7);
+ assert.deepEqual(await f.m.storage.loadRemovedSyncCursor(),{removed_at:tombstone.removed_at,event_id:tombstone.event_id});
+ const after=f.message('still decrypts after delayed removal');assert.equal((await f.m.processE2eeMessage(f.cid,after)).text,'still decrypts after delayed removal');
+ const restarted=await f.restart();const afterRestart=f.message('durable group survives restart');assert.equal((await restarted.processE2eeMessage(f.cid,afterRestart)).text,'durable group survives restart');
+ await h.close();await f.close();
+});
+for(const removedAt of ['2026-10-17T07:31:54.149837Z','2026-10-17T07:31:54.149838Z',undefined,'bad'])test('host removal remains fail closed for current or unproven removal time '+String(removedAt),async()=>{
+ const h=host(),membership={user_id:h.c.userID,channel_role:'member',created_at:'2026-10-17T07:31:54.149837Z'};
+ Object.assign(h.channel.state,{membership,members:{[h.c.userID]:membership},clearMessages(){},resetSyncState(){}});h.channel._disconnect=()=>{};
+ h.c.globalSync=async()=>({channels:{},removed_channels:{events:[{cid:h.channel.cid,removed_at:removedAt}]}});
+ await h.c.performSync(true);assert.equal(h.c.activeChannels[h.channel.cid],undefined);assert.equal(h.events.includes('channel.deleted'),true);await h.close();
+});
 test('disabled synchronous APIs touch neither active nor durable crypto even while a checkpoint is unavailable',async()=>{
  const f=await fixture(),active=f.m._activeProvider,group=f.m.groups.get(f.cid),before=await f.m.storage.loadProviderCheckpoint(f.user,f.device),msg=f.message();
  f.m._providerCheckpointInFlight=true;
