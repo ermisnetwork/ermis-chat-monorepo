@@ -22,7 +22,8 @@ import { installMlsRepairDiagnostics } from '@/utils/mlsRepairDiagnostics';
 import { requiresLoginAfterRefreshFailure, createBootstrapSessionGuard } from '@/utils/authFailure';
 import { waitForBrowserPaint } from '@/utils/browserPaint';
 import i18n from './i18n';
-import { toast, Toaster } from 'sonner';
+import { toast } from 'sonner';
+import { UhmToaster } from '@/components/UhmToaster';
 
 const E2EE_ATTACHMENT_MULTIPART_ENABLED = import.meta.env.VITE_E2EE_ATTACHMENT_MULTIPART === 'true';
 const E2EE_ATTACHMENT_MULTIPART_UPLOAD_CONCURRENCY = parseOptionalPositiveInteger(
@@ -473,7 +474,7 @@ function AppContent() {
 
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-      <Toaster richColors position="top-right" duration={3000} />
+      <UhmToaster />
     </ChatProvider>
   );
 }

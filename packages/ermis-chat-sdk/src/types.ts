@@ -908,6 +908,8 @@ export interface SyncStateRecord {
   lastSyncedAt: string | null;
   hiddenEventSeqs: number[];
   hiddenMessageSeqs: number[];
+  /** Query-only absences: [msg_seq, observed server latest_event_seq]. The hidden union remains conservative for older readers. */
+  queryUnavailableMessageSeqs?: [number, number][];
   lastMsgSeqBeforeChatDeleted: number | null;
   removedSyncCursor?: { removed_at: string; event_id: string };
   updatedAt: string;

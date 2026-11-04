@@ -2161,6 +2161,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const configuredTimeouts = [this.options.timeout, this.options.axiosRequestConfig?.timeout]
       .filter((timeout): timeout is number => typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0);
     const timeout = Math.min(5000, ...configuredTimeouts);
+    const queryUnavailableSnapshots = new Map(Object.entries(this.activeChannels).map(([cid, channel]) =>
+      [cid, channel.state.captureQueryUnavailableMessageSeqs()] as const,
+    ));
     const data = await this.post<QueryChannelsAPIResponse<ErmisChatGenerics>>(
       this.baseURL + '/channels', payload, undefined, {timeout},
     );
@@ -2238,7 +2241,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     // A query snapshot can carry a newer clear-history boundary than IndexedDB.
     // Apply it and finish deleting stale local messages before hydration/events.
     const applyHistoryBoundary = async (channelState: ChannelAPIResponse<ErmisChatGenerics>): Promise<void> => {
-      await this.channel(channelState.channel.type, channelState.channel.id)._applyQueryHistoryBoundary(channelState);
+      const channel = this.channel(channelState.channel.type, channelState.channel.id);
+      await channel._applyQueryHistoryBoundary(channelState, true, queryUnavailableSnapshots.get(channel.cid));
       await Promise.all((channelState.topics || []).map(applyHistoryBoundary));
     };
     await Promise.all(data.channels.map(applyHistoryBoundary));
@@ -2698,6 +2702,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         lastSyncedAt: channel.state.lastSyncedAt,
         hiddenEventSeqs: Array.from(channel.state.hiddenEventSeqs),
         hiddenMessageSeqs: Array.from(channel.state.hiddenMessageSeqs),
+        queryUnavailableMessageSeqs: Array.from(channel.state.queryUnavailableMessageSeqs?.entries() || []),
         lastMsgSeqBeforeChatDeleted: channel.state.lastMsgSeqBeforeChatDeleted,
         removedSyncCursor: this._removedSyncCursor,
         updatedAt: new Date().toISOString(),
@@ -2756,8 +2761,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
           // the queried message cursor; event application is idempotent.
           channel.state.lastSyncedEventSeq = isCurrentVersion ? record.lastSyncedEventSeq : 0;
           channel.state.lastSyncedAt = isCurrentVersion ? record.lastSyncedAt : null;
-          channel.state.hiddenEventSeqs = new Set(record.hiddenEventSeqs || []);
-          channel.state.hiddenMessageSeqs = new Set(record.hiddenMessageSeqs || []);
+          channel.state.restoreHiddenSequences(record);
           channel.state.lastMsgSeqBeforeChatDeleted = record.lastMsgSeqBeforeChatDeleted;
         }
         // Restore removed cursor from the first record that has one

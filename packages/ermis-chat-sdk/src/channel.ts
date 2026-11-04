@@ -2499,6 +2499,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const manager = this.getClient().encryptionManager;
     const encoded = this._encodeE2eeChannelPayload(payload);
+    const queryUnavailableSnapshot = this.state.captureQueryUnavailableMessageSeqs();
     const state: QueryChannelAPIResponse<ErmisChatGenerics> = manager?.initialized
       ? await manager.postMlsBootstrap(this.cid, queryURL + '/query', encoded)
       : await this.getClient().post(queryURL + '/query', encoded);
@@ -2518,7 +2519,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     ) {
       this._data = {};
     }
-    await this._applyQueryHistoryBoundary(state);
+    await this._applyQueryHistoryBoundary(state, true, queryUnavailableSnapshot);
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
     const users = Object.values(this.getClient().state.users);
@@ -2612,10 +2613,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const encoded = this._encodeE2eeChannelPayload(payload);
     const candidateCid = typeof (dataPayload as any)?.cid === 'string'
       ? (dataPayload as any).cid : `messaging:${(dataPayload as any)?.channel_id || this.id}`;
+    const queryUnavailableSnapshot = this.state.captureQueryUnavailableMessageSeqs();
     const state: QueryChannelAPIResponse<ErmisChatGenerics> = manager?.initialized
       ? await manager.postMlsBootstrap(candidateCid, queryURL + '/query', encoded)
       : await this.getClient().post(queryURL + '/query', encoded);
-    await this._applyQueryHistoryBoundary(state);
+    await this._applyQueryHistoryBoundary(state, true, queryUnavailableSnapshot);
 
     // Ensure all members' user info are loaded in state.users
     await ensureMembersUserInfoLoaded(this.getClient(), state.channel.members);
@@ -2808,7 +2810,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       updated_at: null,
     } as unknown as MessageResponse<ErmisChatGenerics>;
 
-    if (messageSeq > 0) this.state.hiddenMessageSeqs.add(messageSeq);
+    if (messageSeq > 0) this.state.markHiddenMessageSeq(messageSeq);
     this.state.removeMessage({ id: messageId }, { persist: false });
     if (forMe) {
       this.state.unavailableMessageIds.delete(messageId);
@@ -3361,7 +3363,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             event.message = unavailableMessage;
             channelState.unavailableMessageIds.add(unavailableMessage.id);
             const messageSeq = Number(unavailableMessage.msg_seq) || 0;
-            if (messageSeq > 0) channelState.hiddenMessageSeqs.add(messageSeq);
+            if (messageSeq > 0) channelState.markHiddenMessageSeq(messageSeq);
             channelState.removeMessage({ id: unavailableMessage.id }, { persist: false });
 
             const encryptionManager = this.getClient().encryptionManager;
@@ -3513,7 +3515,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         event.message = deletedMessage;
         const messageSeq = Number(deletedMessage.msg_seq) || 0;
-        if (messageSeq > 0) channelState.hiddenMessageSeqs.add(messageSeq);
+        if (messageSeq > 0) channelState.markHiddenMessageSeq(messageSeq);
         channelState.removeMessage({ id: eventMessageId }, { persist: false });
         channelState.unavailableMessageIds.delete(eventMessageId);
         channelState.addMessageSorted(deletedMessage);
@@ -4736,7 +4738,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    * The server can return unavailable placeholders for sequence continuity;
    * they must never be hydrated into RAM or persisted back into IndexedDB.
    */
-  async _applyQueryHistoryBoundary(state: ChannelAPIResponse<ErmisChatGenerics>, persist = true): Promise<number> {
+  async _applyQueryHistoryBoundary(
+    state: ChannelAPIResponse<ErmisChatGenerics>, persist = true, queryUnavailableSnapshot?: Map<number, object>,
+  ): Promise<number> {
     const rawBoundary =
       state.last_msg_seq_before_chat_deleted ??
       state.channel.last_msg_seq_before_chat_deleted ??
@@ -4748,6 +4752,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     const boundary = Math.max(responseBoundary, currentBoundary);
     let hiddenMessagesChanged = false;
     const unavailableMessageIdsToDelete: string[] = [];
+    const queryEventSeq = Number(state.channel.latest_event_seq);
+    const unavailableSeqs = new Set(
+      [...(state.messages || []), ...(state.pinned_messages || [])]
+        .filter((message) => message.display_type === 'unavailable')
+        .map((message) => Number(message.msg_seq)),
+    );
     const shouldKeepMessage = (message: MessageResponse<ErmisChatGenerics>) => {
       if (message.display_type === 'unavailable') {
         if (message.id) {
@@ -4755,18 +4765,24 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           unavailableMessageIdsToDelete.push(message.id);
         }
         const messageSeq = Number(message.msg_seq) || 0;
-        if (messageSeq > 0 && !this.state.hiddenMessageSeqs.has(messageSeq)) {
-          this.state.hiddenMessageSeqs.add(messageSeq);
-          hiddenMessagesChanged = true;
+        if (Number.isSafeInteger(messageSeq) && messageSeq > 0) {
+          const changed = message.id
+            ? this.state.markHiddenMessageSeq(messageSeq)
+            : this.state.markQueryUnavailableMessageSeq(messageSeq, queryEventSeq);
+          hiddenMessagesChanged = changed || hiddenMessagesChanged;
         }
         return false;
       }
       const messageSeq = Number(message.msg_seq) || 0;
+      if ((boundary <= 0 || messageSeq > boundary) && !unavailableSeqs.has(messageSeq)) {
+        hiddenMessagesChanged = this.state.revalidateQueryMessage(message, queryUnavailableSnapshot) || hiddenMessagesChanged;
+      }
       return boundary <= 0 || messageSeq <= 0 || messageSeq > boundary;
     };
 
     state.messages = (state.messages || []).filter(shouldKeepMessage);
     state.pinned_messages = (state.pinned_messages || []).filter(shouldKeepMessage);
+    this.state.removeHiddenMessages(Array.from(unavailableSeqs).filter((seq) => Number.isSafeInteger(seq) && seq > 0));
 
     if (unavailableMessageIdsToDelete.length > 0) {
       const storage = state.channel.mls_enabled
@@ -4882,10 +4898,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     // 1. Merge hidden sequences (Section 6.1)
     const hiddenEventCountBeforeMerge = channelState.hiddenEventSeqs.size;
     const hiddenMessageCountBeforeMerge = channelState.hiddenMessageSeqs.size;
+    const queryUnavailableCountBeforeMerge = channelState.queryUnavailableMessageSeqs.size;
     channelState.mergeHiddenSequences(syncResult.hidden_event_seqs || [], syncResult.hidden_message_seqs || []);
     let syncMetadataChanged =
       channelState.hiddenEventSeqs.size !== hiddenEventCountBeforeMerge ||
-      channelState.hiddenMessageSeqs.size !== hiddenMessageCountBeforeMerge;
+      channelState.hiddenMessageSeqs.size !== hiddenMessageCountBeforeMerge ||
+      channelState.queryUnavailableMessageSeqs.size !== queryUnavailableCountBeforeMerge;
 
     // 2. Process truncate/clear history (Section 5.5, Rule 1)
     if (syncResult.last_msg_seq_before_chat_deleted && syncResult.last_msg_seq_before_chat_deleted > 0) {
@@ -4919,9 +4937,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           if (event.message) {
             if ((event.message as any).display_type === 'unavailable') {
               const messageSeq = Number((event.message as any).msg_seq) || 0;
-              if (messageSeq > 0 && !channelState.hiddenMessageSeqs.has(messageSeq)) {
-                channelState.hiddenMessageSeqs.add(messageSeq);
-                syncMetadataChanged = true;
+              if (messageSeq > 0) {
+                syncMetadataChanged = channelState.markHiddenMessageSeq(messageSeq) || syncMetadataChanged;
               }
               if (event.message.id) {
                 channelState.unavailableMessageIds.add(event.message.id);
@@ -5033,9 +5050,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               channelState.unavailableMessageIds.has(msgId) ||
               (!deleteForMe && (event.hard_delete === true || !isLocalForMeTombstone));
 
-            if (messageSeq > 0 && !channelState.hiddenMessageSeqs.has(messageSeq)) {
-              channelState.hiddenMessageSeqs.add(messageSeq);
-              syncMetadataChanged = true;
+            if (messageSeq > 0) {
+              syncMetadataChanged = channelState.markHiddenMessageSeq(messageSeq) || syncMetadataChanged;
             }
 
             channelState.removeMessage({ id: msgId }, { persist: false });

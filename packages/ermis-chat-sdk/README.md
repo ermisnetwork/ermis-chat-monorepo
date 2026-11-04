@@ -23,6 +23,21 @@ npm install @ermis-network/ermis-chat-react@2.1.0
 
 Backend contract selection is runtime configuration through `endUserApiMode`, not an npm channel or an API probe. Existing `self-host` and `user-service` dist-tags may remain available for older releases, but new integrations should use the unified `2.x` line.
 
+## Query-unavailable history and deletion barriers
+
+<details><summary>Change log</summary>
+
+- `2026-11-04`: Persist optional `SyncStateRecord.queryUnavailableMessageSeqs` pairs `[msg_seq, observed latest_event_seq]` alongside the conservative `hiddenMessageSeqs` union.
+  - Reason: sequence queries can return an anonymous `unavailable` placeholder while an allocated message is not readable yet; absence alone does not establish permanent deletion.
+  - Integrator action: custom sync-state adapters must round-trip the optional pairs with the same checkpoint. Restore cached metadata with `channel.state.restoreHiddenSequences(record)`; use `mergeHiddenSequences` only for authoritative hidden/deletion metadata. Do not rewrite either set directly.
+  - Compatibility/default: omitted, invalid, or legacy provenance remains conservatively hidden. Older SDKs still honor the hidden union; an older writer can discard recoverability but cannot automatically reopen content. No IndexedDB schema upgrade or server API change.
+
+</details>
+
+Only a normal canonical query response in the same CID can retire a query-only marker. The query must begin after that exact absence was observed, no later absence/deletion may supersede it, and its message `last_event_seq` must meet the recorded server watermark. Cache, realtime, stale/in-flight responses, confirmed per-ID deletion, sync hidden metadata, local tombstones and clear-history boundaries cannot reopen content. Missing watermarks and older hidden records require separate repair evidence; this change does not migrate them.
+
+Implementation history, verification and the original unresolved live case are tracked in the [canonical LOR plan](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md#2026-11-04--query-unavailable-sequence-provenance-lor-bug-web-live-hidden-seq-001).
+
 ## Durable GroupInfo repair
 
 The SDK treats `group_info.refresh_requested` and `group_info.uploaded` as

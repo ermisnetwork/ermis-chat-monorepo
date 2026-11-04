@@ -69,6 +69,9 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
   hiddenEventSeqs: Set<number>;
   /** Set of msg_seq values that are hidden/deleted-for-me. Used for fake gap detection on UI pagination. */
   hiddenMessageSeqs: Set<number>;
+  /** Provenance for query-only absences; explicit deletion always removes this recoverable marker. */
+  queryUnavailableMessageSeqs: Map<number, number>;
+  private _queryUnavailableObservations = new Map<number, object>();
   /** Message IDs permanently withdrawn for everyone; blocks query/cache resurrection. */
   unavailableMessageIds: Set<string>;
   /** Message IDs hidden locally; blocks repaired/cache plaintext from replacing their tombstones. */
@@ -94,6 +97,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     this.hasMoreSyncEvents = false;
     this.hiddenEventSeqs = new Set();
     this.hiddenMessageSeqs = new Set();
+    this.queryUnavailableMessageSeqs = new Map();
     this.unavailableMessageIds = new Set();
     this.locallyDeletedMessageIds = new Set();
     this.lastMsgSeqBeforeChatDeleted = null;
@@ -191,7 +195,7 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       if (rawMsg.display_type === 'unavailable') {
         if (rawMsg.id) this.unavailableMessageIds.add(rawMsg.id);
         if (rawMsg.msg_seq && this._channel?.cid) {
-          this.hiddenMessageSeqs.add(rawMsg.msg_seq);
+          this.markHiddenMessageSeq(rawMsg.msg_seq);
         }
         continue; // Don't add to UI state
       }
@@ -813,7 +817,80 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
    */
   mergeHiddenSequences(hiddenEventSeqs: number[], hiddenMessageSeqs: number[]) {
     hiddenEventSeqs.forEach((seq) => this.hiddenEventSeqs.add(seq));
-    hiddenMessageSeqs.forEach((seq) => this.hiddenMessageSeqs.add(seq));
+    hiddenMessageSeqs.forEach((seq) => this.markHiddenMessageSeq(seq));
+  }
+
+  /** Confirmed deletion/hidden metadata must never remain query-recoverable. */
+  markHiddenMessageSeq(seq: number): boolean {
+    const changed = !this.hiddenMessageSeqs.has(seq) || this.queryUnavailableMessageSeqs.has(seq);
+    this.hiddenMessageSeqs.add(seq);
+    this.queryUnavailableMessageSeqs.delete(seq);
+    this._queryUnavailableObservations.delete(seq);
+    return changed;
+  }
+
+  /** A sequence-only query placeholder does not prove deletion of a UUID. */
+  markQueryUnavailableMessageSeq(seq: number, eventSeq: number): boolean {
+    if (!Number.isSafeInteger(eventSeq) || eventSeq <= 0) return this.markHiddenMessageSeq(seq);
+    const previous = this.queryUnavailableMessageSeqs.get(seq);
+    // Never downgrade a confirmed or legacy ambiguous hidden entry.
+    if (this.hiddenMessageSeqs.has(seq) && previous === undefined) return false;
+    const watermark = Math.max(previous || 0, eventSeq);
+    this.hiddenMessageSeqs.add(seq);
+    this.queryUnavailableMessageSeqs.set(seq, watermark);
+    this._queryUnavailableObservations.set(seq, {});
+    return previous !== watermark;
+  }
+
+  /** Capture immediately before HTTP; a response already in flight cannot reopen a later absence. */
+  captureQueryUnavailableMessageSeqs(): Map<number, object> {
+    return new Map(this._queryUnavailableObservations);
+  }
+
+  /** Only the authenticated query boundary calls this, never cache/realtime hydration. */
+  revalidateQueryMessage(message: MessageResponse<ErmisChatGenerics>, observed?: Map<number, object>): boolean {
+    const seq = Number(message.msg_seq);
+    const watermark = this.queryUnavailableMessageSeqs.get(seq);
+    const eventSeq = Number(message.last_event_seq);
+    if (
+      watermark === undefined || !observed?.has(seq) ||
+      observed.get(seq) !== this._queryUnavailableObservations.get(seq) ||
+      message.display_type !== 'normal' || (message.type as string) === 'deleted' ||
+      !message.id || message.cid !== this._channel.cid ||
+      !Number.isSafeInteger(eventSeq) || eventSeq < watermark ||
+      this.unavailableMessageIds.has(message.id) || this.locallyDeletedMessageIds.has(message.id) ||
+      (this.lastMsgSeqBeforeChatDeleted !== null && seq <= this.lastMsgSeqBeforeChatDeleted)
+    ) return false;
+    this.queryUnavailableMessageSeqs.delete(seq);
+    this._queryUnavailableObservations.delete(seq);
+    this.hiddenMessageSeqs.delete(seq);
+    return true;
+  }
+
+  /** Restore the conservative union plus validated provenance without weakening newer in-memory fences. */
+  restoreHiddenSequences(record: {
+    hiddenEventSeqs?: number[];
+    hiddenMessageSeqs?: number[];
+    queryUnavailableMessageSeqs?: [number, number][];
+  }) {
+    const provenance = new Map<number, number>();
+    if (Array.isArray(record.queryUnavailableMessageSeqs)) {
+      for (const entry of record.queryUnavailableMessageSeqs) {
+        if (Array.isArray(entry) && entry.length === 2 &&
+          Number.isSafeInteger(entry[0]) && entry[0] > 0 &&
+          Number.isSafeInteger(entry[1]) && entry[1] > 0) {
+          provenance.set(entry[0], Math.max(provenance.get(entry[0]) || 0, entry[1]));
+        }
+      }
+    }
+    for (const seq of record.hiddenEventSeqs || []) this.hiddenEventSeqs.add(seq);
+    for (const seq of record.hiddenMessageSeqs || []) {
+      const watermark = provenance.get(seq);
+      if (watermark === undefined) this.markHiddenMessageSeq(seq);
+      else if (!this.queryUnavailableMessageSeqs.has(seq) || watermark > this.queryUnavailableMessageSeqs.get(seq)!) {
+        this.markQueryUnavailableMessageSeq(seq, watermark);
+      }
+    }
   }
 
   /**
@@ -928,6 +1005,8 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
     this.hasMoreSyncEvents = false;
     this.hiddenEventSeqs = new Set();
     this.hiddenMessageSeqs = new Set();
+    this.queryUnavailableMessageSeqs = new Map();
+    this._queryUnavailableObservations.clear();
     this.lastMsgSeqBeforeChatDeleted = null;
   }
 
@@ -953,6 +1032,8 @@ export class ChannelState<ErmisChatGenerics extends ExtendableGenerics = Default
       for (const seq of this.hiddenMessageSeqs) {
         if (seq <= clearedThroughSeq) {
           this.hiddenMessageSeqs.delete(seq);
+          this.queryUnavailableMessageSeqs.delete(seq);
+          this._queryUnavailableObservations.delete(seq);
         }
       }
     }

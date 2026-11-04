@@ -590,7 +590,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     for (const requestedCid of new Set(cids)) {
       const cid = this._commonStateScope(requestedCid);
       if (!cid || !this.groups.has(cid) || !this._commonStateSubscribers.get(cid)?.size) continue;
-      const current = this.getE2eeState(cid);
+      const current = this.getE2eeState(cid) || this._commonSnapshot(cid, 'repairing', 'local_checkpoint_pending');
       if (current?.state !== 'repairing' || current.reason !== 'local_checkpoint_pending') continue;
       this._queueSubscribedReadyRevalidation(cid);
       const request = this._subscribedReadyRequests.get(cid)!, alias = this._captureCleanupRevisionGuard(requestedCid),
@@ -625,7 +625,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           await this._providerMutationTail;
           request.assertCurrent();
           if (!this.initialized || !this._commonStateSubscribers.get(cid)?.size) continue;
-          const current = this.getE2eeState(cid);
+          const current = this.getE2eeState(cid) || this._commonSnapshot(cid, 'repairing', 'local_checkpoint_pending');
           if (current?.state !== 'repairing' || current.reason !== 'local_checkpoint_pending') continue;
           await this.refreshE2eeState(cid);
         } catch (error) {
@@ -3272,23 +3272,26 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     return progressed && sameSyncCheckpointValue(next, prior);
   }
 
-  private async _refreshE2eeStateOnce(cid: string, retryPublicReadSet: boolean): Promise<E2eeStateSnapshot> {
+  private async _refreshE2eeStateOnce(
+    cid: string, retryPublicReadSet: boolean,
+    onReady?: (provider: any, assertCurrent: () => void, replaceProvider: (next: any, signer?: {value: any}) => void) => Promise<void>,
+  ): Promise<E2eeStateSnapshot> {
     this._ensureWelcomeHistorySubscription();
     const resolved=this._commonStateScope(cid);
     if(resolved===null)return this._publishCommonState(this._commonSnapshot(cid,'repairing','mls_scope_binding_pending'));
-    if(resolved!==cid){const alias=this._captureCleanupRevisionGuard(cid);const state=await this.refreshE2eeState(resolved);alias();return state;}
+    if(resolved!==cid){const alias=this._captureCleanupRevisionGuard(cid);const state=await this._refreshE2eeStateOnce(resolved, retryPublicReadSet, onReady);alias();return state;}
     const scope = this._captureCleanupRevisionGuard(cid), storage = this.storage;
     const deferred = (code: string) => this._publishCommonState(this._commonSnapshot(cid,
       code === 'client_upgrade_required' ? 'upgrade_required' : code === 'manual_intervention_required' ? 'manual_intervention_required' :
       ['pending_external_join', 'mls_mutation_outcome_pending', 'canonical_receipt_pending'].includes(code) ? 'pending_external_join' : 'repairing', code), scope);
-    let ownReadyRevisionReproved = false;
+    let ownReadyRevisionReproved = false, readyContinuationFailed = false;
     try {
       if (!this.initialized) return deferred('local_checkpoint_pending');
       const issue = this._externalCandidateIssueSnapshot(cid); if (issue) return this._publishCommonState(issue, scope);
       if (storage.readyCheckpointVersion !== 2 || storage.providerCheckpointCASVersion !== 1 || !storage.loadMlsReadyBase ||
           !storage.saveMlsReadyCheckpoint || !storage.verifyMlsReadyCheckpoint || typeof wasmModule.Group.validate_group_info_with_policy !== 'function') return deferred('client_upgrade_required');
       if (this._observedWelcomePendingSnapshot(cid)) return deferred('pending_external_join');
-      return await this._withProviderMutation(async (provider, assertQueue) => {
+      return await this._withProviderMutation(async (provider, assertQueue, replaceProvider) => {
         scope(); assertQueue();
         const group = this.groups.get(cid), marker = this._groupGenerations.get(cid), pending = this._pendingMlsMutations.get(cid), external = this._externalJoinCandidates.get(cid);
         const bytes = new Uint8Array(provider.to_bytes()), identityBytes = new Uint8Array(this.identity.to_bytes());
@@ -3377,6 +3380,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           ...(externalBase ? {external_join_base: externalBase} : {}),
           ...(observation ? {provider_observation: true as const} : {})});
         let writing = false, committed = false;
+        let admitted: E2eeStateSnapshot;
         try {
           assertBase(); writing = true; await storage.saveMlsReadyCheckpoint!(structuredClone(cp), assertBase); committed = true; assertBase();
           if (!await storage.verifyMlsReadyCheckpoint!(structuredClone(cp))) {
@@ -3410,7 +3414,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               this._providerDurableBase?.revision !== guard.next_revision || this.groups.get(cid) !== group || this._groupGenerations.get(cid) !== marker ||
               this._pendingMlsMutations.has(cid) || this._externalJoinCandidates.has(cid) || JSON.stringify(this._recoveryControls.get(cid)) !== controlText ||
               !bytesEqual(provider.to_bytes(), bytes)) throw recoveryControlError('local_checkpoint_pending'); };
-          return this._publishCommonState(snapshot, scope, proof);
+          admitted = this._publishCommonState(snapshot, scope, proof);
         } catch (error) {
           // A committed observation changed only Ready metadata. A view owner
           // may retire immediately afterwards (for example, a query applies its
@@ -3432,13 +3436,22 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               this._providerScopeRevision === revision && this.storage === storage && this.userId === userId && this.deviceId === deviceId && this.identity === identity) this._providerPersistenceUncertain = true;
           throw error;
         }
+        // Fresh application preparation must consume this exact Ready proof
+        // before releasing its provider owner to another checkpoint writer.
+        // Keep continuation failures outside the Ready-write uncertainty handler.
+        if (admitted.state === 'ready' && onReady) {
+          try { await onReady(provider, assertQueue, replaceProvider); }
+          catch (error) { readyContinuationFailed = true; throw error; }
+        }
+        return admitted;
       });
     } catch (error) { scope();
+      if (readyContinuationFailed) throw error;
       const publicReadSetAborted = (error as {code?: string})?.code === 'local_checkpoint_pending' &&
         (error as {checkpoint_outcome?: string})?.checkpoint_outcome === 'aborted';
       if (ownReadyRevisionReproved || publicReadSetAborted) {
         // The provider queue has released before this retry; never recurse under its lock.
-        if (retryPublicReadSet) return this._refreshE2eeStateOnce(cid, false);
+        if (retryPublicReadSet) return this._refreshE2eeStateOnce(cid, false, onReady);
         return deferred('local_checkpoint_pending');
       }
       if ((error as {welcome_history_work_pending?: boolean})?.welcome_history_work_pending) this._armWelcomeHistoryRetry(); if ((error as {code?: string})?.code === 'recovery_scope_changed') throw error;
@@ -7947,7 +7960,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           };
 
           if (activeChannel?.state) {
-            if (messageSeq > 0) activeChannel.state.hiddenMessageSeqs.add(messageSeq);
+            if (messageSeq > 0) activeChannel.state.markHiddenMessageSeq(messageSeq);
             activeChannel.state.removeMessage({ id: deletedMessageId }, { persist: false });
             activeChannel.state.removePinnedMessage({ id: deletedMessageId });
             if (deleteForMe) {
@@ -11913,13 +11926,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       this._assertNoPendingMlsMutation(submitted.e2ee_group_id);
       if (intendedGeneration !== undefined &&
           intendedGeneration !== this._groupGenerations.get(submitted.e2ee_group_id)?.group_generation) throw recoveryControlError('old_group_generation');
-      const state = await this.refreshE2eeState(submitted.e2ee_group_id); assertScope();
-      if (state.state !== 'ready') throw recoveryControlError(state.reason);
     }
     // Exact prior ciphertext keeps its original mutation fence and receipt
     // reconciliation priority. No re-encryption under an unresolved candidate.
     this._assertNoPendingMlsMutation(submitted.e2ee_group_id);
-    return await this._withProviderMutation(async (provider, assertCurrent, replaceProvider) => {
+    const prepare = async (provider: any, assertCurrent: () => void, replaceProvider: (next: any, signer?: {value: any}) => void): Promise<PendingE2eeSendRecord> => {
       assertScope(); this._assertNoPendingMlsMutation(submitted.e2ee_group_id);
       const previousRecord = await storage.loadPendingE2eeSend(submitted.message_id); assertScope(); assertCurrent();
       if (previousRecord?.unsealed_intent_version === 1 && !previousRecord.mls_ciphertext &&
@@ -11981,7 +11992,18 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             this.userId === userId && this.deviceId === deviceId && this.identity === identity) this._providerPersistenceUncertain = true;
         throw error;
       } finally { if (!published) { candidateGroup?.free?.(); candidateProvider.free(); } }
-    });
+    };
+    if (needsNewRatchet) {
+      let prepared: PendingE2eeSendRecord | undefined;
+      const state = await this._refreshE2eeStateOnce(submitted.e2ee_group_id, true,
+        async (provider, assertCurrent, replaceProvider) => { prepared = await prepare(provider, assertCurrent, replaceProvider); });
+      assertScope();
+      if (state.state !== 'ready') throw recoveryControlError(state.reason);
+      if (!prepared) throw recoveryControlError('local_checkpoint_pending');
+      return prepared;
+    }
+    // Existing exact ciphertext keeps its original receipt/reconciliation path.
+    return await this._withProviderMutation(prepare);
   }
 
   /**

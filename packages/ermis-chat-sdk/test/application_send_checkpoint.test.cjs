@@ -73,10 +73,17 @@ test('Ready readback uncertainty blocks new ciphertext, retaining the exact comm
  await assert.rejects(f.send('unproven',id),e=>e.code==='provider_persistence_uncertain');assert.equal(f.calls.length,0);
  assert.equal((await f.m.storage.loadPendingE2eeSend(id)).unsealed_intent_version,1);assert.equal((await f.m.storage.loadPendingE2eeSend(id)).mls_ciphertext,undefined);assert.deepEqual(f.m._activeProvider.to_bytes(),bytes);assert.equal(f.m._providerPersistenceUncertain,true);await f.close();
 });
-test('provider revision changing after admission blocks a fresh ratchet before POST',async()=>{
- const f=await fixture(),id=randomUUID(),admit=f.m.refreshE2eeState.bind(f.m);f.m.refreshE2eeState=async cid=>{const state=await admit(cid);await f.m._persistProviderStrict();return state;};
- await assert.rejects(f.send('stale proof',id),e=>e.code==='local_checkpoint_pending');assert.equal(f.calls.length,0);assert.equal((await f.m.storage.loadPendingE2eeSend(id)).unsealed_intent_version,1);assert.equal((await f.m.storage.loadPendingE2eeSend(id)).mls_ciphertext,undefined);await f.close();
+test('foreign provider revision after admission blocks fresh ratchet CAS before POST',async()=>{
+ const f=await fixture(),id=randomUUID(),bytes=f.m.provider.to_bytes(),verify=f.m.storage.verifyMlsReadyCheckpoint.bind(f.m.storage);
+ let other,winner,injected=false;
+ f.m.storage.verifyMlsReadyCheckpoint=async cp=>{const ok=await verify(cp);if(ok&&!injected){injected=true;other=await f.manager();f.loadGroup(other);await other._persistProviderStrict();winner=await other.storage.loadProviderCheckpoint(f.user,f.device);}return ok;};
+ try{
+  await assert.rejects(f.send('stale proof',id),e=>e.code==='provider_checkpoint_conflict');assert.equal(injected,true);assert.equal(f.calls.length,0);
+  const held=await f.m.storage.loadPendingE2eeSend(id);assert.equal(held.unsealed_intent_version,1);assert.equal(held.mls_ciphertext,undefined);
+  assert.deepEqual(f.m._activeProvider.to_bytes(),bytes);assert.deepEqual(await f.m.storage.loadProviderCheckpoint(f.user,f.device),winner);
+ }finally{await other?.storage.close();await f.close();}
 });
+
 test('unknown accepted ciphertext keeps exact retry priority without new admission or encryption',async()=>{
  const f=await fixture(),id=randomUUID();f.m.e2eeClient.sendMessage=async()=>{throw Error('lost response');};await assert.rejects(f.send('exact',id));
  const prior=await f.m.storage.loadPendingE2eeSend(id);f.m.storage.readyCheckpointVersion=undefined;let sent;
@@ -285,7 +292,12 @@ test('completed attachment from an old generation cannot silently create ciphert
 
 
 test('completed upload generation remains pinned through a concurrent Ready wait',async()=>{
- const f=await fixture(),id=randomUUID(),asset=randomUUID(),row={message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),group_generation:0,text:'',manifest:[{version:1,attachment_id:asset,attachment_type:'voiceRecording'}],e2ee_attachment_ids:[asset],status:'uploaded',created_at:1,updated_at:1,retry_count:0};await f.m.storage.savePendingE2eeSend(row);const admit=f.m.refreshE2eeState.bind(f.m);f.m.refreshE2eeState=async cid=>{const value=await admit(cid);f.m._groupGenerations.set(cid,{...f.m._groupGenerations.get(cid),group_generation:1});return value;};const bytes=f.m.provider.to_bytes();await f.m._processQueuedE2eeAttachmentMessage(await f.m.storage.loadPendingE2eeSend(id));assert.equal(f.calls.length,0);const kept=await f.m.storage.loadPendingE2eeSend(id);assert.equal(kept.group_generation,0);assert.equal(kept.status,'failed_terminal');assert.equal(kept.mls_ciphertext,undefined);assert.deepEqual(f.m.provider.to_bytes(),bytes);await f.close();
+ const f=await fixture(),id=randomUUID(),asset=randomUUID(),row={message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),group_generation:0,text:'',manifest:[{version:1,attachment_id:asset,attachment_type:'voiceRecording'}],e2ee_attachment_ids:[asset],status:'uploaded',created_at:1,updated_at:1,retry_count:0};
+ await f.m.storage.savePendingE2eeSend(row);const verify=f.m.storage.verifyMlsReadyCheckpoint.bind(f.m.storage),read=f.m.storage.loadPendingE2eeSend.bind(f.m.storage);let admitted=false,injected=false;
+ f.m.storage.verifyMlsReadyCheckpoint=async cp=>{const ok=await verify(cp);if(ok)admitted=true;return ok;};
+ f.m.storage.loadPendingE2eeSend=async key=>{const value=await read(key);if(admitted&&!injected&&key===id){injected=true;f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),group_generation:1});}return value;};
+ const bytes=f.m.provider.to_bytes();await f.m._processQueuedE2eeAttachmentMessage(await f.m.storage.loadPendingE2eeSend(id));
+ assert.equal(injected,true);assert.equal(f.calls.length,0);const kept=await f.m.storage.loadPendingE2eeSend(id);assert.equal(kept.group_generation,0);assert.equal(kept.status,'failed_terminal');assert.equal(kept.mls_ciphertext,undefined);assert.deepEqual(f.m.provider.to_bytes(),bytes);await f.close();
 });
 
 
@@ -488,4 +500,23 @@ test('cipher-bearing message cannot fall through to plaintext with a stale chann
   h.ch.state.updateMessageById(id,m=>({...m,mls_ciphertext:[1,2,3]}));
   await assert.rejects(h.ch.retryMessage(id));assert.equal(h.plain(),0);
  }finally{await f.close()}
+});
+
+
+test('Ready admission and fresh send cannot be split by another owned provider checkpoint',async()=>{
+ const f=await fixture(),id=randomUUID(),other='team:other-scope',cursor={created_at:'2026-11-03T00:00:00Z',event_id:randomUUID()};
+ const verify=f.m.storage.verifyMlsReadyCheckpoint.bind(f.m.storage);let queued,injected=false;
+ f.m.storage.verifyMlsReadyCheckpoint=async cp=>{
+  const ok=await verify(cp);
+  if(ok&&!injected){injected=true;queued=f.m._saveEncryptionSyncCheckpoint({scopeCursors:{[other]:cursor}});}
+  return ok;
+ };
+ try{
+  await f.send('Ready queue race',id);await queued;
+  assert.equal(injected,true);assert.equal(f.calls.length,1);
+  const sent=await f.m.storage.loadPendingE2eeSend(id);
+  assert.equal(sent.status,'sent');assert.equal(sent.message_id,id);assert.ok(sent.mls_ciphertext.length>0);
+  assert.equal((await f.m.storage.loadScopeSyncCursor(other)).event_id,cursor.event_id);
+  assert.equal(f.m._providerPersistenceUncertain,false);
+ }finally{await queued;await f.close();}
 });

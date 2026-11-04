@@ -56,20 +56,14 @@ export function MessageGapIndicator({
           }
           if (allHidden) {
             // Gap was already resolved in a previous session — merge and skip
-            channel.state.mergeHiddenSequences(
-              Array.from(saved.hiddenEventSeqs || []),
-              Array.from(saved.hiddenMessageSeqs || []),
-            )
+            channel.state.restoreHiddenSequences(saved)
             _resolvedGaps.add(key)
             setResolved(true)
             setLoading(false)
             return
           }
           // Restore any previously saved hidden seqs
-          channel.state.mergeHiddenSequences(
-            Array.from(saved.hiddenEventSeqs || []),
-            Array.from(saved.hiddenMessageSeqs || []),
-          )
+          channel.state.restoreHiddenSequences(saved)
         }
       }
 

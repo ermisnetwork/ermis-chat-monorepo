@@ -268,3 +268,16 @@ for(const stop of ['unsubscribe','route','manual'])test('normal query readset wa
   release.resolve();await writer;await drainPresentation(h);assert.notEqual(h.m.getE2eeState(h.cid)?.state,'ready');assert.notEqual(seen.at(-1),'ready');
  }finally{release.resolve();if(writer)await writer;sub?.unsubscribe();h.m.destroy();await h.s.close();}
 });
+
+for(const entry of ['subscribe-after-install','member-readset-after-install'])test(`newly installed local group without common snapshot reaches normal subscribed Ready: ${entry}`,async()=>{
+ const h=await fixture(),seen=[],group=h.m.groups.get(h.cid),before=await h.s.loadProviderCheckpoint(h.user,h.device),cursor=await h.s.loadScopeSyncCursor(h.cid);
+ assert.equal(h.m.getE2eeState(h.cid),null);assert.equal(h.m._commonStates.has(h.cid),false);
+ if(entry==='member-readset-after-install')h.m.groups.delete(h.cid);
+ const sub=h.m.subscribeE2eeState(h.cid,s=>seen.push(s.state));
+ if(entry==='member-readset-after-install'){h.m.groups.set(h.cid,group);h.m.handleSelfMemberReadSetUpdated([h.cid]);}
+ await drainPresentation(h);
+ assert.equal(h.m.getE2eeState(h.cid)?.state,'ready');assert.equal(seen.at(-1),'ready');
+ assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),before);assert.deepEqual(await h.s.loadScopeSyncCursor(h.cid),cursor);
+ assert.equal(h.m.identity.owns_key_package_ref(h.m.provider,h.ref),true);assert.equal(h.m._providerPersistenceUncertain,false);
+ sub.unsubscribe();await h.s.close();
+});
