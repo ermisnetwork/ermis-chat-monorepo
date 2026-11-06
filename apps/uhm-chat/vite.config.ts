@@ -53,6 +53,11 @@ export default defineConfig({
         target: 'https://bucket.ermis.network',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/__bucket/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            proxyRes.headers['x-ermis-bucket-proxy'] = '1';
+          });
+        },
       },
     },
     watch: {
@@ -71,6 +76,11 @@ export default defineConfig({
         target: 'https://bucket.ermis.network',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/__bucket/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            proxyRes.headers['x-ermis-bucket-proxy'] = '1';
+          });
+        },
       },
     },
   },

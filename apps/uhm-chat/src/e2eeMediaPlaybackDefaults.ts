@@ -11,9 +11,10 @@ function envEnabled(value: unknown, defaultValue: boolean): boolean {
  * Without this, existing users would still have the old workbox SW intercepting
  * bucket requests and caching opaque (CORS-failed) responses, breaking downloads.
  */
-async function unregisterLegacyPwaWorker(): Promise<void> {
+async function unregisterLegacyPwaWorker(streamingEnabled: boolean): Promise<void> {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker?.getRegistrations) return;
   const registrations = await navigator.serviceWorker.getRegistrations();
+  let unregisteredLegacy = false;
   await Promise.all(
     registrations.map(async (registration) => {
       const scriptUrl =
@@ -22,6 +23,7 @@ async function unregisterLegacyPwaWorker(): Promise<void> {
       if (scriptUrl.includes(E2EE_MEDIA_WORKER_MARKER)) return;
       if (scriptUrl.includes('/sw.js') || scriptUrl.includes('workbox')) {
         await registration.unregister();
+        unregisteredLegacy = true;
       }
     }),
   );
@@ -32,6 +34,20 @@ async function unregisterLegacyPwaWorker(): Promise<void> {
       keys.filter((k) => k.startsWith('ermis-image-cache') || k.startsWith('general-image-cache') || k.startsWith('workbox-'))
         .map((k) => caches.delete(k)),
     );
+  }
+  // If a legacy /sw.js controller is still attached to this tab, registering the
+  // lightweight E2EE media worker (which calls skipWaiting + clients.claim)
+  // immediately replaces the old controller without requiring a tab close.
+  const controllerUrl = navigator.serviceWorker.controller?.scriptURL || '';
+  if (
+    streamingEnabled &&
+    (unregisteredLegacy ||
+      (!controllerUrl.includes(E2EE_MEDIA_WORKER_MARKER) &&
+        (controllerUrl.includes('/sw.js') || controllerUrl.includes('workbox'))))
+  ) {
+    await navigator.serviceWorker.register(`${E2EE_MEDIA_WORKER_MARKER}?v=${E2EE_MEDIA_WORKER_VERSION}`, {
+      scope: '/',
+    });
   }
 }
 
@@ -81,7 +97,7 @@ export function configureE2eeMediaPlaybackDefaults(): void {
     // LocalStorage can be unavailable in hardened browser modes; the global flag still enables streaming.
   }
 
-  void unregisterLegacyPwaWorker().catch(() => {/* best-effort */});
+  void unregisterLegacyPwaWorker(streamingEnabled).catch(() => {/* best-effort */});
   void unregisterStaleE2eeMediaWorker().catch((err) => {
     if (debugEnabled) console.info('[E2EE media streaming] stale worker cleanup skipped', err);
   });

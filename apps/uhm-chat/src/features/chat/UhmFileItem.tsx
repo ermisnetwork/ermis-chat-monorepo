@@ -1,5 +1,6 @@
-import React from 'react';
-import { FileText, FileCode, FileArchive, Music, File as FileIcon, Download } from 'lucide-react';
+import React, { useCallback } from 'react';
+import { FileText, FileCode, FileArchive, Music, File as FileIcon, Download, Loader2 } from 'lucide-react';
+import { useChatCore, useE2eeAttachmentRenderer } from '@ermis-network/ermis-chat-react';
 import type { AttachmentItem } from '@ermis-network/ermis-chat-react';
 
 const getUhmFileIcon = (fileName: string) => {
@@ -23,12 +24,25 @@ export const UhmFileItem: React.FC<{
   item: AttachmentItem;
   onClick: (url: string) => void;
 }> = React.memo(({ item, onClick }) => {
+  const { activeChannel } = useChatCore();
+  const manifest = item.e2ee_manifest;
+  const isE2ee = Boolean(manifest || item.e2ee_manifest_missing);
+  const original = useE2eeAttachmentRenderer(activeChannel, manifest, 'original');
   const Icon = getUhmFileIcon(item.file_name || '');
+
+  const handleClick = useCallback(() => {
+    if (isE2ee) {
+      if (!manifest || original.loading) return;
+      void original.download(item.file_name);
+      return;
+    }
+    onClick(item.url);
+  }, [isE2ee, item.file_name, item.url, manifest, onClick, original]);
 
   return (
     <div 
       className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors group cursor-pointer"
-      onClick={() => onClick(item.url)}
+      onClick={handleClick}
     >
       <div className="w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400">
         <Icon className="w-5 h-5" />
@@ -49,9 +63,9 @@ export const UhmFileItem: React.FC<{
         </div>
       </div>
       
-      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className={original.loading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 transition-opacity'}>
         <div className="w-8 h-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all">
-          <Download className="w-4 h-4" />
+          {original.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
         </div>
       </div>
     </div>

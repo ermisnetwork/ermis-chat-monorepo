@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, sta
 import { useTranslation } from 'react-i18next';
 import {
   MediaLightbox,
+  useDownloadHandler,
   isDirectChannel,
   CHANNEL_ROLES,
   canRemoveTargetMember,
@@ -49,6 +50,7 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
   isPreviewMode: _isPreviewMode = false,
 }) => {
   const { t } = useTranslation();
+  const { downloadFile } = useDownloadHandler();
   const isMessaging = isDirectChannel(channel);
   const isTopic = Boolean(channel?.data?.parent_cid);
 
@@ -335,7 +337,7 @@ export const UhmChannelInfoTabs: React.FC<ChannelInfoTabsProps> = React.memo(({
                     FileItemComponent ? <FileItemComponent
                       key={item.id || idx}
                       item={item}
-                      onClick={(url: string) => window.open(url, '_blank')}
+                      onClick={(url: string) => void downloadFile(url, item.file_name)}
                     /> : null
                   ))}
                 </div>

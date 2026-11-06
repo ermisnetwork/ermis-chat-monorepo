@@ -240,10 +240,10 @@ async function registerWorker(options: E2eeMediaStreamWorkerOptions = {}): Promi
   // trigger a controller-change reload. Apps that cannot integrate the handler
   // into their worker safely fall back to whole-blob playback.
   const existingRegistration = await navigator.serviceWorker.getRegistration(scope);
-  if (existingRegistration || navigator.serviceWorker.controller) {
+  if (existingRegistration) {
     if (!navigator.serviceWorker.controller) await waitForController();
     if (await currentWorkerSupportsE2eeMedia()) {
-      return existingRegistration || (await navigator.serviceWorker.ready);
+      return existingRegistration;
     }
     logMediaStreamFallback('the existing app Service Worker does not include E2EE media streaming support');
     return null;

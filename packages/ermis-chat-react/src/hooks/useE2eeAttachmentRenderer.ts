@@ -96,6 +96,7 @@ export function useE2eeAttachmentRenderer(
   const [streamLoading, setStreamLoading] = useState(false);
   const streamDisposeRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const cachedPreviewRef = useRef(false);
+  const blobRef = useRef<Blob | undefined>(undefined);
 
   const disposeStream = useCallback(async () => {
     const dispose = streamDisposeRef.current;
@@ -109,6 +110,7 @@ export function useE2eeAttachmentRenderer(
       if (current && !(kind === 'preview' && cachedPreviewRef.current)) URL.revokeObjectURL(current);
       return undefined;
     });
+    blobRef.current = undefined;
     setBlob(undefined);
     setProgress(undefined);
     cachedPreviewRef.current = false;
@@ -125,6 +127,7 @@ export function useE2eeAttachmentRenderer(
         previewObjectUrlCache.delete(cacheKey);
         previewObjectUrlCache.set(cacheKey, cached);
         cachedPreviewRef.current = true;
+        blobRef.current = cached.blob;
         setBlob(cached.blob);
         setUrl(cached.url);
         return cached.url;
@@ -152,6 +155,7 @@ export function useE2eeAttachmentRenderer(
       } else {
         cachedPreviewRef.current = false;
       }
+      blobRef.current = typedBlob;
       setBlob(typedBlob);
       setUrl(objectUrl);
       return objectUrl;
@@ -190,13 +194,23 @@ export function useE2eeAttachmentRenderer(
     async (filename?: string) => {
       const objectUrl = await load();
       if (!objectUrl || typeof document === 'undefined') return;
+      const currentBlob = blobRef.current;
+      const downloadUrl = currentBlob ? URL.createObjectURL(currentBlob) : objectUrl;
       const anchor = document.createElement('a');
-      anchor.href = objectUrl;
+      anchor.style.display = 'none';
+      anchor.href = downloadUrl;
       anchor.download =
         filename || (manifest ? manifestDisplayString(manifest, kind, 'name') : undefined) || 'encrypted-attachment';
       document.body.appendChild(anchor);
       anchor.click();
-      anchor.remove();
+      setTimeout(() => {
+        if (document.body.contains(anchor)) document.body.removeChild(anchor);
+      }, 1000);
+      if (downloadUrl !== objectUrl) {
+        setTimeout(() => {
+          URL.revokeObjectURL(downloadUrl);
+        }, 60_000);
+      }
     },
     [kind, load, manifest],
   );

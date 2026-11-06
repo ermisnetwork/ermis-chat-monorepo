@@ -42,6 +42,8 @@ export { useMessageSend } from './hooks/useMessageSend';
 export { useFileUpload } from './hooks/useFileUpload';
 export { useE2eeFileUpload } from './hooks/useE2eeFileUpload';
 export { useE2eeAttachmentRenderer } from './hooks/useE2eeAttachmentRenderer';
+export { useDownloadHandler } from './hooks/useDownloadHandler';
+export type { DownloadProgress } from './hooks/useDownloadHandler';
 export { usePendingE2eeSends } from './hooks/usePendingE2eeSends';
 export { useEmojiPicker } from './hooks/useEmojiPicker';
 export { useStickerPicker } from './hooks/useStickerPicker';

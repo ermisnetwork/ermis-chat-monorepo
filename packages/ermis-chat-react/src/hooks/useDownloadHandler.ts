@@ -17,12 +17,48 @@ export interface DownloadProgress {
 
 const BUCKET_ORIGIN = 'https://bucket.ermis.network';
 const BUCKET_PROXY_PREFIX = '/__bucket';
+const BLOB_REVOKE_DELAY_MS = 60_000;
 
 function toProxiedUrl(url: string): string {
   if (url.startsWith(BUCKET_ORIGIN)) {
     return url.replace(BUCKET_ORIGIN, BUCKET_PROXY_PREFIX);
   }
   return url;
+}
+
+function isSpaHtmlFallbackResponse(response: Response, isHtmlExpected: boolean): boolean {
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+  if (!contentType.includes('text/html')) {
+    return false;
+  }
+  if (!isHtmlExpected) {
+    return true;
+  }
+  // Even when the target filename is .html, an unproxied SPA fallback will lack
+  // both the Vite proxy marker header and a storage Content-Disposition header.
+  const isProxiedBucket = response.headers.get('x-ermis-bucket-proxy') === '1';
+  const hasContentDisposition = Boolean(response.headers.get('content-disposition'));
+  return !isProxiedBucket && !hasContentDisposition;
+}
+
+async function isSpaShellSniff(chunks: Uint8Array[], response: Response): Promise<boolean> {
+  if (response.headers.get('x-ermis-bucket-proxy') === '1' || response.headers.get('content-disposition')) {
+    return false;
+  }
+  const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  if (totalBytes === 0 || totalBytes > 16_384) {
+    return false;
+  }
+  try {
+    const sample = new TextDecoder('utf-8').decode(chunks[0]);
+    const normalized = sample.trimStart().toLowerCase();
+    return (
+      (normalized.startsWith('<!doctype html') || normalized.startsWith('<html')) &&
+      normalized.includes('<div id="root"')
+    );
+  } catch {
+    return false;
+  }
 }
 
 function fallbackDirectDownload(url: string, filename?: string) {
@@ -109,41 +145,56 @@ export const useDownloadHandler = () => {
       });
 
       try {
+        if (url.startsWith('blob:') || url.startsWith('data:')) {
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = url;
+          a.download = name;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            if (document.body.contains(a)) document.body.removeChild(a);
+          }, 1000);
+          updateProgress(downloadKey, { percent: 100, active: false });
+          setTimeout(() => removeDownload(downloadKey), 2000);
+          return;
+        }
+
         const proxiedUrl = toProxiedUrl(url);
+        const isHtmlExpected = /\.html?$/i.test(name);
         let response: Response;
+        let usedProxy = false;
 
         try {
-          response = await fetch(proxiedUrl, {
+          response = await fetch(url, {
             signal: controller.signal,
             cache: 'no-store',
           });
 
           const contentType = response.headers.get('content-type') || 'application/octet-stream';
-          const isHtmlExpected = /\.html?$/i.test(name);
-          // If proxy returned 200 with HTML (e.g. SPA fallback index.html), reject this response
           if (!response.ok || (contentType.toLowerCase().includes('text/html') && !isHtmlExpected)) {
-            throw new Error(`Proxy response invalid (status ${response.status}, contentType ${contentType})`);
+            throw new Error(`Direct response invalid (status ${response.status}, contentType ${contentType})`);
           }
-        } catch (proxyErr: any) {
-          if (proxyErr?.name === 'AbortError') throw proxyErr;
-          // If proxied fetch failed (e.g. proxy prefix not configured on production Nginx), try direct URL
+        } catch (directErr: any) {
+          if (directErr?.name === 'AbortError') throw directErr;
           if (proxiedUrl !== url) {
-            response = await fetch(url, {
+            usedProxy = true;
+            response = await fetch(proxiedUrl, {
               signal: controller.signal,
               cache: 'no-store',
             });
             const contentType = response.headers.get('content-type') || 'application/octet-stream';
-            const isHtmlExpected = /\.html?$/i.test(name);
-            if (!response.ok || (contentType.toLowerCase().includes('text/html') && !isHtmlExpected)) {
-              throw new Error(`Direct response invalid (status ${response.status}, contentType ${contentType})`);
+            if (!response.ok || isSpaHtmlFallbackResponse(response, isHtmlExpected)) {
+              throw new Error(`Proxy response invalid (status ${response.status}, contentType ${contentType})`);
             }
           } else {
-            throw proxyErr;
+            throw directErr;
           }
         }
 
         const contentType = response.headers.get('content-type') || 'application/octet-stream';
         const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+        const hasContentEncoding = Boolean(response.headers.get('content-encoding'));
 
         if (contentLength > 0) {
           updateProgress(downloadKey, { total: contentLength, percent: 0 });
@@ -168,10 +219,20 @@ export const useDownloadHandler = () => {
             updateProgress(downloadKey, { loaded, total: contentLength, percent });
           }
 
+          if (!hasContentEncoding && contentLength > 0 && loaded < contentLength) {
+            throw new Error(`Incomplete download stream: received ${loaded} of ${contentLength} bytes`);
+          }
+          if (usedProxy && (await isSpaShellSniff(chunks, response))) {
+            throw new Error('Proxy returned SPA shell instead of file content');
+          }
+
           blob = new Blob(chunks as BlobPart[], { type: contentType });
         } else {
           // Fallback for browsers without ReadableStream (rare)
           blob = await response.blob();
+          if (!hasContentEncoding && contentLength > 0 && blob.size < contentLength) {
+            throw new Error(`Incomplete download blob: received ${blob.size} of ${contentLength} bytes`);
+          }
         }
 
         // Trigger browser download
@@ -185,8 +246,10 @@ export const useDownloadHandler = () => {
 
         setTimeout(() => {
           if (document.body.contains(a)) document.body.removeChild(a);
-          window.URL.revokeObjectURL(blobUrl);
         }, 1000);
+        setTimeout(() => {
+          window.URL.revokeObjectURL(blobUrl);
+        }, BLOB_REVOKE_DELAY_MS);
 
         // Show "Complete" briefly before removing
         updateProgress(downloadKey, { percent: 100, active: false });
