@@ -35,6 +35,7 @@ export function computeDefaultActions(
     onEditTopic?: (channel: Channel) => void;
     onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
     onDeleteTopic?: (channel: Channel) => void;
+    onDeleteChannel?: (channel: Channel) => void;
     onTruncateChannel?: (channel: Channel) => void;
     isBlocked?: boolean;
     isMuted?: boolean;
@@ -231,6 +232,10 @@ export function computeDefaultActions(
         icon: actionIcons?.DeleteChannelIcon || <TrashIcon />,
         isDanger: true,
         onClick: async (ch) => {
+          if (options?.onDeleteChannel) {
+            await options.onDeleteChannel(ch);
+            return;
+          }
           try {
             await ch.delete();
           } catch (e) {

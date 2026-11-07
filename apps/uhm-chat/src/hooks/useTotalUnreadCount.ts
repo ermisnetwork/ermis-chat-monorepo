@@ -47,13 +47,21 @@ export function useTotalUnreadCount(): number {
     // Initial calculation
     calculateTotalUnread();
 
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+
     // Re-calculate on relevant events
-    const handleEvent = () => calculateTotalUnread();
+    const handleEvent = () => {
+      calculateTotalUnread();
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      cleanupTimer = setTimeout(calculateTotalUnread, 0);
+    };
 
     const eventsToListen = [
       'message.new',
       'message.read',
       'channel.deleted',
+      'notification.channel_deleted',
+      'member.removed',
       'channels.queried',
       'channel.updated',
       'channel.created',
@@ -67,6 +75,7 @@ export function useTotalUnreadCount(): number {
     eventsToListen.forEach((event) => client.on(event, handleEvent));
 
     return () => {
+      if (cleanupTimer) clearTimeout(cleanupTimer);
       eventsToListen.forEach((event) => client.off(event, handleEvent));
     };
   }, [client]);

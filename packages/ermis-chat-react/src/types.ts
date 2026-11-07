@@ -461,6 +461,8 @@ export type ChannelItemProps = {
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
   /** Handler when Delete Topic action is triggered */
   onDeleteTopic?: (channel: Channel) => void;
+  /** Handler when Delete Channel action is triggered */
+  onDeleteChannel?: (channel: Channel) => void;
   /** Handler when Truncate Channel action is triggered */
   onTruncateChannel?: (channel: Channel) => void;
   /** Array of action IDs to hide from the actions dropdown */
@@ -603,6 +605,8 @@ export type ChannelListProps = {
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
   /** Handler when Delete Topic action is triggered */
   onDeleteTopic?: (channel: Channel) => void;
+  /** Handler when Delete Channel action is triggered */
+  onDeleteChannel?: (channel: Channel) => void;
   /** Handler when Truncate action is triggered */
   onTruncateChannel?: (channel: Channel) => void;
   /** Custom labels for default channel actions */
@@ -1704,7 +1708,7 @@ export type ChannelInfoProps = {
   /** Action callbacks */
   onSearchClick?: () => void;
   onLeaveChannel?: () => void;
-  onDeleteChannel?: () => void;
+  onDeleteChannel?: (channel?: Channel) => void;
   onTruncateChannel?: (channel: Channel) => void;
   onTruncateChannelForMe?: (channel: Channel) => void;
   onPinChannel?: () => void;

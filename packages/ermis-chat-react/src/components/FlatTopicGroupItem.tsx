@@ -45,6 +45,7 @@ type FlatTopicGroupItemProps = {
   PinnedIconComponent?: React.ComponentType;
   ChannelActionsComponent?: React.ComponentType<ChannelActionsProps>;
   onAddTopic?: (channel: Channel) => void;
+  onDeleteChannel?: (channel: Channel) => void;
   onTruncateChannel?: (channel: Channel) => void;
   hiddenActions?: string[];
   actionLabels?: ChannelActionLabels;
@@ -77,6 +78,8 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   PinnedIconComponent,
   ChannelActionsComponent,
   onAddTopic,
+  onDeleteChannel,
+  onTruncateChannel,
   hiddenActions,
   actionLabels,
   actionIcons,
@@ -147,9 +150,9 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
 
   // Actions menu (pin, create topic, delete, leave)
   const defaultActions = useMemo(
-    () => computeDefaultActions(channel, currentUserId, { onAddTopic, actionLabels, actionIcons }),
+    () => computeDefaultActions(channel, currentUserId, { onAddTopic, onDeleteChannel, onTruncateChannel, actionLabels, actionIcons }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [channel, currentUserId, updateCount, onAddTopic, actionLabels, actionIcons],
+    [channel, currentUserId, updateCount, onAddTopic, onDeleteChannel, onTruncateChannel, actionLabels, actionIcons],
   );
   const filteredActions = useMemo(() => {
     if (!hiddenActions || hiddenActions.length === 0) return defaultActions;

@@ -79,6 +79,8 @@ export function useTopicGroupUpdates(
     subs.push(client.on('e2ee.message_decrypted' as any, handleE2eePreviewUpdate));
     subs.push(client.on('e2ee.local_messages_loaded' as any, handleE2eePreviewUpdate));
     subs.push(client.on('e2ee.post_join_sync' as any, handleE2eePreviewUpdate));
+    subs.push(client.on('channel.deleted', handleE2eePreviewUpdate));
+    subs.push(client.on('notification.channel_deleted', handleE2eePreviewUpdate));
 
     // Topic children events
     const currentTopics = channel.state?.topics || [];

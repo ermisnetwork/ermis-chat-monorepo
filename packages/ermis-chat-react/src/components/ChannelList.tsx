@@ -54,6 +54,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   onEditTopic,
   onToggleCloseTopic,
   onDeleteTopic,
+  onDeleteChannel,
   onTruncateChannel,
   hiddenActions,
   actionLabels,
@@ -82,8 +83,8 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   }, [channel]);
 
   const defaultActions = useMemo(
-    () => computeDefaultActions(channel, currentUserId, { onAddTopic, onEditTopic, onToggleCloseTopic, onDeleteTopic, onTruncateChannel, isBlocked, isMuted, actionLabels, actionIcons }),
-    [channel, currentUserId, updateCount, onAddTopic, onEditTopic, onToggleCloseTopic, onDeleteTopic, onTruncateChannel, isBlocked, isMuted, actionLabels, actionIcons],
+    () => computeDefaultActions(channel, currentUserId, { onAddTopic, onEditTopic, onToggleCloseTopic, onDeleteTopic, onDeleteChannel, onTruncateChannel, isBlocked, isMuted, actionLabels, actionIcons }),
+    [channel, currentUserId, updateCount, onAddTopic, onEditTopic, onToggleCloseTopic, onDeleteTopic, onDeleteChannel, onTruncateChannel, isBlocked, isMuted, actionLabels, actionIcons],
   );
 
   const filteredActions = useMemo(() => {
@@ -297,6 +298,7 @@ type ChannelRowProps = {
   onEditTopic?: (channel: Channel) => void;
   onToggleCloseTopic?: (channel: Channel, isClosed: boolean) => void;
   onDeleteTopic?: (channel: Channel) => void;
+  onDeleteChannel?: (channel: Channel) => void;
   onTruncateChannel?: (channel: Channel) => void;
   hiddenActions?: string[];
   actionLabels?: import('../types').ChannelActionLabels;
@@ -331,6 +333,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   onEditTopic,
   onToggleCloseTopic,
   onDeleteTopic,
+  onDeleteChannel,
   onTruncateChannel,
   hiddenActions,
   actionLabels,
@@ -431,6 +434,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       onEditTopic={onEditTopic}
       onToggleCloseTopic={onToggleCloseTopic}
       onDeleteTopic={onDeleteTopic}
+      onDeleteChannel={onDeleteChannel}
       onTruncateChannel={onTruncateChannel}
       hiddenActions={hiddenActions}
       actionLabels={actionLabels}
@@ -470,6 +474,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   onEditTopic,
   onToggleCloseTopic,
   onDeleteTopic,
+  onDeleteChannel,
   onTruncateChannel,
   hiddenActions,
   actionLabels,
@@ -781,6 +786,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 PinnedIconComponent={PinnedIconComponent}
                 ChannelActionsComponent={ChannelActionsComponent}
                 onAddTopic={handleAddTopicClick}
+                onDeleteChannel={onDeleteChannel}
                 onTruncateChannel={onTruncateChannel}
                 hiddenActions={hiddenActions}
                 actionLabels={actionLabels}
@@ -817,6 +823,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               onEditTopic={handleEditTopicClick}
               onToggleCloseTopic={handleToggleCloseTopicClick}
               onDeleteTopic={onDeleteTopic}
+              onDeleteChannel={onDeleteChannel}
               onTruncateChannel={onTruncateChannel}
               hiddenActions={hiddenActions}
               actionLabels={actionLabels}

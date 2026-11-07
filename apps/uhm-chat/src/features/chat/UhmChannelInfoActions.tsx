@@ -225,8 +225,9 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
 
     const handleActionWithConfirm = (actionId: string, execute?: () => void) => {
       if (!execute) return;
-      if (activeChannel && needsConfirmation(actionId)) {
-        requestConfirm(actionId, activeChannel, execute);
+      const targetChannel = channel || activeChannel;
+      if (targetChannel && needsConfirmation(actionId)) {
+        requestConfirm(actionId, targetChannel, execute);
       } else {
         execute();
       }

@@ -385,7 +385,7 @@ export const ChannelInfo: React.FC<ChannelInfoProps> = React.memo((props) => {
       : undefined;
 
   const handleDeleteChannel = useCallback(async () => {
-    if (onDeleteChannelProp) return onDeleteChannelProp();
+    if (onDeleteChannelProp) return onDeleteChannelProp(channel || undefined);
     if (!channel) return;
     try {
       await channel.delete();

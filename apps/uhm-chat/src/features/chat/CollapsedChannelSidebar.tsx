@@ -55,7 +55,13 @@ export function CollapsedChannelSidebar({
   // Listen for events that would change the channel list ordering or unread state
   useEffect(() => {
     if (!client) return
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined
     const bump = () => setUpdateTick((c) => c + 1)
+    const bumpAfterCleanup = () => {
+      bump()
+      if (cleanupTimer) clearTimeout(cleanupTimer)
+      cleanupTimer = setTimeout(bump, 0)
+    }
     const subs = [
       client.on('channels.queried', bump),
       client.on('message.new', bump),
@@ -64,13 +70,19 @@ export function CollapsedChannelSidebar({
       client.on('channel.pinned', bump),
       client.on('channel.unpinned', bump),
       client.on('notification.added_to_channel', bump),
-      client.on('notification.removed_from_channel', bump),
-      client.on('channel.deleted', bump),
+      client.on('notification.removed_from_channel', bumpAfterCleanup),
+      client.on('member.removed', bumpAfterCleanup),
+      client.on('channel.deleted', bumpAfterCleanup),
+      client.on('notification.channel_deleted', bumpAfterCleanup),
     ]
-    return () => subs.forEach((s) => s.unsubscribe())
+    return () => {
+      if (cleanupTimer) clearTimeout(cleanupTimer)
+      subs.forEach((s) => s.unsubscribe())
+    }
   }, [client])
 
   const channels = useMemo(() => {
+    void updateTick
     if (!client?.activeChannels) return []
 
     const pinned: Channel[] = []
@@ -112,7 +124,6 @@ export function CollapsedChannelSidebar({
     regular.sort(sortByLastMessage)
 
     return [...pinned, ...regular]
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client?.activeChannels, updateTick])
 
   return (

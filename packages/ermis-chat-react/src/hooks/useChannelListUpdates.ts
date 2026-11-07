@@ -129,12 +129,20 @@ export function useChannelListUpdates(
       }
     };
 
-    // --- channel.deleted: remove from list and reset active ---
+    // --- channel.deleted / notification.channel_deleted: remove from list and reset active ---
     const handleChannelDeleted = (event: Event) => {
-      const eventCid = event.cid || event.channel?.cid;
+      const rawCid = event.cid || event.channel?.cid;
+      const eventCid = rawCid
+        ? rawCid
+        : (event as Record<string, unknown>).channel_id && (event as Record<string, unknown>).channel_type
+        ? `${(event as Record<string, unknown>).channel_type}:${(event as Record<string, unknown>).channel_id}`
+        : undefined;
       if (!eventCid) return;
 
-      if (activeChannelRef.current?.cid === eventCid) {
+      if (
+        activeChannelRef.current?.cid === eventCid ||
+        activeChannelRef.current?.data?.parent_cid === eventCid
+      ) {
         setActiveChannel(null);
       }
 
@@ -361,6 +369,7 @@ export function useChannelListUpdates(
     // instead of notification.invite_accepted — handle it to re-group the channel list
     const sub15 = client.on('member.joined', handleMemberUpdated);
     const sub16 = client.on('sync.completed', handleSyncCompleted);
+    const sub17 = client.on('notification.channel_deleted', handleChannelDeleted);
 
     return () => {
       sub1.unsubscribe();
@@ -379,6 +388,7 @@ export function useChannelListUpdates(
       sub14.unsubscribe();
       sub15.unsubscribe();
       sub16.unsubscribe();
+      sub17.unsubscribe();
     };
   }, [client, setChannels, setActiveChannel]);
 }

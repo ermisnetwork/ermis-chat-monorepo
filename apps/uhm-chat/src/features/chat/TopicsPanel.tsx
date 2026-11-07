@@ -6,6 +6,7 @@ import {
   useChatCore,
   TopicList,
   canManageChannel,
+  type AvatarProps,
 } from '@ermis-network/ermis-chat-react'
 import type { Channel, SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk'
 import { UhmChannelActions } from './UhmChannelActions'
@@ -15,6 +16,7 @@ interface TopicsPanelProps {
   onBack: () => void
   onCreateTopic?: (channel: Channel) => void
   onEditTopic?: (topic: Channel) => void
+  onDeleteTopic?: (topic: Channel) => void
   onShowChannelInfo?: (channel: Channel) => void
   deletedMessageLabel?: React.ReactNode
   stickerMessageLabel?: React.ReactNode
@@ -29,14 +31,14 @@ interface TopicsPanelProps {
 }
 
 /** Custom general avatar using lucide Hash icon + TailwindCSS */
-const GeneralAvatar = () => (
+const GeneralAvatar: React.FC<AvatarProps> = () => (
   <div className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-bold bg-zinc-100 dark:bg-[#2a2640]">
     <Hash className="w-6 h-6" />
   </div>
 )
 
 /** Custom topic emoji avatar using TailwindCSS */
-const TopicEmojiAvatar = ({ image }: { image?: string | null }) => {
+const TopicEmojiAvatar: React.FC<AvatarProps> = ({ image }) => {
   let emoji = '💬'
   if (image && typeof image === 'string' && image.startsWith('emoji://')) {
     emoji = image.replace('emoji://', '')
@@ -53,6 +55,7 @@ export function TopicsPanel({
   onBack,
   onCreateTopic,
   onEditTopic,
+  onDeleteTopic,
   onShowChannelInfo,
   deletedMessageLabel,
   stickerMessageLabel,
@@ -168,11 +171,12 @@ export function TopicsPanel({
         <TopicList
           channel={channel}
           generalTopicLabel={t('chat.topics_general', 'general')}
-          GeneralAvatarComponent={GeneralAvatar as any}
-          TopicAvatarComponent={TopicEmojiAvatar as any}
+          GeneralAvatarComponent={GeneralAvatar}
+          TopicAvatarComponent={TopicEmojiAvatar}
           ChannelActionsComponent={UhmChannelActions}
           actionLabels={actionLabels}
           onEditTopic={onEditTopic}
+          onDeleteTopic={onDeleteTopic}
           deletedMessageLabel={deletedMessageLabel}
           stickerMessageLabel={stickerMessageLabel}
           photoMessageLabel={photoMessageLabel}

@@ -1205,10 +1205,36 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   dispatchEvent = (event: Event<ErmisChatGenerics>) => {
     if (!event.received_at) event.received_at = new Date();
+    if ((event.type === 'channel.deleted' || event.type === 'notification.channel_deleted') && !event.cid) {
+      const derivedCid =
+        event.channel?.cid ||
+        (event.channel_type && event.channel_id ? `${event.channel_type}:${event.channel_id}` : undefined);
+      if (derivedCid) event.cid = derivedCid;
+    }
     if (this._isMlsRemovalClientEvent(event)) {
-      void this._dispatchMlsRemovalEvent(event).catch(err => {
-        this.logger('error', 'client: durable MLS removal deferred', {err, cid: event.cid});
-      });
+      const cid = event.cid!;
+      const prev = this._mlsRemovalQueues.get(cid) ?? Promise.resolve();
+      const next = prev
+        .catch(() => undefined)
+        .then(() => this._dispatchMlsRemovalEvent(event))
+        .catch(err => {
+          this.logger('error', 'client: durable MLS removal deferred', {err, cid: event.cid});
+          if ((event.type === 'channel.deleted' || event.type === 'notification.channel_deleted') && cid) {
+            this.state.deleteAllChannelReference(cid);
+            this.activeChannels[cid]?.state.clearMessages();
+            this.activeChannels[cid]?.state.resetSyncState();
+            this.activeChannels[cid]?._disconnect();
+            this._callClientListeners(event);
+            this.activeChannels[cid]?._callChannelListeners(event);
+            delete this.activeChannels[cid];
+          }
+        })
+        .finally(() => {
+          if (this._mlsRemovalQueues.get(cid) === next) {
+            this._mlsRemovalQueues.delete(cid);
+          }
+        });
+      this._mlsRemovalQueues.set(cid, next);
       return;
     }
 
@@ -1503,6 +1529,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     });
   };
 
+  private _mlsRemovalQueues = new Map<string, Promise<void>>();
+
+  _waitForMlsRemoval(cid?: string): Promise<void> {
+    if (!cid) return Promise.resolve();
+    return this._mlsRemovalQueues.get(cid) ?? Promise.resolve();
+  }
+
   private _isMlsRemovalClientEvent(event: Event<ErmisChatGenerics>): boolean {
     return !!event.cid && !!this.encryptionManager?.initialized &&
       (!!event.mls_enabled || !!this.activeChannels[event.cid]?.data?.mls_enabled || !!this.encryptionManager.hasLocalMlsCleanupState?.(event.cid)) &&
@@ -1522,8 +1555,14 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const removedAt = event.created_at || event.createdAt || event.message?.created_at;
     if (manager.isObsoleteMlsRemoval(cid, this.userID!, removedAt)) return;
     const cids = [cid, ...(event.topic_cids || []).filter(key => manager.ownsE2eeGroup(key))];
+    const expectedGeneration =
+      (event as any).group_generation ??
+      (event.channel as any)?.group_generation ??
+      (event.type === 'channel.deleted' || event.type === 'notification.channel_deleted'
+        ? (manager as any)._groupGenerations?.get?.(cid)?.group_generation
+        : undefined);
     await manager.leaveGroups(cids, removedAt, {kind: 'canonical_removal', event_id: (event as any).event_id,
-      removed_at: typeof removedAt === 'string' ? removedAt : undefined, expected_generation: (event as any).group_generation});
+      removed_at: typeof removedAt === 'string' ? removedAt : undefined, expected_generation: expectedGeneration});
     assertCurrent();
     const post = this._handleClientEvent(event, true);
     if (channel) { await channel._handleChannelEvent(event); assertCurrent(); }

@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ChannelList, Channel, VirtualMessageList, ChannelHeader, ChannelInfo, useChatCore, useRecoveryPin, isGroupChannel, isTopicChannel, isPendingMember, canStartDirectCall } from '@ermis-network/ermis-chat-react'
-import type { Channel as ChannelType, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
+import type { Channel as ChannelType, Event as SdkEvent, RestoreProgressRecord } from '@ermis-network/ermis-chat-sdk'
 import { Info, Phone, Video, Image as ImageIcon, Film, Mic, Paperclip, LockKeyhole, RotateCw, Hash, Music } from 'lucide-react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { UhmMusicRoomPlayer } from '@/features/chat/UhmMusicRoomPlayer'
@@ -527,6 +527,56 @@ export function ChatPage() {
     }
   }, [t])
 
+  const handleDeleteChannel = useCallback(async (channel?: ChannelType) => {
+    const target = channel || infoChannel || activeChannel
+    if (!target) return
+    try {
+      await target.delete()
+      if (
+        activeChannel?.cid === target.cid ||
+        activeChannel?.data?.parent_cid === target.cid ||
+        drillDownChannel?.cid === target.cid ||
+        infoChannel?.cid === target.cid ||
+        infoChannel?.data?.parent_cid === target.cid
+      ) {
+        setShowChannelInfo(false)
+        setInfoChannel(null)
+        if (drillDownChannel?.cid === target.cid) {
+          setDrillDownChannel(null)
+          setActivePanel('channels')
+        }
+        if (activeChannel?.cid === target.cid || activeChannel?.data?.parent_cid === target.cid) {
+          setActiveChannel(null)
+        }
+      }
+      toast.success(t('chat.channel_deleted', 'Channel deleted'))
+    } catch (err) {
+      console.error('Failed to delete channel', err)
+      toast.error(t('chat.channel_delete_failed', 'Failed to delete channel'))
+    }
+  }, [activeChannel, drillDownChannel, infoChannel, setActiveChannel, t])
+
+  const handleDeleteTopic = useCallback(async (topic: ChannelType) => {
+    const target = topic || infoChannel || activeChannel
+    if (!target) return
+    try {
+      await target.delete()
+      if (activeChannel?.cid === target.cid || infoChannel?.cid === target.cid) {
+        setShowChannelInfo(false)
+        setInfoChannel(null)
+        if (activeChannel?.cid === target.cid) {
+          const parentCid = target.data?.parent_cid as string | undefined
+          const parentChannel = parentCid ? client.activeChannels[parentCid] : drillDownChannel
+          setActiveChannel(parentChannel || null)
+        }
+      }
+      toast.success(t('chat.topic_deleted', 'Topic deleted'))
+    } catch (err) {
+      console.error('Failed to delete topic', err)
+      toast.error(t('chat.topic_delete_failed', 'Failed to delete topic'))
+    }
+  }, [activeChannel, client.activeChannels, drillDownChannel, infoChannel, setActiveChannel, t])
+
   const toggleChannelInfo = useCallback(() => {
     setHasOpenedInfo(true)
     setInfoChannel(null) // use activeChannel from context
@@ -766,18 +816,45 @@ export function ChatPage() {
   // Reset UI state when leaving a channel or channel is deleted
   useEffect(() => {
     if (!client) return;
+    const notifiedDeletedCids = new Set<string>();
 
-    const handleChannelExit = (event: any) => {
+    const handleChannelExit = (event: SdkEvent) => {
       // In member.removed, event.user is the actor, event.member.user_id is the target.
       const isTargetMe = event.member?.user_id === client.userID;
       const isDelete = event.type === 'channel.deleted' || event.type === 'notification.channel_deleted';
+      const eventCid =
+        event.cid ||
+        event.channel?.cid ||
+        (event.channel_type && event.channel_id ? `${event.channel_type}:${event.channel_id}` : undefined);
 
-      if ((isTargetMe || isDelete) && event.cid) {
-        if (activeChannel?.cid === event.cid || drillDownChannel?.cid === event.cid) {
+      if ((isTargetMe || isDelete) && eventCid) {
+        const isCurrentContextAffected =
+          activeChannel?.cid === eventCid ||
+          activeChannel?.data?.parent_cid === eventCid ||
+          drillDownChannel?.cid === eventCid ||
+          infoChannel?.cid === eventCid ||
+          infoChannel?.data?.parent_cid === eventCid;
+
+        if (isCurrentContextAffected) {
+          const actorId = event.user?.id || event.user_id;
+          if (isDelete && actorId && actorId !== client.userID && !notifiedDeletedCids.has(eventCid)) {
+            notifiedDeletedCids.add(eventCid);
+            const deletedName =
+              event.channel?.name ||
+              (activeChannel?.cid === eventCid ? activeChannel?.data?.name : undefined) ||
+              (drillDownChannel?.cid === eventCid ? drillDownChannel?.data?.name : undefined) ||
+              eventCid;
+            toast.info(t('notifications.channel_deleted', { name: deletedName }));
+          }
           setShowChannelInfo(false);
-          setDrillDownChannel(null);
-          setActiveChannel(null);
-          setActivePanel('channels');
+          setInfoChannel(null);
+          if (drillDownChannel?.cid === eventCid) {
+            setDrillDownChannel(null);
+            setActivePanel('channels');
+          }
+          if (activeChannel?.cid === eventCid || activeChannel?.data?.parent_cid === eventCid) {
+            setActiveChannel(null);
+          }
         }
       }
     };
@@ -789,7 +866,7 @@ export function ChatPage() {
     ];
 
     return () => listeners.forEach(l => l.unsubscribe());
-  }, [client, activeChannel, drillDownChannel]);
+  }, [client, activeChannel, drillDownChannel, infoChannel, setActiveChannel, t]);
 
   // Auto-accept topics when parent channel invitation is accepted
   useEffect(() => {
@@ -899,6 +976,8 @@ export function ChatPage() {
                   LoadingIndicator={ChannelListSkeleton}
                   EmptyStateIndicator={ChannelListEmpty}
                   ChannelActionsComponent={UhmChannelActions}
+                  onDeleteChannel={handleDeleteChannel}
+                  onDeleteTopic={handleDeleteTopic}
                   onTruncateChannel={handleTruncateChannel}
                   actionLabels={actionLabels}
                   deletedMessageLabel={t('chat.deleted_message')}
@@ -960,6 +1039,7 @@ export function ChatPage() {
                 onBack={handleBackFromTopics}
                 onCreateTopic={openCreateTopicModal}
                 onEditTopic={openEditTopicModal}
+                onDeleteTopic={handleDeleteTopic}
                 onShowChannelInfo={() => { setHasOpenedInfo(true); setInfoChannel(drillDownChannel); setShowChannelInfo(true) }}
                 deletedMessageLabel={t('chat.deleted_message')}
                 stickerMessageLabel={t('chat.preview_sticker')}
@@ -1180,6 +1260,8 @@ export function ChatPage() {
               actionsReopenTopicLabel={t('actions.reopen_topic')}
               actionsDeleteTopicLabel={t('actions.delete_topic')}
               actionsCreateTopicLabel={t('actions.create_topic')}
+              onDeleteChannel={handleDeleteChannel}
+              onDeleteTopic={handleDeleteTopic}
               onTruncateChannel={handleTruncateChannel}
               onTruncateChannelForMe={handleTruncateChannelForMe}
               onCreateTopic={openCreateTopicModal}

@@ -1843,7 +1843,33 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   async delete() {
-    return await this.getClient().delete(this._channelURL());
+    const client = this.getClient();
+    const response = await client.delete(this._channelURL());
+    if (this.cid) {
+      await client._waitForMlsRemoval(this.cid);
+    }
+    if (this.cid && client.activeChannels[this.cid]) {
+      const channelData = (response as any)?.channel || this.data;
+      const groupGeneration =
+        channelData?.group_generation ??
+        (this.data as any)?.group_generation ??
+        (client.encryptionManager as any)?._groupGenerations?.get?.(this.cid)?.group_generation;
+      const topicCids = Array.isArray(this.state?.topics)
+        ? this.state.topics.map((t) => t.cid).filter(Boolean)
+        : undefined;
+      client.dispatchEvent({
+        type: 'channel.deleted',
+        cid: this.cid,
+        channel_type: this.type,
+        channel_id: this.id,
+        channel: channelData,
+        ...(channelData?.deleted_at ? { created_at: channelData.deleted_at } : {}),
+        ...(groupGeneration !== undefined ? { group_generation: groupGeneration } : {}),
+        ...(topicCids?.length ? { topic_cids: topicCids } : {}),
+      } as any);
+      await client._waitForMlsRemoval(this.cid);
+    }
+    return response;
   }
 
   async truncate(options?: { for_me?: boolean }) {
