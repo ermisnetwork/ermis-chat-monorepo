@@ -85,6 +85,7 @@ test('standard single presign includes file_size and confirms after upload', asy
 
     assert.equal(result.file, 'https://cdn.example.test/single.png');
     assert.equal(calls[0].payload.file_size, 12);
+    assert.equal(Object.hasOwn(calls[0].payload, 'purpose'), false);
     assert.deepEqual(calls[1].payload, {
       attachment_id: 'single-attachment',
       file_name: 'photo.png',
@@ -355,4 +356,45 @@ test('canceling a standard attachment send aborts the active upload and never po
     if (previousXhr === undefined) delete global.XMLHttpRequest;
     else global.XMLHttpRequest = previousXhr;
   }
+});
+
+for (const mode of ['single', 'multipart']) {
+  test(`channel avatar purpose is carried to ${mode} presign and confirm, never storage`, async () => {
+    const xhr = installFakeXhr();
+    const calls = [];
+    const channel = makeChannel(async (url, payload) => {
+      calls.push({ url, payload });
+      if (url.endsWith('/file/presign')) return mode === 'single' ? {
+        attachment_id: 'qa-avatar', upload_mode: 'single', upload_url: 'https://storage.example.test/avatar',
+      } : {
+        attachment_id: 'qa-avatar', upload_mode: 'multipart',
+        multipart: { upload_id: 'qa-multipart', part_size: 10, part_count: 1,
+          parts: [{ part_number: 1, upload_url: 'https://storage.example.test/avatar-part' }] },
+      };
+      if (url.endsWith('/file/confirm')) return { file: 'https://cdn.example.test/avatar.png' };
+      throw new Error('Unexpected QA request');
+    });
+    try {
+      const result = await channel.uploadFilePresigned(new Blob([new Uint8Array(5)], { type: 'image/png' }),
+        'qa-avatar.png', 'image/png', undefined, undefined, { purpose: 'channel_avatar' });
+      assert.equal(result.file, 'https://cdn.example.test/avatar.png');
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0].payload.purpose, 'channel_avatar');
+      assert.equal(calls[1].payload.purpose, 'channel_avatar');
+      assert.deepEqual(xhr.requests[0].headers, { 'Content-Type': mode === 'single' ? 'image/png' : 'application/octet-stream' });
+    } finally { xhr.restore(); }
+  });
+}
+
+test('normal upload purpose is optional and preserves the legacy request URL', async () => {
+  const channel = makeChannel(async () => { throw new Error('Unexpected POST'); });
+  const calls = [];
+  channel.getClient().sendFile = async (...args) => { calls.push(args); return { file: 'https://cdn.example.test/qa.png' }; };
+  const file = Buffer.from('qa');
+  await channel.sendFile(file, 'qa.png', 'image/png');
+  await channel.sendFile(file, 'qa.png', 'image/png', undefined, { purpose: 'channel_avatar' });
+  assert.ok(calls[0][0].endsWith('/file'));
+  assert.ok(calls[1][0].endsWith('/file?purpose=channel_avatar'));
+  assert.equal(calls[0][1], file);
+  assert.equal(calls[1][1], file);
 });

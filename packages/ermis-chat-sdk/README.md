@@ -320,6 +320,9 @@ Durable Welcome compatibility (LOR DEC085): adapters implementing `welcomeAuthor
 Durable application intent compatibility (LOR DEC085, 2026-10-20): adapters need `applicationIntentCheckpointVersion:1` and atomic `reserveApplicationIntent(record, owner, assertOwner)` before a fresh send/edit can wait for Ready. Existing pending-send stores retain `unsealed_intent_version:1`, original UUID/payload/route/AAD and account/device/signer/known generation. This local plaintext intent is distinct from ciphertext acceptance; it never replaces an existing exact ciphertext job. Missing capability fails typed; conflicting same-ID intent rejects. Resume uses normal Ready/private-ratchet checkpoint and preserves known-generation fencing. Cancellation retains exact canceled ciphertext/intent with `acceptance_unknown_after_cancel` when ciphertext exists; no automatic resend or replacement batch follows cancellation. There is no schema migration. A rollback reader must understand and preserve both authored Welcome and unsealed intents; no predecessor is qualified yet. Owner snapshot/copies cost O(provider bytes + intent payload), one short reservation transaction, no HTTP while holding the provider queue.
 
 
+2026-11-05 queued-send durability: a fresh send reserves its owner-bound unsealed intent before waiting for an earlier send's HTTP, within the existing32-ticket admission limit. Queued intents remain `sending` so interrupted work can resume with its original UUID; an actual admission failure becomes `failed_retryable` and still requires explicit Retry. Ratchet mutation and HTTP stay in per-scope FIFO order. Existing sealed ciphertext and completed-upload journals keep their original adoption/reconciliation path. The Channel publishes an E2EE `sending` bubble only after intent reservation commits; failures publish a separate error. Await the send result for canonical acceptance; an optimistic bubble is not a receipt. No server API or IndexedDB schema change.
+
+
 2026-10-20 DEC085 final intent writer contract: applicationIntentCheckpointVersion1 includes exact ephemeral pending_send_guards in the same provider+pending private checkpoint. Cancellation/replacement between admission and commit aborts the whole candidate; no ratchet or winning job is overwritten. Preserve unsealed_intent_version1 original UUID/payload/route/AAD and known generation across restart. Hydration/resume restores text intents as well as attachment jobs through existing Channel callbacks. Canceled unknown ciphertext is retained; late errors cannot make it retryable. Compatible predecessor reader/artifact remains unqualified. Final507 affected tests and physical/browser evidence are indexed in the existing Bellboy LOR canonical/ledger, with full six gates still open. Pinned Uhm build used Vite configLoader runner; ESM config resolves projectDir through import.meta.url without alias changes. Default bundled Rolldown loader hung and is retained as a toolchain limitation, not a source-test PASS.
 
 
@@ -460,3 +463,30 @@ Channel-list transport (2026-10-30): `queryChannels` bounds its HTTP read at fiv
 `channel.retryMessage(messageId)` routes E2EE retries through the original durable pending intent. It retains the UUID and original payload. A sealed operation with an unknown HTTP outcome reconciles the exact ciphertext; it never falls through to the ordinary plaintext endpoint. Missing, foreign-channel, canceled, terminal and edit checkpoints fail closed. Failed unsealed intents remain failed after reload until explicit retry; interrupted work and sealed reconciliation retain their existing resume behavior. Acceptance comes from the server receipt, not the retry button or optimistic cache.
 
 After an accepted rebootstrap installs the founder group, the SDK observes and durably binds authoritative recovery control through the existing bounded discovery flow. Failed observation retains the installed group; a newer manual/repair control still governs it. No identity reset or second rebootstrap is implied. See the [canonical LOR journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md).
+
+Startup scope isolation (2026-11-06): malformed/missing event-bound acceptance metadata keeps that scope at its saved durable cursor with `needs_retry` / `acceptance_metadata_invalid`. Other scopes in the same response can finish checkpointing and recovery discovery. The strict validator is unchanged; the invalid scope is not Ready and does not receive a cursor skip. Shared provider persistence or ownership failures still abort the sync. No wire/schema, retry or crypto-policy changes. See the [canonical LOR journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md).
+
+### Group avatar upload purpose
+
+<details>
+<summary>Change log</summary>
+
+- `2026-11-07`: Added optional `purpose: 'channel_avatar'` for channel metadata uploads.
+  - Reason: E2EE group avatars use the standard storage path without becoming message attachments.
+  - Integrator action: pass the option for group avatar upload, then use the existing channel update with `image`.
+  - Compatibility/default: omitted purpose keeps message attachment behavior; deploy backend purpose support first.
+
+</details>
+
+```ts
+// Keep the existing normal proxy transport (Uhm):
+const uploaded = await channel.sendFile(file, file.name, file.type, undefined, { purpose: 'channel_avatar' });
+// Or keep the existing presigned transport (default React component):
+const direct = await channel.uploadFilePresigned(file, file.name, file.type, undefined, undefined, { purpose: 'channel_avatar' });
+await channel.update({ image: uploaded.file });
+```
+
+Purpose is sent only to the API, never to storage. Existing membership, role and upload permissions still apply.
+Avatar bytes and the channel image URL remain server-readable metadata; MLS attachment encryption is unchanged.
+
+Browser presigned uploads still require storage CORS to allow the exact page origin (scheme, host and port); multipart also needs ETag exposed. A successful normal proxy avatar upload does not validate browser direct-upload CORS. Uhm currently uses the normal avatar path, while the shared React editor uses presign. `purpose` changes upload admission only.

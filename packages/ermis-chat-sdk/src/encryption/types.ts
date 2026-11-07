@@ -60,6 +60,11 @@ export interface StoredMessage {
   // Notification metadata
   mentioned_users?: string[];
   mentioned_all?: boolean;
+  /** Canonical authenticated envelope fields retained for full-snapshot edits. */
+  e2ee_attachment_ids?: string[];
+  forward_cid?: string;
+  forward_message_id?: string;
+  forward_parent_cid?: string;
 
   // State
   pinned?: boolean;

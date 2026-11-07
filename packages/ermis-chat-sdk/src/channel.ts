@@ -243,10 +243,18 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       type: message.sticker_url ? 'sticker' : message.type || 'regular',
     } as unknown as MessageResponse<ErmisChatGenerics>;
 
-    this.state.addMessageSorted(optimisticMessage);
+    let optimisticPublished = false;
+    const publishOptimistic = () => {
+      if (optimisticPublished) return;
+      optimisticPublished = true;
+      this.state.addMessageSorted(optimisticMessage);
+    };
 
     const isE2ee = this._isEffectiveE2ee();
     const encryptionMgr = this.getClient().encryptionManager;
+    // An E2EE sending bubble must represent durable work, including the
+    // final click before navigating away. Plaintext keeps its eager behavior.
+    if (!isE2ee || !encryptionMgr?.initialized) publishOptimistic();
     if (isE2ee && encryptionMgr?.initialized) {
       try {
         const response = await encryptionMgr.sendMessage(this.type, this.id, this.cid, message.text || '', messageId, {
@@ -264,7 +272,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           poll_type: message.poll_type,
           allow_change_choice: message.allow_change_choice,
           poll_closed: message.poll_closed,
-        });
+        }, publishOptimistic);
         const resMsg = response?.message || (response as any);
         if (resMsg && (resMsg.id || resMsg.text)) {
           const responseUserId = resMsg.user?.id || (resMsg as any).user_id || this.getClient().userID || '';
@@ -292,6 +300,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         }
         return response;
       } catch (error: any) {
+        publishOptimistic();
         const isOfflineError =
           error.code === 'ERR_NETWORK' ||
           error.isWSFailure ||
@@ -1542,8 +1551,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     name?: string,
     contentType?: string,
     user?: UserResponse<ErmisChatGenerics>,
+    options: { purpose?: 'message_attachment' | 'channel_avatar' } = {},
   ) {
-    return this.getClient().sendFile(`${this._channelURL()}/file`, uri, name, contentType, user);
+    const purposeQuery = options.purpose ? `?purpose=${encodeURIComponent(options.purpose)}` : '';
+    return this.getClient().sendFile(`${this._channelURL()}/file${purposeQuery}`, uri, name, contentType, user);
   }
 
   /**
@@ -1610,6 +1621,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void,
     signal?: AbortSignal,
     options: {
+      /** Omit for legacy message uploads. Group avatars are server-readable channel metadata. */
+      purpose?: 'message_attachment' | 'channel_avatar';
       session?: StandardUploadSession;
       onSession?: (session: StandardUploadSession) => void | Promise<void>;
       onPartCompleted?: (session: StandardUploadSession) => void | Promise<void>;
@@ -1641,6 +1654,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           file_name: name,
           content_type: contentType,
           file_size: totalSize,
+          ...(options.purpose ? { purpose: options.purpose } : {}),
         },
       );
       const ttlSeconds = presign.ttl_secs ?? 900;
@@ -1658,6 +1672,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       attachment_id: presignResp.attachment_id,
       file_name: name,
       content_type: contentType,
+      ...(options.purpose ? { purpose: options.purpose } : {}),
     };
 
     if (presignResp.upload_mode === 'multipart') {

@@ -204,7 +204,7 @@ test('corrupt persisted ciphertext fails before HTTP; cancellation does not dele
 for(const race of ['cancel','replace'])test(`pending ${race} at private checkpoint aborts the whole candidate without overwriting the winning job`,async()=>{
  const f=await fixture(),id=randomUUID(),bytes=f.m.provider.to_bytes(),save=f.m.storage.saveEncryptionSyncCheckpoint.bind(f.m.storage);let winner;
  f.m.storage.saveEncryptionSyncCheckpoint=async cp=>{if(cp.pending_sends?.length){const old=await f.m.storage.loadPendingE2eeSend(id);if(race==='cancel')await f.m.cancelPendingE2eeSend(id);else await f.m.storage.savePendingE2eeSend({...old,payload:{text:'concurrent winner'}});winner=await f.m.storage.loadPendingE2eeSend(id);}return save(cp);};
- await assert.rejects(f.send('original',id),e=>e.code==='pending_send_conflict');assert.equal(f.calls.length,0);assert.deepEqual(f.m.provider.to_bytes(),bytes);assert.deepEqual(await f.m.storage.loadPendingE2eeSend(id),winner);assert.equal(winner.mls_ciphertext,undefined);assert.equal(winner.status,race==='cancel'?'canceled':'failed_retryable');assert.equal(f.m._providerPersistenceUncertain,false);await f.close();
+ await assert.rejects(f.send('original',id),e=>e.code==='pending_send_conflict');assert.equal(f.calls.length,0);assert.deepEqual(f.m.provider.to_bytes(),bytes);assert.deepEqual(await f.m.storage.loadPendingE2eeSend(id),winner);assert.equal(winner.mls_ciphertext,undefined);assert.equal(winner.status,race==='cancel'?'canceled':'sending');assert.equal(f.m._providerPersistenceUncertain,false);await f.close();
 });
 
 
@@ -437,6 +437,42 @@ test('sealed ciphertext dispatch waits for an actual concurrent provider checkpo
  }finally{release.open();if(writer)await writer;peer?.free();identity.free();p.free();await f.close();}
 });
 
+test('sealed dispatch does not strand its first POST when a provider writer starts during HTTP-marker CAS',async()=>{
+ const f=await fixture(),id=randomUUID(),entered=latch(),release=latch();let writer;
+ const save=f.m.storage.savePendingE2eeSendOutcome.bind(f.m.storage),persist=f.m.storage.saveProviderState.bind(f.m.storage);
+ try{
+  f.m.storage.savePendingE2eeSendOutcome=async(before,after,...rest)=>{
+   const result=await save(before,after,...rest);
+   if(result&&before.application_http_started===false&&after?.application_http_started===true){
+    f.m.storage.saveProviderState=async(...args)=>{entered.open();await release.promise;return persist(...args);};
+    writer=f.m._persistProviderStrict();await entered.promise;
+   }
+   return result;
+  };
+  const work=f.send('sealed first POST',id);work.catch(()=>{});
+  await entered.promise;await new Promise(r=>setImmediate(r));
+  assert.equal(f.calls.length,1,'Marker winner must dispatch the first POST, never strand it as reconcile-only');
+  assert.equal(f.calls[0].body.message.id,id);
+  release.open();await writer;await work;
+  assert.equal((await f.m.storage.loadPendingE2eeSend(id)).status,'sent');
+ }finally{release.open();if(writer)await writer;await f.close();}
+});
+
+test('sealed dispatch still fails closed if provider persistence becomes uncertain during HTTP-marker CAS',async()=>{
+ const f=await fixture(),id=randomUUID();
+ const save=f.m.storage.savePendingE2eeSendOutcome.bind(f.m.storage);
+ try{
+  f.m.storage.savePendingE2eeSendOutcome=async(before,after,...rest)=>{
+   const result=await save(before,after,...rest);
+   if(result&&before.application_http_started===false&&after?.application_http_started===true)f.m._providerPersistenceUncertain=true;
+   return result;
+  };
+  await assert.rejects(f.send('must remain fenced',id),e=>e.code==='provider_persistence_uncertain');
+  assert.equal(f.calls.length,0);
+  assert.equal((await f.m.storage.loadPendingE2eeSend(id)).application_http_started,true);
+ }finally{await f.close();}
+});
+
 test('sealed dispatch still fails closed on provider persistence uncertainty before HTTP',async()=>{
  const f=await fixture(),id=randomUUID();try{
   const row=await f.m._prepareApplicationSend({message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),operation_kind:'send',payload:{text:'retain'},status:'sending',created_at:1,updated_at:1});
@@ -519,4 +555,77 @@ test('Ready admission and fresh send cannot be split by another owned provider c
   assert.equal((await f.m.storage.loadScopeSyncCursor(other)).event_id,cursor.event_id);
   assert.equal(f.m._providerPersistenceUncertain,false);
  }finally{await queued;await f.close();}
+});
+
+
+test('ten rapid sends reserve every durable intent while the first HTTP is still blocked',async()=>{
+ const f=await fixture(),entered=latch(),release=latch(),reserved=latch(),ids=Array.from({length:10},()=>randomUUID());
+ const reserve=f.m.storage.reserveApplicationIntent.bind(f.m.storage);const reservedIds=new Set();let timer;const tasks=[];
+ f.m.storage.reserveApplicationIntent=async(...args)=>{const row=await reserve(...args);reservedIds.add(row.message_id);if(reservedIds.size>=10)reserved.open();return row;};
+ f.m.e2eeClient.sendMessage=async(_t,_c,body)=>{entered.open();await release.promise;return{message:{id:body.message.id}};};
+ try{
+  tasks.push(f.send('burst-0',ids[0]));await entered.promise;
+  for(let i=1;i<ids.length;i++)tasks.push(f.send('burst-'+i,ids[i]));
+  await Promise.race([reserved.promise,new Promise(resolve=>{timer=setTimeout(resolve,1000)})]);
+  const snapshot=await Promise.all(ids.map(id=>f.m.storage.loadPendingE2eeSend(id)));
+  assert.equal(snapshot.filter(Boolean).length,10,'waiting behind a network send must not leave optimistic UUIDs only in memory');
+  for(let i=1;i<snapshot.length;i++){assert.equal(snapshot[i].message_id,ids[i]);assert.equal(snapshot[i].payload.text,'burst-'+i);assert.equal(snapshot[i].mls_ciphertext,undefined,'reservation must not advance the ratchet');}
+ }finally{clearTimeout(timer);release.open();await Promise.allSettled(tasks);await f.close();}
+});
+
+
+test('channel publishes an E2EE sending bubble only after its durable intent reservation',async()=>{
+ const f=await fixture(),id=randomUUID(),entered=latch(),release=latch(),http=latch(),finish=latch();
+ const {ErmisChat}=require('../dist/index.cjs'),c=new ErmisChat('fixture','project','http://fixture.invalid',{browser:false,logger:()=>{}});
+ c._setUser({id:f.user});c.deviceId=f.device;c.encryptionManager=f.m;f.m.client=c;const ch=c.channel('team',f.cid.slice(5));ch.data={mls_enabled:true};
+ const reserve=f.m.storage.reserveApplicationIntent.bind(f.m.storage);f.m.storage.reserveApplicationIntent=async(...args)=>{entered.open();await release.promise;return reserve(...args);};
+ f.m.e2eeClient.sendMessage=async(_t,_cid,body)=>{http.open();await finish.promise;return{message:{id:body.message.id,text:'durable-bubble'}};};
+ const sending=ch.sendMessage({id,text:'durable-bubble'});let publishedBeforeReservation;
+ try{await entered.promise;publishedBeforeReservation=ch.state.messages.some(m=>m.id===id);release.open();await http.promise;
+  assert.equal(publishedBeforeReservation,false,'an optimistic UI UUID must not imply a send that exists only in memory');
+  assert.ok(await f.m.storage.loadPendingE2eeSend(id));assert.equal(ch.state.messages.find(m=>m.id===id)?.status,'sending');
+ }finally{release.open();finish.open();await Promise.allSettled([sending]);await f.close();}
+});
+
+
+// LOR-BUG-ATTACHMENT-EDIT-001: public consumer + actual WASM/IndexedDB.
+test('public Channel caption edit preserves authenticated image manifest and peer snapshot',async()=>{
+ const f=await fixture(),id=randomUUID(),attachmentId=randomUUID(),assetId=randomUUID();
+ const manifest={version:1,attachment_id:attachmentId,attachment_type:'image',assets:[{asset_id:assetId,kind:'original',frame_size:262144,content_key:Buffer.alloc(32,7).toString('base64'),nonce_prefix:Buffer.alloc(8,3).toString('base64'),cipher_sha256:'a'.repeat(64),cipher_size:24,plaintext_size:0,display:{name:'qaatt-image.png',mime_type:'image/png'}}]};
+ const bp=new f.w.Provider(),bob=new f.w.Identity(bp,'edit-peer'),g=f.m.getGroup(f.cid),bundle=g.add_members(f.m.provider,f.m.identity,[bob.key_package_typed(bp)]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);const peer=f.w.Group.join(bp,bundle.welcome,g.export_ratchet_tree());
+ try{
+  await f.m.sendMessage('team',f.cid.slice(5),f.cid,'QAATT-original',id,{attachments:[manifest],e2ee_attachment_ids:[attachmentId]});
+  const first=f.calls.at(-1).body.message.mls_ciphertext;peer.process_application_message(bp,first,undefined);
+  const {ErmisChat,buildE2eeMessageAadV1}=require('../dist/index.cjs'),c=new ErmisChat('fixture','project','http://fixture.invalid',{browser:false,logger:()=>{}});c._setUser({id:f.user});c.deviceId=f.device;c.encryptionManager=f.m;f.m.client=c;const ch=c.channel('team',f.cid.slice(5));ch.data={mls_enabled:true};
+  await ch.editMessage(id,{text:'QAATT-edited'});
+  const row=await f.m.storage.loadPendingE2eeSend(id);assert.deepEqual(row.payload.attachments,[manifest],'caption edit must keep complete authenticated manifest');assert.deepEqual(row.e2ee_attachment_ids,[attachmentId]);assert.equal(row.operation_kind,'update');assert.notDeepEqual(row.mls_ciphertext,first);
+  const processed=peer.process_application_message(bp,row.mls_ciphertext,undefined),payload=JSON.parse(new TextDecoder().decode(processed.content));assert.equal(payload.text,'QAATT-edited');assert.deepEqual(payload.attachments,[manifest]);assert.deepEqual(processed.aad,buildE2eeMessageAadV1({cid:f.cid,e2ee_group_id:f.cid,message_id:id,e2ee_attachment_ids:[attachmentId]}));
+  const reopened=new IndexedDBEncryptionStorage(f.user);try{assert.deepEqual((await reopened.loadMessage(id)).attachments,[manifest]);assert.equal((await reopened.loadMessage(id)).text,'QAATT-edited');}finally{await reopened.close()}
+ }finally{peer.free();bob.free();bp.free();await f.close()}
+});
+
+test('unsealed attachment caption edit retains authenticated manifest AAD after restart',async()=>{
+ const f=await fixture(),id=randomUUID(),attachmentId=randomUUID(),assetId=randomUUID();let resumed,second;
+ const manifest={version:1,attachment_id:attachmentId,attachment_type:'file',assets:[{asset_id:assetId,kind:'original',frame_size:262144,content_key:Buffer.alloc(32,7).toString('base64'),nonce_prefix:Buffer.alloc(8,3).toString('base64'),cipher_sha256:'a'.repeat(64),cipher_size:24,plaintext_size:0,display:{name:'qaatt-restart.txt',mime_type:'text/plain'}}]};
+ const bp=new f.w.Provider(),bob=new f.w.Identity(bp,'edit-restart-peer'),g=f.m.getGroup(f.cid),bundle=g.add_members(f.m.provider,f.m.identity,[bob.key_package_typed(bp)]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);const peer=f.w.Group.join(bp,bundle.welcome,g.export_ratchet_tree());
+ try{
+  await f.m.sendMessage('team',f.cid.slice(5),f.cid,'QAATT-before-restart',id,{attachments:[manifest],e2ee_attachment_ids:[attachmentId]});peer.process_application_message(bp,f.calls.at(-1).body.message.mls_ciphertext,undefined);
+  f.m.storage.readyCheckpointVersion=undefined;
+  await assert.rejects(f.m.updateMessage('team',f.cid.slice(5),f.cid,id,'QAATT-after-restart'));
+  const held=await f.m.storage.loadPendingE2eeSend(id);assert.equal(held.unsealed_intent_version,1);assert.equal(held.mls_ciphertext,undefined);assert.equal(held.operation_kind,'update');
+  resumed=await f.manager();f.loadGroup(resumed);resumed.e2eeClient=f.m.e2eeClient;
+  resumed.client.channel=()=>({restorePendingE2eeAttachmentUpload:()=>{},updatePendingE2eeAttachmentUpload:()=>{},completePendingE2eeAttachmentUpload:()=>{},failPendingE2eeAttachmentUpload:()=>{}});
+  // Explicitly failed edits are resubmitted through the edit API, never the
+  // new-message retry endpoint (which intentionally rejects operation=update).
+  await resumed.updateMessage('team',f.cid.slice(5),f.cid,id,'QAATT-after-restart');
+  const updates=f.calls.filter(x=>x.kind==='update');assert.equal(updates.length,1);const processed=peer.process_application_message(bp,updates[0].body.message.mls_ciphertext,undefined),payload=JSON.parse(new TextDecoder().decode(processed.content));
+  assert.equal(payload.text,'QAATT-after-restart');assert.deepEqual(payload.attachments,[manifest]);assert.equal(payload.old_texts.at(-1).text,'QAATT-before-restart');
+  const {buildE2eeMessageAadV1}=require('../dist/index.cjs');const aad={cid:f.cid,e2ee_group_id:f.cid,message_id:id,e2ee_attachment_ids:[attachmentId]};assert.deepEqual(processed.aad,buildE2eeMessageAadV1(aad));
+  // A process may die immediately after a queued intent is durably reserved.
+  // Use the real reservation boundary; no failed status/Ready guard is relaxed.
+  const now=Date.now();await resumed._reserveApplicationIntent({operation_kind:'update',message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),text:'QAATT-queued-restart',payload:{...payload,text:'QAATT-queued-restart',old_texts:[...payload.old_texts,{text:payload.text,created_at:'2026-10-01T00:00:00Z'}]},e2ee_attachment_ids:[attachmentId],aad_metadata:aad,send_envelope:{},retry_count:0,status:'sending',created_at:now,updated_at:now},true);
+  second=await f.manager();f.loadGroup(second);second.e2eeClient=f.m.e2eeClient;second.client.channel=resumed.client.channel;
+  let job;const process=second._processQueuedE2eeAttachmentMessage.bind(second);second._processQueuedE2eeAttachmentMessage=record=>(job=process(record));await second.resumePendingE2eeSends();assert.ok(job);await job;
+  const last=f.calls.filter(x=>x.kind==='update').at(-1),restored=peer.process_application_message(bp,last.body.message.mls_ciphertext,undefined),latest=JSON.parse(new TextDecoder().decode(restored.content));assert.equal(latest.text,'QAATT-queued-restart');assert.deepEqual(latest.attachments,[manifest]);assert.deepEqual(latest.old_texts.map(x=>x.text),['QAATT-before-restart','QAATT-after-restart']);assert.deepEqual(restored.aad,buildE2eeMessageAadV1(aad));
+ }finally{await second?.storage.close();await resumed?.storage.close();peer.free();bob.free();bp.free();await f.close()}
 });

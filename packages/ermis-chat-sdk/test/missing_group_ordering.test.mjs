@@ -79,6 +79,25 @@ test('startup missing-group scope cannot abort independent scope checkpoint or r
   assert.equal(await h.s.loadScopeSyncCursor(h.cid),null);assert.ok(await h.s.loadScopeSyncCursor(healthy));assert.equal(h.posts(),0);await h.preserve();
  }finally{await h.close();}
 });
+for(const malformed of ['missing','digest'])test('startup '+malformed+' acceptance stays blocked without aborting an independent scope',async()=>{
+ const h=await fixture(),healthy='team:independent-'+h.user;
+ try{
+  if(malformed==='missing')delete h.welcome.acceptance_context;
+  else h.welcome.acceptance_context={...h.welcome.acceptance_context,payload_sha256:'0'.repeat(64)};
+  h.m.client.activeChannels[healthy]={id:healthy.slice(5),type:'team',cid:healthy,data:{mls_enabled:true},state:{membership:{channel_role:'member',created_at:'2026-10-27T06:59:59Z'}}};
+  const visited=[];let synced;
+  h.m._discoverMlsRecoveryStates=async cids=>{visited.push(...cids);return{states:{},unsupported:false};};
+  h.m.bootstrapKnownE2eeChannels=async options=>{synced=options.scopeSyncedCids;return{results:[]};};
+  await h.m._syncAndRestoreGroups();
+  assert.ok(visited.includes(healthy));assert.ok(visited.includes(h.cid));
+  assert.ok(synced.includes(healthy));assert.ok(!synced.includes(h.cid));
+  assert.equal(h.m.getSyncState(h.cid).error,'acceptance_metadata_invalid');
+  assert.equal(h.m.getSyncState(h.cid).needs_retry,true);
+  assert.equal(await h.s.loadScopeSyncCursor(h.cid),null);
+  assert.ok(await h.s.loadScopeSyncCursor(healthy));
+  assert.equal(h.m.groups.has(h.cid),false);assert.equal(h.posts(),0);await h.preserve();
+ }finally{await h.close();}
+});
 for(const broken of ['stale','invalid'])test(broken+' GI cannot turn missing-group recovery into Ready or advance the blocked Commit',async()=>{
  const h=await fixture(false);h.events.splice(1);
  if(broken==='stale')h.info.is_stale=true;

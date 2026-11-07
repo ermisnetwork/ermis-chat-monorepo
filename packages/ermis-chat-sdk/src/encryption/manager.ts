@@ -7321,13 +7321,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             const code = (error as { code?: string })?.code;
             assertSyncScope();
             if (code !== 'mls_protocol_epoch_gap' && code !== 'mls_own_commit_unresolved' &&
-                code !== 'mls_group_missing' && code !== 'mls_protocol_generation_mismatch') throw error;
-            // Keep this scope's durable prefix; discovery below can authorize a
-            // membership-bounded rewind to the missing predecessor Commit.
+                code !== 'mls_group_missing' && code !== 'mls_protocol_generation_mismatch' &&
+                code !== 'acceptance_metadata_invalid') throw error;
+            // Invalid acceptance belongs to this scope: preserve its cursor and
+            // strict validation while independent scopes finish their pages.
+            // Shared provider/ownership failures still abort the whole sync.
+            // Discovery can authorize a rewind for a missing predecessor Commit.
             scopeSyncCompletedCids.delete(scopeCid);
             blockedScopes.add(scopeCid);
             queueState(this._makeSyncState(scopeCid, 'needs_retry', startedCursor, startedCursor, {
-              needs_retry: true, error: code === 'mls_group_missing' || code === 'mls_protocol_generation_mismatch'
+              needs_retry: true, error: code === 'mls_group_missing' || code === 'mls_protocol_generation_mismatch' || code === 'acceptance_metadata_invalid'
                 ? code : 'protocol_delivery_pending',
             }));
             continue;
@@ -11882,7 +11885,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   /** Prepare a candidate ratchet and the exact retry job before any outbound HTTP. */
-  private async _reserveApplicationIntent(record: PendingE2eeSendRecord): Promise<PendingE2eeSendRecord> {
+  private async _reserveApplicationIntent(record: PendingE2eeSendRecord, queued = false): Promise<PendingE2eeSendRecord> {
     const storage = this.storage, scope = this._captureCleanupRevisionGuard(record.e2ee_group_id);
     if (storage.applicationIntentCheckpointVersion !== 1 || !storage.reserveApplicationIntent) throw recoveryControlError('client_upgrade_required');
     return this._withProviderMutation(async (provider, assertCurrent) => {
@@ -11890,7 +11893,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const row: PendingE2eeSendRecord = {...structuredClone(record), unsealed_intent_version: 1,
         checkpoint_user_id: this.userId!, checkpoint_device_id: this.deviceId!, signing_identity_sha256: sha256Hex(this.identity.signature_public_key()),
         group_generation: record.group_generation ?? this._groupGenerations.get(record.e2ee_group_id)?.group_generation,
-        status: 'failed_retryable', last_error: 'awaiting_local_ready'};
+        status: queued ? 'sending' : 'failed_retryable', last_error: queued ? undefined : 'awaiting_local_ready'};
       const owner = {provider_bytes: new Uint8Array(provider.to_bytes()), identity_bytes: new Uint8Array(this.identity.to_bytes()), revision: this._providerDurableBase!.revision};
       const assertOwner = () => {scope(); assertCurrent();};
       const selected = await storage.reserveApplicationIntent!(row, owner, assertOwner); assertOwner(); return selected;
@@ -11908,7 +11911,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     assertScope();
     if (!submitted.message_id) {this._assertNoPendingMlsMutation(submitted.e2ee_group_id); throw recoveryControlError('pending_send_checkpoint_invalid');}
     let prior = await storage.loadPendingE2eeSend(submitted.message_id); assertScope();
-    if (!prior || prior.unsealed_intent_version === 1 && !prior.mls_ciphertext) {
+    if (!prior || prior.unsealed_intent_version === 1 && !prior.mls_ciphertext ||
+        prior.status === 'sent' && submitted.operation_kind === 'update' && !rejectedCiphertext) {
       prior = await this._reserveApplicationIntent(submitted); assertScope(); Object.assign(submitted, prior);
     }
     if (prior?.unsealed_intent_version === 1 && ['canceled','failed_terminal'].includes(prior.status)) throw recoveryControlError('pending_send_conflict');
@@ -13397,7 +13401,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private _e2eeSendLockQueued = 0;
 
-  private async _withE2eeSendLock<T>(e2eeGroupId: string, task: () => Promise<T>): Promise<T> {
+  private async _withE2eeSendLock<T>(e2eeGroupId: string, task: () => Promise<T>, beforeWait?: () => Promise<void>): Promise<T> {
     const assertScope = this._captureSyncScopeGuard();
     if (this._e2eeSendLockQueued >= 32) throw recoveryControlError('provider_mutation_busy');
     this._e2eeSendLockQueued += 1;
@@ -13409,9 +13413,19 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const chained = previous.catch(() => undefined).then(() => next);
     this._e2eeSendLockChains.set(e2eeGroupId, chained);
 
+    // Reserve durable work while an earlier HTTP is in flight. Keep this
+    // ticket in the same FIFO even if reservation fails; releasing it early
+    // would let the next sender overtake the still-running previous sender.
+    let preparationFailed = false;
+    let preparationFailure: unknown;
+    if (beforeWait) {
+      try { await beforeWait(); }
+      catch (error) { preparationFailed = true; preparationFailure = error; }
+    }
     await previous.catch(() => undefined);
     try {
       assertScope();
+      if (preparationFailed) throw preparationFailure;
       return await task();
     } finally {
       this._e2eeSendLockQueued -= 1;
@@ -13705,7 +13719,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         // Commit before HTTP. A crash or competing dispatch after this point
         // must resolve the canonical server record, never submit again.
         if (!await storage.savePendingE2eeSendOutcome!(durable, {...durable, application_http_started: true})) reconciling = true;
-        assertRecord();
+        // The marker winner now owns one transport dispatch of already sealed
+        // bytes. A provider writer starting during this CAS cannot revoke that
+        // dispatch and strand the UUID in reconcile-only mode without a POST.
+        // Keep owner, identity, generation, ciphertext and mutation fences;
+        // provider availability was checked before claiming the marker.
+        assertRecordBinding();
+        if (this._providerPersistenceUncertain) throw recoveryControlError('provider_persistence_uncertain');
         record = {...record, application_http_started: true};
       }
       const {id: _messageId, ...updateMessage} = body.message;
@@ -13730,7 +13750,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           forward_cid: record.forward_cid, forward_message_id: record.forward_message_id,
           forward_parent_cid: record.forward_parent_cid, e2ee_attachment_ids: record.e2ee_attachment_ids || []};
         this._validateEnvelopeAttachmentIds(aadParams, payload);
-        const aad = record.operation_kind !== 'update' && hasE2eeAadMetadata(aadParams) ? buildE2eeMessageAadV1(aadParams) : undefined;
+        const aad = hasE2eeAadMetadata(aadParams) ? buildE2eeMessageAadV1(aadParams) : undefined;
         record = await this._prepareApplicationSend({...record, payload, retry_count: (record.retry_count || 0) + 1}, aad, record.mls_ciphertext);
         assertRecord(); onPrepared?.(structuredClone(record)); response = await sendPersisted();
       }
@@ -13916,7 +13936,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             record.signing_identity_sha256 !== sha256Hex(this.identity.signature_public_key())) throw recoveryControlError('recovery_scope_changed');
         const response = await this._withE2eeSendLock(record.e2ee_group_id, async () => {
           const aadParams = record.aad_metadata as Parameters<typeof buildE2eeMessageAadV1>[0] | undefined;
-          const aad = record.operation_kind !== 'update' && aadParams && hasE2eeAadMetadata(aadParams) ? buildE2eeMessageAadV1(aadParams) : undefined;
+          const aad = aadParams && hasE2eeAadMetadata(aadParams) ? buildE2eeMessageAadV1(aadParams) : undefined;
           record = await this._prepareApplicationSend(record, aad);
           return this._sendPersistedPendingE2eeRecord(record);
         });
@@ -14230,12 +14250,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       /** Poll choices — encrypted inside E2EE payload */
       poll_choice_counts?: Record<string, number>;
     } = {},
+    onIntentReserved?: () => void,
   ): Promise<any> {
     const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
     const submittedOptions = structuredClone(options);
-    return await this._withE2eeSendLock(e2eeGroupId, () =>
-      this._sendMessageUnlocked(channelType, channelId, cid, text, messageId, submittedOptions, e2eeGroupId),
-    );
+    return await this._sendMessageUnlocked(channelType, channelId, cid, text, messageId, submittedOptions, e2eeGroupId, onIntentReserved);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14268,6 +14287,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       poll_closed?: boolean;
     },
     e2eeGroupId: string,
+    onIntentReserved?: () => void,
   ): Promise<any> {
     const assertScope = this._captureSyncScopeGuard();
     // Build structured payload — everything inside is encrypted
@@ -14323,9 +14343,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const aad = hasE2eeAadMetadata(aadParams) ? buildE2eeMessageAadV1(aadParams) : undefined;
 
     const now = Date.now();
-    let record: PendingE2eeSendRecord;
-    try {
-      record = await this._prepareApplicationSend({
+    const submitted: PendingE2eeSendRecord = {
       message_id: messageId, cid, e2ee_group_id: e2eeGroupId, channel_type: channelType, channel_id: channelId,
       operation_kind: 'send', text, payload, e2ee_attachment_ids: e2eeAttachmentIds,
       aad_metadata: {...(aad ? aadParams : {}), ...(options.local_created_at ? {local_created_at: options.local_created_at} : {})},
@@ -14333,26 +14351,37 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       forward_message_id: options.forward_message_id, forward_parent_cid: options.forward_parent_cid,
       manifest: payload.attachments as E2eeAttachmentManifest[] | undefined, retry_count: 0,
       status: 'sending', created_at: now, updated_at: now,
-    }, aad);
-    } catch (error) {
-      assertScope();
-      const diagnostic = error as {code?: string; reason?: string};
-      if (diagnostic.code !== 'acceptance_metadata_invalid') throw error;
-      const pending = await this.storage.loadPendingE2eeSend(messageId); assertScope();
-      // Preserve an unsealed, unsent intent and its exact error across reload.
-      // Never rewrite another scope, canceled job, or ciphertext outcome here.
-      if (pending?.unsealed_intent_version === 1 && !pending.mls_ciphertext && pending.status === 'failed_retryable' &&
-          pending.checkpoint_user_id === this.userId && pending.checkpoint_device_id === this.deviceId &&
-          pending.cid === cid && pending.e2ee_group_id === e2eeGroupId && sameSyncCheckpointValue(pending.payload, payload)) {
-        const reason = diagnostic.reason;
-        await this.storage.savePendingE2eeSendOutcome!(pending, {...pending,
-          last_error: diagnostic.code ? diagnostic.code + (reason ? ':' + reason : '') : 'application_prepare_failed', updated_at: Date.now()});
+    };
+    return await this._withE2eeSendLock(e2eeGroupId, async () => {
+      let record: PendingE2eeSendRecord;
+      try {
+        record = await this._prepareApplicationSend(submitted, aad);
+      } catch (error) {
         assertScope();
+        const diagnostic = error as {code?: string; reason?: string};
+        const pending = await this.storage.loadPendingE2eeSend(messageId); assertScope();
+        // Preserve an unsealed, unsent intent and its exact error across reload.
+        // Never rewrite another scope, canceled job, or ciphertext outcome here.
+        if (pending?.unsealed_intent_version === 1 && !pending.mls_ciphertext && (pending.status === 'sending' || (pending.status === 'failed_retryable' && diagnostic.code === 'acceptance_metadata_invalid')) &&
+            pending.checkpoint_user_id === this.userId && pending.checkpoint_device_id === this.deviceId &&
+            pending.cid === cid && pending.e2ee_group_id === e2eeGroupId && sameSyncCheckpointValue(pending.payload, payload)) {
+          const reason = diagnostic.reason;
+          await this.storage.savePendingE2eeSendOutcome!(pending, {...pending,
+            status: 'failed_retryable', last_error: diagnostic.code ? diagnostic.code + (reason ? ':' + reason : '') : 'application_prepare_failed', updated_at: Date.now()});
+          assertScope();
+        }
+        throw error;
       }
-      throw error;
-    }
-    assertScope();
-    return await this._dispatchPreparedApplicationSend(record);
+      assertScope();
+      return await this._dispatchPreparedApplicationSend(record);
+    }, async () => {
+      const prior = await this.storage.loadPendingE2eeSend(messageId); assertScope();
+      // Existing ciphertext/retry and completed-upload journals keep their
+      // original adoption and reconciliation path inside preparation.
+      if (!prior) await this._reserveApplicationIntent(submitted, true);
+      assertScope();
+      onIntentReserved?.();
+    });
   }
 
   /** Edits share the bounded group send queue and preserve their update endpoint on restart. */
@@ -14401,6 +14430,15 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       message_id: messageId,
     });
     const existingForPayload = await storage.loadMessage(messageId); assertScope();
+    // Caption edits carry a full snapshot. Rebuilding from the editor's text-only
+    // options would silently remove authenticated attachments from the ciphertext.
+    if (existingForPayload && existingForPayload.cid !== cid) {
+      throw new Error('[Encryption] Edit requires the current local message snapshot');
+    }
+    if (options.attachments !== undefined &&
+        !sameSyncCheckpointValue(options.attachments, existingForPayload?.attachments || [])) {
+      throw new Error('[Encryption] Attachment replacement is not supported by caption edits');
+    }
     const oldTexts = existingForPayload
       ? [
           ...(existingForPayload.old_texts || []),
@@ -14410,7 +14448,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           },
         ]
       : [];
-    const payload: E2eePayload = { text };
+    const payload: E2eePayload = {
+      text,
+      attachments: structuredClone(existingForPayload?.attachments),
+      sticker_url: existingForPayload?.sticker_url,
+    };
     if (oldTexts.length > 0) {
       payload.old_texts = oldTexts;
     }
@@ -14444,10 +14486,23 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     } = options;
 
     const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
+    const attachmentIds = existingForPayload?.e2ee_attachment_ids || this._manifestAttachmentIds(payload);
+    this._validateEnvelopeAttachmentIds({e2ee_attachment_ids: attachmentIds}, payload);
+    const aadParams = {
+      cid, e2ee_group_id: e2eeGroupId, message_id: messageId,
+      forward_cid: existingForPayload?.forward_cid,
+      forward_message_id: existingForPayload?.forward_message_id,
+      forward_parent_cid: existingForPayload?.forward_parent_cid,
+      e2ee_attachment_ids: attachmentIds,
+    };
+    const aad = hasE2eeAadMetadata(aadParams) ? buildE2eeMessageAadV1(aadParams) : undefined;
     const now = Date.now();
     const record = await this._prepareApplicationSend({operation_kind: 'update', message_id: messageId, cid,
       e2ee_group_id: e2eeGroupId, channel_type: channelType, channel_id: channelId, text, payload,
-      send_envelope: envelopeOptions as Record<string, unknown>, retry_count: 0, status: 'sending', created_at: now, updated_at: now});
+      e2ee_attachment_ids: attachmentIds, aad_metadata: aadParams,
+      forward_cid: aadParams.forward_cid, forward_message_id: aadParams.forward_message_id,
+      forward_parent_cid: aadParams.forward_parent_cid,
+      send_envelope: envelopeOptions as Record<string, unknown>, retry_count: 0, status: 'sending', created_at: now, updated_at: now}, aad);
     assertScope();
     return await this._dispatchPreparedApplicationSend(record);
   }

@@ -1140,8 +1140,19 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
               !sameSyncCheckpointValue(requests[3].result, expected.identity_bytes)) throw recoveryControlError('provider_checkpoint_conflict');
           const prior = requests[0].result as PendingE2eeSendRecord | undefined;
           if (prior) {
-            if (!sameSyncCheckpointValue(intent(prior), intent(row))) throw recoveryControlError('pending_send_conflict');
-            selected = structuredClone(prior);
+            // An accepted version may become one fresh edit intent. The same
+            // transaction rejects any competing unresolved version; reserve it
+            // before Ready/crypto so restart cannot lose the caption snapshot.
+            const freshEdit = prior.status === 'sent' && row.operation_kind === 'update' &&
+              prior.cid === row.cid && prior.e2ee_group_id === row.e2ee_group_id &&
+              prior.channel_type === row.channel_type && prior.channel_id === row.channel_id &&
+              prior.checkpoint_user_id === row.checkpoint_user_id && prior.checkpoint_device_id === row.checkpoint_device_id &&
+              prior.signing_identity_sha256 === row.signing_identity_sha256;
+            if (freshEdit) { selected = row; store.put(row); }
+            else {
+              if (!sameSyncCheckpointValue(intent(prior), intent(row))) throw recoveryControlError('pending_send_conflict');
+              selected = structuredClone(prior);
+            }
           } else { selected = row; store.add(row); }
         } catch (error) { failure = error; tx.abort(); }
       };

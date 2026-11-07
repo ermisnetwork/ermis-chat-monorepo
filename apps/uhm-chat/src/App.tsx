@@ -21,6 +21,7 @@ import { loadUhmOpenMlsWasm } from '@/lib/openmls';
 import { installMlsRepairDiagnostics } from '@/utils/mlsRepairDiagnostics';
 import { requiresLoginAfterRefreshFailure, createBootstrapSessionGuard } from '@/utils/authFailure';
 import { waitForBrowserPaint } from '@/utils/browserPaint';
+import { selectUhmJoinTreePolicy } from '@/utils/joinTreePolicy';
 import i18n from './i18n';
 import { toast } from 'sonner';
 import { UhmToaster } from '@/components/UhmToaster';
@@ -33,7 +34,11 @@ const E2EE_ATTACHMENT_UPLOAD_DEBUG = import.meta.env.VITE_E2EE_ATTACHMENT_UPLOAD
 const E2EE_HISTORICAL_REPLAY_ENABLED = import.meta.env.VITE_E2EE_HISTORICAL_REPLAY !== 'false';
 const E2EE_PARTIAL_WELCOME_FALLBACK_ENABLED = import.meta.env.VITE_E2EE_PARTIAL_WELCOME_FALLBACK !== 'false';
 const E2EE_GROUP_INFO_REPAIR_ENABLED = import.meta.env.VITE_E2EE_GROUP_INFO_REPAIR !== 'false';
-const E2EE_ALLOW_EXPIRED_JOIN_TREE_LEAVES = import.meta.env.VITE_E2EE_ALLOW_EXPIRED_JOIN_TREE_LEAVES === 'true';
+const E2EE_ALLOW_EXPIRED_JOIN_TREE_LEAVES = selectUhmJoinTreePolicy(
+  API_DEFAULTS.BASE_URL,
+  import.meta.env.VITE_E2EE_ALLOW_EXPIRED_JOIN_TREE_LEAVES,
+  import.meta.env.DEV ? import.meta.env.VITE_QA_DATA_SCOPE : undefined,
+);
 const E2EE_MLS_ROLLOUT_TELEMETRY_ENABLED = import.meta.env.VITE_E2EE_MLS_ROLLOUT_TELEMETRY !== 'false';
 
 function parseOptionalPositiveInteger(value: unknown): number | undefined {

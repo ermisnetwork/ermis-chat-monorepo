@@ -80,7 +80,7 @@ export const UhmEditChannelModal: React.FC<EditChannelModalProps> = React.memo((
       setIsProcessingImage(false);
       
       setIsUploading(true);
-      const { file: url } = await channel.sendFile(processedFile, processedFile.name, processedFile.type);
+      const { file: url } = await channel.sendFile(processedFile, processedFile.name, processedFile.type, undefined, { purpose: 'channel_avatar' });
       setImage(url);
     } catch (err: any) {
       setError(err?.message || 'Failed to process or upload image');
