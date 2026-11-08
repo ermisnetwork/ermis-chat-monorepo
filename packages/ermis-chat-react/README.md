@@ -2,6 +2,8 @@
 
 The official React UI components for Ermis Chat.
 
+The text composer clears an E2EE draft after the SDK acknowledges durable local admission. Transport continues in the background. When the bounded send queue is full, the composer retains that draft until a slot is available; local reservation failures preserve the input. A late acknowledgment for a previous channel cannot clear the newly selected channel's draft.
+
 ## E2EE UI Support
 
 - `CreateChannelModal` supports E2EE direct/group creation when `client.encryptionManager` is initialized.

@@ -29,7 +29,9 @@ async function harness() {
     m._cleanupEvictedGhosts = async () => {}; m._uploadGroupInfo = async () => {};
     const channel = {}; m._getActiveChannel = () => channel; m._getMembershipCreatedAt = () => '2026-10-06T00:00:00Z';
     m._syncChannelFromCursor = async () => {};
-    m.client = { baseURL: 'http://fixture/v1', post: async () => ({}) };
+    m.client = { baseURL: 'http://fixture/v1', post: async () => ({channel: {
+      mls_enabled: false, members: [{user_id: user, channel_role: 'owner'}, {user_id: 'bob', channel_role: 'member'}],
+    }}) };
     await m._persistProviderStrict();
     return m;
   }
@@ -117,6 +119,46 @@ test('unknown topic creation blocks another random-CID create for that parent', 
   }));
   assert.throws(() => m.assertCanCreateMlsTopic(h.cid), /outcome_pending/);
   assert.doesNotThrow(() => m.assertCanCreateMlsTopic('team:another'));
+});
+for (const role of ['pending', 'rejected', 'skipped', 'unknown']) {
+  test(`enable refuses canonical ${role} member before consuming KeyPackages or staging a Commit`, async () => {
+    const h = await harness(), m = await h.manager(); let fetches = 0, submissions = 0, queries = 0;
+    const before = new Uint8Array(m.provider.to_bytes());
+    m.client.post = async (url, body) => {
+      queries++;
+      assert.equal(url, m.client.baseURL + '/channels/team/' + h.user + '/query');
+      assert.deepEqual(body, {state: true, watch: false, messages: {limit: 0}});
+      return {channel: {mls_enabled: false, members: [
+        {user_id: h.user, channel_role: 'owner'}, {user_id: 'bob', channel_role: role},
+      ]}};
+    };
+    m.e2eeClient = {
+      getKeyPackagesByCid: async () => { fetches++; return recipients(); },
+      enableE2ee: async () => { submissions++; throw new Error('server rejects member state'); },
+    };
+    await assert.rejects(m.enableE2ee('team', h.user, h.cid, ['bob']), error =>
+      error.code === 'e2ee_enable_members_not_accepted');
+    assert.equal(queries, 1); assert.equal(fetches, 0); assert.equal(submissions, 0);
+    assert.deepEqual(new Uint8Array(m.provider.to_bytes()), before);
+    assert.equal(m.groups.has(h.cid), false);
+    assert.equal((await h.storage.listPendingMlsMutations()).length, 0);
+  });
+}
+test('enable does not consume KeyPackages when canonical membership cannot be read', async () => {
+  const h = await harness(), m = await h.manager(); let fetches = 0;
+  m.client.post = async () => { throw new Error('membership unavailable'); };
+  m.e2eeClient = {getKeyPackagesByCid: async () => { fetches++; return recipients(); }};
+  await assert.rejects(m.enableE2ee('team', h.user, h.cid, ['bob']), /membership unavailable/);
+  assert.equal(fetches, 0); assert.equal(m.groups.has(h.cid), false);
+  assert.equal((await h.storage.listPendingMlsMutations()).length, 0);
+});
+test('enable refuses an absent membership snapshot instead of treating it as an empty accepted roster', async () => {
+  const h = await harness(), m = await h.manager(); let fetches = 0;
+  m.client.post = async () => ({channel: {mls_enabled: false}});
+  m.e2eeClient = {getKeyPackagesByCid: async () => { fetches++; return recipients(); }};
+  await assert.rejects(m.enableE2ee('team', h.user, h.cid, ['bob']), error =>
+    error.code === 'e2ee_enable_membership_unavailable');
+  assert.equal(fetches, 0); assert.equal(m.groups.has(h.cid), false);
 });
 test('enable timeout retains the saved artifact until the server exposes the same enabled GroupInfo', async () => {
   const h = await harness(), m = await h.manager();

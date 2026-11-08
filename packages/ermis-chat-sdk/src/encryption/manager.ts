@@ -6553,6 +6553,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   requestScopeSyncAfterRepair(scopeCid: string): void {
+    // A deferred Welcome can request recovery without starting a repair gate
+    // (for example while the enabling device is settling its bootstrap).
+    // Only a real gate has a completion callback to drain the deferred flag.
+    if (!this.isScopeRepairing(scopeCid)) {
+      const parts = channelPartsFromCid(scopeCid);
+      if (!parts || !this.initialized) return;
+      void this.ensureChannelReady(parts.channelType, parts.channelId, scopeCid, {source: 'protocol'})
+        .catch(() => sdkLog('warn', '[Encryption] Protocol recovery requires retry:', scopeCid));
+      return;
+    }
     this._scopeSyncRequestedAfterRepair.add(scopeCid);
   }
 
@@ -8396,6 +8406,29 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private _channelReadyAdmissions = new Map<string, Set<Promise<EnsureE2eeChannelResult>>>();
 
+  /** A historical group stays retired until a new targeted Welcome activates it. */
+  private async _readAcceptedRejoinMembership(cid: string): Promise<{created_at: string; epoch: number}> {
+    const owner = this._captureExternalJoinOwner(cid), client = this.client as any, parts = channelPartsFromCid(cid);
+    const marker = this._groupGenerations.get(cid), channel = client?.activeChannels?.[cid];
+    if (!parts || !marker || marker.status !== 'historical' || this.groups.has(cid) || !channel || !client?.post) {
+      throw recoveryControlError('mls_readd_reconciliation_required');
+    }
+    const membership = channel.state?.membership;
+    const assertOwner = () => { owner.assertCurrent(); if (client.activeChannels?.[cid] !== channel ||
+      channel.state?.membership !== membership) throw recoveryControlError('recovery_scope_changed'); };
+    const response = await client.post(client.baseURL + `/channels/${parts.channelType}/${parts.channelId}/query`,
+      {state: true, watch: false, messages: {limit: 0}});
+    assertOwner();
+    const member = response.membership, canonical = response.channel, generation = canonical?.e2ee?.group_generation ?? 0;
+    const epoch = canonical?.e2ee?.epoch ?? canonical?.mls_epoch;
+    if ((member?.user_id || member?.user?.id) !== this.userId || !['member','owner','moder'].includes(member?.channel_role) ||
+        member.banned || member.blocked || !Number.isFinite(Date.parse(member.created_at)) || !canonical?.mls_enabled ||
+        generation !== marker.group_generation || !Number.isSafeInteger(epoch) || epoch <= marker.current_epoch) {
+      throw recoveryControlError('mls_readd_reconciliation_required');
+    }
+    return {created_at: member.created_at, epoch};
+  }
+
   async ensureChannelReady(channelType: string, channelId: string, cid: string,
     options: {source?: string; initialScopeSyncCompleted?: boolean} = {}): Promise<EnsureE2eeChannelResult> {
     const pending = this._channelReadyAdmissions.get(cid) || new Set<Promise<EnsureE2eeChannelResult>>();
@@ -8418,6 +8451,20 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         !this.storage.loadMlsReadyBase || !this.storage.saveMlsReadyCheckpoint || !this.storage.verifyMlsReadyCheckpoint) {
       const state = await this.refreshE2eeState(cid); assertOwner();
       return {cid, status: 'needs_retry', error: state.reason};
+    }
+    if (this._groupGenerations.get(cid)?.status === 'historical' && !this._providerPersistenceUncertain &&
+        !this._pendingMlsMutations.has(cid) && !this._externalJoinCandidates.has(cid) && this._automaticRecoveryAllowed(cid)) {
+      try {
+        const membership = await this._readAcceptedRejoinMembership(cid); assertOwner();
+        // Use the new canonical consent boundary, never the pre-leave cursor.
+        await this._syncChannelFromCursor(cid, {created_at: this._initialSyncCursor(membership.created_at), event_id: ZERO_EVENT_ID}, 100);
+        assertOwner();
+      } catch (error) {
+        assertOwner();
+        if ((error as {code?: string})?.code === 'recovery_scope_changed') throw error;
+        const state = await this.refreshE2eeState(cid); assertOwner();
+        return {cid, status: 'needs_retry', error: (error as {code?: string})?.code || state.reason};
+      }
     }
     // A retained candidate is an obligation to reconcile its original UUID,
     // not a permanent reason to skip recovery. The existing join coordinator
@@ -8919,6 +8966,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     generation: {cid: string; group_generation: number; group_id: Uint8Array}, record: WelcomeRecoveryCheckpoint): Promise<any> {
     this._requireWelcomeWorkStorage();
     const owner = this._captureExternalJoinOwner(record.cid), handles = new Map(this.groups), markers = new Map(this._groupGenerations), metadata = JSON.stringify([...markers]);
+    const retired = markers.get(record.cid)?.status === 'historical' ? markers.get(record.cid) : undefined;
+    const membership = retired ? await this._readAcceptedRejoinMembership(record.cid) : undefined;
+    owner.assertCurrent();
+    if (retired && (record.group_generation !== retired.group_generation || record.epoch <= retired.current_epoch ||
+        record.epoch > membership!.epoch || Date.parse(record.event_cursor.created_at) < Date.parse(membership!.created_at) - 1)) {
+      throw recoveryControlError('mls_readd_reconciliation_required');
+    }
     const joined = await this._withExternalJoinBase(record.cid, '', owner, async ({expected, storage, user, device, provider, assertCurrent}) => {
       const assertHandles = () => { assertCurrent(); if (this.groups.size !== handles.size || [...handles].some(([cid, group]) => this.groups.get(cid) !== group) ||
         JSON.stringify([...this._groupGenerations]) !== metadata) throw recoveryControlError('recovery_scope_changed'); };
@@ -8940,7 +8994,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         const marker: MlsGroupGenerationMarker = {cid: record.cid, group_generation: generation.group_generation,
           group_id: generation.group_generation > 0 ? new Uint8Array(generation.group_id) : null, current_epoch: record.epoch, status: 'active', updated_at: Date.now()};
         const bytes = new Uint8Array(candidate.provider_bytes()), guard = this._providerWriteGuard()!;
-        const applied: WelcomeRecoveryCheckpoint = {...record, status: 'applied', checkpoint: {provider_sha256: sha256Hex(bytes), marker}};
+        const rejoin = retired ? {previous_marker: structuredClone(retired), removal: expected.state.cleanup.metadata[`mls_removal:v1:${record.cid}`],
+          membership_created_at: membership!.created_at, canonical_epoch: membership!.epoch} : undefined;
+        const applied: WelcomeRecoveryCheckpoint = {...record, status: 'applied', checkpoint: {provider_sha256: sha256Hex(bytes), marker, ...(rejoin ? {rejoin} : {})}};
         const change: WelcomeWorkChange = {kind: 'apply', record: applied, checkpoint: {user_id: user, device_id: device, cid: record.cid,
           provider_bytes: bytes, provider_write_guard: guard, generation: marker, readiness: null, welcome_dispositions: [applied]}};
         const wanted = nextWelcomeWorkBase(expected, change, user, device, record.cid);
@@ -9939,6 +9995,25 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   ): Promise<any> {
     const assertScope = this._captureSyncScopeGuard(), transport = this.e2eeClient!;
     const assertTarget = this._captureMlsPreparation(cid, true), targets = [...memberUserIds];
+    // This query returns the full roster, including unaccepted invitations.
+    // Check consent before consuming one-shot KeyPackages or staging a Commit.
+    // The enable handler remains authoritative if membership changes afterwards.
+    const snapshot = await this.client!.post<{channel: {
+      mls_enabled?: boolean; members?: Array<{channel_role?: string}>;
+    }}>(this.client!.baseURL + `/channels/${channelType}/${channelId}/query`, {
+      state: true, watch: false, messages: {limit: 0},
+    });
+    assertTarget();
+    if (snapshot?.channel?.mls_enabled) throw new Error('E2EE is already enabled on this channel');
+    const roster = snapshot?.channel?.members;
+    if (snapshot?.channel?.mls_enabled !== false || !Array.isArray(roster) || !roster.length) {
+      throw Object.assign(new Error('Channel membership is unavailable. Refresh the channel before enabling E2EE.'),
+        {code: 'e2ee_enable_membership_unavailable'});
+    }
+    if (roster.some(member => !['owner', 'member', 'moder'].includes(member?.channel_role || ''))) {
+      throw Object.assign(new Error('All members must accept their invites before enabling E2EE. Resolve declined invitations first.'),
+        {code: 'e2ee_enable_members_not_accepted'});
+    }
     const {members} = await transport.getKeyPackagesByCid(channelType, channelId); assertTarget();
     const kps = members.flatMap(member => member.key_packages.map(kp => wasmModule.KeyPackage.from_bytes(new Uint8Array(kp.key_package))));
     const pending = await this._prepareBootstrapMutation(cid, assertTarget, kps,
@@ -11902,6 +11977,34 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private _freshApplicationSendRecords = new WeakSet<PendingE2eeSendRecord>();
 
+  private _traceApplicationIntent(stage: 'prepared' | 'dispatch' | 'reconcile' | 'accepted' | 'predecessor' | 'deferred', record: PendingE2eeSendRecord): void {
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(record.message_id)) return;
+    const cipher = /^[0-9a-f]{64}$/.test(record.mls_ciphertext_sha256 || '') ? record.mls_ciphertext_sha256 : 'none';
+    const generation = record.group_generation ?? 0, epoch = record.mls_epoch ?? 0;
+    if (![generation, epoch].every(n => Number.isSafeInteger(n) && n >= 0 && n <= 999999999)) return;
+    const count = Number.isSafeInteger(record.retry_count) ? Math.max(0, Math.min(999999999, record.retry_count)) : 0;
+    const mode = record.application_http_started === true ? 'started' : record.application_http_started === false ? 'not_started' : 'unknown';
+    sdkLog('info', `mls_send_intent stage=${stage} uuid=${record.message_id} cipher_sha256=${cipher} generation=${generation} epoch=${epoch} count=${count} mode=${mode}`);
+  }
+
+  /** Do not let new sender generations overtake a retained sealed obligation. */
+  private async _settleSealedApplicationPredecessors(submitted: PendingE2eeSendRecord): Promise<void> {
+    const assertScope = this._captureSyncScopeGuard(), storage = this.storage;
+    const pending = await storage.listPendingE2eeSends(['sending', 'failed_retryable']); assertScope();
+    for (const listed of pending) {
+      if (listed.message_id === submitted.message_id || listed.e2ee_group_id !== submitted.e2ee_group_id ||
+          !listed.mls_ciphertext) continue;
+      const current = await storage.loadPendingE2eeSend(listed.message_id); assertScope();
+      if (!current?.mls_ciphertext || !['sending', 'failed_retryable'].includes(current.status)) continue;
+      if ((current.group_generation || 0) < (submitted.group_generation || 0)) continue;
+      // The existing dispatch path validates owner, generation and exact bytes,
+      // and reconciles an unknown HTTP outcome without another application POST.
+      if (current.operation_kind === 'update') throw recoveryControlError('application_send_order_pending');
+      this._traceApplicationIntent('predecessor', current);
+      await this._dispatchPreparedApplicationSend(current); assertScope();
+    }
+  }
+
   private async _prepareApplicationSend(record: PendingE2eeSendRecord, aad?: Uint8Array, rejectedCiphertext?: Uint8Array): Promise<PendingE2eeSendRecord> {
     const submitted = structuredClone(record), submittedAad = aad && new Uint8Array(aad);
     const assertScope = this._captureSyncScopeGuard(), storage = this.storage;
@@ -11920,6 +12023,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       (prior.status === 'sent' && (submitted.operation_kind || 'send') !== 'send');
     const intendedGeneration = prior?.group_generation ?? submitted.group_generation;
     if (needsNewRatchet) {
+      await this._settleSealedApplicationPredecessors(submitted); assertScope();
       // Existing exact ciphertext keeps reconciliation/retry priority. A new
       // ratchet requires actual local validation and durable Ready publication.
       if (!this.groups.has(submitted.e2ee_group_id) || this._externalJoinCandidates.has(submitted.e2ee_group_id)) {
@@ -11990,6 +12094,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         assertScope(); assertCurrent(); this._advanceProviderRevision(guard);
         replaceProvider(candidateProvider); this.groups.set(cid, candidateGroup); published = true; previousGroup.free?.();
         this._freshApplicationSendRecords.add(next);
+        this._traceApplicationIntent('prepared', next);
         return next;
       } catch (error) {
         if (committed && this._activeProvider === provider && this._providerScopeRevision === revision && this.storage === storage &&
@@ -13400,10 +13505,24 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   private _e2eeSendLockQueued = 0;
+  private _e2eeSendAdmissionWake?: {promise: Promise<void>; release: () => void};
 
-  private async _withE2eeSendLock<T>(e2eeGroupId: string, task: () => Promise<T>, beforeWait?: () => Promise<void>): Promise<T> {
+  private async _withE2eeSendLock<T>(e2eeGroupId: string, task: () => Promise<T>, beforeWait?: () => Promise<void>, waitForAdmission = false): Promise<T> {
     const assertScope = this._captureSyncScopeGuard();
-    if (this._e2eeSendLockQueued >= 32) throw recoveryControlError('provider_mutation_busy');
+    const assertAdmissionScope = waitForAdmission ? this._captureCleanupRevisionGuard(e2eeGroupId) : assertScope;
+    while (this._e2eeSendLockQueued >= 32) {
+      if (!waitForAdmission) throw recoveryControlError('provider_mutation_busy');
+      // The UI retains one draft until admission. Do not add another active
+      // ticket or start a reservation while the bounded send queue is full.
+      if (!this._e2eeSendAdmissionWake) {
+        let release!: () => void;
+        const promise = new Promise<void>(resolve => { release = resolve; });
+        this._e2eeSendAdmissionWake = {promise, release};
+      }
+      await this._e2eeSendAdmissionWake.promise;
+      assertScope();
+      assertAdmissionScope();
+    }
     this._e2eeSendLockQueued += 1;
     const previous = this._e2eeSendLockChains.get(e2eeGroupId) || Promise.resolve();
     let release!: () => void;
@@ -13429,6 +13548,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       return await task();
     } finally {
       this._e2eeSendLockQueued -= 1;
+      const admissionWake = this._e2eeSendAdmissionWake;
+      this._e2eeSendAdmissionWake = undefined;
+      admissionWake?.release();
       release();
       if (this._e2eeSendLockChains.get(e2eeGroupId) === chained) {
         this._e2eeSendLockChains.delete(e2eeGroupId);
@@ -13639,9 +13761,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       try { return await this._sendPersistedPendingE2eeRecord(record); }
       catch (error) {
         assertScope();
-        if ((error as {code?: string})?.code !== 'provider_mutation_busy' || !this._providerCheckpointInFlight) throw error;
+        if ((error as {code?: string})?.code !== 'provider_mutation_busy') throw error;
         const remaining = deadline - Date.now();
         if (remaining <= 0) { this._wakePendingSendAfterProviderCheckpoint(record.message_id); throw error; }
+        // The checkpoint can release between the provider getter rejecting and
+        // this continuation observing that rejection. Its typed busy result is
+        // still retryable with this same sealed record under the same deadline.
+        // A completed writer needs no wait and must not strand an unsent UUID.
+        if (!this._providerCheckpointInFlight) continue;
         const tail = this._providerMutationTail;
         try {
           await new Promise<void>((resolve, reject) => {
@@ -13729,6 +13856,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         record = {...record, application_http_started: true};
       }
       const {id: _messageId, ...updateMessage} = body.message;
+      this._traceApplicationIntent(reconciling ? 'reconcile' : 'dispatch', record);
       const result = record.operation_kind === 'update'
         ? await client.updateMessage(record.channel_type!, record.channel_id!, record.message_id, {message: updateMessage})
         : await client.sendMessage(record.channel_type!, record.channel_id!, body, {reconcileOnly: reconciling});
@@ -13816,10 +13944,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const persistedMessage = await storage.loadMessage(storedMessage.id); assertScope();
       if (!persistedMessage) throw recoveryControlError('application_checkpoint_missing');
       const message = await this._buildFullMessageWithQuoted(persistedMessage, serverMessage); assertScope();
+      this._traceApplicationIntent('accepted', record);
       return { ...rawResponse, message };
     } catch (error) {
       // Stale continuations cannot mark another scope's job or publish their result.
       assertScope();
+      this._traceApplicationIntent('deferred', record);
       if (!['recovery_scope_changed','provider_checkpoint_conflict','provider_checkpoint_invalid','provider_persistence_uncertain','pending_send_conflict'].includes((error as {code?: string})?.code || '')) {
         await storage.savePendingE2eeSendOutcome!(record, {...record, status: (error as {code?: string})?.code === 'old_group_generation' ? 'failed_terminal' : 'failed_retryable',
           last_error: getApiErrorMessage(error), updated_at: Date.now()});
@@ -14251,10 +14381,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       poll_choice_counts?: Record<string, number>;
     } = {},
     onIntentReserved?: () => void,
+    waitForAdmission = false,
   ): Promise<any> {
     const e2eeGroupId = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
     const submittedOptions = structuredClone(options);
-    return await this._sendMessageUnlocked(channelType, channelId, cid, text, messageId, submittedOptions, e2eeGroupId, onIntentReserved);
+    return await this._sendMessageUnlocked(channelType, channelId, cid, text, messageId, submittedOptions, e2eeGroupId, onIntentReserved, waitForAdmission);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14288,6 +14419,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     },
     e2eeGroupId: string,
     onIntentReserved?: () => void,
+    waitForAdmission = false,
   ): Promise<any> {
     const assertScope = this._captureSyncScopeGuard();
     // Build structured payload — everything inside is encrypted
@@ -14381,7 +14513,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (!prior) await this._reserveApplicationIntent(submitted, true);
       assertScope();
       onIntentReserved?.();
-    });
+    }, waitForAdmission);
   }
 
   /** Edits share the bounded group send queue and preserve their update endpoint on restart. */

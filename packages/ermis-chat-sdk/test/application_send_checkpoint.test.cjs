@@ -172,6 +172,56 @@ test('bounded send queue fences queued scope and freezes caller options',async()
  const hold=latch(),enteredQueue=latch(),admitted=[];admitted.push(f.m._withE2eeSendLock(f.cid,()=>{enteredQueue.open();return hold.promise;}));for(let i=1;i<32;i++)admitted.push(f.m._withE2eeSendLock(f.cid,()=>hold.promise));await enteredQueue.promise;await assert.rejects(f.m._withE2eeSendLock(f.cid,async()=>{}),e=>e.code==='provider_mutation_busy');f.m.client={activeChannels:{}};const outcomes=Promise.allSettled(admitted);hold.open();assert.equal((await outcomes).filter(x=>x.status==='rejected').length,31);assert.equal(f.m._e2eeSendLockQueued,0);await f.close();
 });
 
+test('channel durable admission retains the 33rd draft until bounded capacity is available',async()=>{
+ const f=await fixture(),hold=latch(),id=randomUUID(),work=[];let submitted,observed='pending',enqueued=0;
+ try{
+  const {ErmisChat}=require('../dist/index.cjs'),c=new ErmisChat('fixture','project','http://fixture.invalid',{browser:false,logger:()=>{}});c._setUser({id:f.user});c.deviceId=f.device;c.encryptionManager=f.m;f.m.client=c;
+  const ch=c.channel('team',f.cid.slice(5));ch.data={mls_enabled:true};
+  for(let i=0;i<32;i++)work.push(f.m._withE2eeSendLock(f.cid,()=>hold.promise));
+  submitted=ch.sendMessage({id,text:'retained draft'},{waitForLocalAdmission:true,onLocalEnqueued:()=>enqueued++});submitted.then(()=>observed='sent',()=>observed='rejected');
+  await new Promise(setImmediate);
+  assert.equal(observed,'pending');assert.equal(enqueued,0);assert.equal(f.m._e2eeSendLockQueued,32);assert.equal(await f.m.storage.loadPendingE2eeSend(id),null);assert.equal(ch.state.messages.length,0);assert.equal(f.calls.length,0);
+  hold.open();await Promise.all(work);await submitted;
+  assert.equal(enqueued,1);assert.equal(f.calls.length,1);assert.equal(f.calls[0].body.message.id,id);assert.equal((await f.m.storage.loadPendingE2eeSend(id)).status,'sent');assert.equal(ch.state.messages.filter(x=>x.id===id).length,1);
+ }finally{hold.open();await Promise.allSettled([...work,...(submitted?[submitted]:[])]);await f.close()}
+});
+
+test('waiting send admission fences a retired session before reserving an intent',async()=>{
+ const f=await fixture(),hold=latch(),jobs=[];let waiting;try{
+  for(let i=0;i<32;i++)jobs.push(f.m._withE2eeSendLock(f.cid,()=>hold.promise));
+  const id=randomUUID();waiting=f.m.sendMessage('team',f.cid.slice(5),f.cid,'retained',id,{},()=>assert.fail('retired acknowledgment'),true);const rejected=assert.rejects(waiting);
+  await new Promise(setImmediate);f.m.client={activeChannels:{}};hold.open();await rejected;await Promise.allSettled(jobs);
+  assert.equal(await f.m.storage.loadPendingE2eeSend(id),null);assert.equal(f.calls.length,0);assert.equal(f.m._e2eeSendLockQueued,0);
+ }finally{hold.open();await Promise.allSettled([...jobs,...(waiting?[waiting]:[])]);await f.close()}
+});
+
+test('waiting admission takes the first released slot without draining the whole group queue',async()=>{
+ const f=await fixture(),first=latch(),rest=latch(),jobs=[];let waiting,entered=false;try{
+  jobs.push(f.m._withE2eeSendLock(f.cid,()=>first.promise));
+  for(let i=1;i<32;i++)jobs.push(f.m._withE2eeSendLock(f.cid,()=>rest.promise));
+  waiting=f.m._withE2eeSendLock(f.cid,async()=>{},async()=>{entered=true},true);
+  await new Promise(setImmediate);assert.equal(entered,false);first.open();await jobs[0];await new Promise(setImmediate);
+  assert.equal(entered,true);assert.equal(f.m._e2eeSendLockQueued,32);
+ }finally{first.open();rest.open();await Promise.allSettled([...jobs,...(waiting?[waiting]:[])]);await f.close()}
+});
+
+test('100 admitted channel sends retain every UUID and peer decrypt while active tickets stay bounded',async()=>{
+ const f=await fixture(),hold=latch(),entered=latch(),jobs=[],ids=[],peerProvider=new f.w.Provider(),peerIdentity=new f.w.Identity(peerProvider,'burst-peer');let peer;
+ try{
+  const g=f.m.getGroup(f.cid),bundle=g.add_members(f.m.provider,f.m.identity,[peerIdentity.key_package_typed(peerProvider)]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);peer=f.w.Group.join(peerProvider,bundle.welcome,g.export_ratchet_tree());
+  const {ErmisChat}=require('../dist/index.cjs'),c=new ErmisChat('fixture','project','http://fixture.invalid',{browser:false,logger:()=>{}});c._setUser({id:f.user});c.deviceId=f.device;c.encryptionManager=f.m;f.m.client=c;const ch=c.channel('team',f.cid.slice(5));ch.data={mls_enabled:true};
+  const send=f.m.e2eeClient.sendMessage;let requests=0,peak=0,acks=0;
+  f.m.e2eeClient.sendMessage=async(...args)=>{if(requests++===0){entered.open();await hold.promise;}return send(...args)};
+  const submit=async()=>{for(let n=0;n<100;n++){
+   const id=randomUUID();ids.push(id);const ack=latch();const job=ch.sendMessage({id,text:'burst '+n},{waitForLocalAdmission:true,onLocalEnqueued:()=>{acks++;ack.open()}});jobs.push(job);job.catch(()=>{});
+   await Promise.race([ack.promise,job]);peak=Math.max(peak,f.m._e2eeSendLockQueued);
+   if(acks===32){await entered.promise;assert.equal(requests,1);assert.equal(f.m._e2eeSendLockQueued,32);hold.open();}
+  }};
+  await submit();await Promise.all(jobs);assert.equal(acks,100);assert.equal(peak,32);assert.equal(f.m._e2eeSendLockQueued,0);assert.equal(f.calls.length,100);assert.deepEqual(f.calls.map(x=>x.body.message.id),ids);assert.equal(new Set(ch.state.messages.map(x=>x.id)).size,100);
+  for(let n=0;n<100;n++){const job=await f.m.storage.loadPendingE2eeSend(ids[n]);assert.equal(job.status,'sent');assert.equal(JSON.parse(new TextDecoder().decode(peer.process_application_message(peerProvider,f.calls[n].body.message.mls_ciphertext,undefined).content)).text,'burst '+n);}
+ }finally{hold.open();await Promise.allSettled(jobs);peer?.free();peerIdentity.free();peerProvider.free();await f.close()}
+});
+
 test('peer decrypts consecutive fresh sends across provider/group replacement and sender restart',async()=>{
  const f=await fixture(),bobProvider=new f.w.Provider(),bob=new f.w.Identity(bobProvider,'peer'),kp=bob.key_package_typed(bobProvider),g=f.m.getGroup(f.cid);
  const bundle=g.add_members(f.m.provider,f.m.identity,[kp]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);
@@ -437,6 +487,20 @@ test('sealed ciphertext dispatch waits for an actual concurrent provider checkpo
  }finally{release.open();if(writer)await writer;peer?.free();identity.free();p.free();await f.close();}
 });
 
+test('sealed dispatch retries exact ciphertext when its busy checkpoint finishes before the rejection handler',async()=>{
+ const f=await fixture(),id=randomUUID(),p=new f.w.Provider(),identity=new f.w.Identity(p,'released-dispatch-peer'),entered=latch(),release=latch();let peer,writer,sealed,first=true;
+ const persist=f.m.storage.saveProviderState.bind(f.m.storage),prepare=f.m._prepareApplicationSend.bind(f.m),dispatch=f.m._sendPersistedPendingE2eeRecord.bind(f.m);
+ try{
+  const g=f.m.getGroup(f.cid),bundle=g.add_members(f.m.provider,f.m.identity,[identity.key_package_typed(p)]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);peer=f.w.Group.join(p,bundle.welcome,g.export_ratchet_tree());
+  f.m._prepareApplicationSend=async(...args)=>{const row=await prepare(...args);sealed=structuredClone(row);f.m.storage.saveProviderState=async(...a)=>{entered.open();await release.promise;return persist(...a);};writer=f.m._persistProviderStrict();await entered.promise;return row;};
+  // Exercise the real provider getter while the checkpoint owns the writer.
+  // Its rejection is delivered only after that exact writer has released.
+  f.m._sendPersistedPendingE2eeRecord=async(...args)=>{if(!first)return dispatch(...args);first=false;try{return await dispatch(...args);}catch(error){assert.equal(error.code,'provider_mutation_busy');release.open();await writer;assert.equal(f.m._providerCheckpointInFlight,false);throw error;}};
+  let posts=0;f.m.e2eeClient.sendMessage=async(_t,_c,body,options)=>{posts++;assert.equal(body.message.id,id);assert.deepEqual(body.message.mls_ciphertext,sealed.mls_ciphertext);assert.equal(options.reconcileOnly,false);assert.equal(JSON.parse(new TextDecoder().decode(peer.process_application_message(p,body.message.mls_ciphertext,undefined).content)).text,'released checkpoint intent');return{message:{id,msg_seq:101,last_event_seq:102,created_at:'2026-11-08T00:00:00Z'}};};
+  await f.send('released checkpoint intent',id);assert.equal(posts,1);const row=await f.m.storage.loadPendingE2eeSend(id);assert.equal(row.status,'sent');assert.equal(row.application_http_started,true);assert.deepEqual(row.mls_ciphertext,sealed.mls_ciphertext);assert.equal((await f.m.storage.loadMessage(id)).msg_seq,101);
+ }finally{release.open();if(writer)await writer;peer?.free();identity.free();p.free();await f.close();}
+});
+
 test('sealed dispatch does not strand its first POST when a provider writer starts during HTTP-marker CAS',async()=>{
  const f=await fixture(),id=randomUUID(),entered=latch(),release=latch();let writer;
  const save=f.m.storage.savePendingE2eeSendOutcome.bind(f.m.storage),persist=f.m.storage.saveProviderState.bind(f.m.storage);
@@ -628,4 +692,50 @@ test('unsealed attachment caption edit retains authenticated manifest AAD after 
   let job;const process=second._processQueuedE2eeAttachmentMessage.bind(second);second._processQueuedE2eeAttachmentMessage=record=>(job=process(record));await second.resumePendingE2eeSends();assert.ok(job);await job;
   const last=f.calls.filter(x=>x.kind==='update').at(-1),restored=peer.process_application_message(bp,last.body.message.mls_ciphertext,undefined),latest=JSON.parse(new TextDecoder().decode(restored.content));assert.equal(latest.text,'QAATT-queued-restart');assert.deepEqual(latest.attachments,[manifest]);assert.deepEqual(latest.old_texts.map(x=>x.text),['QAATT-before-restart','QAATT-after-restart']);assert.deepEqual(restored.aad,buildE2eeMessageAadV1(aad));
  }finally{await second?.storage.close();await resumed?.storage.close();peer.free();bob.free();bp.free();await f.close()}
+});
+
+
+// Regression for offline-sync R9: a sealed but undispatched record cannot be
+// overtaken by enough newer generations to expire the receiver's skipped key.
+test('late sealed ciphertext beyond the real WASM skipped-key window fails without changing epoch',async()=>{
+ const f=await fixture(),bp=new f.w.Provider(),bi=new f.w.Identity(bp,'late-window-peer');let peer;
+ try{
+  const g=f.m.getGroup(f.cid),bundle=g.add_members(f.m.provider,f.m.identity,[bi.key_package_typed(bp)]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);peer=f.w.Group.join(bp,bundle.welcome,g.export_ratchet_tree());
+  const sender=f.m.getGroup(f.cid),old=sender.create_message(f.m.provider,f.m.identity,new TextEncoder().encode('old fixture'));
+  for(let n=0;n<16;n++){const next=sender.create_message(f.m.provider,f.m.identity,new TextEncoder().encode('new fixture'));peer.process_application_message(bp,next,undefined);}
+  assert.equal(Number(peer.epoch()),Number(sender.epoch()));
+  assert.throws(()=>peer.process_application_message(bp,old,undefined),e=>/TooDistantInThePast|NoPastEpochData|Generation is too old/.test(String(e)));
+ }finally{peer?.free();bi.free();bp.free();await f.close();}
+});
+
+test('sealed unsent predecessor is durably delivered before a new sender ratchet is prepared',async()=>{
+ const f=await fixture(),oldId=randomUUID(),nextId=randomUUID(),bp=new f.w.Provider(),bi=new f.w.Identity(bp,'ordered-send-peer');let peer;
+ const dispatch=f.m._dispatchPreparedApplicationSend.bind(f.m);let first=true;
+ try{
+  const g=f.m.getGroup(f.cid),bundle=g.add_members(f.m.provider,f.m.identity,[bi.key_package_typed(bp)]);g.merge_pending_commit(f.m.provider);g.save_state(f.m.provider);f.m._groupGenerations.set(f.cid,{...f.m._groupGenerations.get(f.cid),current_epoch:Number(g.epoch())});await f.m._writeMlsMutation(f.cid,null);peer=f.w.Group.join(bp,bundle.welcome,g.export_ratchet_tree());
+  f.m._dispatchPreparedApplicationSend=async record=>{if(first){first=false;throw Object.assign(Error('held before HTTP'),{code:'fixture_before_http'});}return dispatch(record);};
+  await assert.rejects(f.send('old',oldId),e=>e.code==='fixture_before_http');const retained=await f.m.storage.loadPendingE2eeSend(oldId);assert.equal(retained.application_http_started,false);
+  const received=[];f.m.e2eeClient.sendMessage=async(_t,_c,body,options)=>{assert.equal(options.reconcileOnly,false);received.push(body.message.id);if(body.message.id===oldId)assert.deepEqual(body.message.mls_ciphertext,retained.mls_ciphertext);peer.process_application_message(bp,body.message.mls_ciphertext,undefined);return{message:{id:body.message.id,msg_seq:received.length,last_event_seq:received.length,created_at:'2026-11-08T00:00:00Z'}};};
+  await f.send('next',nextId);assert.deepEqual(received,[oldId,nextId]);assert.equal((await f.m.storage.loadPendingE2eeSend(oldId)).status,'sent');
+ }finally{peer?.free();bi.free();bp.free();await f.close();}
+});
+
+
+test('unresolved sealed predecessor blocks new encryption until read-only reconciliation succeeds',async()=>{
+ const f=await fixture(),oldId=randomUUID(),nextId=randomUUID();let initial=true;
+ try{
+  f.m.e2eeClient.sendMessage=async()=>{throw Error('unknown HTTP outcome')};await assert.rejects(f.send('old',oldId));const old=await f.m.storage.loadPendingE2eeSend(oldId);const before=f.m._activeProvider.to_bytes();assert.equal(old.application_http_started,true);
+  f.m.e2eeClient.sendMessage=async(_t,_c,body,options)=>{assert.equal(body.message.id,oldId);assert.equal(options.reconcileOnly,true);assert.deepEqual(body.message.mls_ciphertext,old.mls_ciphertext);throw Object.assign(Error('not yet known'),{code:'fixture_receipt_pending'});};
+  await assert.rejects(f.send('new',nextId),e=>e.code==='fixture_receipt_pending');const queued=await f.m.storage.loadPendingE2eeSend(nextId);assert.equal(queued.mls_ciphertext,undefined);assert.deepEqual(f.m._activeProvider.to_bytes(),before);assert.deepEqual((await f.m.storage.loadPendingE2eeSend(oldId)).mls_ciphertext,old.mls_ciphertext);
+  const calls=[];f.m.e2eeClient.sendMessage=async(_t,_c,body,options)=>{calls.push([body.message.id,options.reconcileOnly]);return{message:{id:body.message.id,msg_seq:1,last_event_seq:1,created_at:'2026-11-08T00:00:00Z'}};};
+  await f.send('new',nextId);assert.deepEqual(calls,[[oldId,true],[nextId,false]]);assert.equal((await f.m.storage.loadPendingE2eeSend(oldId)).status,'sent');
+ }finally{await f.close();}
+});
+
+test('indexed pending status selection never scans accepted ciphertext journals',async()=>{
+ const f=await fixture();try{
+  await f.send('accepted');const db=await f.m.storage.openDB(),transaction=db.transaction.bind(db);let fullScans=0;
+  db.transaction=(...args)=>{const tx=transaction(...args);if([args[0]].flat().includes('pending_sends')){const objectStore=tx.objectStore.bind(tx);tx.objectStore=name=>{const store=objectStore(name);if(name==='pending_sends'){const cursor=store.openCursor.bind(store);store.openCursor=(...a)=>{fullScans++;return cursor(...a);};}return store;};}return tx;};
+  assert.deepEqual(await f.m.storage.listPendingE2eeSends(['sending','failed_retryable','sending']),[]);assert.equal(fullScans,0);db.transaction=transaction;
+ }finally{await f.close();}
 });

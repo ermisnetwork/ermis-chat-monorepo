@@ -6,6 +6,7 @@ const syncState = /scope_sync_state status=(idle|syncing|needs_retry|ready|joine
 const pendingSend = /pending_send_checkpoint result=(epoch_stale|epoch_retry|sent|retryable|terminal)(?![a-z_])/;
 const pendingFailure = /pending_send_failed category=(epoch_stale|generation_stale|network_or_local|server|other)(?![a-z_])/;
 const archiveUpload = /archive_upload_checkpoint result=(permission_blocked|acknowledged|terminal|retryable)(?![a-z_])/;
+const sendIntent = /^mls_send_intent stage=(prepared|dispatch|reconcile|accepted|predecessor|deferred) uuid=[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12} cipher_sha256=(?:[0-9a-f]{64}|none) generation=\d{1,9} epoch=\d{1,9} count=\d{1,9} mode=(started|not_started|unknown)$/i;
 const repeated = new Map<string, number>();
 const receiveDiagnostics = new Map<string, number>();
 const scopeDigests = new Map<string, Promise<string>>();
@@ -116,6 +117,11 @@ if (import.meta.env.DEV && window.location.hostname === 'localhost' && window.lo
 }
 
 export const mlsDevLogger: Logger = (level, message, extraData) => {
+  if (sendIntent.test(message)) {
+    capture(message);
+    if (import.meta.env.DEV) console.log(message);
+    return;
+  }
   // Project failure metadata even when the SDK classifies it as expected history
   // recovery at info level. Never forward the raw error or message/group identity.
   // sdkLog formats all arguments into message and preserves them in extraData.args.

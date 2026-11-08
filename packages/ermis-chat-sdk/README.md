@@ -328,6 +328,13 @@ Durable application intent compatibility (LOR DEC085, 2026-10-20): adapters need
 
 DEC085 final continuation (2026-10-20): a queued send that encounters typed provider_mutation_busy now coalesces a point-read wake after the existing provider checkpoint tail. It rereads durable status and current scope, preserves exact UUID/ciphertext and skips canceled/terminal/sent work; no timer, attempt reset or provider mutex through HTTP. Final affected510PASS includes held-checkpoint autonomous wake/cancel/owner fences; actual final browser restart and offline/online exact retry both returned200. This supersedes the earlier507 count for this changed boundary. Full generation/rollback/performance acceptance remains open in the authoritative LOR ledger.
 
+`2026-11-08` offline burst correction: sealed dispatch also retries the same durable
+UUID/ciphertext when a typed `provider_mutation_busy` rejection reaches its handler
+after the owning checkpoint has already released. It uses the existing dispatch
+deadline and rechecks owner, generation, pending mutation, persistence and HTTP
+dispatch marker on every attempt. A completed checkpoint does not strand an
+unsent sealed intent; an unknown HTTP outcome still enters reconciliation.
+
 2026-10-20 DEC085 per-CID discovery: optional complete generation.capability overrides batch defaults, including explicitfalse. Absent preserves legacy fallback; malformed present values fail before control persistence, scoped protocol skew affects only that CID. Policy remains subject to owner, pending receipt, client opt-in and genuine900s incident/claim fences; enabled is not Ready or reset eligibility. No persistence/dependency/minimum-version change. Final Web/Android runtime verification is tracked in the canonical LOR journal.
 
 
@@ -464,6 +471,8 @@ Channel-list transport (2026-10-30): `queryChannels` bounds its HTTP read at fiv
 
 After an accepted rebootstrap installs the founder group, the SDK observes and durably binds authoritative recovery control through the existing bounded discovery flow. Failed observation retains the installed group; a newer manual/repair control still governs it. No identity reset or second rebootstrap is implied. See the [canonical LOR journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md).
 
+For an E2EE composer, `channel.sendMessage(message, {waitForLocalAdmission: true, onLocalEnqueued})` retains the current draft until the SDK durably reserves its exact UUID/payload. The callback acknowledges local persistence, not server acceptance. The existing 32 active send limit stays in force; an opted-in draft waits outside that queue and takes the next released slot, with the same session/channel cleanup fences. A failed reservation leaves the draft available to the caller. Callers that omit this option keep the existing queue-full rejection. Sealed unknown outcomes still reconcile their original UUID/ciphertext.
+
 Startup scope isolation (2026-11-06): malformed/missing event-bound acceptance metadata keeps that scope at its saved durable cursor with `needs_retry` / `acceptance_metadata_invalid`. Other scopes in the same response can finish checkpointing and recovery discovery. The strict validator is unchanged; the invalid scope is not Ready and does not receive a cursor skip. Shared provider persistence or ownership failures still abort the sync. No wire/schema, retry or crypto-policy changes. See the [canonical LOR journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md).
 
 ### Group avatar upload purpose
@@ -490,3 +499,30 @@ Purpose is sent only to the API, never to storage. Existing membership, role and
 Avatar bytes and the channel image URL remain server-readable metadata; MLS attachment encryption is unchanged.
 
 Browser presigned uploads still require storage CORS to allow the exact page origin (scheme, host and port); multipart also needs ETag exposed. A successful normal proxy avatar upload does not validate browser direct-upload CORS. Uhm currently uses the normal avatar path, while the shared React editor uses presign. `purpose` changes upload admission only.
+
+
+### Enable E2EE on an existing standard group
+
+<details>
+<summary>Change log</summary>
+
+- `2026-11-08`: Add canonical membership preflight and correct Welcome recovery when no repair gate exists. Rebuild the SDK to get both client-only fixes; API and persisted formats are unchanged.
+
+</details>
+
+`EncryptionManager.enableE2ee` first reads the canonical channel with `state: true`, `watch: false`, and `messages.limit: 0`. Every member must have role `owner`, `member`, or `moder`; pending, rejected, skipped, or unknown roles stop the call before KeyPackage consumption and before any MLS Commit is staged. Resolve outstanding invitations, then enable. A missing/unreadable roster also stops preparation. The server still enforces owner/admin permission and accepted membership at `/enable`, including races after the preflight.
+
+Existing submitted/pending mutations are retained for reconciliation; this preflight does not clear their Commit/provider or authorize a new mutation. Transport failures after submission keep the exact staged bundle.
+
+Regression: `node --test --test-concurrency=1 test/mls_bootstrap_checkpoint.test.mjs` (real WASM and IndexedDB). See [LOR-BUG-E2EE-ENABLE-001 canonical journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md#2026-11-08--lor-bug-e2ee-enable-001-standard-group-enable-400) for reproduction, source/artifact identity, and open runtime acceptance gates.
+
+A deferred Welcome outside an active repair gate now requests normal `ensureChannelReady` admission. It does not leave a deferred-sync flag waiting for a nonexistent repair completion. Active repair gates still defer until completion, and all normal ownership, pending-mutation and private/public Ready checks remain in force.
+
+
+### Leave and reinvite after a successful E2EE send
+
+IndexedDB retains an accepted outgoing intent (`status: sent`) and its message projection for idempotent reuse. These accepted audit rows do not block normal self-leave. Cleanup preflight and its atomic recheck still reject every unresolved or unknown send status, pending MLS mutation and join candidate; they preserve the original UUID/ciphertext for reconciliation. No accepted intent is deleted by this change. The existing100-row per-CID cleanup read bound remains fail-closed.
+
+Regression: `node --test --test-concurrency=1 test/mls_cleanup_checkpoint.test.mjs` after building the SDK. Canonical tracking: `LOR-BUG-GROUP-REINVITE-001` in the Bellboy lifetime plan/ledger.
+
+Re-invitation after durable leave queries current canonical accepted self-membership before replaying from its new creation boundary. A fresh targeted Welcome may replace the exact historical marker only at a later epoch with the same generation/GroupId and locally owned KeyPackage. The applied Welcome checkpoint retains the superseded marker/removal in optional `checkpoint.rejoin` evidence; provider activation and readback precede normal Ready. Pending invitations, stale Welcomes, unresolved mutation owners and NoMatchingKeyPackage do not reactivate the removed group. No server/API/native format changes.

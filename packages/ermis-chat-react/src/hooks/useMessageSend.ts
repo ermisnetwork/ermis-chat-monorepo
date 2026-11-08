@@ -46,6 +46,8 @@ export function useMessageSend({
 }: UseMessageSendOptions) {
   const [sending, setSending] = useState(false);
   const isProcessingRef = useRef(false);
+  const currentChannelRef = useRef(activeChannel);
+  currentChannelRef.current = activeChannel;
 
   const handleSend = useCallback(async () => {
     if (!activeChannel || !hasContent || sending || isProcessingRef.current) return;
@@ -144,7 +146,20 @@ export function useMessageSend({
         if (quotedMessage?.id) {
           message.quoted_message_id = quotedMessage.id;
         }
-        sendPromise = activeChannel.sendMessage(message as any);
+        let locallyEnqueued!: () => void;
+        const localAdmission = new Promise<void>((resolve) => { locallyEnqueued = resolve; });
+        sendPromise = activeChannel.sendMessage(message as any, {
+          waitForLocalAdmission: true,
+          onLocalEnqueued: locallyEnqueued,
+        });
+        // Keep the draft and input guard until the SDK has durable work. HTTP
+        // continues in the background after admission, including during bursts.
+        if (isE2eeChannel) await Promise.race([localAdmission, sendPromise]);
+        if (currentChannelRef.current !== activeChannel) {
+          // Admission belongs to the original channel; a later view owns its draft.
+          void sendPromise.catch(() => undefined);
+          return;
+        }
       }
 
       // --- 0. OPTIMISTIC UI UPDATE ---

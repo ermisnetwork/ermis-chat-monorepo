@@ -19,7 +19,21 @@ export function nextWelcomeWorkBase(expected: ExternalJoinWorkBase, change: Welc
   const base = structuredClone(expected), row = change.record, state = base.state;
   if (!row || row.user_id !== user || row.device_id !== device || row.cid !== cid || !/^[0-9a-f]{64}$/.test(row.signing_identity_sha256)) throw recoveryControlError('welcome_checkpoint_invalid');
   validateExternalJoinWelcomeBase(base, user, device, cid, row.signing_identity_sha256);
-  if (!state.provider_bytes || !state.identity_bytes || state.cleanup.metadata[`mls_removal:v1:${cid}`]) throw recoveryControlError('local_checkpoint_pending');
+  const removalKey = `mls_removal:v1:${cid}`, removal = state.cleanup.metadata[removalKey];
+  const rejoin = row.checkpoint?.rejoin;
+  if (rejoin) {
+    const previous = state.cleanup.marker as import('./types').MlsGroupGenerationMarker | null;
+    if (change.kind !== 'apply' || row.status !== 'applied' || !removal || !previous || previous.status !== 'historical' ||
+        !equal(rejoin.previous_marker, previous) || !equal(rejoin.removal, removal) || previous.group_generation !== row.group_generation ||
+        row.epoch <= previous.current_epoch || !Number.isSafeInteger(rejoin.canonical_epoch) || rejoin.canonical_epoch < row.epoch ||
+        !Number.isFinite(Date.parse(rejoin.membership_created_at)) ||
+        Date.parse(row.event_cursor.created_at) < Date.parse(rejoin.membership_created_at) - 1 ||
+        !change.checkpoint.generation || !equal(change.checkpoint.generation.group_id, previous.group_id) ||
+        state.cleanup.metadata[`external_candidate:v1:${cid}`] || state.cleanup.metadata[`mls_rebootstrap_candidate:v1:${cid}`]) {
+      throw recoveryControlError('mls_readd_reconciliation_required');
+    }
+  }
+  if (!state.provider_bytes || !state.identity_bytes || removal && !rejoin) throw recoveryControlError('local_checkpoint_pending');
   const control = state.control, generationDisposition = row.status === 'superseded_by_generation';
   if (generationDisposition) validateWelcomeGenerationDisposition(row);
   if (control && (control.group_generation > (generationDisposition ? row.checkpoint!.marker.group_generation : row.group_generation) || control.group_generation === (generationDisposition ? row.checkpoint!.marker.group_generation : row.group_generation) &&
@@ -40,7 +54,7 @@ export function nextWelcomeWorkBase(expected: ExternalJoinWorkBase, change: Welc
   } else {
     const cp = change.checkpoint, marker = cp.generation, guard = cp.provider_write_guard;
     const authored = row.status === 'authored';
-    const proof = authored ? {authored_device_id: device, ratchet_tree_sha256: row.checkpoint?.ratchet_tree_sha256} : generationDisposition ? {generation_receipt: row.checkpoint!.generation_receipt} : {};
+    const proof = authored ? {authored_device_id: device, ratchet_tree_sha256: row.checkpoint?.ratchet_tree_sha256} : generationDisposition ? {generation_receipt: row.checkpoint!.generation_receipt} : rejoin ? {rejoin} : {};
     if (generationDisposition && (!equal(cp.provider_bytes, state.provider_bytes) || !equal(marker, state.cleanup.marker) ||
         Object.values(base.welcome_pending).some(pending => externalWelcomeKey(pending) !== key))) throw recoveryControlError('welcome_checkpoint_invalid');
     if (authored && (!/^[0-9a-f]{64}$/.test(row.checkpoint?.ratchet_tree_sha256 || '') ||
@@ -57,6 +71,8 @@ export function nextWelcomeWorkBase(expected: ExternalJoinWorkBase, change: Welc
     if (prior && prior.status !== 'pending_external_join') throw recoveryControlError('welcome_disposition_required');
     state.provider_bytes = new Uint8Array(cp.provider_bytes); state.revision = guard.next_revision; state.cleanup.marker = structuredClone(marker);
     state.cleanup.metadata[`external_join_readiness:${cid}`] = null;
+    // The prior removal is retained inside this exact applied Welcome proof.
+    if (rejoin) state.cleanup.metadata[removalKey] = null;
     base.welcome_primary[key] = structuredClone(row); delete base.welcome_pending[due];
   }
   if (base.welcome_history_work && (!equal(expected.welcome_primary, base.welcome_primary) || !equal(expected.welcome_pending, base.welcome_pending))) {

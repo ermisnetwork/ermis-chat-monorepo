@@ -205,7 +205,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
    * @param message - The constructed text/attachment object payload representing the message.
    * @returns       A Promise resolving to the exact API response encompassing message details.
    */
-  async sendMessage(message: Message<ErmisChatGenerics>) {
+  async sendMessage(message: Message<ErmisChatGenerics>, options: {
+    /** Retain the current UI draft while the bounded E2EE queue has no slot. */
+    waitForLocalAdmission?: boolean;
+    /** E2EE: called only after the exact intent is durably reserved. */
+    onLocalEnqueued?: () => void;
+  } = {}) {
     // 1. Generate ID upfront
     if (!message.id) {
       message = { ...message, id: randomId() };
@@ -248,6 +253,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       if (optimisticPublished) return;
       optimisticPublished = true;
       this.state.addMessageSorted(optimisticMessage);
+      options.onLocalEnqueued?.();
     };
 
     const isE2ee = this._isEffectiveE2ee();
@@ -272,7 +278,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
           poll_type: message.poll_type,
           allow_change_choice: message.allow_change_choice,
           poll_closed: message.poll_closed,
-        }, publishOptimistic);
+        }, publishOptimistic, options.waitForLocalAdmission === true);
         const resMsg = response?.message || (response as any);
         if (resMsg && (resMsg.id || resMsg.text)) {
           const responseUserId = resMsg.user?.id || (resMsg as any).user_id || this.getClient().userID || '';
@@ -300,6 +306,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         }
         return response;
       } catch (error: any) {
+        // A waiting composer still owns this draft if admission never happened.
+        // Do not invent a failed message that has no durable retry identity.
+        if (options.waitForLocalAdmission && !optimisticPublished) throw error;
         publishOptimistic();
         const isOfflineError =
           error.code === 'ERR_NETWORK' ||

@@ -1239,16 +1239,24 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       const tx = db.transaction(STORE_PENDING_SENDS, 'readonly');
       const store = tx.objectStore(STORE_PENDING_SENDS);
       const results: PendingE2eeSendRecord[] = [];
-      const allowed = statuses && statuses.length > 0 ? new Set(statuses) : null;
-      const request = store.openCursor();
+      // Accepted journals can outnumber active work by thousands. Use the
+      // existing status index when selecting resumable work before a new send.
+      const selected = statuses?.length ? [...new Set(statuses)] : null;
+      const read = (statusIndex: number) => {
+      const request = selected ? store.index('status').openCursor(IDBKeyRange.only(selected[statusIndex])) : store.openCursor();
       request.onsuccess = (event: Event) => {
         const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
         if (cursor) {
           const value = cursor.value as PendingE2eeSendRecord;
-          if (!allowed || allowed.has(value.status)) results.push(value);
+          results.push(value);
           cursor.continue();
+        } else if (selected && statusIndex + 1 < selected.length) {
+          read(statusIndex + 1);
         }
       };
+      request.onerror = () => reject(request.error);
+      };
+      read(0);
       tx.oncomplete = () => {
         results.sort((a, b) => a.updated_at - b.updated_at);
         resolve(results);
@@ -3105,6 +3113,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
           assertOwner(); tx.objectStore(STORE_GROUPS).put(cp.generation, cid);
           if (submitted.kind === 'apply') {
             meta.delete(`${EXTERNAL_JOIN_READINESS_PREFIX}${cid}`);
+            if (submitted.record.checkpoint?.rejoin) meta.delete(`mls_removal:v1:${cid}`);
             meta.put(submitted.record, externalWelcomeKey(submitted.record)); meta.delete(externalWelcomeKey(submitted.record, true));
           }
           // Manual processing preserves all existing readiness/event/index/receipt/candidate obligations.
@@ -3967,7 +3976,9 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     if (includePendingSends) {
       const sends = tx.objectStore(STORE_PENDING_SENDS).index('cid').getAll(cid, 101);
       sends.onsuccess = () => { if (sends.result.length > 100) { tx.abort(); return; }
-        state.pending_sends = sends.result; finish(); };
+        // Canonically accepted sends remain durable for idempotent reuse. Only
+        // unresolved outcomes fence removal; retain every audit row in storage.
+        state.pending_sends = sends.result.filter(record => record.status !== 'sent'); finish(); };
     }
   }
 

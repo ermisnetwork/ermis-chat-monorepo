@@ -175,6 +175,13 @@ export interface WelcomeRecoveryCheckpoint {
     generation_receipt?: Pick<MlsRebootstrapReceipt, 'operation_id' | 'state' | 'expected_generation' | 'current_generation' | 'current_epoch' | 'group_id' | 'membership_version' | 'activated_at'> & {version: 1; cid: string};
     authored_device_id?: string;
     ratchet_tree_sha256?: string;
+    /** New accepted membership and the retired fence superseded by this Welcome. */
+    rejoin?: {
+      previous_marker: MlsGroupGenerationMarker;
+      removal: unknown;
+      membership_created_at: string;
+      canonical_epoch: number;
+    };
   };
 }
 

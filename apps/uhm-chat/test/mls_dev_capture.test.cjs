@@ -173,3 +173,10 @@ test('diagnostics reject invalid epochs and inspect only bounded raw error prefi
     'capture_ready', 'receive_diagnostic error=other epoch_relation=unknown', 'capture_finished',
   ]);
 });
+
+
+test('send-intent diagnostic permits only bounded metadata and never extra payload', async()=>{
+ const h=await harness(),marker='mls_send_intent stage=prepared uuid=9024e0db-eacd-4486-9be2-8a1fb8817be2 cipher_sha256='+ 'a'.repeat(64)+' generation=0 epoch=5 count=0 mode=not_started';
+ h.emitSdk('info',marker);h.emitSdk('info',marker+' plaintext=fixture-secret');h.emitSdk('info',marker.replace('count=0','count=9999999999'));h.emitSdk('info',marker.replace('stage=prepared','stage=raw_key'));
+ await h.finish();const captured=h.requests.flatMap(s=>s.split('\n'));assert.equal(captured.filter(s=>s===marker).length,1);assert.ok(!captured.some(s=>s.includes('fixture-secret')));assert.equal(h.logs.filter(s=>s[0]===marker).length,1);
+});

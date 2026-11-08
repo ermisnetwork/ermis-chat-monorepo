@@ -19,6 +19,34 @@ async function fixture(){
  return{m,s,user,device,cid,group,marker,channel,events,ref,bytes:m.provider.to_bytes(),base:await s.loadProviderCheckpoint(user,device)};
 }
 const control=(h,revision='1',action='repair')=>({version:1,user_id:h.user,device_id:h.device,cid:h.cid,signing_identity_sha256:sha256Hex(h.m.identity.signature_public_key()),group_generation:0,incident_id:'00000000-0000-4000-8000-000000000001',recovery_action:action,recovery_revision:revision,repair_retry_until:'2026-10-12T23:59:59Z'});
+test('Welcome recovery without a repair gate rechecks real Ready instead of leaving an orphaned deferred-sync barrier',async()=>{
+ const h=await fixture(),done=latch();let calls=0,observed;
+ try{
+  assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');
+  h.m.ensureChannelReady=async(type,id,cid)=>{
+   assert.equal(type,'team');assert.equal(cid,h.cid);assert.equal(id,h.cid.slice(5));calls++;
+   observed=await h.m.refreshE2eeState(cid);done.resolve();return {cid,status:observed.state};
+  };
+  h.m.requestScopeSyncAfterRepair(h.cid);
+  assert.equal(h.m._scopeSyncRequestedAfterRepair.has(h.cid),false,'there is no repair completion that could drain this flag');
+  await done.promise;
+  assert.equal(calls,1);assert.equal(observed.state,'ready');
+  assert.deepEqual(h.m.provider.to_bytes(),h.bytes);
+  assert.equal(h.m.identity.owns_key_package_ref(h.m.provider,h.ref),true);
+ }finally{h.m.destroy();await h.s.close();}
+});
+test('Welcome recovery during an actual repair gate remains deferred until normal gate completion',async()=>{
+ const h=await fixture(),done=latch();let admissions=0,syncs=0,observed;
+ try{
+  h.m.ensureChannelReady=async()=>{admissions++;assert.fail('must wait for active repair');};
+  h.m._syncChannelFromCursor=async(cid)=>{syncs++;observed=await h.m.refreshE2eeState(cid);done.resolve();};
+  h.m._startScopeRepairGate(h.cid);h.m.requestScopeSyncAfterRepair(h.cid);
+  assert.equal(h.m._scopeSyncRequestedAfterRepair.has(h.cid),true);assert.equal(admissions,0);assert.equal(syncs,0);
+  h.m._finishScopeRepairGate(h.cid);await done.promise;
+  assert.equal(syncs,1);assert.equal(observed.state,'ready');assert.equal(h.m._scopeSyncRequestedAfterRepair.has(h.cid),false);
+  assert.deepEqual(h.m.provider.to_bytes(),h.bytes);
+ }finally{h.m.destroy();await h.s.close();}
+});
 test('Ready own committed revision with public cursor progress re-proves without private uncertainty',async()=>{
  const h=await fixture(),verify=h.s.verifyMlsReadyCheckpoint.bind(h.s);let checks=0;
  const winner={created_at:'2026-10-12T00:00:00Z',event_id:'public-cursor-winner'};
