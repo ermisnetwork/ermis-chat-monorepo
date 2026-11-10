@@ -359,6 +359,10 @@ export class ErmisAuthProvider {
    * @param token Google OAuth token
    * @param apikey API key
    */
+  async loginWithFirebasePhone(idToken: string): Promise<EndUserAuthResponse> {
+    return this.endUserApi.loginWithFirebasePhone(idToken);
+  }
+
   async loginWithGoogle(token: string): Promise<EndUserAuthResponse> {
     return this.endUserApi.loginWithGoogle(token);
   }

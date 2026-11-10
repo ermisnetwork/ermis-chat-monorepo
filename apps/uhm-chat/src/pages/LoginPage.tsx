@@ -1,3 +1,4 @@
+import { FirebasePhoneChallenge, firebasePhoneErrorKey } from '../utils/firebasePhone'
 import React, { useState, useRef, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -38,6 +39,14 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
   const { t } = useTranslation()
   const [loginMode, setLoginMode] = useState<'email' | 'phone'>('email')
   const [identifier, setIdentifier] = useState('')
+  const firebasePhone = useRef(new FirebasePhoneChallenge())
+  const recaptchaContainer = useRef<HTMLDivElement>(null)
+  const firebaseToken = useRef<string | null>(null)
+  useEffect(() => () => firebasePhone.current.clear(), [])
+  useEffect(() => {
+    firebasePhone.current.clear()
+    firebaseToken.current = null
+  }, [identifier, loginMode])
   const [otpSent, setOtpSent] = useState(false)
   const [otpCode, setOtpCode] = useState('')
   const [loading, setLoading] = useState(false)
@@ -51,7 +60,7 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
   }, [sessionExpired, t])
 
   useEffect(() => {
-    let timer: NodeJS.Timeout
+    let timer: ReturnType<typeof setTimeout>
     if (otpSent && countdown > 0) {
       timer = setTimeout(() => setCountdown(c => c - 1), 1000)
     }
@@ -88,7 +97,10 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
       if (loginMode === 'email') {
         res = await provider.sendOtpToEmail(finalIdentifier)
       } else {
-        res = await provider.sendOtpToPhone(finalIdentifier, OTP_CONFIG.PHONE_METHOD)
+        if (!recaptchaContainer.current) throw new Error('Phone verification is unavailable')
+        firebaseToken.current = null
+        await firebasePhone.current.send(finalIdentifier, recaptchaContainer.current)
+        res = { success: true }
       }
 
       if (res && res.success !== false) {
@@ -99,7 +111,8 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
         setError(res.message || t('errors.otp_failed'))
       }
     } catch (err: any) {
-      setError(err?.message || t('errors.system_otp_err'))
+      const phoneError = loginMode === 'phone' ? firebasePhoneErrorKey(err) : undefined
+      setError(phoneError ? t(`errors.${phoneError}`) : err?.message || t('errors.system_otp_err'))
     } finally {
       setLoading(false)
     }
@@ -118,7 +131,13 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
       const provider = authProviderRef.current
       if (!provider) throw new Error(t('errors.invalid_session'))
 
-      const res = await provider.verifyOtp(otpCode) as any
+      let res: any
+      if (loginMode === 'phone') {
+        firebaseToken.current ??= await firebasePhone.current.verify(otpCode)
+        res = await provider.loginWithFirebasePhone(firebaseToken.current)
+      } else {
+        res = await provider.verifyOtp(otpCode)
+      }
       if (res && res.success !== false) {
         const token = res.token || res.data?.token || res.access_token
         const refreshToken = res.refresh_token || res.data?.refresh_token
@@ -134,6 +153,10 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
         localStorage.setItem(STORAGE_KEYS.TOKEN, token)
         localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken)
         localStorage.setItem(STORAGE_KEYS.CALL_SESSION_ID, crypto.randomUUID())
+        if (loginMode === 'phone') {
+          void firebasePhone.current.finish().catch(() => {})
+          firebaseToken.current = null
+        }
         onLoginSuccess(finalUserId, token, refreshToken)
       } else {
         const msg = res?.message || ''
@@ -146,7 +169,12 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
     } catch (err: any) {
       const status = err?.response?.status || err?.status || err?.statusCode
       const msg = typeof err === 'string' ? err : err?.response?.data?.message || err?.message || ''
-      if (status === 401 || msg.includes('401') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('invalid otp')) {
+      const phoneError = loginMode === 'phone' ? firebasePhoneErrorKey(err) : undefined
+      if (phoneError) {
+        setError(t(`errors.${phoneError}`))
+      } else if (status >= 500) {
+        setError(t('errors.phone_service_unavailable'))
+      } else if (status === 401 || msg.includes('401') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('invalid otp')) {
         setError(t('errors.wrong_otp'))
       } else if (msg && !/^\d{3}$/.test(msg.trim()) && !msg.startsWith('Request failed with status code')) {
         setError(msg)
@@ -192,6 +220,8 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
   }
 
   return (
+    <>
+      <div ref={recaptchaContainer} />
     <div className="flex min-h-screen bg-zinc-50 dark:bg-[#1a1828] items-center justify-center p-4 sm:p-8">
       <SEO title={`${t('login.title') || 'Đăng nhập'} | Uhm Chat`} />
       {/* Container chính: card bọc toàn bộ chia đôi trên màn lớn */}
@@ -391,7 +421,7 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
                           {loading ? t('login.verifying') : t('login.verify')}
                         </Button>
                         <div className="flex gap-3">
-                          <Button type="button" variant="outline" disabled={loading} onClick={() => setOtpSent(false)} className="flex-1 h-12 rounded-xl border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium">
+                          <Button type="button" variant="outline" disabled={loading} onClick={() => { firebasePhone.current.clear(); firebaseToken.current = null; setOtpSent(false) }} className="flex-1 h-12 rounded-xl border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 font-medium">
                             {t('login.back')}
                           </Button>
                           <Button type="button" variant="secondary" disabled={countdown > 0 || loading} onClick={handleSendOtp} className="flex-1 h-12 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-[#2a2640] dark:hover:bg-[#332e50] text-zinc-700 dark:text-zinc-300 font-medium transition-colors">
@@ -434,5 +464,6 @@ export function LoginPage({ onLoginSuccess, sessionExpired = false }: LoginPageP
         </div>
       </div>
     </div>
+    </>
   )
 }

@@ -157,3 +157,11 @@ and [bound evidence](../../../bellboy/docs/evidence/local_main_plan/20261004-thr
 
 
 2026-10-20 secure startup: background tabs continue normal WASM/provider/auth initialization without waiting for a suspended animation frame. Visible tabs yield for paint with a100ms fallback and visibility-change cleanup; this never publishes chat Ready before cryptographic initialization. Actual hidden-tab reload regression and final artifact are linked in the Bellboy LOR DEC085 canonical journal. Performance optimization is owner-deferred to the next phase; recorded idle CPU failure remains open.
+
+## Firebase phone login
+
+Phone sign-in uses Firebase Auth and the internal `/auth/firebase/phone` exchange; email OTP remains unchanged. Configure `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, and `VITE_FIREBASE_APP_ID` from the registered Firebase Web app, then authorize the actual host in Firebase. This flow requires the internal legacy auth adapter; external v1 returns an explicit unsupported-feature error. Missing config shows a service configuration error, without sending legacy SMS.
+
+[API and rollout contract](../../../ermis_end_user/docs/firebase_phone_auth.md) · [Canonical implementation/acceptance plan](../../../ermis_end_user/docs/todo/firebase_phone_auth_plan.md). Real SMS and reCAPTCHA acceptance must be recorded against the shipped artifact.
+
+Use [`.env.example`](.env.example) for deployment configuration. Run the root `build:uhm` command so SDK/React declarations are rebuilt before Uhm typechecking. Phone inputs are normalized to E.164 and reCAPTCHA remains enabled across resend/change-number. Domain/proxy used in QA is not hardcoded into application source.

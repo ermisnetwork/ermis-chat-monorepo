@@ -54,6 +54,12 @@ export class LegacyEndUserAuthApi implements EndUserAuthApi {
     });
   }
 
+  loginWithFirebasePhone(idToken: string) {
+    return this.transport.request<EndUserAuthResponse>('post', this.baseURL + '/auth/firebase/phone', {
+      id_token: idToken, apikey: this.apiKey,
+    });
+  }
+
   loginWithGoogle(token: string) {
     return this.transport.request<EndUserAuthResponse>('post', this.baseURL + '/auth/google_login', {
       token,

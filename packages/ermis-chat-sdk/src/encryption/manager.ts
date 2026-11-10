@@ -869,6 +869,64 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _restoreQueueRunning = false;
   private _restoreInflight = new Map<string, Promise<RestoredMessage[]>>();
   private _bootstrapKnownChannelsPromise: Promise<BootstrapKnownE2eeChannelsResult> | null = null;
+  private _bootstrapKnownChannelsScope: (() => void) | null = null;
+  private _bootstrapKnownChannelsKey: string | null = null;
+  private _scopeSyncBatchObservation: object | null = null;
+  /** An observed rejection is neither an applied page nor a Ready proof. */
+  private _scopeSyncBlocked = new Map<string, {cursor: EventCursor; assertCurrent(): void;
+    group: any; marker: any; epoch?: number; cycle: object | null; retryAt: number; code: 'acceptance_metadata_invalid'; reason?: string}>();
+  private _scopeSyncFlights = new Map<string, {assertCurrent(): void; group: any; marker: any; work: Promise<E2eeSyncState>}>();
+  private _scopeSyncRetry: {assertCurrent(): void; attempts: number; observations: number; timer?: ReturnType<typeof setTimeout>} | null = null;
+
+  private _rememberScopeSyncBlocked(cid: string, cursor: EventCursor, error: unknown): void {
+    const failure = error as {code?: string; reason?: string; diagnostic?: unknown};
+    if (failure?.code !== 'acceptance_metadata_invalid') return;
+    this._scopeSyncBlocked.set(cid, {cursor: {...cursor}, assertCurrent: this._captureCleanupRevisionGuard(cid),
+      group: this.groups.get(cid), marker: this._groupGenerations.get(cid), epoch: this._localEpoch(cid),
+      cycle: this._scopeSyncBatchObservation,
+      retryAt: Date.now() + 30_000, code: 'acceptance_metadata_invalid', reason: failure.reason});
+    // Only a closed reason enum, never context objects, payload or provider bytes.
+    sdkLog('warn', '[MLS] scope acceptance rejected', {code: failure.code, reason: failure.reason || 'binding', diagnostic: failure.diagnostic});
+  }
+
+  private async _scopeSyncBlockedResult(cid: string, cursor?: EventCursor): Promise<EnsureE2eeChannelResult | undefined> {
+    const blocked = this._scopeSyncBlocked.get(cid);
+    if (!blocked) return;
+    try { blocked.assertCurrent(); } catch { this._scopeSyncBlocked.delete(cid); return; }
+    if (blocked.group !== this.groups.get(cid) || blocked.marker !== this._groupGenerations.get(cid) ||
+        blocked.epoch !== this._localEpoch(cid) || (Date.now() >= blocked.retryAt &&
+          (!blocked.cycle || blocked.cycle !== this._scopeSyncBatchObservation))) {
+      this._scopeSyncBlocked.delete(cid); return;
+    }
+    const saved = cursor || await this._loadScopeSyncCursor(cid); blocked.assertCurrent();
+    if (saved && compareEventCursor(saved, blocked.cursor) !== 0) { this._scopeSyncBlocked.delete(cid); return; }
+    return {cid, status: 'needs_retry', error: blocked.code, sync_state: this.getSyncState(cid) || undefined};
+  }
+
+  /** At most three scheduled probes per outage/session; explicit sync remains available. */
+  private _scheduleScopeSyncRetry(error: unknown): void {
+    const failure = error as {code?: string; retry_at?: number};
+    if (!['rate_limited', 'scope_sync_throttled', 'transport_unknown'].includes(failure?.code || '') || !Number.isFinite(failure.retry_at)) return;
+    let retry = this._scopeSyncRetry;
+    try { retry?.assertCurrent(); } catch { if (retry?.timer) clearTimeout(retry.timer); retry = null; }
+    if (!retry) { retry = {assertCurrent: this._captureMlsCleanupScope(), attempts: 0, observations: 0}; this._scopeSyncRetry = retry; }
+    retry.observations += 1;
+    if (retry.timer || retry.attempts >= 3) return;
+    const owned = retry;
+    // Long Retry-After values are checked in bounded timer slices, never shortened.
+    const arm = () => {
+      owned.timer = setTimeout(() => {
+        owned.timer = undefined;
+        try { owned.assertCurrent(); if (!this.initialized || this._scopeSyncRetry !== owned) return; }
+        catch { return; }
+        if (Date.now() < failure.retry_at!) { arm(); return; }
+        owned.attempts += 1;
+        void this.sync().catch(() => { /* sync schedules the next bounded probe. */ });
+      }, Math.max(1, Math.min(60_000, failure.retry_at! - Date.now())));
+      (owned.timer as any).unref?.();
+    };
+    arm();
+  }
   private _mlsRecoveryDiscoverySupported: boolean | null = null;
   private _channelEvidenceTransportId:string|null=null;
   private _channelEvidenceWasOffline=false;
@@ -902,6 +960,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   /** Hydration only reads public metadata. Crypto is evaluated on channel use. */
   observeChannelE2ee(value:unknown,authenticatedResponse=false):void {
     const row=parseChannelE2ee(value);if(row){const previous=this._channelE2ee.get(row.cid);if(previous && previous.group_generation!==null && row.group_generation!==null && (row.group_generation<previous.group_generation || row.group_generation===previous.group_generation && previous.recovery && row.recovery && BigInt(row.recovery.revision)<BigInt(previous.recovery.revision)))return;this._channelE2ee.set(row.cid,row);if(authenticatedResponse){
+      if (previous && ((row.group_generation !== null && previous.group_generation !== null && row.group_generation > previous.group_generation) ||
+          row.group_generation === previous.group_generation && ((row.epoch !== null && previous.epoch !== null && row.epoch > previous.epoch) ||
+            row.recovery && previous.recovery && BigInt(row.recovery.revision) > BigInt(previous.recovery.revision)))) {
+        this._scopeSyncBlocked.delete(row.cid);
+      }
       this._channelEvidenceObservations.set(row.cid,newUuid());
       if(row.group_generation!==null && row.recovery){
         const head=this._recoveryDiscoveryHeads.get(row.cid),next={group_generation:row.group_generation,recovery_revision:row.recovery.revision};
@@ -4325,8 +4388,21 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (!this.initialized) {
       return { ...this._e2eeBootstrapProgress, results: [] };
     }
+    const assertScope = this._captureMlsCleanupScope();
+    const requestKey = JSON.stringify([options.targetCids?.slice().sort(), options.priorityActiveCid,
+      options.source, options.recoveryDiscoveryStates, options.recoveryDiscoveryUnsupported, options.scopeSyncedCids?.slice().sort()]);
+    let pendingSync = this._syncWorkPromise;
+    try { this._syncWorkScope?.(); } catch { pendingSync = null; }
+    if (options.source !== 'sync' && pendingSync) {
+      await pendingSync; assertScope();
+    }
     if (this._bootstrapKnownChannelsPromise) {
-      return this._bootstrapKnownChannelsPromise;
+      try { this._bootstrapKnownChannelsScope?.();
+        if (this._bootstrapKnownChannelsKey === requestKey) return this._bootstrapKnownChannelsPromise;
+        await this._bootstrapKnownChannelsPromise; assertScope();
+        // A targeted retry is not equivalent to a full startup (or vice versa).
+        // Run the requested set after the preceding owner has completed.
+      } catch (error) { assertScope(); }
     }
 
     const work = (async (): Promise<BootstrapKnownE2eeChannelsResult> => {
@@ -4354,6 +4430,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
       let completed = 0;
       for (const channel of channels) {
+        assertScope();
         this._emitBootstrapProgress({
           total: channels.length,
           completed,
@@ -4363,12 +4440,22 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         });
 
         try {
+          if (options.recoveryDiscoveryStates?.[channel.cid]?.result !== 'state' &&
+              !this._externalJoinCandidates.has(channel.cid) && !this._pendingMlsMutations.has(channel.cid)) {
+            const blocked = await this._scopeSyncBlockedResult(channel.cid); assertScope();
+            if (blocked) { results.push(blocked); failedCids.push(channel.cid); continue; }
+          }
+          // An authoritative recovery snapshot still goes through its normal
+          // admission path. Only the equivalent rejected event read is held;
+          // an accepted recovery can change the group/cursor and release it.
           // Generic public discovery can exhaust its bounded observation budget.
           // An installed group still has its independent normal sync/evidence/
           // checkpoint proof; no discovery error may replace that proof path.
           if (this.groups.has(channel.cid) && this.storage.readyCheckpointVersion === 2) {
             const local = await this.ensureChannelReady(channel.channelType, channel.channelId, channel.cid, {
-              source: options.source || 'startup',
+              // A bootstrap already in flight may itself be awaited by sync.
+              // Its channel admissions must not wait back on that sync owner.
+              source: options.source === 'sync' ? 'sync' : 'bootstrap',
               initialScopeSyncCompleted: options.scopeSyncedCids?.includes(channel.cid) === true,
             });
             if (local.status === 'ready') {
@@ -4442,7 +4529,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             this._clearGenerationRecoveryRetry(channel.cid);
           }
           const result = await this.ensureChannelReady(channel.channelType, channel.channelId, channel.cid, {
-            source: options.source || 'startup',
+            source: options.source === 'sync' ? 'sync' : 'bootstrap',
             initialScopeSyncCompleted: options.scopeSyncedCids?.includes(channel.cid) === true,
           });
           results.push(result);
@@ -4456,6 +4543,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             }
           }
         } catch (err) {
+          assertScope();
+          this._scheduleScopeSyncRetry(err);
           failedCids.push(channel.cid);
           results.push({
             cid: channel.cid,
@@ -4463,7 +4552,15 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             error: err instanceof Error ? err.message : String(err),
           });
           sdkLog('warn', '[Encryption] Known E2EE channel bootstrap failed:', channel.cid, err);
+          if (['rate_limited', 'scope_sync_throttled', 'transport_unknown'].includes((err as {code?: string})?.code || '')) {
+            for (const deferred of channels.slice(completed + 1)) {
+              failedCids.push(deferred.cid);
+              results.push({cid: deferred.cid, status: 'needs_retry', error: (err as {code?: string}).code});
+            }
+            break;
+          }
         } finally {
+          assertScope();
           completed += 1;
           this._emitBootstrapProgress({
             total: channels.length,
@@ -4475,6 +4572,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }
 
       const finalStatus: E2eeBootstrapStatus = failedCids.length > 0 ? 'failed' : 'done';
+      assertScope();
       const finalProgress: E2eeBootstrapProgress = {
         total: channels.length,
         completed,
@@ -4493,10 +4591,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }
       return { ...finalProgress, results };
     })().finally(() => {
-      this._bootstrapKnownChannelsPromise = null;
+      if (this._bootstrapKnownChannelsPromise === work) {
+        this._bootstrapKnownChannelsPromise = null; this._bootstrapKnownChannelsScope = null; this._bootstrapKnownChannelsKey = null;
+      }
     });
 
     this._bootstrapKnownChannelsPromise = work;
+    this._bootstrapKnownChannelsScope = assertScope;
+    this._bootstrapKnownChannelsKey = requestKey;
     return work;
   }
 
@@ -7067,6 +7169,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
 
     assertScope(); this._startSyncGate();
+    const retryAtStart = this._scopeSyncRetry, retryObservations = retryAtStart?.observations;
     const gateResolve = this._syncGateResolve;
     const finish = () => {
       if (this._syncGateResolve === gateResolve) this._finishSyncGate();
@@ -7083,9 +7186,14 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const work = restoration
       .then(() => {
         assertScope(); finish();
+        if (this._scopeSyncRetry === retryAtStart && retryAtStart?.observations === retryObservations) {
+          if (retryAtStart?.timer) clearTimeout(retryAtStart.timer);
+          this._scopeSyncRetry = null;
+        }
       })
       .catch((err) => {
         finish();
+        try { assertScope(); this._scheduleScopeSyncRetry(err); } catch { /* Retired owner. */ }
         throw err;
       })
       .finally(() => {
@@ -7238,6 +7346,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private async _syncAndRestoreGroups(): Promise<void> {
     const assertSyncScope = this._captureMlsCleanupScope();
+    const observation = {}; this._scopeSyncBatchObservation = observation;
+    // A fresh sync is a new server observation (including repaired metadata).
+    this._scopeSyncBlocked.clear();
     const checkpointStates = new Map<string, E2eeSyncState>();
     const queueState = (state: E2eeSyncState) => checkpointStates.set(state.cid, state);
     try {
@@ -7339,6 +7450,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             // Discovery can authorize a rewind for a missing predecessor Commit.
             scopeSyncCompletedCids.delete(scopeCid);
             blockedScopes.add(scopeCid);
+            // Aggregate checkpoint retains the pre-batch cursor of a blocked
+            // scope, even if an earlier page had applied a valid prefix.
+            this._rememberScopeSyncBlocked(scopeCid, savedCursors[scopeCid] || startedCursor, error);
             queueState(this._makeSyncState(scopeCid, 'needs_retry', startedCursor, startedCursor, {
               needs_retry: true, error: code === 'mls_group_missing' || code === 'mls_protocol_generation_mismatch' || code === 'acceptance_metadata_invalid'
                 ? code : 'protocol_delivery_pending',
@@ -7433,6 +7547,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     } catch (err) {
       sdkLog('warn', '[Encryption] Failed to sync and restore groups:', err);
       throw err;
+    } finally {
+      if (this._scopeSyncBatchObservation === observation) this._scopeSyncBatchObservation = null;
     }
   }
 
@@ -8142,6 +8258,24 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   private async _syncChannelFromCursor(cid: string, since: EventCursor, limit = 100): Promise<E2eeSyncState> {
+    const assertCurrent = this._captureCleanupRevisionGuard(cid), key = JSON.stringify([cid, since.created_at, since.event_id, limit]);
+    const existing = this._scopeSyncFlights.get(key);
+    if (existing) {
+      try { existing.assertCurrent();
+        if (existing.group === this.groups.get(cid) && existing.marker === this._groupGenerations.get(cid)) return existing.work;
+      } catch { /* A replacement lifecycle must start its own observation. */ }
+    }
+    const work = (async () => {
+      const blocked = await this._scopeSyncBlockedResult(cid, since); assertCurrent();
+      if (blocked) throw Object.assign(new Error(blocked.error), {code: blocked.error});
+      return this._syncChannelFromCursorCore(cid, since, limit);
+    })().catch(error => { assertCurrent(); this._scheduleScopeSyncRetry(error); throw error; })
+      .finally(() => { if (this._scopeSyncFlights.get(key)?.work === work) this._scopeSyncFlights.delete(key); });
+    this._scopeSyncFlights.set(key, {assertCurrent, group: this.groups.get(cid), marker: this._groupGenerations.get(cid), work});
+    return work;
+  }
+
+  private async _syncChannelFromCursorCore(cid: string, since: EventCursor, limit = 100): Promise<E2eeSyncState> {
     const assertSyncScope = this._captureCleanupRevisionGuard(cid);
     let cursor = since;
     let finalState = this._makeSyncState(cid, 'ready', since, since);
@@ -8176,6 +8310,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         processResult = await this._processChannelEvents(cid, result.events, startedCursor); assertSyncScope();
       } catch (error) {
         assertSyncScope();
+        this._rememberScopeSyncBlocked(cid, startedCursor, error);
         if ((error as {code?: string})?.code !== 'mls_group_missing') throw error;
         // Hold the exact durable cursor. The caller can now reach typed
         // active-member recovery instead of failing before the GI prerequisite.
@@ -8431,6 +8566,19 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   async ensureChannelReady(channelType: string, channelId: string, cid: string,
     options: {source?: string; initialScopeSyncCompleted?: boolean} = {}): Promise<EnsureE2eeChannelResult> {
+    const assertScope = this._captureCleanupRevisionGuard(cid);
+    // Batch bootstrap is inside this owner; external open/reconnect callers join
+    // its completion before attempting their own read/admission.
+    let pendingSync = this._syncWorkPromise;
+    try { this._syncWorkScope?.(); } catch { pendingSync = null; }
+    if ((!options.source || ['open', 'startup', 'reconnect', 'manual_retry'].includes(options.source)) && pendingSync) {
+      try { await pendingSync; }
+      catch (error) { assertScope(); this._scheduleScopeSyncRetry(error); throw error; }
+      assertScope();
+    }
+    // An explicit user Retry asks for a fresh server observation. Endpoint
+    // cooldown still applies, and strict admission/durable proof is unchanged.
+    if (options.source === 'manual_retry') this._scopeSyncBlocked.delete(cid);
     const pending = this._channelReadyAdmissions.get(cid) || new Set<Promise<EnsureE2eeChannelResult>>();
     this._channelReadyAdmissions.set(cid, pending);
     const work = this._ensureChannelReadyCore(channelType, channelId, cid, options);
@@ -8446,6 +8594,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     options: {source?: string; initialScopeSyncCompleted?: boolean} = {}): Promise<EnsureE2eeChannelResult> {
     const assertOwner = this._captureCleanupRevisionGuard(cid);
     await this._loadRecoveryControl(cid); assertOwner();
+    if (!this._externalJoinCandidates.has(cid) && !this._pendingMlsMutations.has(cid)) {
+      const blocked = await this._scopeSyncBlockedResult(cid); assertOwner();
+      if (blocked) return blocked;
+    }
     if(this._commonStateScope(cid)===null){const state=await this.refreshE2eeState(cid);assertOwner();return{cid,status:'needs_retry',error:state.reason};}
     if (this.storage.readyCheckpointVersion !== 2 || this.storage.providerCheckpointCASVersion !== 1 ||
         !this.storage.loadMlsReadyBase || !this.storage.saveMlsReadyCheckpoint || !this.storage.verifyMlsReadyCheckpoint) {
@@ -8496,7 +8648,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if(result.sync_state?.has_more || result.sync_state?.needs_retry || ['needs_retry','failed','stale_group_info','pending_external_join'].includes(result.status)){
       const reason=result.error || result.sync_state?.error;
       const typedReasons=new Set(['authorization_failed','not_authorized','invalid_clock','transport_unknown','transport_unavailable','storage_error','storage_corruption',
-        'provider_persistence_uncertain','key_package_expired','leaf_not_yet_valid','lifetime_range_invalid','mls_protocol_epoch_gap','canonical_receipt_pending','mls_mutation_outcome_pending','client_upgrade_required']);
+        'provider_persistence_uncertain','key_package_expired','leaf_not_yet_valid','lifetime_range_invalid','mls_protocol_epoch_gap','canonical_receipt_pending','mls_mutation_outcome_pending','client_upgrade_required',
+        'acceptance_metadata_invalid','rate_limited','scope_sync_throttled']);
       const code=this._providerPersistenceUncertain?'provider_persistence_uncertain':result.status==='pending_external_join'?'pending_external_join':
         reason && (typedReasons.has(reason) || isMlsJoinAdmissionFailure(reason))?reason:'scope_sync_pending';
       const current=this.getE2eeState(groupCid),state=current?.state==='manual_intervention_required'?current:this._commonSnapshot(groupCid,
@@ -14848,6 +15001,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this._restoreQueueRunning = false;
     this._restoreInflight.clear();
     this._bootstrapKnownChannelsPromise = null;
+    this._bootstrapKnownChannelsScope = null;
+    this._bootstrapKnownChannelsKey = null;
+    this._scopeSyncBlocked.clear(); this._scopeSyncFlights.clear();
+    this._scopeSyncBatchObservation = null;
+    if (this._scopeSyncRetry?.timer) clearTimeout(this._scopeSyncRetry.timer);
+    this._scopeSyncRetry = null;
     this._mlsRecoveryDiscoverySupported = null;
     this._e2eeBootstrapProgress = {
       total: 0,

@@ -53,7 +53,7 @@ export const UhmCreatePollModal: React.FC<UhmCreatePollModalProps> = ({ isOpen, 
     }
 
     const validation = validatePollDraft(question, choices);
-    if (!validation.valid) {
+    if (validation.valid === false) {
       const errorKey = {
         question_required: 'chat.poll_question_required',
         question_too_long: 'chat.poll_question_too_long',

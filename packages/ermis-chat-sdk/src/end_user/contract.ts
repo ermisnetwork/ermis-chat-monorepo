@@ -50,6 +50,7 @@ export interface EndUserAuthApi {
     method: 'Sms' | 'Voice' | 'Email' | undefined,
     otp: string,
   ): Promise<EndUserAuthResponse>;
+  loginWithFirebasePhone(idToken: string): Promise<EndUserAuthResponse>;
   loginWithGoogle(token: string): Promise<EndUserAuthResponse>;
   getWalletChallenge(address: string): Promise<unknown>;
   verifyWalletSignature(address: string | undefined, signature: string): Promise<EndUserAuthResponse>;

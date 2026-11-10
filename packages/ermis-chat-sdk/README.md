@@ -475,6 +475,20 @@ For an E2EE composer, `channel.sendMessage(message, {waitForLocalAdmission: true
 
 Startup scope isolation (2026-11-06): malformed/missing event-bound acceptance metadata keeps that scope at its saved durable cursor with `needs_retry` / `acceptance_metadata_invalid`. Other scopes in the same response can finish checkpointing and recovery discovery. The strict validator is unchanged; the invalid scope is not Ready and does not receive a cursor skip. Shared provider persistence or ownership failures still abort the sync. No wire/schema, retry or crypto-policy changes. See the [canonical LOR journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md).
 
+Startup scheduling follow-up (2026-11-09): the same owned acceptance rejection is
+shared with bootstrap/open rather than reread per channel. Exact concurrent scope
+reads and channel apply/checkpoint work coalesce in the current session; other
+scope HTTP reads serialize and observe endpoint cooldown after429 or unknown
+network/CORS transport. Readable Retry-After is honored; hidden status uses bounded
+backoff and at most three scheduled session probes per outage. SDK
+`rate_limited`/`scope_sync_throttled` carry `retry_at`; they do not grant Ready or
+change server wire fields. Fresh sync, explicit Retry, meaningful authenticated
+metadata or actual protocol/lifecycle progress can reobserve a blocked scope.
+Pagination, private KeyPackage validation, durable checkpoints and admitted
+recovery/post-join catch-up remain required. See the
+[scope-sync API guidance](../../../bellboy/docs/e2ee_api_reference.md#scope-sync)
+and [implementation/verification journal](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md#run6f29-final-source-verification-and-blocked-build-handoff).
+
 ### Group avatar upload purpose
 
 <details>
@@ -526,3 +540,7 @@ IndexedDB retains an accepted outgoing intent (`status: sent`) and its message p
 Regression: `node --test --test-concurrency=1 test/mls_cleanup_checkpoint.test.mjs` after building the SDK. Canonical tracking: `LOR-BUG-GROUP-REINVITE-001` in the Bellboy lifetime plan/ledger.
 
 Re-invitation after durable leave queries current canonical accepted self-membership before replaying from its new creation boundary. A fresh targeted Welcome may replace the exact historical marker only at a later epoch with the same generation/GroupId and locally owned KeyPackage. The applied Welcome checkpoint retains the superseded marker/removal in optional `checkpoint.rejoin` evidence; provider activation and readback precede normal Ready. Pending invitations, stale Welcomes, unresolved mutation owners and NoMatchingKeyPackage do not reactivate the removed group. No server/API/native format changes.
+
+### Internal Firebase phone authentication
+
+After Firebase Phone Auth confirms the SMS code, call `authProvider.loginWithFirebasePhone(idToken)` and consume the same Ermis login/session result as OTP login. The SDK only exchanges the proof; applications own Firebase SDK/reCAPTCHA configuration. This is supported by the internal legacy auth adapter; external v1 explicitly rejects it. Legacy `sendOtpToPhone`/`verifyOtp` remain available. See [internal API/config contract](../../../ermis_end_user/docs/firebase_phone_auth.md).

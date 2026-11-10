@@ -19,14 +19,12 @@ export const validateEmail = (email: string) => {
   return re.test(email)
 }
 
-export const validatePhone = (phone: string) => {
-  const cleaned = phone.replace(/\D/g, '')
-  return cleaned.length >= 9 && cleaned.length <= 11
+export const normalizePhone = (phone: string): string => {
+  const digits = phone.replace(/\D/g, '')
+  const national = digits.length === 10 && digits.startsWith('0')
+    ? digits.slice(1)
+    : digits.length === 11 && digits.startsWith('84') ? digits.slice(2) : digits
+  return /^[35789]\d{8}$/.test(national) ? `+84${national}` : ''
 }
 
-export const normalizePhone = (phone: string): string => {
-  const cleaned = phone.replace(/\D/g, '')
-  if (cleaned.startsWith('84')) return cleaned
-  if (cleaned.startsWith('0')) return `84${cleaned.substring(1)}`
-  return `84${cleaned}`
-}
+export const validatePhone = (phone: string) => normalizePhone(phone) !== ''

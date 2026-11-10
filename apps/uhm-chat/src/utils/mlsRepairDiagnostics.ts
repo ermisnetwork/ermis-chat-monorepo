@@ -53,7 +53,8 @@ export function installMlsRepairDiagnostics(client: ErmisChat) {
     for (const key of ['reason', 'message', 'request_id', 'minimum_epoch', 'deadline_at', 'epoch', 'is_stale',
       'state', 'group_generation', 'current_epoch', 'incident_deadline_at', 'retryable', 'source']) {
       const value = body[key];
-      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null) fields[key] = value;
+      if (value === null) fields[key] = null;
+      else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') fields[key] = value;
     }
     recordMlsRepairDiagnostic('api_response', fields);
     const states = body.states && typeof body.states === 'object' ? body.states as Record<string, unknown> : {};

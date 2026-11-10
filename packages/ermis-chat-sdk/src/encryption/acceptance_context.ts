@@ -31,8 +31,34 @@ export function acceptanceMetadataError(reason: MlsAcceptanceFailureReason = 'co
 
 /** Also guards own pending settlement, which does not feed its own Commit back into OpenMLS. */
 export function validateMlsAcceptanceContext(value: unknown, expected: MlsAcceptanceEnvelope | undefined, bytes: Uint8Array): MlsAcceptanceContext {
-  if (!(bytes instanceof Uint8Array)) throw acceptanceMetadataError('payload_type');
-  return validateMlsAcceptanceContextDigest(value, expected, sha256Hex(bytes));
+  try {
+    if (!(bytes instanceof Uint8Array)) throw acceptanceMetadataError('payload_type');
+    return validateMlsAcceptanceContextDigest(value, expected, sha256Hex(bytes));
+  } catch (error) {
+    if ((error as {code?: string})?.code === 'acceptance_metadata_invalid') {
+      Object.assign(error as Error, {diagnostic: mlsAcceptanceDiagnostic(value, expected, bytes)});
+    }
+    throw error;
+  }
+}
+
+/** Public binding diagnostics only; no raw CID, identity, payload or provider. */
+export function mlsAcceptanceDiagnostic(value: unknown, expected: MlsAcceptanceEnvelope | undefined, bytes: unknown) {
+  const context = value as Partial<MlsAcceptanceContext> | null;
+  const hashId = (id: unknown) => typeof id === 'string' && id.length <= 512 ? sha256Hex(new TextEncoder().encode(id)) : undefined;
+  const integer = (n: unknown) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : undefined;
+  return {
+    context_present: !!context && typeof context === 'object', envelope_present: !!expected,
+    event_id_sha256: hashId(expected?.event_id), cid_sha256: hashId(expected?.cid),
+    event_id_matches: !!context && context.event_id === expected?.event_id,
+    cid_matches: !!context && context.cid === expected?.cid,
+    envelope_generation: integer(expected?.group_generation), context_generation: integer(context?.group_generation),
+    envelope_epoch: integer(expected?.epoch), context_epoch: integer(context?.epoch),
+    accepted_at: integer(context?.accepted_at),
+    provenance: context?.provenance === 'bellboy_transition_v1' || context?.provenance === 'bellboy_legacy_acceptance_v1' ? context.provenance : undefined,
+    context_payload_sha256: typeof context?.payload_sha256 === 'string' && /^[0-9a-f]{64}$/.test(context.payload_sha256) ? context.payload_sha256 : undefined,
+    observed_payload_sha256: bytes instanceof Uint8Array ? sha256Hex(bytes) : undefined,
+  };
 }
 
 /** Revalidate a public canonical receipt already bound to a durable local checkpoint. */

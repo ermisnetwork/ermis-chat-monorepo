@@ -23,6 +23,9 @@
     "hero_footer": "© 2026 Uhm Chat bởi Sub2s. Bảo lưu mọi quyền."
   },
   "errors": {
+    "phone_service_unavailable": "Dịch vụ xác thực điện thoại đang gián đoạn. Vui lòng thử lại sau hoặc chọn phương thức đăng nhập khác.",
+    "phone_rate_limited": "Có quá nhiều yêu cầu xác thực. Vui lòng chờ trước khi thử lại hoặc chọn phương thức đăng nhập khác.",
+    "phone_otp_expired": "Mã xác thực đã hết hạn. Vui lòng yêu cầu mã mới.",
     "invalid_email": "Vui lòng nhập định dạng Email hợp lệ",
     "invalid_phone": "Số điện thoại phải từ 9-11 chữ số",
     "otp_failed": "Gửi mã OTP thất bại",

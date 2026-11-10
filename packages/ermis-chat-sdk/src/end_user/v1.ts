@@ -130,6 +130,10 @@ export class V1EndUserAuthApi implements EndUserAuthApi {
     return this.postAuth('/auth/otp/verify', { identifier, otp });
   }
 
+  async loginWithFirebasePhone(_idToken: string): Promise<EndUserAuthResponse> {
+    throw new UnsupportedEndUserFeatureError('external_auth', 'v1', 'Firebase phone login requires the internal auth service');
+  }
+
   loginWithGoogle(token: string) {
     return this.postAuth('/auth/google', { token });
   }

@@ -1,6 +1,7 @@
 import {validateContinuationResponse} from "./channel_recovery";
 import type {RecoveryContinuationRequest,RecoveryContinuationResponse} from "./channel_recovery";
 import {MlsRequestProofCoordinator, type MlsProofOwner} from './mls_request_proof';
+import {ScopeSyncCoordinator} from './scope_sync';
 /**
  * E2EE (encryption) API methods for Ermis Chat
  *
@@ -98,6 +99,7 @@ import type {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
+const scopeSyncCoordinators = new WeakMap<object, ScopeSyncCoordinator>();
 type Base64Bytes = string;
 type RawDeviceKeyPackage = Omit<DeviceKeyPackage, 'key_package'> & { key_package: Base64Bytes };
 type RawMemberKeyPackages = Omit<MemberKeyPackages, 'key_packages'> & { key_packages: RawDeviceKeyPackage[] };
@@ -818,31 +820,43 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       limit: number;
       removed_cursor?: RemovedSyncCursor | null;
     } = {
-      cursors,
+      cursors: Object.fromEntries(Object.entries(cursors).map(([cid, cursor]) => [cid, {...cursor}])),
       limit,
     };
     if (removedCursor !== undefined) {
-      body.removed_cursor = removedCursor;
+      body.removed_cursor = removedCursor ? {...removedCursor} : removedCursor;
     }
-    let raw: ScopeSyncResponse;
-    try {
+    let coordinator = scopeSyncCoordinators.get(this.client);
+    if (!coordinator) { coordinator = new ScopeSyncCoordinator(); scopeSyncCoordinators.set(this.client, coordinator); }
+    // Canonical full request identity: subset, cursor, limit and removed stream
+    // must all agree. Never reuse successful pages across observations.
+    const key = JSON.stringify([this.baseURL, Object.entries(body.cursors).sort(([a], [b]) => a.localeCompare(b))
+      .map(([cid, cursor]) => [cid, cursor.created_at, cursor.event_id]), limit,
+      removedCursor === undefined ? ['omitted'] : removedCursor === null ? ['initial'] : [removedCursor.removed_at, removedCursor.event_id]]);
+    const capture = () => {
+      const client = this.client, auth = client._captureAuthScope?.(),
+        manager = client.encryptionManager,
+        values = [client.baseURL, client.userID, client.deviceId, manager, client.tokenManager, manager?.identity,
+          manager?.storage, manager?.e2eeClient, manager?._wasmArtifactSha256, manager?.storage?.storageScopeRevision];
+      return () => {
+        auth?.assertCurrent();
+        const current = client.encryptionManager;
+        if (values.some((value, i) => value !== [client.baseURL, client.userID, client.deviceId, current, client.tokenManager, current?.identity,
+          current?.storage, current?.e2eeClient, current?._wasmArtifactSha256, current?.storage?.storageScopeRevision][i])) {
+          throw Object.assign(new Error('Scope sync session changed'), {code: 'recovery_scope_changed'});
+        }
+      };
+    };
+    return coordinator.run(key, capture, async () => {
       // A successful status line is insufficient: an incomplete response body
       // must not hold the manager's global receive gate indefinitely. The host
       // carries this read budget through token renewal and any auth retry.
-      raw = await (this.client as any).doAxiosRequest('post', this.baseURL + '/v1/e2ee/scope_sync', body, {
+      const raw = await (this.client as any).doAxiosRequest('post', this.baseURL + '/v1/e2ee/scope_sync', body, {
         headers: this.deviceHeaders,
         timeout: 5000,
       });
-    } catch (error) {
-      const code = (error as {code?: string})?.code;
-      if (code && ['key_package_ownership_deadline', 'ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK', 'ECONNRESET'].includes(code)) {
-        throw Object.assign(new Error('[Encryption] Scope sync transport outcome unknown'), {
-          code: 'transport_unknown', retryable: true,
-        });
-      }
-      throw error;
-    }
-    return normalizeScopeSyncResponseBytes(raw);
+      return normalizeScopeSyncResponseBytes(raw);
+    });
   }
 
   /** Discover authoritative generation and repair state for up to 200 E2EE channels. */
