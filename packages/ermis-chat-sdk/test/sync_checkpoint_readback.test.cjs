@@ -29,7 +29,7 @@ function transport(f,{empty=false}={}){
 }
 function globalSync(f){
   f.m._restoreGroupsLocally=async()=>{};f.m._loadAllScopeSyncCursors=async()=>({[f.cid]:since});
-  f.m._listKnownE2eeChannels=()=>[{cid:f.cid}];f.m._membershipBoundedEventCursor=(_c,saved)=>saved;
+  f.m._warmScopeCids=()=>[f.cid];f.m._listKnownE2eeChannels=()=>[{cid:f.cid}];f.m._membershipBoundedEventCursor=(_c,saved)=>saved;
   f.m._discoverMlsRecoveryStates=async()=>({states:{},unsupported:false});f.m.bootstrapKnownE2eeChannels=async()=>{};
   f.m._replayLaggingEpochs=async()=>{};f.m._resumeExternalJoinCandidates=async()=>{};f.m._resumePendingMlsMutations=async()=>{};
 }

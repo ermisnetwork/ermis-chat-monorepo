@@ -1,4 +1,4 @@
-import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut, ArrowLeft, X, KeyRound } from 'lucide-react';
+import { Menu, Search, Plus, Palette, Globe, Inbox, Users, LogOut, ArrowLeft, X, ShieldCheck, ChevronRight } from 'lucide-react';
 import { useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +16,6 @@ import {
   useInviteCount,
   useContactCount,
   Avatar,
-  useRecoveryPin,
   getUserDisplayName,
 } from '@ermis-network/ermis-chat-react';
 import { useUIStore } from '@/store/useUIStore';
@@ -50,7 +49,6 @@ export function SidebarHeader({
   const { inviteCount } = useInviteCount();
   const { contactCount } = useContactCount();
   const { openCreateChannelModal } = useUIStore();
-  const recovery = useRecoveryPin();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isRecoveryPinOpen, setIsRecoveryPinOpen] = useState(false);
@@ -200,24 +198,10 @@ export function SidebarHeader({
               onClick={() => setIsRecoveryPinOpen(true)}
             >
               <div className="flex items-center">
-                <KeyRound className="mr-2 h-4 w-4" />
-                <span>{t('recovery_pin.menu_label')}</span>
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                <span>{t('privacy_settings.title')}</span>
               </div>
-              <span
-                className={`text-xs ${
-                  recovery.recoveryStatus?.unlocked
-                    ? 'text-emerald-600 dark:text-emerald-400'
-                    : 'text-zinc-500 dark:text-zinc-400'
-                }`}
-              >
-                {recovery.recoveryStatus === null
-                  ? t('recovery_pin.menu_checking')
-                  : recovery.recoveryStatus.hasVault === false
-                  ? t('recovery_pin.menu_not_set')
-                  : recovery.recoveryStatus.unlocked
-                  ? t('recovery_pin.menu_active')
-                  : t('recovery_pin.menu_locked')}
-              </span>
+              <ChevronRight className="h-4 w-4 text-zinc-400" />
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
@@ -274,7 +258,7 @@ export function SidebarHeader({
 
       {/* Profile Modal */}
       <ProfileModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
-      <UhmRecoveryPinDialog isOpen={isRecoveryPinOpen} onClose={() => setIsRecoveryPinOpen(false)} />
+      <UhmRecoveryPinDialog variant="privacy" isOpen={isRecoveryPinOpen} onClose={() => setIsRecoveryPinOpen(false)} />
     </div>
   );
 }

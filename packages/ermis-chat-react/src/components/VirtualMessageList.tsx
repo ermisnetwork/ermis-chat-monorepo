@@ -132,7 +132,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   AvatarComponent = Avatar,
   MessageBubble = DefaultBubble,
   messageRenderers: customRenderers,
-  loadMoreLimit = 25,
+  loadMoreLimit = 50,
   DateSeparatorComponent = DefaultDateSeparator,
   dateLocale,
   MessageItemComponent = MessageItem,

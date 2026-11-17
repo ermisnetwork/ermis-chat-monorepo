@@ -775,6 +775,11 @@ export interface EncryptionStorageAdapter {
   deleteEpochArchiveCheckpoint(scopeCid: string, epoch: number, groupGeneration?: number): Promise<void>;
   saveArchiveStashKey(key: CryptoKey): Promise<void>;
   loadArchiveStashKey(): Promise<CryptoKey | null>;
+  /** Persistent browser protection, scoped by authenticated backend/project/account. Not hardware-backed. */
+  saveProtectedRecoveryKey?(namespace: string, keyId: string, privateKey: Uint8Array, assertOwner: () => void): Promise<void>;
+  loadProtectedRecoveryKey?(namespace: string, keyId: string, assertOwner: () => void): Promise<Uint8Array | null>;
+  saveChannelMetadata?(namespace: string, snapshot: unknown, assertOwner: () => void): Promise<void>;
+  loadChannelMetadata?(namespace: string): Promise<unknown | null>;
   saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void>;
   loadRecoveryPublicKey(userId: string): Promise<Uint8Array | null>;
 
@@ -2068,6 +2073,7 @@ export interface EncryptedChannelRepairResult {
 }
 
 export interface RecoveryStatus {
+  autoUnlockUnavailable?: boolean;
   hasVault: boolean;
   unlocked: boolean;
   hasIncompleteRestore: boolean;

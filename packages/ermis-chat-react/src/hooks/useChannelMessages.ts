@@ -511,7 +511,7 @@ export function useChannelMessages({
       queryingChannels.add(cid);
       activeChannel
         .query({
-          messages_seq: { limit: 25 },
+          messages_seq: { limit: 50 },
         })
         .then(() => {
           if (!isCurrentEffect()) return;
@@ -566,7 +566,7 @@ export function useChannelMessages({
       // second "flash" even though nothing changed.
       const prevIds = (activeChannel.state?.latestMessages || []).map((m: any) => `${m.id}:${m.type}`).join(',');
       activeChannel
-        .query({ messages_seq: { limit: 25 } })
+        .query({ messages_seq: { limit: 50 } })
         .then(() => {
           if (!isCurrentEffect()) return;
           const nextIds = (activeChannel.state?.latestMessages || []).map((m: any) => `${m.id}:${m.type}`).join(',');
@@ -766,7 +766,7 @@ export function useChannelMessages({
       // when the visible message state actually changed. A no-op query used to
       // recreate the whole VList and schedule four bottom scrolls.
       activeChannel
-        .query({ messages_seq: { limit: 25 } })
+        .query({ messages_seq: { limit: 50 } })
         .then(() => {
           syncRecoveredMessages();
           ensureE2eeChannelReady();
@@ -787,6 +787,15 @@ export function useChannelMessages({
       if (wasAtBottom) {
         followBottomAfterRender(true);
       }
+    };
+
+    const handleRecoveryUnlocked = () => {
+      if (!isCurrentEffect() || !isE2eeChannel(activeChannel, client)) return;
+      // Retry only the already-requested current timeline page. Unlock is not
+      // permission to fetch every channel or an entire epoch's ciphertexts.
+      const page = activeChannel.state.latestMessages.slice(-50);
+      void client.encryptionManager?.restoreHistoryPage(activeChannel.type, activeChannel.id!, page as any[])
+        .catch(() => console.warn('[E2EE] Requested page recovery deferred after unlock'));
     };
 
     const handleE2eeRefresh = (event: any) => {
@@ -867,6 +876,7 @@ export function useChannelMessages({
       if (isCurrentEffect() && snapshot.state === 'ready') handleE2eeRefresh({cid: effectCid});
     });
     const sub19 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
+    const unlockSub = eventClient.on('e2ee.recovery_unlocked' as any, handleRecoveryUnlocked);
     const sub19a = eventClient.on('e2ee.repair_started' as any, handleE2eeRepairStarted);
     const sub19b = eventClient.on('e2ee.repair_completed' as any, handleE2eeRepairCompleted);
     const sub19c = eventClient.on('e2ee.repair_failed' as any, handleE2eeRepairFailed);
@@ -905,6 +915,7 @@ export function useChannelMessages({
       sub18.unsubscribe();
       sub18a?.unsubscribe();
       sub19.unsubscribe();
+      unlockSub.unsubscribe();
       sub19a.unsubscribe();
       sub19b.unsubscribe();
       sub19c.unsubscribe();

@@ -49,7 +49,7 @@ export function useLoadMessages({
   messagesRef,
   jumpingRef,
   scrollLoadLockRef,
-  loadMoreLimit = 25,
+  loadMoreLimit = 50,
 }: UseLoadMessagesOptions): UseLoadMessagesReturn {
   const { activeChannel } = useChatCore();
   const { setMessages } = useChatMessages();

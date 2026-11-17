@@ -1,3 +1,4 @@
+import {SessionNetworkBudget} from './network_budget';
 /* eslint no-unused-vars: "off" */
 /* global process */
 
@@ -364,6 +365,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const assertCurrent = () => { if (!isCurrent()) throw recoveryControlError('recovery_scope_changed'); };
     return {tokens, api, isCurrent, assertCurrent};
   }
+
+  /** @internal Captured account/backend owner for delayed metadata-profile batches. */
+  _captureUserMetadataScope(): () => void { return this._captureAuthScope().assertCurrent; }
 
   async refreshAccessToken(): Promise<TokenRefreshResult> {
     if (this.refreshTokenPromise && this._refreshScopeIsCurrent?.()) return this.refreshTokenPromise;
@@ -1032,6 +1036,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     } catch (error) { scope.assertCurrent(); throw error; }
   }
 
+  private readonly sessionNetworkBudget = new SessionNetworkBudget();
+
   doAxiosRequest = async <T>(
     type: string,
     url: string,
@@ -1060,42 +1066,54 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     const requestConfig = this._enrichAxiosOptions(options);
     (requestConfig as any).__mlsDeadline = deadline;
-    let wireData = data;
-    const prepared = options.__mlsRequestProof
+    let prepared: Awaited<ReturnType<NonNullable<typeof options.__mlsRequestProof>>> | undefined;
+    let wireData=data;
+    prepared = options.__mlsRequestProof
       ? await wait(() => options.__mlsRequestProof!({type, url, data, config: requestConfig})) : undefined;
     scope.assertCurrent(); assertTransport();
     if (prepared) { wireData = prepared.data; await wait(() => prepared.verifyDurable()); prepared.assertCurrent(); scope.assertCurrent(); }
     if (options.__mlsRequestGuard) { await wait(() => options.__mlsRequestGuard!()); scope.assertCurrent(); }
 
+    const releaseNetwork=await this.sessionNetworkBudget.acquire(deadline,signal);
+    let released=false;
+    const release=()=>{if(released)return;released=true;releaseNetwork();};
+    // Queue waiting may retire account/proof ownership. Recheck immediately before HTTP.
+    let networkStarted=false;
+    const send=<R>(work:()=>Promise<R>)=>wait(()=>{
+      networkStarted=true;
+      try{return work().finally(release);}catch(error){release();throw error;}
+    });
     try {
-      assertTransport();
+      scope.assertCurrent();prepared?.assertCurrent();assertTransport();
+      if(prepared){await wait(()=>prepared!.verifyDurable());prepared.assertCurrent();scope.assertCurrent();}
+      if(options.__mlsRequestGuard){await wait(()=>options.__mlsRequestGuard!());scope.assertCurrent();}
       if (deadline !== undefined) requestConfig.timeout = Math.max(1, Math.min(requestConfig.timeout || 5000, deadline - Date.now()));
       let response: AxiosResponse<T>;
       this._logApiRequest(type, url, data, requestConfig); scope.assertCurrent();
       switch (type) {
         case 'get':
-          response = await wait(() => this.axiosInstance.get(url, requestConfig));
+          response = await send(() => this.axiosInstance.get(url, requestConfig));
           break;
         case 'delete':
-          response = await wait(() => this.axiosInstance.delete(url, requestConfig));
+          response = await send(() => this.axiosInstance.delete(url, requestConfig));
           break;
         case 'post':
-          response = await wait(() => this.axiosInstance.post(url, wireData, requestConfig));
+          response = await send(() => this.axiosInstance.post(url, wireData, requestConfig));
           break;
         case 'postForm':
-          response = await wait(() => this.axiosInstance.postForm(url, data, requestConfig));
+          response = await send(() => this.axiosInstance.postForm(url, data, requestConfig));
           break;
         case 'put':
-          response = await wait(() => this.axiosInstance.put(url, data, requestConfig));
+          response = await send(() => this.axiosInstance.put(url, data, requestConfig));
           break;
         case 'patch':
-          response = await wait(() => this.axiosInstance.patch(url, data, requestConfig));
+          response = await send(() => this.axiosInstance.patch(url, data, requestConfig));
           break;
         case 'options':
-          response = await wait(() => this.axiosInstance.options(url, requestConfig));
+          response = await send(() => this.axiosInstance.options(url, requestConfig));
           break;
         default:
-          throw new Error('Invalid request type');
+          networkStarted=false;throw new Error('Invalid request type');
       }
       scope.assertCurrent(); prepared?.assertCurrent();
       this._logApiResponse<T>(type, url, response); scope.assertCurrent();
@@ -1103,6 +1121,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       return this.handleResponse(response);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any /**TODO: generalize error types  */) {
+      // A still-running Axios promise owns its permit until its own finally.
       scope.assertCurrent();
       e.client_request_id = requestConfig.headers?.['x-client-request-id'];
       this._logApiError(type, url, e, options); scope.assertCurrent();
@@ -1124,7 +1143,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       } else {
         throw e as AxiosError<APIErrorResponse>;
       }
-    }
+    } finally { if(!networkStarted)release(); }
   };
 
   get<T>(url: string, params?: AxiosRequestConfig['params']) {
@@ -1882,6 +1901,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   };
 
   recoverState = async () => {
+    // A startup snapshot may predate membership changes while disconnected.
+    // Existing queryChannels coalescing still shares any concurrent reads.
+    this._startupMetadata.clear();
     this.logger('info', 'client:recoverState() - Start of recoverState', {
       tags: ['connection'],
     });
@@ -2178,14 +2200,101 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * @param stateOptions     - Defines whether to skip state initialization or offline usage.
    * @returns                  An array of hydrated and locally manageable `Channel` objects.
    */
+  private _progressSerial=0;
+  private _progressCycle:{id:string;jobs:number;failed:boolean;retry?:()=>unknown}|null=null;
+  _beginSessionProgress(phase:string):string {
+    if(!this._progressCycle || this._progressCycle.jobs===0)this._progressCycle={id:`secure-session-${++this._progressSerial}`,jobs:0,failed:false};
+    const cycle=this._progressCycle;cycle.jobs++;
+    this.dispatchEvent({type:'e2ee.session_progress',cycle_id:cycle.id,phase,status:'running'} as any);return cycle.id;
+  }
+  _finishSessionProgress(id:string,failed:boolean,retry?:()=>unknown):void {
+    const cycle=this._progressCycle;if(!cycle || cycle.id!==id)return;
+    cycle.jobs=Math.max(0,cycle.jobs-1);cycle.failed ||= failed;if(retry)cycle.retry=retry;
+    if(cycle.jobs===0)this.dispatchEvent({type:'e2ee.session_progress',cycle_id:id,phase:'done',status:cycle.failed?'partial':'done',retry:cycle.retry} as any);
+  }
+
+  private _startupMetadata = new Map<string, {
+    current: () => void;
+    promise: Promise<Channel<ErmisChatGenerics>[]>;
+    pending: boolean;
+    refresh: boolean;
+  }>();
+
+  /** Share the baseline list snapshot with one preview for its last-message clock. */
+  loadChannelMetadata(
+    filter: ChannelFilters,
+    sort: ChannelSort = [],
+    stateOptions: ChannelStateOptions = {},
+    options: { refresh?: boolean } = {},
+  ) {
+    const auth = this._captureAuthScope(), user = this.userID, backend = this.baseURL, project = this.projectId;
+    const current = () => {
+      auth.assertCurrent();
+      if (this.userID !== user || this.baseURL !== backend || this.projectId !== project) {
+        throw recoveryControlError('recovery_scope_changed');
+      }
+    };
+    const key = JSON.stringify([filter, sort, stateOptions]);
+    let held = this._startupMetadata.get(key);
+    if (held) {
+      try { held.current(); }
+      catch { this._startupMetadata.delete(key); held = undefined; }
+    }
+    const refresh = options.refresh === true;
+    if (held && (!refresh || (held.refresh && held.pending))) return held.promise;
+    const previous = refresh && held?.pending ? held.promise : undefined;
+    const promise = (async () => {
+      // Do not let queryChannels' in-flight sharing turn a refresh into the older startup read.
+      if (previous) {
+        try { await previous; } catch { current(); }
+      }
+      current();
+      // Baseline Bellboy derives last_message_at from the returned preview.
+      // Zero previews cannot refresh recency after offline time. This reads one
+      // envelope per channel, without scheduling archive/history restoration.
+      const listSort: ChannelSort = sort.length ? sort : [{ field: 'last_message_at', direction: -1 }];
+      return this.queryChannels(filter, listSort, { message_limit: 1 }, stateOptions);
+    })().then(value => { current(); return value; })
+      .catch(error => {
+        if (this._startupMetadata.get(key)?.promise === promise) this._startupMetadata.delete(key);
+        throw error;
+      }).finally(() => {
+        const entry = this._startupMetadata.get(key);
+        if (entry?.promise === promise) entry.pending = false;
+      });
+    this._startupMetadata.set(key, { current, promise, pending: true, refresh });
+    return promise;
+  }
+
+  private _metadataQueries = new Map<string, {current: () => void; promise: Promise<Channel<ErmisChatGenerics>[]>}>();
+
   async queryChannels(
+    filterConditions: ChannelFilters,
+    sort: ChannelSort = [],
+    options: {message_limit?: number} = {},
+    stateOptions: ChannelStateOptions = {},
+  ) {
+    if (options.message_limit !== 0) return this._queryChannelsInternal(filterConditions,sort,options,stateOptions);
+    const auth=this._captureAuthScope(), user=this.userID, backend=this.baseURL, project=this.projectId;
+    const current=()=>{auth.assertCurrent();if(this.userID!==user || this.baseURL!==backend || this.projectId!==project)throw recoveryControlError('recovery_scope_changed');};
+    const key=JSON.stringify([filterConditions,sort,options,stateOptions]);
+    const held=this._metadataQueries.get(key);
+    if (held) { try {held.current();return held.promise;} catch {this._metadataQueries.delete(key);} }
+    const promise=this._queryChannelsInternal(filterConditions,sort,options,stateOptions).then(value=>{current();return value;})
+      .finally(()=>{if(this._metadataQueries.get(key)?.promise===promise)this._metadataQueries.delete(key);});
+    this._metadataQueries.set(key,{current,promise});return promise;
+  }
+
+  private async _queryChannelsInternal(
     filterConditions: ChannelFilters,
     sort: ChannelSort = [],
     options: { message_limit?: number } = {},
     stateOptions: ChannelStateOptions = {},
   ) {
+    const authOwner=this._captureAuthScope(), ownerUser=this.userID, ownerBackend=this.baseURL, ownerProject=this.projectId;
+    const assertQueryOwner=()=>{authOwner.assertCurrent();if(this.userID!==ownerUser||this.baseURL!==ownerBackend||this.projectId!==ownerProject)throw recoveryControlError('recovery_scope_changed');};
     // Make sure we wait for the connect promise if there is a pending one
-    await this.wsPromise;
+    await this.wsPromise; assertQueryOwner();
 
     // Return a list of channels
     const payload = {
@@ -2206,62 +2315,49 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const data = await this.post<QueryChannelsAPIResponse<ErmisChatGenerics>>(
       this.baseURL + '/channels', payload, undefined, {timeout},
     );
+    assertQueryOwner();
 
-    // Sort channels by latest message created_at (including topics if present)
-    data.channels.sort((a, b) => {
-      // Get latest message created_at in channel a
-      let aLatest = getLatestCreatedAt(a.messages);
+    if (options.message_limit === 0 || options.message_limit === 1) {
+      const storage=this.encryptionManager?.storage || this.messageStorage;
+      const auth=this._captureAuthScope(), user=this.userID, backend=this.baseURL, project=this.projectId;
+      const current=()=>{auth.assertCurrent();if(this.userID!==user || this.baseURL!==backend || this.projectId!==project)throw recoveryControlError('recovery_scope_changed');};
+      const metadata=(item: any): any=>({channel:item.channel,membership:item.membership,read:item.read,
+        watchers:item.watchers,is_pinned:item.is_pinned,channel_cleared_at:item.channel_cleared_at,
+        topics:item.topics?.map(metadata)});
+      await storage?.saveChannelMetadata?.(JSON.stringify([backend,project||'',user]),data.channels.map(metadata),current);
+      current();
+    }
 
-      // If channel a has topics, check messages in topics
-      if (a.channel.type === 'team' && Array.isArray(a.topics)) {
-        for (const topic of a.topics) {
-          aLatest = Math.max(aLatest, getLatestCreatedAt(topic.messages));
-        }
-      }
-
-      // Get latest message created_at in channel b
-      let bLatest = getLatestCreatedAt(b.messages);
-
-      // If channel b has topics, check messages in topics
-      if (b.channel.type === 'team' && Array.isArray(b.topics)) {
-        for (const topic of b.topics) {
-          bLatest = Math.max(bLatest, getLatestCreatedAt(topic.messages));
-        }
-      }
-
-      // Descending order (newest first)
-      return bLatest - aLatest;
-    });
-
-    const memberIds =
-      Array.from(
-        new Set(data.channels.flatMap((c) => (c.channel.members || []).map((member: any) => member.user.id))),
-      ) || [];
-
+    const snapshotMembers: any[] = [];
+    const collectMembers = (row: any) => {
+      snapshotMembers.push(...(row.channel.members || []));
+      (row.topics || []).forEach(collectMembers);
+    };
+    data.channels.forEach(collectMembers);
+    const completeProfiles = snapshotMembers.map(member => member.user).filter(user =>
+      user?.id && typeof user.name === 'string' && user.name.trim() && user.name !== user.id &&
+      (!this.state.users[user.id]?.name || this.state.users[user.id].name === user.id));
+    if (completeProfiles.length) { assertQueryOwner(); this._upsertUsers(completeProfiles, {persist:false,updateReferences:false}); }
     if (!filterConditions.parent_cid) {
-      const dummyMembers = memberIds.map((id) => ({ user: { id } }));
-      await ensureMembersUserInfoLoaded(this as any, dummyMembers);
+      await ensureMembersUserInfoLoaded(this as any, snapshotMembers); assertQueryOwner();
     }
     const membersInfo = Object.values(this.state.users);
+    const memberLookup = new Map(membersInfo.map(user => [user.id, user]));
     data.channels.forEach((c) => {
-      c.channel.members = enrichWithUserInfo(c.channel.members, membersInfo);
-      c.messages = enrichWithUserInfo(c.messages, membersInfo);
-      c.read = enrichWithUserInfo(c.read || [], membersInfo);
+      c.channel.members = enrichWithUserInfo(c.channel.members, membersInfo, memberLookup);
+      c.messages = enrichWithUserInfo(c.messages, membersInfo, memberLookup);
+      c.read = enrichWithUserInfo(c.read || [], membersInfo, memberLookup);
       c.channel.name =
         c.channel.type === 'messaging' ? getDirectChannelName(c.channel.members, this.userID || '') : c.channel.name;
       c.channel.image =
         c.channel.type === 'messaging' ? getDirectChannelImage(c.channel.members, this.userID || '') : c.channel.image;
 
       if (c.channel.type === 'team' && Array.isArray(c.topics)) {
-        c.topics.sort((a, b) => {
-          const aLatest = getLatestCreatedAt(a.messages);
-          const bLatest = getLatestCreatedAt(b.messages);
-          return bLatest - aLatest;
-        });
+
       }
 
       if (c.pinned_messages) {
-        c.pinned_messages = enrichWithUserInfo(c.pinned_messages || [], membersInfo);
+        c.pinned_messages = enrichWithUserInfo(c.pinned_messages || [], membersInfo, memberLookup);
       }
     });
 
@@ -2275,16 +2371,17 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
     // Restore sync states from IndexedDB into the newly instantiated channels
     // so that lastMsgSeqBeforeChatDeleted is available for filtering messages below.
-    await this.restoreSyncState();
+    await this.restoreSyncState(); assertQueryOwner();
 
     // A query snapshot can carry a newer clear-history boundary than IndexedDB.
     // Apply it and finish deleting stale local messages before hydration/events.
     const applyHistoryBoundary = async (channelState: ChannelAPIResponse<ErmisChatGenerics>): Promise<void> => {
+      assertQueryOwner();
       const channel = this.channel(channelState.channel.type, channelState.channel.id);
       await channel._applyQueryHistoryBoundary(channelState, true, queryUnavailableSnapshots.get(channel.cid));
       await Promise.all((channelState.topics || []).map(applyHistoryBoundary));
     };
-    await Promise.all(data.channels.map(applyHistoryBoundary));
+    await Promise.all(data.channels.map(applyHistoryBoundary)); assertQueryOwner();
 
     // Hydrate E2EE messages from local cache BEFORE initializing state.
     // Without this, encrypted API messages overwrite decrypted local messages,
@@ -2312,11 +2409,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       );
     }
 
+    assertQueryOwner();
     const { channels, userIds } = this.hydrateChannels(data.channels, stateOptions);
     //   await this.getBatchUsers(userIds);
     // }
 
-    await this._persistSyncState();
+    await this._persistSyncState(); assertQueryOwner();
 
     // Establish the Client-owned cold-start promise before notifying UI
     // listeners. A synchronous channels.queried listener may open a channel,
@@ -2482,8 +2580,9 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this._syncScopeIsCurrent = scope.isCurrent;
     // Own the promise before invoking hooks: a synchronous hook may replace the session.
     let releaseUnclaimedSyncGate: (() => void) | undefined;
+    let progressId:string|undefined;
     const sync = Promise.resolve().then(async () => {
-      scope.assertCurrent();
+      scope.assertCurrent();progressId=this._beginSessionProgress('syncing');
       if (scope.manager?.initialized) { releaseUnclaimedSyncGate = scope.manager.markSyncStart(); scope.assertCurrent(); }
       await Promise.all([
         this._performSyncInternal(scope.assertCurrent),
@@ -2492,6 +2591,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       scope.assertCurrent();
       this._lastSyncCompletedAt = Date.now();
       this._lastSyncScopeIsCurrent = scope.isCurrent;
+    }).then(()=>{if(progressId)this._finishSessionProgress(progressId,false);},error=>{
+      if(progressId && scope.isCurrent())this._finishSessionProgress(progressId,true,()=>this.performSync(true));throw error;
     }).finally(() => {
       releaseUnclaimedSyncGate?.();
       if (this._syncPromise === sync) {

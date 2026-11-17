@@ -5035,6 +5035,57 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
     });
   }
 
+  async saveProtectedRecoveryKey(namespace: string, keyId: string, privateKey: Uint8Array, assertOwner: () => void): Promise<void> {
+    if (!this.accountId || privateKey.byteLength !== 32 || !keyId) throw new Error('Recovery key invalid');
+    assertOwner();
+    const wrappingKey = await crypto.subtle.generateKey({name: 'AES-GCM', length: 256}, false, ['encrypt','decrypt']);
+    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const aad = new TextEncoder().encode(JSON.stringify([this.accountId, namespace, keyId]));
+    const ciphertext = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce,additionalData:aad}, wrappingKey, new Uint8Array(privateKey)));
+    assertOwner();
+    const db = await this.openDB(); assertOwner();
+    await new Promise<void>((resolve,reject) => {
+      const tx=db.transaction(STORE_META,'readwrite');
+      try { assertOwner(); tx.objectStore(STORE_META).put({version:1,keyId,nonce,ciphertext,wrappingKey}, 'recovery_unlock:v1:'+namespace); }
+      catch(error) { tx.abort(); reject(error); return; }
+      tx.oncomplete=()=>resolve(); tx.onabort=()=>reject(tx.error || new Error('Recovery key checkpoint aborted')); tx.onerror=()=>reject(tx.error);
+    });
+    assertOwner();
+  }
+
+  async loadProtectedRecoveryKey(namespace: string, keyId: string, assertOwner: () => void): Promise<Uint8Array | null> {
+    const db=await this.openDB(); assertOwner();
+    const row=await new Promise<any>((resolve,reject)=>{
+      const tx=db.transaction(STORE_META,'readonly'),req=tx.objectStore(STORE_META).get('recovery_unlock:v1:'+namespace);
+      req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+    });
+    assertOwner(); if (!row || row.keyId!==keyId) return null;
+    if (row.version!==1 || !(row.nonce instanceof Uint8Array) || row.nonce.length!==12 ||
+        !(row.ciphertext instanceof Uint8Array) || row.ciphertext.length!==48 || !row.wrappingKey ||
+        row.wrappingKey.extractable!==false || row.wrappingKey.algorithm?.name!=='AES-GCM') throw new Error('protected_recovery_key_invalid');
+    const aad=new TextEncoder().encode(JSON.stringify([this.accountId,namespace,keyId]));
+    const key=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(row.nonce),additionalData:aad},row.wrappingKey,new Uint8Array(row.ciphertext)));
+    try { assertOwner(); if(key.length!==32)throw new Error('protected_recovery_key_invalid'); return key; }
+    catch(error) { key.fill(0);throw error; }
+  }
+
+  async saveChannelMetadata(namespace: string, snapshot: unknown, assertOwner: () => void): Promise<void> {
+    const db=await this.openDB();assertOwner();
+    await new Promise<void>((resolve,reject)=>{
+      const tx=db.transaction(STORE_META,'readwrite');
+      try { assertOwner();tx.objectStore(STORE_META).put(snapshot,'channel_metadata:v1:'+namespace); }
+      catch(error){tx.abort();reject(error);return;}
+      tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error || new Error('Metadata checkpoint aborted'));tx.onerror=()=>reject(tx.error);
+    }); assertOwner();
+  }
+
+  async loadChannelMetadata(namespace: string): Promise<unknown | null> {
+    const db=await this.openDB();return new Promise((resolve,reject)=>{
+      const req=db.transaction(STORE_META,'readonly').objectStore(STORE_META).get('channel_metadata:v1:'+namespace);
+      req.onsuccess=()=>resolve(req.result??null);req.onerror=()=>reject(req.error);
+    });
+  }
+
   async saveRecoveryPublicKey(userId: string, publicKey: Uint8Array): Promise<void> {
     const db = await this.openDB();
     return new Promise<void>((resolve, reject) => {

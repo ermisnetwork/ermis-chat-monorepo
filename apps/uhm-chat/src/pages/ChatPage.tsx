@@ -76,7 +76,7 @@ export function ChatPage() {
   const { client, activeChannel, setActiveChannel } = useChatCore()
   const canCallActiveChannel = canStartDirectCall(activeChannel, client?.userID)
   const recovery = useRecoveryPin()
-  const recoveryGateAcknowledgement = useRecoveryGateAcknowledgement(client?.userID)
+  const recoveryGateAcknowledgement = useRecoveryGateAcknowledgement(client?.userID ? JSON.stringify([client.baseURL,client.projectId,client.userID]) : undefined, client)
   const { status, retryConnection } = useConnectionStatus(client)
   const totalUnreadCount = useTotalUnreadCount()
   useNotification(activeChannel)
@@ -289,23 +289,24 @@ export function ChatPage() {
   useEffect(() => {
     const status = recovery.recoveryStatus
     if (!status) return
-    if (status.unlocked || !status.hasVault) {
+    if (status.unlocked || client?.encryptionManager?.isRecoveryVaultUnlocked() || status.autoUnlockUnavailable) {
       setIsRecoveryGateOpen(false)
       return
     }
     const alreadyAcknowledged = recoveryGateAcknowledgement.areAllAcknowledged(status.incompleteChannels)
-    setIsRecoveryGateOpen(status.hasIncompleteRestore && !alreadyAcknowledged)
-  }, [recovery.recoveryStatus, recoveryGateAcknowledgement])
+    setIsRecoveryGateOpen(!alreadyAcknowledged)
+  }, [client, recovery.recoveryStatus, recoveryGateAcknowledgement])
 
   useEffect(() => {
     if (!activeChannel?.id || !isEffectiveE2eeChannel(activeChannel, client)) return
+    if (recovery.recoveryStatus?.autoUnlockUnavailable) return
     if (!activeChannel.cid || activeRestoreProgressCheckedCid !== activeChannel.cid) return
 
     if (!activeRestoreProgress) {
       if (recovery.recoveryStatus?.unlocked) {
         if (activeRestoreEnqueuedCidRef.current === activeChannel.cid) return
         activeRestoreEnqueuedCidRef.current = activeChannel.cid || null
-        recovery.enqueueRestore(activeChannel.type, activeChannel.id, 'active')
+        // Requested history pages own restoration.
         return
       }
 
@@ -329,7 +330,7 @@ export function ChatPage() {
     if (recovery.recoveryStatus?.unlocked) {
       if (activeRestoreEnqueuedCidRef.current === activeRestoreProgress.cid) return
       activeRestoreEnqueuedCidRef.current = activeRestoreProgress.cid
-      recovery.enqueueRestore(activeChannel.type, activeChannel.id, 'active')
+      // Requested history pages own restoration.
       return
     }
 
@@ -1136,7 +1137,6 @@ export function ChatPage() {
               )}
             </div>
           )}
-          <SyncStatusBanner syncState={syncState} />
         </div>
 
         <Channel EmptyStateIndicator={ChannelEmptyState}>
@@ -1151,6 +1151,7 @@ export function ChatPage() {
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
+          <SyncStatusBanner syncState={syncState} client={client} />
           <SecureSessionBanner client={client} channel={activeChannel} />
 
           {/* Music Room Player for Group Channels */}
@@ -1303,7 +1304,10 @@ export function ChatPage() {
         variant="gate"
         onSkip={acknowledgeCurrentRecoveryGate}
         onUnlocked={() => {
-          acknowledgeCurrentRecoveryGate()
+          // Unlock success is not a persistent Not now choice. The protected
+          // key suppresses future prompts while available; if local key storage
+          // is lost, the account may need its PIN again.
+          setIsRecoveryGateOpen(false)
           recovery.refresh()
           refreshActiveRestoreProgress()
         }}

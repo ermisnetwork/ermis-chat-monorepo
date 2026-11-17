@@ -88,3 +88,21 @@ test('an in-flight accepted request does not retire newer caller data', async ()
   await pending;
   assert.deepEqual(channel._queryDataPayload(), newer);
 });
+
+
+test('encrypted query forwards the exact requested page and older-page cursor without resending creation artifacts', async () => {
+  const { channel, bodies } = harness();
+  await channel.create();
+  await channel.query({ messages_seq: { limit: 50 } });
+  await channel.query({ messages_seq: { anchor_seq: 901, before: 50 } });
+  assert.deepEqual(bodies[1].messages_seq, { limit: 50 });
+  assert.deepEqual(bodies[2].messages_seq, { anchor_seq: 901, before: 50 });
+  assert.equal(bodies[1].data, undefined); assert.equal(bodies[2].data, undefined);
+});
+test('metadata-only explicit zero remains zero for an encrypted channel query', async () => {
+  const { channel, bodies } = harness();
+  await channel.create();
+  await channel.query({ messages: { limit: 0 } });
+  assert.deepEqual(bodies[1].messages, { limit: 0 });
+  assert.equal(bodies[1].data, undefined);
+});

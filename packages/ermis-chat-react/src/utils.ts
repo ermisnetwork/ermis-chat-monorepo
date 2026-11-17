@@ -397,7 +397,10 @@ export function getLastMessagePreview(
   // for everyone, because the preview falls back to the previous real message
   // instead of flashing "This message was deleted".
   const messages = channel.state?.latestMessages;
-  if (!messages || messages.length === 0) return { text: '', user: '' };
+  if (!messages || messages.length === 0) return {
+    text: channel.data?.mls_enabled ? options?.encryptedMessageLabel ?? 'Tin nhắn được mã hoá' : '',
+    user: '',
+  };
 
   let lastMsg: (typeof messages)[number] | undefined;
   for (let i = messages.length - 1; i >= 0; i--) {

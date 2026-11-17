@@ -128,7 +128,8 @@ test('global startup sync stops an empty has-more page without advancing cursor 
   manager._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   manager._loadAllScopeSyncCursors = async () => ({ [message.cid]: cursor });
   manager.storage.loadRemovedSyncCursor = async () => null;
-  manager._listKnownE2eeChannels = () => [];
+  manager._warmScopeCids = () => [message.cid];
+  manager._listKnownE2eeChannels = () => [{cid:message.cid}];
   manager._membershipBoundedEventCursor = () => cursor;
   manager._flushPendingSnapshotsForScope = async () => ({ pending: [] });
   manager._emitSyncState = state => states.push(state);

@@ -209,11 +209,11 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
           {!isClosedTopic && lastMessageText && (
             <div className="ermis-channel-list__item-last-message">
               {lastMessageUser && (
-                <span className="ermis-channel-list__item-last-message-user">
+                <span className="ermis-channel-list__item-last-message-user" title={lastMessageUser}>
                   {lastMessageUser}:{' '}
                 </span>
               )}
-              <span>{lastMessageText}</span>
+              <span className="ermis-channel-list__item-last-message-text">{lastMessageText}</span>
             </div>
           )}
 
@@ -450,7 +450,7 @@ ChannelRow.displayName = 'ChannelRow';
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   filters = { type: ['messaging', 'team', 'meeting'] } as unknown as ChannelFilters,
   sort = [],
-  options = { message_limit: 1 } as unknown as ChannelListProps['options'],
+  options = { message_limit: 0 } as unknown as ChannelListProps['options'],
   renderChannel,
   onChannelSelect,
   className,
@@ -610,11 +610,13 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
 
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
 
-  const loadChannels = useCallback(async () => {
+  const loadChannels = useCallback(async (refresh = false) => {
     try {
       setLoading(true);
       setError(null);
-      const result = await client.queryChannels(filters, sort, options as { message_limit?: number });
+      const result = (options as {message_limit?:number})?.message_limit===0
+        ? await client.loadChannelMetadata(filters,sort,{}, {refresh})
+        : await client.queryChannels(filters, sort, options as { message_limit?: number });
       setChannels(result);
     } catch (err) {
       console.error('Failed to load channels:', err);
@@ -691,7 +693,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   );
 
   if (loading || (waitForSync && !syncReady)) return <LoadingIndicator text={loadingLabel} />;
-  if (error) return <ActualErrorIndicator text={errorLabel} onRetry={loadChannels} />;
+  if (error) return <ActualErrorIndicator text={errorLabel} onRetry={() => { void loadChannels(true); }} />;
 
   const isEmpty = showPendingInvites
     ? (pendingChannels.length === 0 && regularChannels.length === 0)

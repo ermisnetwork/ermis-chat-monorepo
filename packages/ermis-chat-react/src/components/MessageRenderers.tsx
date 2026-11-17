@@ -155,6 +155,7 @@ function attachmentRenderKey(attachment: Attachment | E2eeAttachmentManifest): s
     id,
     anyAttachment.type || '',
     anyAttachment.upload_status || '',
+    anyAttachment.upload_error_status || '',
     typeof anyAttachment.upload_progress === 'number' ? Math.round(anyAttachment.upload_progress) : '',
     anyAttachment.local_object_url || '',
   ].join('|');
@@ -164,6 +165,9 @@ function LocalUploadOverlay({ attachment }: { attachment: Attachment }) {
   const progress = getLocalUploadProgress(attachment);
   const status = (attachment as any).upload_status;
   if (progress === undefined && !status) return null;
+  if (status === 'failed') return <span className="ermis-attachment-upload-overlay" role="status">Upload failed{typeof (attachment as any).upload_error_status === 'number' ? ` (HTTP ${(attachment as any).upload_error_status})` : ''}</span>;
+  if (status === 'paused') return <span className="ermis-attachment-upload-overlay" role="status">Upload paused</span>;
+  if (status === 'uploaded' || status === 'sent') return null;
   return (
     <span className="ermis-attachment-upload-overlay">
       <span className="ermis-e2ee-attachment-spinner" />
@@ -753,10 +757,13 @@ const FileAttachment: React.FC<AttachmentProps> = React.memo(
           </span>
           <span className="ermis-attachment__file-info">
             <span className="ermis-attachment__file-name">{name}</span>
+            {(attachment as any).upload_status === 'failed' ? <span role="status">Upload failed{typeof (attachment as any).upload_error_status === 'number' ? ` (HTTP ${(attachment as any).upload_error_status})` : ''}</span>
+              : (attachment as any).upload_status === 'paused' ? <span role="status">Upload paused</span>
+              : getLocalUploadProgress(attachment) !== undefined && !['uploaded', 'sent'].includes((attachment as any).upload_status) ? <span>{getLocalUploadProgress(attachment)}%</span> : null}
             {size && (
               <span className="ermis-attachment__file-size">
                 {typeof size === 'number' ? `${(size / 1024).toFixed(1)} KB` : size}
-                {getLocalUploadProgress(attachment) !== undefined ? ` · ${getLocalUploadProgress(attachment)}%` : ''}
+
               </span>
             )}
           </span>

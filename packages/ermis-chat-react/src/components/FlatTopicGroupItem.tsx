@@ -199,16 +199,16 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
           {lastMessageText && (
             <div className="ermis-channel-list__item-last-message">
               {lastMessageSourceName && (
-                <span className="ermis-channel-list__item-last-message-source">
+                <span className="ermis-channel-list__item-last-message-source" title={lastMessageSourceName}>
                   #{lastMessageSourceName} · {' '}
                 </span>
               )}
               {lastMessageUser && (
-                <span className="ermis-channel-list__item-last-message-user">
+                <span className="ermis-channel-list__item-last-message-user" title={lastMessageUser}>
                   {lastMessageUser}:{' '}
                 </span>
               )}
-              <span>{lastMessageText}</span>
+              <span className="ermis-channel-list__item-last-message-text">{lastMessageText}</span>
             </div>
           )}
           <div className="ermis-channel-list__item-badges">

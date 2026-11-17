@@ -11,6 +11,7 @@ function makeSendHarness() {
   let pending;
 
   manager.userId = 'sender';
+  manager.provider = {}; // Projection fixture only; no native crypto/checkpoint claim.
   manager.client = {
     user: { id: 'sender', name: 'Sender' },
     state: { users: {} },
@@ -30,6 +31,7 @@ function makeSendHarness() {
     },
   };
   // Isolate ordering projection; real atomic cryptography is exercised by application_send_checkpoint.
+  manager._reserveApplicationIntent = async r => { await manager.storage.savePendingE2eeSend(r); return r; };
   manager._prepareApplicationSend = async r => { const next = {...r, mls_ciphertext: manager.encryptMessage(), mls_epoch: 4}; await manager.storage.savePendingE2eeSend(next); manager._freshApplicationSendRecords.add(next); return next; };
   manager.e2eeClient = {
     sendMessage: async (_channelType, _channelId, body) => {

@@ -239,6 +239,10 @@
 }
 
 .ermis-channel-list__item-last-message {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
   font-size: calc(var(--ermis-font-size-sm));
   color: var(--ermis-text-muted);
   white-space: nowrap;
@@ -288,10 +292,27 @@
 
 .ermis-channel-list__item-last-message-user {
   color: var(--ermis-text-secondary);
+  max-width: 35%;
 }
 
 .ermis-channel-list__item-last-message-source {
   color: var(--ermis-text-secondary);
+  max-width: 25%;
+}
+
+.ermis-channel-list__item-last-message-user,
+.ermis-channel-list__item-last-message-source {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ermis-channel-list__item-last-message-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ermis-channel-list__item-actions-wrapper,

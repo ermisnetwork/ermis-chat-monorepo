@@ -65,6 +65,7 @@ test('ordinary global sync repairs a delayed Commit even when its saved applicat
   h.m._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   h.m._loadAllScopeSyncCursors = async () => ({ [cid]: advanced });
   h.m.storage = { loadRemovedSyncCursor: async () => null };
+  h.m._warmScopeCids = () => [cid];
   h.m._listKnownE2eeChannels = () => [{ cid }];
   h.m._membershipBoundedEventCursor = (_, saved) => saved || h.boundary;
   h.m._flushPendingSnapshotsForScope = async () => ({ pending: [] });
@@ -89,6 +90,7 @@ test(`${code} in a forward page holds its prefix but still reaches authoritative
   h.m._resumeExternalJoinCandidates = async () => {}; // Component routing only; no External Join/Ready proof claim.
   h.m._loadAllScopeSyncCursors = async () => ({ [cid]: advanced });
   h.m.storage = { loadRemovedSyncCursor: async () => null };
+  h.m._warmScopeCids = () => [cid];
   h.m._listKnownE2eeChannels = () => [{ cid }];
   h.m._membershipBoundedEventCursor = (_, saved) => saved || h.boundary;
   h.m._saveEncryptionSyncCheckpoint = async cp => { checkpoint = cp; };
@@ -110,21 +112,22 @@ test(`${code} in a forward page holds its prefix but still reaches authoritative
   assert.deepEqual(h.calls[0].cursor, h.boundary);
 });
 }
-test('future application requests single-flight sync with a global cooldown; ordinary failures do not', async () => {
+test('future application requests only its existing scope recovery lane with cooldown; ordinary failures do not', async () => {
   const m = new EncryptionManager(); let calls = 0;
   m.initialized = true; m.e2eeClient = {};
-  m.sync = async () => { calls++; };
+  m.sync = async () => { assert.fail('future epoch must not fan out global warm sync'); };
+  m.requestScopeSyncAfterRepair = scope => { assert.equal(scope, cid); calls++; };
   for (const [local, incoming, error] of [[4,4,'epoch differs'], [4,3,'epoch differs'],
     [4,5,'AEAD error'], [undefined,5,'epoch differs'], [4,NaN,'epoch differs']]) {
-    m._requestFutureEpochSync(local, incoming, error);
+    m._requestFutureEpochSync(cid, local, incoming, error);
   }
   assert.equal(calls, 0);
-  m._syncing = true; m._requestFutureEpochSync(4,5,'epoch differs'); assert.equal(calls,0);
+  m._syncing = true; m._requestFutureEpochSync(cid,4,5,'epoch differs'); assert.equal(calls,0);
   m._syncing = false;
-  for (let n=0;n<100;n++) m._requestFutureEpochSync(4,5,'epoch differs');
+  for (let n=0;n<100;n++) m._requestFutureEpochSync(cid,4,5,'epoch differs');
   assert.equal(calls, 1);
   m._lastFutureEpochSyncAt -= 10_001;
-  m._requestFutureEpochSync(4,6,'epoch differs');
+  m._requestFutureEpochSync(cid,4,6,'epoch differs');
   assert.equal(calls, 2);
 });
 for (const type of ['commit', 'own-commit', 'welcome']) {
@@ -214,4 +217,25 @@ test('legacy ownerless current membership remains usable when no peer identity c
   const h = membershipHarness(); h.channel.state.membership = { created_at: h.own.created_at };
   delete h.channel.state.members.alice;
   assert.equal(h.manager._getMembershipCreatedAt(h.channel), h.own.created_at);
+});
+
+
+for (const own of [false, true]) test(`failed realtime ${own ? 'own ' : ''}Commit requests only affected scope recovery`, async () => {
+ const client = new ErmisChat('fixture', 'fixture', 'https://fixture.invalid', {browser:false});
+ client.userID='alice';client.logger=()=>{};const ch=client.channel('messaging','commit-recovery');const wakes=[];let global=0;
+ client.encryptionManager={initialized:true,userId:'alice',deviceId:'device',isSyncing:()=>false,isScopeRepairing:()=>false,
+  processOwnMlsCommit:async()=>{throw Error('protocol not yet usable');},processCommit:async()=>{throw Error('protocol not yet usable');},
+  requestScopeSyncAfterRepair:cid=>wakes.push(cid),sync:async()=>{global++;}};
+ await ch._handleChannelEvent({type:'protocol',cid:ch.cid,protocol_data:{type:'commit',epoch:2,user:{id:own?'alice':'bob'},device_id:own?'device':'other'}});
+ await new Promise(r=>setImmediate(r));assert.deepEqual(wakes,[ch.cid]);assert.equal(global,0);
+});
+
+
+test('failed realtime Commit from a retired session cannot wake recovery on its replacement', async () => {
+ const client=new ErmisChat('fixture','fixture','https://fixture.invalid',{browser:false});client.userID='alice';client.logger=()=>{};
+ const ch=client.channel('messaging','retired-commit');let reject,wakes=0;
+ const m={initialized:true,userId:'alice',deviceId:'device',isSyncing:()=>false,isScopeRepairing:()=>false,
+  processCommit:()=>new Promise((_,r)=>reject=r),requestScopeSyncAfterRepair:()=>wakes++,sync:async()=>wakes++};client.encryptionManager=m;
+ await ch._handleChannelEvent({type:'protocol',cid:ch.cid,protocol_data:{type:'commit',epoch:2,user:{id:'bob'},device_id:'other'}});
+ client.encryptionManager={...m,userId:'replacement'};reject(Error('late failure'));await new Promise(r=>setImmediate(r));assert.equal(wakes,0);
 });

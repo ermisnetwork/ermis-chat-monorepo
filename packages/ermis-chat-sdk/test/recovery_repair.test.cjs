@@ -644,7 +644,7 @@ test('real Client cold-start cannot turn an unsupported adapter cached snapshot 
   assert.equal(scopeSyncCalls, 0);
 });
 
-test('201 E2EE channels use deterministic recovery discovery chunks of 200 and 1', async () => {
+test('201 E2EE metadata channels warm only five recent scopes at startup', async () => {
   const manager = componentRoutingManager();
   manager.initialized = true;
   manager.userId = 'user-1';
@@ -714,8 +714,8 @@ test('201 E2EE channels use deterministic recovery discovery chunks of 200 and 1
 
   await manager.sync();
 
-  assert.deepEqual(chunks.map((chunk) => chunk.length), [200, 1]);
-  assert.deepEqual(chunks.flat(), [...cids].sort());
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [5]);
+  assert.deepEqual(chunks.flat(), [...cids].sort().slice(0,5));
 });
 
 test('scope pagination completes before the single recovery discovery request', async () => {
@@ -1283,45 +1283,17 @@ test('legacy epoch progress is lazily exposed as repair issues', () => {
   assert.equal(progress.repair_issues.find((issue) => issue.mls_epoch === 4).status, 'retryable');
 });
 
-test('post-unlock recovery maintenance runs in the background and dedupes', async () => {
-  const manager = componentRoutingManager();
-  const calls = [];
-  let releaseRecheck;
-
-  manager._recoveryPrivateKey = new Uint8Array([1]);
-  manager._flushDeferredArchives = async () => {
-    calls.push('flush');
-  };
-  manager._resumeEpochArchiveCheckpoints = async () => {
-    calls.push('resume');
-  };
-  manager._recheckKnownRecoveryChannelsOnce = async () => {
-    calls.push('recheck');
-    await new Promise((resolve) => {
-      releaseRecheck = resolve;
-    });
-  };
-
-  manager._scheduleRecoveryPostUnlockMaintenance();
-  const firstWork = manager._recoveryPostUnlockMaintenancePromise;
-  manager._scheduleRecoveryPostUnlockMaintenance();
-
-  assert.ok(firstWork);
-  assert.equal(manager._recoveryPostUnlockMaintenancePromise, firstWork);
-  assert.deepEqual(calls, []);
-
-  for (let attempt = 0; attempt < 10 && calls.length < 3; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-
-  assert.deepEqual(calls, ['flush', 'resume', 'recheck']);
-  assert.equal(manager._recoveryPostUnlockMaintenancePromise, firstWork);
-  assert.equal(typeof releaseRecheck, 'function');
-
-  releaseRecheck();
-  await firstWork;
-
-  assert.equal(manager._recoveryPostUnlockMaintenancePromise, null);
+test('post-unlock upload maintenance dedupes without enqueuing account-wide history', async () => {
+  const manager=componentRoutingManager(),calls=[];
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  manager._recoveryPrivateKey=new Uint8Array([1]);
+  manager._flushDeferredArchives=async()=>{calls.push('flush');await gate;};
+  manager._resumeEpochArchiveCheckpoints=async()=>{calls.push('resume');};
+  manager._recheckKnownRecoveryChannelsOnce=async()=>assert.fail('unlock must not restore whole account');
+  manager._scheduleRecoveryPostUnlockMaintenance();const work=manager._recoveryPostUnlockMaintenancePromise;
+  manager._scheduleRecoveryPostUnlockMaintenance();assert.equal(manager._recoveryPostUnlockMaintenancePromise,work);
+  await new Promise(resolve=>setTimeout(resolve,1));assert.deepEqual(calls,['flush']);
+  release();await work;assert.deepEqual(calls,['flush','resume']);assert.equal(manager._recoveryPostUnlockMaintenancePromise,null);
 });
 
 test('repair republishes already-cached plaintext over an encrypted placeholder', async () => {

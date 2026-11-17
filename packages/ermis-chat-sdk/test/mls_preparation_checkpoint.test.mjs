@@ -22,7 +22,7 @@ async function fixture(){
   m._groupGenerations.set(other,{cid:other,group_generation:0,group_id:null,current_epoch:0,status:'active',updated_at:1});
   await m._writeMlsMutation(cid,null);await m._writeMlsMutation(other,null);
   m._collectPendingGhosts=async()=>[];m._cleanupEvictedGhosts=async()=>{};m.safeArchiveCurrentEpoch=async()=>{};m.safeArchiveCurrentEpochForCid=async()=>{};m._uploadGroupInfo=async()=>{};
-  m.client={baseURL:'http://fixture/v1',activeChannels:{[cid]:{addMembersE2ee:async()=>{},removeMembersE2ee:async()=>{}}}};
+  m.client={baseURL:'http://fixture/v1',post:async()=>({channel:{mls_enabled:false,members:[{channel_role:'owner'}]}}),activeChannels:{[cid]:{addMembersE2ee:async()=>{},removeMembersE2ee:async()=>{}}}};
   m.e2eeClient={keyRotation:async()=>{},getKeyPackagesByUserIds:async()=>({members:[]})};
   const bytes=await s.loadProviderState(user,'device');
   return {m,s,p,identity,group,user,cid,id,other,bytes};

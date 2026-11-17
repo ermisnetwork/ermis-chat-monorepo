@@ -58,6 +58,8 @@ export class DurableRecoveryDiscoveryCoordinator {
     private readonly fetchBatch: (cids: string[]) => Promise<RecoveryDiscoveryResult<MlsRecoveryDiscoveryAppliedItem>>,
     private readonly now: () => number = () => Date.now()) {}
   private current(): void {this.context.assertScope(); if(this.stopped)throw recoveryControlError('recovery_scope_changed');}
+  /** Wait only for lane ordering; callers must start their own guarded observation. */
+  pendingWork(): Promise<unknown> | null { this.current(); return this.work; }
   /** Internal lifecycle check; scheduling cannot revive a retired continuation. */
   assertCurrent(): void {this.current();}
   private capabilities(): void {const s=this.context.storage;if(s.recoveryDiscoveryWorkVersion!==1 || !s.loadRecoveryDiscoveryWork || !s.listDueRecoveryDiscoveryWork || !s.saveRecoveryDiscoveryWork)throw recoveryControlError('client_upgrade_required');}

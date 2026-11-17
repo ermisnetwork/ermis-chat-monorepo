@@ -67,7 +67,7 @@ const chatClientOptions: ErmisChatOptions = {
   recoverStateOnReconnect: true,
   recoveryConfig: {
     filter: { type: ['messaging', 'team'] },
-    options: { message_limit: 1 },
+    options: { message_limit: 0 },
   },
   ...(API_DEFAULTS.USS_BASE_URL ? { userBaseURL: API_DEFAULTS.USS_BASE_URL } : {}),
   refreshToken: getStoredRefreshToken,

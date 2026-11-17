@@ -651,18 +651,20 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   }
 
   failPendingE2eeAttachmentUpload(messageId: string, error: unknown): void {
-    const typedError = error as { code?: string; isWSFailure?: boolean; message?: string };
-    const isOffline =
+    const typedError = error as { code?: string; isWSFailure?: boolean; message?: string; status?: number; response?: { status?: number } };
+    const hasHttpFailure = typeof typedError?.status === 'number' || typeof typedError?.response?.status === 'number';
+    const isOffline = !hasHttpFailure && (
       typedError?.code === 'ERR_NETWORK' ||
       typedError?.isWSFailure === true ||
       typedError?.message?.toLowerCase().includes('network error') === true ||
-      this.getClient().wsConnection?.isHealthy === false;
+      this.getClient().wsConnection?.isHealthy === false);
     this.state.updateMessageById(messageId, (message) => ({
       ...message,
       status: isOffline ? 'failed_offline' : 'error',
       attachments: (message.attachments || []).map((attachment: any) => ({
         ...attachment,
         upload_status: isOffline ? 'paused' : 'failed',
+        upload_error_status: typedError?.status ?? typedError?.response?.status,
       })),
     }));
     this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any, true);
@@ -1123,12 +1125,13 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         const paused = record.paused || signal.aborted;
         // Genuine offline/network error — safe to retry on reconnect
-        const isOfflineError =
+        const hasHttpFailure = typeof error?.status === 'number' || typeof error?.response?.status === 'number';
+        const isOfflineError = !hasHttpFailure && (
           paused ||
           error.code === 'ERR_NETWORK' ||
           error.isWSFailure ||
           (!error.response && typeof error?.status !== 'number' && !(error instanceof DOMException)) ||
-          !this.getClient().wsConnection?.isHealthy;
+          !this.getClient().wsConnection?.isHealthy);
 
         if (isOfflineError) {
           // Keep in IDB so we can resume after reconnect
@@ -1155,6 +1158,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             attachments: (msg.attachments || []).map((attachment: any) => ({
               ...attachment,
               upload_status: 'failed',
+              upload_error_status: error?.status ?? error?.response?.status,
             })),
           }));
           this._dispatchLocalMessageStateEvent('message.updated', this._findLocalMessageById(messageId) as any);
@@ -2518,9 +2522,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     this._seedE2eeStateFromLocalCache(options, messageSetToAddToIfDoesNotExist);
 
-    const update_options = this._isE2eeQuery()
-      ? this.getClient()._withProjectId({})
-      : this.getClient()._withProjectId({ ...options });
+    // Pagination belongs to the requested timeline page on encrypted and standard
+    // channels alike. Creation artifacts remain fenced separately by _queryDataPayload.
+    const update_options = this.getClient()._withProjectId({ ...options });
 
     let queryURL = `${this.getClient().baseURL}/channels/${this.type}`;
     if (this.id) {
@@ -4346,7 +4350,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             if (isOwnDeviceCommit) {
               encryptionMgrProto.processOwnMlsCommit(this.cid, protoMsg,
                 mlsProtocolProcessingOptions(event, protoMsg, this.cid, false)).catch(() => {
-                encryptionMgrProto.sync().catch(() => undefined);
+                if (encryptionMgrProto.initialized && this.getClient().encryptionManager === encryptionMgrProto &&
+                    encryptionMgrProto.userId === protocolUser && encryptionMgrProto.deviceId === protocolDevice) {
+                  encryptionMgrProto.requestScopeSyncAfterRepair(this.cid!);
+                }
               });
               break;
             }
@@ -4358,12 +4365,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
                 cid: this.cid,
                 protocol_type: protoType,
               });
-              encryptionMgrProto.sync().catch((syncErr: unknown) => {
-                this.getClient().logger('error', '[Encryption Event] Recovery sync failed after protocol commit', {
-                  err: syncErr,
-                  cid: this.cid,
-                });
-              });
+              if (encryptionMgrProto.initialized && this.getClient().encryptionManager === encryptionMgrProto &&
+                  encryptionMgrProto.userId === protocolUser && encryptionMgrProto.deviceId === protocolDevice) {
+                encryptionMgrProto.requestScopeSyncAfterRepair(this.cid!);
+              }
             });
             break;
           }
@@ -4549,6 +4554,14 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       hydrated.push(mergedMessage as MessageResponse<ErmisChatGenerics>);
     }
 
+    const pending=hydrated.filter((row:any)=>row.content_type==='mls' || row.mls_ciphertext && !row.text);
+    const manager=this.getClient().encryptionManager;
+    if(pending.length && manager?.restoreHistoryPage) {
+      for(let offset=0;offset<pending.length;offset+=50) {
+        void manager.restoreHistoryPage(this.type,this.id,pending.slice(offset,offset+50) as any[])
+          .catch(()=>this.getClient().logger('warn','History page restore deferred',{tags:['encryption']}));
+      }
+    }
     return hydrated;
   }
 

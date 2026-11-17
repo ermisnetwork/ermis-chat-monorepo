@@ -391,3 +391,28 @@ test('inline GI belongs to the same isolated epoch and a forged GI digest cannot
   assert.equal(f.m.groups.has(f.cid), false); assert.equal(f.uploads(), 0);
   await f.storage.close();
 });
+
+
+test('accepted External Join provider rebase preserves completed event delivery for unchanged surviving scopes', async () => {
+  const f = await fixture(); const survivors = [];
+  try {
+    for (let i = 0; i < 4; i++) {
+      const cid = `team:survivor-${unique}-${i}`;
+      const group = f.wasm.Group.create_with_cid(f.m.provider, f.m.identity, cid);
+      f.m.groups.set(cid, group);
+      f.m._groupGenerations.set(cid, {cid, group_generation:0, group_id:null, current_epoch:0, status:'active', updated_at:1});
+      await f.m._writeMlsMutation(cid, null); survivors.push({cid, group});
+    }
+    const cursor = {created_at:'2026-11-01T00:00:00Z', event_id:'00000000-0000-4000-8000-000000000000'};
+    for (const {cid} of survivors) f.m._emitSyncState(f.m._makeSyncState(cid, 'ready', cursor, cursor));
+    const oldProvider = f.m.provider;
+    await join(f);
+    assert.notEqual(f.m.provider, oldProvider);
+    for (const {cid, group} of survivors) {
+      assert.notEqual(f.m.groups.get(cid), group, 'activation actually reloaded the surviving handle');
+      assert.deepEqual(f.m._getCompletedSyncProgress(cid)?.processed_event_cursor, cursor);
+      assert.equal(f.m.getEpoch(cid), 0);
+    }
+    assert.equal(f.m._getCompletedSyncProgress(f.cid), null, 'newly joined scope still requires its own catch-up');
+  } finally { await f.storage.close(); }
+});

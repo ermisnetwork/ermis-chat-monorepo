@@ -12,6 +12,7 @@ import { useChatCore } from './useChatCore';
 export type RecoveryPinStatus = 'idle' | 'working' | 'ready' | 'locked' | 'error';
 
 export type RecoveryStatusInfo = {
+  autoUnlockUnavailable?: boolean;
   hasVault: boolean;
   unlocked: boolean;
   hasIncompleteRestore: boolean;
@@ -229,10 +230,12 @@ export const useRecoveryPin = (): UseRecoveryPinReturn => {
     const progressSub = eventClient.on('e2ee.restore_progress' as any, refresh);
     const bootstrapSub = eventClient.on('e2ee.bootstrap_progress' as any, refresh);
     const initSub = eventClient.on('e2ee.initialized' as any, refresh);
+    const unlockSub = eventClient.on('e2ee.recovery_unlocked' as any, refresh);
     return () => {
       progressSub?.unsubscribe?.();
       bootstrapSub?.unsubscribe?.();
       initSub?.unsubscribe?.();
+      unlockSub?.unsubscribe?.();
     };
   }, [client, refresh]);
 

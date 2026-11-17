@@ -5,6 +5,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
+  ArrowLeft,
+  ShieldCheck,
+  Archive,
   KeyRound,
   Loader2,
   LockOpen,
@@ -20,7 +24,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RECOVERY_PIN_CONFIG } from '@/utils/constants';
 
-type RecoveryDialogVariant = 'account' | 'gate' | 'repair';
+type RecoveryDialogVariant = 'account' | 'gate' | 'repair' | 'privacy';
+type PrivacyPage = 'privacy' | 'encryption' | 'storage' | 'pin';
 
 type UhmRecoveryPinDialogProps = {
   isOpen: boolean;
@@ -104,6 +109,8 @@ export function UhmRecoveryPinDialog({
   const [isChanging, setIsChanging] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const isPrivacy = variant === 'privacy';
+  const [privacyPage, setPrivacyPage] = useState<PrivacyPage>('privacy');
   const isGate = variant === 'gate';
   const isRepair = variant === 'repair';
   const encryptionInitialized = client?.encryptionManager?.initialized === true;
@@ -163,7 +170,8 @@ export function UhmRecoveryPinDialog({
   );
   const historyIssueCount = historyIssueRows.reduce((total, row) => total + row.messageCount, 0);
   const showHistoryIssues = !isGate && !isRepair && historyIssueRows.length > 0;
-  const dialogTitle = isGate
+  const privacyTitles = { privacy: 'privacy_settings.title', encryption: 'privacy_settings.encryption', storage: 'privacy_settings.storage', pin: 'privacy_settings.recovery_pin' };
+  const dialogTitle = isPrivacy ? t(privacyTitles[privacyPage]) : isGate
     ? t('recovery_pin.gate_title')
     : isRepair
     ? t(hasVault ? 'recovery_pin.repair_title' : 'recovery_pin.repair_setup_title')
@@ -186,7 +194,11 @@ export function UhmRecoveryPinDialog({
     : t('recovery_pin.unlock_action');
 
   useEffect(() => {
-    if (isOpen) refresh();
+    if (isOpen) {
+      // Manual Restore already owns this form. Re-enabling the automatic gate
+      // here would open a second PIN dialog alongside it after Not now.
+      refresh();
+    }
   }, [isOpen, refresh]);
 
   const validatePin = useCallback(
@@ -215,11 +227,14 @@ export function UhmRecoveryPinDialog({
     }
   }, [t]);
 
+  useEffect(() => { if (isOpen && isPrivacy) setPrivacyPage('privacy'); }, [isOpen, isPrivacy]);
+
   const finishUnlock = () => {
     setPin('');
     setConfirmPin('');
     setIsChanging(false);
     onUnlocked?.();
+    if (isPrivacy) setPrivacyPage('storage');
   };
 
   const handleClose = () => {
@@ -383,15 +398,45 @@ export function UhmRecoveryPinDialog({
         if (!open) handleClose();
       }}
     >
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-[480px]">
-        <DialogHeader className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
-          <DialogTitle className="flex items-center gap-2 text-[16px]">
-            <KeyRound className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+      <DialogContent className="gap-0 overflow-hidden rounded-3xl border-zinc-200/80 p-0 shadow-2xl sm:max-w-[440px] dark:border-zinc-700">
+        <DialogHeader className="border-b border-zinc-100 bg-gradient-to-br from-violet-50 to-white px-6 py-5 dark:border-zinc-800 dark:from-violet-950/40 dark:to-zinc-900">
+          <DialogTitle className="flex items-center gap-3 text-lg">
+            {isPrivacy && privacyPage !== 'privacy' ? (
+              <button type="button" disabled={working} className="-ml-1 rounded-full p-1.5 hover:bg-violet-100 dark:hover:bg-zinc-800" aria-label={t('common.back', 'Back')} onClick={() => {
+                setPin(''); setConfirmPin(''); setLocalError(null); setIsChanging(false);
+                setPrivacyPage(privacyPage === 'pin' ? 'storage' : privacyPage === 'storage' ? 'encryption' : 'privacy');
+              }}><ArrowLeft className="h-4 w-4" /></button>
+            ) : <ShieldCheck className="h-5 w-5 text-violet-600 dark:text-violet-300" />}
             {dialogTitle}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 p-5">
+        <div className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
+          {isPrivacy && privacyPage === 'privacy' && <>
+            <p className="text-sm leading-6 text-zinc-500 dark:text-zinc-400">{t('privacy_settings.description')}</p>
+            <button type="button" className="flex w-full items-center gap-3 rounded-2xl border border-zinc-100 p-4 text-left transition-colors hover:bg-violet-50 dark:border-zinc-800 dark:hover:bg-zinc-800" onClick={() => setPrivacyPage('encryption')}>
+              <ShieldCheck className="h-5 w-5 shrink-0 text-violet-500" />
+              <span className="flex-1"><span className="block text-sm font-semibold">{t('privacy_settings.encryption')}</span><span className="mt-1 block text-xs leading-5 text-zinc-500">{t('privacy_settings.encryption_description')}</span></span><ChevronRight className="h-4 w-4 text-zinc-400" />
+            </button>
+          </>}
+          {isPrivacy && privacyPage === 'encryption' && <>
+            <div className="rounded-2xl bg-violet-50 p-4 text-sm leading-6 text-violet-900 dark:bg-violet-950/30 dark:text-violet-200">{t('privacy_settings.encryption_note')}</div>
+            <button type="button" className="flex w-full items-center gap-3 rounded-2xl border border-zinc-100 p-4 text-left hover:bg-violet-50 dark:border-zinc-800 dark:hover:bg-zinc-800" onClick={() => setPrivacyPage('storage')}>
+              <Archive className="h-5 w-5 text-violet-500" /><span className="flex-1"><span className="block text-sm font-semibold">{t('privacy_settings.storage')}</span><span className="mt-1 block text-xs leading-5 text-zinc-500">{t('privacy_settings.storage_description')}</span></span><ChevronRight className="h-4 w-4 text-zinc-400" />
+            </button>
+          </>}
+          {isPrivacy && privacyPage === 'storage' && <>
+            <div className="rounded-2xl bg-violet-50 p-4 text-sm leading-6 text-violet-900 dark:bg-violet-950/30 dark:text-violet-200">{t('privacy_settings.storage_note')}</div>
+            <div><h3 className="mb-3 text-sm font-semibold">{t('privacy_settings.history')}</h3><p className="text-sm leading-6 text-zinc-500">{t('privacy_settings.history_on_demand')}</p></div>
+            <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800">
+              <button type="button" disabled={working || !encryptionInitialized || recovery.recoveryStatus === null} className="flex w-full items-center gap-3 p-4 text-left disabled:opacity-50" onClick={() => { setIsChanging(false); setPrivacyPage('pin'); }}>
+                <KeyRound className="h-5 w-5 text-violet-500" /><span className="flex-1"><span className="block text-sm font-semibold">{t('privacy_settings.recovery_pin')}</span><span className="mt-1 block text-xs text-zinc-500">{recovery.recoveryStatus === null ? t('recovery_pin.menu_checking') : !hasVault ? t('recovery_pin.menu_not_set') : unlocked ? t('recovery_pin.menu_active') : t('recovery_pin.menu_locked')}</span></span><ChevronRight className="h-4 w-4 text-zinc-400" />
+              </button>
+              <div className="border-t border-zinc-100 p-4 dark:border-zinc-800"><div className="text-sm font-semibold">{t('privacy_settings.remember_device')}</div><p className="mt-1 text-xs leading-5 text-zinc-500">{t('privacy_settings.remember_note')}</p></div>
+            </div>
+            {!encryptionInitialized && <ErrorText>{t('recovery_pin.encryption_unavailable')}</ErrorText>}
+          </>}
+          {(!isPrivacy || privacyPage === 'pin') && <>
           {!encryptionInitialized && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
               {t('recovery_pin.encryption_unavailable')}
@@ -485,6 +530,7 @@ export function UhmRecoveryPinDialog({
           )}
 
           {(localError || recovery.error) && <ErrorText>{localError || sanitizePinError(recovery.error, t)}</ErrorText>}
+          </>}
         </div>
       </DialogContent>
     </Dialog>

@@ -75,6 +75,7 @@ export type ChannelResponse<ErmisChatGenerics extends ExtendableGenerics = Defau
   };
 
 export type QueryChannelsAPIResponse<ErmisChatGenerics extends ExtendableGenerics = DefaultGenerics> = APIResponse & {
+  /** Explicit server confirmation that this metadata-only query returned its complete matching set. */
   channels: Omit<ChannelAPIResponse<ErmisChatGenerics>, keyof APIResponse>[];
 };
 

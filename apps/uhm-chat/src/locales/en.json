@@ -526,7 +526,6 @@
   "message_actions": {
     "retry_send": "Retry send",
     "retry_error": "Could not retry this message",
-
     "reply": "Reply",
     "forward": "Forward",
     "more": "More",
@@ -809,5 +808,30 @@
     "cmd_footer_tip": "Paste any YouTube link into chat to add songs to the music room",
     "cmd_send_now": "Send",
     "cmd_fill": "Fill"
+  },
+  "session_progress": {
+    "preparing": "Preparing…",
+    "syncing": "Syncing…",
+    "restoring_page": "Restoring messages…",
+    "partial": "Partly completed",
+    "done": "Completed",
+    "retry": "Retry",
+    "dismiss": "Dismiss progress",
+    "title": "Message sync"
+  },
+  "privacy_settings": {
+    "title": "Privacy & safety",
+    "description": "Manage security and recovery for your conversations.",
+    "encryption": "End-to-end encryption",
+    "encryption_description": "Security settings for your conversations",
+    "encryption_note": "In end-to-end encrypted conversations, only you and the participants can read the messages.",
+    "storage": "Message storage",
+    "storage_description": "Manage backups and history recovery",
+    "storage_note": "End-to-end encrypted messages can be recovered using your secure backup and PIN.",
+    "history": "Chat history",
+    "history_on_demand": "History loads when you open a conversation or scroll back. Your PIN unlocks history backed up on other devices.",
+    "recovery_pin": "Recovery PIN",
+    "remember_device": "Remember device",
+    "remember_note": "After unlocking, your recovery key is protected and saved in this browser so you do not have to enter your PIN again. You will be notified if the browser cannot save the key."
   }
 }

@@ -349,7 +349,7 @@ export function addToMessageList<ErmisChatGenerics extends ExtendableGenerics = 
   return uniqueMessages;
 }
 
-export const enrichWithUserInfo = (items: any[], users: any[]) => {
+export const enrichWithUserInfo = (items: any[], users: any[], lookup?: Map<string, any>) => {
   if (items.length === 0) return [];
 
   if (users.length === 0) {
@@ -360,13 +360,14 @@ export const enrichWithUserInfo = (items: any[], users: any[]) => {
     });
   }
 
+  const userLookup = lookup || new Map(users.map(user => [user.id, user]));
   return items.map((item) => {
     const userId = item.user?.id || item.sender?.id;
     const lastestReactionMsg = item?.latest_reactions;
     const quotedMsg = item?.quoted_message;
     
     if (userId) {
-      const user = users.find((u) => u.id === userId);
+      const user = userLookup.get(userId);
       if (user) {
         item.user = { id: user.id, name: user.name || user.id, avatar: user.avatar || '' };
       } else if (!item.user && item.sender) {
@@ -376,7 +377,7 @@ export const enrichWithUserInfo = (items: any[], users: any[]) => {
 
     if (lastestReactionMsg) {
       item.latest_reactions = lastestReactionMsg.map((reaction: any) => {
-        const reactionUser = users.find((u) => u.id === reaction.user_id);
+        const reactionUser = userLookup.get(reaction.user_id);
         return {
           ...reaction,
           user: {
@@ -391,7 +392,7 @@ export const enrichWithUserInfo = (items: any[], users: any[]) => {
     }
 
     if (quotedMsg) {
-      const quotedUser = users.find((u) => u.id === quotedMsg.user?.id);
+      const quotedUser = userLookup.get(quotedMsg.user?.id);
       item.quoted_message.user = {
         ...quotedMsg.user,
         ...quotedUser,
@@ -503,15 +504,13 @@ export const getDirectChannelImage = (members: any[], currentUserId: string) => 
   return '';
 };
 
-let pendingBatchUserIds = new Set<string>();
-let pendingBatchUserPromise: Promise<void> | null = null;
-let resolvePendingBatchUserPromise: (() => void) | null = null;
-
-/**
- * Track user IDs we've already attempted to fetch, so we don't re-fetch
- * infinitely for users who genuinely have no name set in the backend.
- */
-const _fetchedUserIds = new Set<string>();
+type MemberProfileBatch = {
+  current: () => void;
+  ids: Set<string>;
+  fetched: Set<string>;
+  pending: Promise<void> | null;
+};
+const memberProfileBatches = new WeakMap<object, MemberProfileBatch>();
 
 /**
  * Ensure all members' user info are loaded in state.users.
@@ -524,53 +523,38 @@ export async function ensureMembersUserInfoLoaded<ErmisChatGenerics extends Exte
   client: ErmisChat<ErmisChatGenerics>,
   members: any[],
 ) {
-  // Get all memberIds
-  const memberIds = (members || []).map((m: any) => m.user?.id).filter((id: string | undefined) => !!id);
-
-  // Filter out ids that are missing or have incomplete info (name === id, i.e. hex address)
-  const users = client.state.users;
-  const missingUserIds = memberIds.filter((id: string) => {
-    // Skip users we've already attempted to fetch (prevents infinite re-fetching)
-    if (_fetchedUserIds.has(id)) return false;
-    const existing = users[id];
-    // Treat as missing if: not in state, has no name, or name is just the raw id
-    return !existing || !existing.name || existing.name === existing.id;
-  });
-
-  // If there are users missing, fetch and update them into state
-  if (missingUserIds.length > 0) {
-    // Mark as attempted before fetching
-    missingUserIds.forEach((id) => {
-      _fetchedUserIds.add(id);
-      pendingBatchUserIds.add(id);
-    });
-
-    if (!pendingBatchUserPromise) {
-      pendingBatchUserPromise = new Promise((resolve) => {
-        resolvePendingBatchUserPromise = resolve;
-      });
-
-      setTimeout(async () => {
-        const idsToFetch = Array.from(pendingBatchUserIds);
-        pendingBatchUserIds.clear();
-        const resolveFn = resolvePendingBatchUserPromise;
-
-        pendingBatchUserPromise = null;
-        resolvePendingBatchUserPromise = null;
-
-        if (idsToFetch.length > 0) {
-          try {
-            await client.getBatchUsers(idsToFetch);
-          } catch (e) {
-            client.logger('error', 'utils:ensureMembersUserInfoLoaded() - Failed to get batch users', { err: e });
-          }
-        }
-        if (resolveFn) resolveFn();
-      }, 50);
-    }
-
-    await pendingBatchUserPromise;
+  const owner = client._captureUserMetadataScope(); owner();
+  let state = memberProfileBatches.get(client);
+  if (state) { try { state.current(); } catch { state = undefined; } }
+  if (!state) { state = { current: owner, ids: new Set(), fetched: new Set(), pending: null }; memberProfileBatches.set(client, state); }
+  const batch = state;
+  const missing = Array.from(new Set((members || []).map(member => member.user?.id).filter((id): id is string => typeof id === 'string' && !!id)))
+    .filter(id => !batch.fetched.has(id) && (!client.state.users[id]?.name || client.state.users[id].name === id));
+  missing.forEach(id => batch.ids.add(id));
+  if (missing.length && !batch.pending) {
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    batch.pending = promise;
+    setTimeout(async () => {
+      const ids = Array.from(batch.ids); batch.ids.clear();
+      try {
+        batch.current();
+        if (ids.length) await client.getBatchUsers(ids);
+        batch.current(); ids.forEach(id => batch.fetched.add(id)); resolve();
+      } catch (error) {
+        try { batch.current(); client.logger('warn', 'utils:member_profiles lookup unavailable'); resolve(); }
+        catch { reject(error); }
+      } finally {
+        if (batch.pending === promise) batch.pending = null;
+        // A later query may request IDs that arrived during this HTTP operation.
+        // Retain them for that demand instead of spawning an unowned request.
+      }
+    }, 50);
   }
+  const pending = batch.pending;
+  if (pending) await pending;
+  owner();
+  if (missing.some(id => batch.ids.has(id))) await ensureMembersUserInfoLoaded(client, members);
 }
 
 export const getLatestCreatedAt = (messages: any[] = []) =>

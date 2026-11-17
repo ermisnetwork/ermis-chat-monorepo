@@ -657,3 +657,27 @@ test('reload of a failed unsealed text intent preserves error status instead of 
  channel.restorePendingE2eeAttachmentUpload(record);assert.equal(channel.state.findMessage(id).status,'error');
  channel.restorePendingE2eeAttachmentUpload(record);assert.equal(channel.state.findMessage(id).status,'error');
 });
+
+for (const httpStatus of [403, 500]) test(`standard complete HTTP ${httpStatus} is a visible failure even with unhealthy WebSocket`, async () => {
+ const previous=global.XMLHttpRequest;
+ class Xhr { constructor(){this.upload={};this.status=200;} open(){} setRequestHeader(){} send(body){queueMicrotask(()=>{this.upload.onprogress?.({loaded:body.size,total:body.size});this.onload?.();});} }
+ global.XMLHttpRequest=Xhr;
+ const {client,suffix}=createClient('http-terminal'); client.wsConnection={isHealthy:false}; client.queryUser=async()=>client.user;
+ let sends=0; client.post=async(url)=>{
+  if(url.endsWith('/file/presign'))return {attachment_id:'http-fixture',upload_mode:'single',upload_url:'https://storage.example.test/file',ttl_secs:900};
+  if(url.endsWith('/file/confirm'))throw Object.assign(new Error('HTTP rejected'),{response:{status:httpStatus}});
+  if(url.endsWith('/message')){sends++;throw Error('must not send');}throw Error('unexpected request');
+ };
+ const channel=client.channel('messaging','http-'+suffix);
+ try { const {message}=await channel.enqueueAttachmentMessage({text:'test'},[new File(['test'],'test.txt',{type:'text/plain'})]);
+  await waitForState(()=>channel.state.findMessage(message.id)?.status==='error');
+  const value=channel.state.findMessage(message.id);assert.equal(value.attachments[0].upload_status,'failed');assert.equal(value.attachments[0].upload_error_status,httpStatus);assert.equal(sends,0);
+ }finally{global.XMLHttpRequest=previous;}
+});
+
+test('E2EE HTTP rejection beats socket offline status without discarding durable send identity',()=>{
+ const {client,suffix}=createClient('e2ee-http'); client.wsConnection={isHealthy:false};const channel=client.channel('messaging','e2ee-http-'+suffix);
+ channel.state.addMessageSorted({id:'http-e2ee',text:'',status:'sending',created_at:new Date(),attachments:[{type:'file',upload_status:'uploading',upload_progress:99}]},true,true);
+ channel.failPendingE2eeAttachmentUpload('http-e2ee',Object.assign(new Error('Forbidden'),{status:403}));
+ const value=channel.state.findMessage('http-e2ee');assert.equal(value.status,'error');assert.equal(value.attachments[0].upload_status,'failed');assert.equal(value.attachments[0].upload_error_status,403);
+});

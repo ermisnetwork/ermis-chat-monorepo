@@ -201,7 +201,7 @@ test('old early gate ticket cannot finish a replacement semantic gate',async()=>
 
 test('partial HTTP200 scope body fails within its read budget without cursor advance or stranding a real MLS receive',{timeout:12000},async()=>{
  const http=require('node:http'),{ErmisChat,EncryptionApiClient}=require('../dist/index.cjs'),f=await fixture(),arrived=latch();let response,syncOutcome,receive;const sockets=new Set();let posts=0;
- const server=http.createServer((req,res)=>{req.resume();req.on('end',()=>{if(req.url.split('?')[0]!=='/v1/e2ee/scope_sync'){res.writeHead(500);res.end('{}');return;}posts++;response=res;res.writeHead(200,{'Content-Type':'application/json'});res.write('{"channels":{');arrived.open();});});server.on('connection',s=>{sockets.add(s);s.on('close',()=>sockets.delete(s));});
+ const server=http.createServer((req,res)=>{req.resume();req.on('end',()=>{if(req.url.split('?')[0]!=='/sync'){res.writeHead(500);res.end('{}');return;}posts++;response=res;res.writeHead(200,{'Content-Type':'application/json'});res.write('{"channels":{');arrived.open();});});server.on('connection',s=>{sockets.add(s);s.on('close',()=>sockets.delete(s));});
  try{
   await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
   const c=new ErmisChat('fixture-key','00000000-0000-4000-8000-000000000083',origin,{browser:false,logger:()=>{}});c._setUser({id:f.user});c.deviceId=f.device;await c.tokenManager.setTokenOrProvider('fixture-not-a-jwt',{id:f.user});c.axiosInstance.defaults.proxy=false;c.encryptionManager=f.m;f.m.client=c;f.m.e2eeClient=new EncryptionApiClient(c);

@@ -127,3 +127,32 @@ test('maximum CID plus HTTP head and event hint stay inside the existing version
  await c.invalidate([cid],hint(cid,'9007199254740994'));const saved=await primary(h,cid);assert.ok(new TextEncoder().encode(JSON.stringify(saved)).length<=2048);
  assert.equal(saved.observed_head.recovery_revision,'9007199254740993');assert.equal(saved.hint.data.recovery_revision,'9007199254740994');c.stop();
 });
+
+
+test('startup sync waits for already-running discovery before writing the shared provider', async () => {
+ const h=await fixture(),entered=latch(),release=latch();let scopeReads=0,discovery,sync;
+ const c=lane(h,async cids=>{entered.resolve();await release.promise;return response(cids);});
+ h.m.e2eeClient.scopeSync=async cursors=>{scopeReads++;return{channels:Object.fromEntries(Object.keys(cursors).map(cid=>[cid,{events:[],has_more:false}]))};};
+ h.m._warmScopeCids=()=>[h.cid];h.m._listKnownE2eeChannels=()=>[{cid:h.cid,channelType:'team',channelId:h.cid.slice(5)}];
+ try {
+  discovery=c.request([h.cid]);const observed=discovery.catch(e=>e);await entered.promise;
+  sync=h.m.sync();const synced=sync.catch(e=>e);
+  for(let i=0;i<15;i++)await new Promise(setImmediate);
+  assert.equal(scopeReads,0,'cold start must not invalidate a currently admitted discovery provider owner');
+  release.resolve();const discoveryResult=await observed;assert.equal(discoveryResult.code,undefined,'startup changed the pending discovery owner: '+discoveryResult.code);assert.equal(discoveryResult.states[h.cid].result,'state');const syncResult=await synced;assert.equal(syncResult?.code,undefined,'startup sync failed: '+syncResult?.code);
+  assert.ok(scopeReads>=1);assert.equal(h.m._providerPersistenceUncertain,false);
+ } finally {release.resolve();await Promise.allSettled([discovery,sync].filter(Boolean));c.stop();await h.s.close();}
+});
+
+
+test('startup waiting for discovery cannot continue across a device replacement', async () => {
+ const h=await fixture(),entered=latch(),release=latch();let reads=0,discovery,sync;
+ const c=lane(h,async cids=>{entered.resolve();await release.promise;return response(cids);});
+ h.m.e2eeClient.scopeSync=async()=>{reads++;return{channels:{}}};
+ try {
+  discovery=c.request([h.cid]);const rejected=assert.rejects(discovery,e=>e.code==='recovery_scope_changed');await entered.promise;
+  sync=h.m.sync();const retired=assert.rejects(sync,e=>e.code==='recovery_scope_changed');
+  await new Promise(setImmediate);h.m.deviceId='replacement-device';release.resolve();await rejected;await retired;
+  assert.equal(reads,0);assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),h.base);
+ } finally {release.resolve();await Promise.allSettled([discovery,sync].filter(Boolean));c.stop();await h.s.close();}
+});

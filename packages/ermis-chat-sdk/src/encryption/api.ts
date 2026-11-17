@@ -851,7 +851,7 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
       // A successful status line is insufficient: an incomplete response body
       // must not hold the manager's global receive gate indefinitely. The host
       // carries this read budget through token renewal and any auth retry.
-      const raw = await (this.client as any).doAxiosRequest('post', this.baseURL + '/v1/e2ee/scope_sync', body, {
+      const raw = await (this.client as any).doAxiosRequest('post', this.baseURL + '/sync', {...body, project_id: this.client.projectId}, {
         headers: this.deviceHeaders,
         timeout: 5000,
       });

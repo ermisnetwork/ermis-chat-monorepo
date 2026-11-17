@@ -526,7 +526,6 @@
   "message_actions": {
     "retry_send": "Gửi lại",
     "retry_error": "Không thể gửi lại tin nhắn này",
-
     "reply": "Trả lời",
     "forward": "Chuyển tiếp",
     "more": "Thêm",
@@ -809,5 +808,30 @@
     "cmd_footer_tip": "Dán link YouTube vào chat để tự động thêm bài hát vào phòng nhạc",
     "cmd_send_now": "Gửi ngay",
     "cmd_fill": "Điền"
+  },
+  "session_progress": {
+    "preparing": "Đang chuẩn bị…",
+    "syncing": "Đang đồng bộ…",
+    "restoring_page": "Đang khôi phục…",
+    "partial": "Hoàn tất một phần",
+    "done": "Đã hoàn tất",
+    "retry": "Thử lại",
+    "dismiss": "Đóng tiến trình",
+    "title": "Đồng bộ tin nhắn"
+  },
+  "privacy_settings": {
+    "title": "Quyền riêng tư và an toàn",
+    "description": "Quản lý bảo mật và khôi phục lịch sử trò chuyện của bạn.",
+    "encryption": "Mã hoá đầu cuối",
+    "encryption_description": "Cài đặt bảo mật cho các cuộc trò chuyện",
+    "encryption_note": "Trong cuộc trò chuyện mã hoá đầu cuối, chỉ bạn và người tham gia có thể đọc nội dung tin nhắn.",
+    "storage": "Lưu trữ tin nhắn",
+    "storage_description": "Quản lý bản sao lưu và khôi phục lịch sử",
+    "storage_note": "Các tin nhắn được mã hoá đầu cuối có thể được khôi phục bằng bản sao lưu an toàn và mã PIN của bạn.",
+    "history": "Lịch sử chat",
+    "history_on_demand": "Lịch sử tự tải khi bạn mở cuộc trò chuyện hoặc cuộn lên. Bạn có thể dùng PIN để mở khoá lịch sử đã sao lưu trên thiết bị khác.",
+    "recovery_pin": "Mã PIN khôi phục",
+    "remember_device": "Nhớ thiết bị",
+    "remember_note": "Sau khi mở khoá, khoá khôi phục được bảo vệ và lưu trên trình duyệt này để bạn không phải nhập PIN lại. Nếu trình duyệt không thể lưu khoá, bạn sẽ được thông báo."
   }
 }

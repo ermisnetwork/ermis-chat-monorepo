@@ -28,6 +28,9 @@ async function fixture(n = 1, cold = false) {
     }
     await storage.saveScopeSyncCursor(c.cid, start);
   }
+  // These tests stress an explicitly scheduled batch, independently of startup warm selection.
+  // Default scheduling bounds are covered with1000metadata rows in bounded_bootstrap_page.
+  m._warmScopeCids = () => channels.map(channel=>channel.cid);
   m._discoverMlsRecoveryStates = async () => ({states: {}, unsupported: false});
   m.recoverMlsGeneration = async () => ({status: 'active'});
   m._replayLaggingEpochs = async () => {}; m._resumeExternalJoinCandidates = async () => {};
@@ -319,4 +322,52 @@ test('a rejected event read does not suppress independently admitted recovery fr
     await f.m.sync(); assert.equal(recoveries, 1); assert.equal(calls.length, 2, 'accepted activation still requires catch-up');
     assert.equal(f.m.getE2eeState(cid).state, 'ready'); assert.equal(f.m.identity.owns_key_package_ref(f.m.provider, invite.ref), false);
   } finally {await f.close();}
+});
+
+
+test('completed batch is not reread after an unrelated durable provider write before Ready admission', async () => {
+  const f = await fixture(5);
+  try {
+    const calls = transport(f, empty);
+    const ensure = f.m.ensureChannelReady.bind(f.m);
+    let changed = false;
+    f.m.ensureChannelReady = async (...args) => {
+      if (!changed) { changed = true; await f.m._persistProviderStrict(); }
+      return ensure(...args);
+    };
+    await f.m.sync();
+    assert.equal(calls.length, 1, 'a provider revision is not a new server event observation');
+    for (const c of f.channels) {
+      assert.equal(f.m.getE2eeState(c.cid).state, 'ready');
+      assert.ok((await f.storage.loadMlsReadyBase(f.user, f.device, c.cid)).ready);
+    }
+  } finally { await f.close(); }
+});
+
+
+test('reused event delivery still requires current durable Ready evidence', async () => {
+  const f = await fixture(1); const c = f.channels[0];
+  try {
+    const calls = transport(f, empty); await f.m.sync();
+    await f.m._persistProviderStrict();
+    let proofs = 0;
+    f.m._checkChannelEvidence = async () => { proofs++; throw Object.assign(new Error('checkpoint unavailable'), {code:'local_checkpoint_pending'}); };
+    const result = await f.m.ensureChannelReady(c.channelType, c.channelId, c.cid, {source:'sync', initialScopeSyncCompleted:true});
+    assert.equal(calls.length, 1); assert.equal(proofs, 1);
+    assert.equal(result.status, 'needs_retry'); assert.notEqual(f.m.getE2eeState(c.cid).state, 'ready');
+  } finally { await f.close(); }
+});
+
+test('completed event delivery rejects changed scope ownership and uncertain provider', async () => {
+  const f = await fixture(1); const cid = f.channels[0].cid;
+  try {
+    transport(f, empty); await f.m.sync();
+    assert.ok(f.m._getCompletedSyncProgress(cid));
+    f.m._providerPersistenceUncertain = true; assert.equal(f.m._getCompletedSyncProgress(cid), null);
+    f.m._providerPersistenceUncertain = false;
+    const marker = f.m._groupGenerations.get(cid);
+    f.m._groupGenerations.set(cid, {...marker}); assert.equal(f.m._getCompletedSyncProgress(cid), null);
+    f.m._groupGenerations.set(cid, marker);
+    f.m._mlsCleanupRevisions.set(cid, 1); assert.equal(f.m._getCompletedSyncProgress(cid), null);
+  } finally { await f.close(); }
 });
