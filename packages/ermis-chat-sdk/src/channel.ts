@@ -4423,6 +4423,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async _hydrateE2eeMessagesFromLocalCache(
     messages: MessageResponse<ErmisChatGenerics>[] = [],
     channelData?: ChannelResponse<ErmisChatGenerics> | ChannelData<ErmisChatGenerics>,
+    restoreHistory = true,
   ): Promise<MessageResponse<ErmisChatGenerics>[]> {
     const isE2ee = this._isE2eeChannelData(channelData);
     const storage = this.getClient().encryptionManager?.storage || (this.getClient() as any).messageStorage;
@@ -4556,7 +4557,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const pending=hydrated.filter((row:any)=>row.content_type==='mls' || row.mls_ciphertext && !row.text);
     const manager=this.getClient().encryptionManager;
-    if(pending.length && manager?.restoreHistoryPage) {
+    if(restoreHistory && pending.length && manager?.restoreHistoryPage) {
       for(let offset=0;offset<pending.length;offset+=50) {
         void manager.restoreHistoryPage(this.type,this.id,pending.slice(offset,offset+50) as any[])
           .catch(()=>this.getClient().logger('warn','History page restore deferred',{tags:['encryption']}));

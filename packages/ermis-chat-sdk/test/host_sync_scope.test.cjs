@@ -176,3 +176,26 @@ for(const added of [false,true])test('teardown captures channel handles at entry
  const h=teardownHost(),entered=latch(),release=latch();h.m.destroy=async()=>{entered.open();await release.promise;};
  const old=h.c.disconnectUser(),rejected=assert.rejects(old,e=>e.code==='recovery_scope_changed');await entered.promise;let disconnected=0;const replacement={_disconnect:()=>{disconnected++;}};const key=added?'team:added':h.channel.cid;h.c.activeChannels[key]=replacement;release.open();await rejected;assert.equal(h.c.activeChannels[key],replacement);assert.equal(disconnected,0);assert.equal(h.calls.filter(x=>x==='channel').length,1);assert.equal(h.calls.includes('tokens'),false);
 });
+
+for (const noStandard of [false,true]) test('unified completion waits for slow MLS even '+(noStandard?'without standard cursors':'after standard checkpoint'),async()=>{
+ const h=host(),entered=latch(),release=latch();if(noStandard)h.channel.data.mls_enabled=true;
+ h.m.sync=async()=>{entered.open();await release.promise;};
+ const work=h.c.performSync(true);await entered.promise;await new Promise(r=>setImmediate(r));
+ const early=h.events.includes('sync.completed');release.open();await work;
+ assert.equal(early,false);assert.equal(h.events.filter(e=>e==='sync.completed').length,1);await h.close();
+});
+test('MLS failure after ordinary checkpoint cannot announce unified completion',async()=>{
+ const h=host(),entered=latch(),release=latch();h.m.sync=async()=>{entered.open();await release.promise;throw Error('MLS checkpoint failed');};
+ const work=h.c.performSync(true),failure=assert.rejects(work,/MLS checkpoint failed/);await entered.promise;await new Promise(r=>setImmediate(r));release.open();await failure;
+ assert.equal(h.events.includes('sync.completed'),false);assert.equal(h.c._lastSyncCompletedAt,0);assert.equal(h.events.filter(e=>e==='sync.failed').length,1,'MLS rejection must terminate UI syncing once');assert.equal(h.c._syncInProgress,false);await h.close();
+});
+
+
+test('standard branch failure publishes one combined terminal event',async()=>{
+ const h=host();h.c._performSyncInternal=async()=>{throw Error('standard checkpoint failed')};
+ try{await assert.rejects(h.c.performSync(true),/standard checkpoint failed/);assert.equal(h.events.filter(e=>e==='sync.failed').length,1);assert.equal(h.events.includes('sync.completed'),false);assert.equal(h.c._syncInProgress,false);}finally{await h.close();}
+});
+test('retired MLS failure cannot publish failure into a replacement owner',async()=>{
+ const h=host(),entered=latch(),release=latch();h.m.sync=async()=>{entered.open();await release.promise;throw Error('retired MLS failure')};
+ try{const work=h.c.performSync(true),failure=assert.rejects(work,/retired MLS failure/);await entered.promise;h.c.encryptionManager={initialized:true};release.open();await failure;assert.equal(h.events.includes('sync.failed'),false);assert.equal(h.events.includes('sync.completed'),false);}finally{await h.close();}
+});

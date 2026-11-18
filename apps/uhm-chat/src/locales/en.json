@@ -668,7 +668,9 @@
     "create": "Create",
     "creating": "Creating...",
     "choose_icon": "Choose Icon",
-    "error_processing_image": "Error processing image"
+    "error_processing_image": "Error processing image",
+    "choose_other_emoji": "Choose another emoji",
+    "search_emoji": "Search emoji"
   },
   "roles": {
     "owner": "Owner",

@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),test=require('node:test'),fs=require('node:fs'),Module=require('node:module'),path=require('node:path'),ts=require('typescript');
 const filename=path.resolve(__dirname,'../src/utils/urlChannelRestore.ts'),fixture=new Module(filename,module);
 fixture._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,filename);
-const {beginUrlChannelRestore}=fixture.exports;
+const {beginUrlChannelRestore,isUrlChannelRestorePending}=fixture.exports;
 const settle=()=>new Promise(r=>setImmediate(r));
 function harness(t){
  const timers=[],ready=[],errors=[];let cached,listener,slow=0,queries=0,unsubscribes=0,resolve,reject;
@@ -32,4 +32,23 @@ test('hydration between initial read and subscription is resolved without a poll
 });
 test('synchronous subscription delivery cannot leave a live listener or duplicate selection',t=>{
  const h=harness(t),subscribe=h.options.subscribe,channel={cid:'sync'};h.options.subscribe=fn=>{const off=subscribe(fn);h.setCached(channel);fn();return off;};beginUrlChannelRestore(h.options);assert.deepEqual(h.ready,[channel]);assert.equal(h.unsubscribes(),1);h.event();assert.equal(h.ready.length,1);
+});
+
+
+test('loaded ChatView is not covered by a global sync progress or failure state',()=>{
+ for(const status of ['idle','syncing','synced','error']){
+  const state={hasUrlChannel:true,notice:'none',channelRestored:true,messagesReady:true,globalSyncStatus:status};
+  assert.equal(isUrlChannelRestorePending(state),false);
+ }
+});
+test('initial URL hydration and message layout still own the skeleton',()=>{
+ const state={hasUrlChannel:true,notice:'none',channelRestored:false,messagesReady:false};
+ assert.equal(isUrlChannelRestorePending(state),true);
+ assert.equal(isUrlChannelRestorePending({...state,channelRestored:true}),true);
+ assert.equal(isUrlChannelRestorePending({...state,messagesReady:true}),true);
+ assert.equal(isUrlChannelRestorePending({...state,channelRestored:true,messagesReady:true}),false);
+});
+test('slow/error URL restore notices and no-channel route remain visible',()=>{
+ for(const notice of ['slow','error'])assert.equal(isUrlChannelRestorePending({hasUrlChannel:true,notice,channelRestored:false,messagesReady:false}),false);
+ assert.equal(isUrlChannelRestorePending({hasUrlChannel:false,notice:'none',channelRestored:false,messagesReady:false}),false);
 });

@@ -5,6 +5,7 @@ import { isDirectChannel } from '../channelTypeUtils';
 import { getLastMessagePreview } from '../utils';
 import { SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk';
 import { useChatCore } from './useChatCore';
+import { getChannelMessageTime } from '../channelListActivity';
 
 /** Preview data for the most recent message across the topic group */
 export type LatestMessagePreview = {
@@ -70,6 +71,7 @@ export function useTopicGroupUpdates(
 
     // Parent channel events
     subs.push(channel.on('message.new', bump));
+    subs.push(channel.on('message.updated', bump));
     subs.push(channel.on('message.read', bump));
     subs.push(channel.on('message.deleted', bump));
     subs.push(channel.on('channel.updated', bump));
@@ -79,6 +81,9 @@ export function useTopicGroupUpdates(
     subs.push(client.on('e2ee.message_decrypted' as any, handleE2eePreviewUpdate));
     subs.push(client.on('e2ee.local_messages_loaded' as any, handleE2eePreviewUpdate));
     subs.push(client.on('e2ee.post_join_sync' as any, handleE2eePreviewUpdate));
+    subs.push(client.on('e2ee.sync_state' as any, handleE2eePreviewUpdate));
+    subs.push(client.on('sync.completed', bump));
+    subs.push(client.on('sync.failed', bump));
     subs.push(client.on('channel.deleted', handleE2eePreviewUpdate));
     subs.push(client.on('notification.channel_deleted', handleE2eePreviewUpdate));
 
@@ -86,6 +91,7 @@ export function useTopicGroupUpdates(
     const currentTopics = channel.state?.topics || [];
     currentTopics.forEach((t: Channel) => {
       subs.push(t.on('message.new', bump));
+      subs.push(t.on('message.updated', bump));
       subs.push(t.on('message.read', bump));
       subs.push(t.on('message.deleted', bump));
       subs.push(t.on('channel.updated', bump));
@@ -100,13 +106,9 @@ export function useTopicGroupUpdates(
   }, [channel, channel.state?.topics, channel.state?.topics?.length, bump]);
 
   // Helper: get sort timestamp for a channel/topic
-  const getTopicTime = (t: Channel): number => {
-    const lastMsg = t.state?.latestMessages?.slice(-1)[0];
-    if (lastMsg?.created_at) return new Date(lastMsg.created_at).getTime();
-    if (t.data?.last_message_at) return new Date(t.data.last_message_at as string | Date).getTime();
-    if (t.data?.created_at) return new Date(t.data.created_at as string | Date).getTime();
-    return 0;
-  };
+  const getTopicTime = (topic: Channel): number =>
+    getChannelMessageTime(channel.getClient().activeChannels[topic.cid] || topic);
+
 
   // Helper: check if user is excluded from unread counting
   const isExcludedUser = (ch: Channel): boolean => {
@@ -187,7 +189,8 @@ export function useTopicGroupUpdates(
     // If banned from the main group, hide previews for all sub-items
     if (isExcludedUser(channel)) return null;
 
-    const allChannels = [channel, ...(channel.state?.topics || [])];
+    const client = channel.getClient();
+    const allChannels = [channel, ...(channel.state?.topics || [])].map(ch => client.activeChannels[ch.cid] || ch);
 
     let bestTime = 0;
     let bestChannel: Channel | null = null;
@@ -206,7 +209,7 @@ export function useTopicGroupUpdates(
     if (!preview.text && !preview.user) return null;
 
     // sourceName is non-null only when the message comes from a sub-topic (not the parent/general)
-    const isFromSubTopic = bestChannel !== channel;
+    const isFromSubTopic = bestChannel.cid !== channel.cid;
     const sourceName = isFromSubTopic ? (bestChannel.data?.name as string || null) : null;
 
     return {

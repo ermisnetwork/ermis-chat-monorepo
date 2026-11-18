@@ -34,3 +34,14 @@ export function beginUrlChannelRestore<T>(options: {
   } catch { fail(); }
   return stop;
 }
+
+/** Loaded channel content is independent of account-wide background sync progress. */
+export function isUrlChannelRestorePending(options: {
+  hasUrlChannel: boolean;
+  notice: 'none' | 'slow' | 'error';
+  channelRestored: boolean;
+  messagesReady: boolean;
+}): boolean {
+  return options.hasUrlChannel && options.notice === 'none' &&
+    (!options.channelRestored || !options.messagesReady);
+}

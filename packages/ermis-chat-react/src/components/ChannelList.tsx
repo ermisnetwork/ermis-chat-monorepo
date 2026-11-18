@@ -3,7 +3,7 @@ import { VList as _VList, type VListHandle } from 'virtua';
 const VList = _VList as any;
 import type { Channel, Event, ChannelFilters } from '@ermis-network/ermis-chat-sdk';
 import { useChatCore } from '../hooks/useChatCore';
-import { useChannelListUpdates } from '../hooks/useChannelListUpdates';
+import { sortChannelsByRecency, useChannelListUpdates } from '../hooks/useChannelListUpdates';
 import { useOnlineUsers } from '../hooks/useOnlineUsers';
 import { getLastMessagePreview, getUserDisplayName } from '../utils';
 import { useChannelRowUpdates } from '../hooks/useChannelRowUpdates';
@@ -617,7 +617,9 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       const result = (options as {message_limit?:number})?.message_limit===0
         ? await client.loadChannelMetadata(filters,sort,{}, {refresh})
         : await client.queryChannels(filters, sort, options as { message_limit?: number });
-      setChannels(result);
+      // Backend metadata pages use update order. The default presentation is
+      // message recency; a reconnect query must not undo completed-sync sorting.
+      setChannels(sort.length === 0 ? sortChannelsByRecency(result) : result);
     } catch (err) {
       console.error('Failed to load channels:', err);
       setError(err);
@@ -631,7 +633,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   }, [loadChannels]);
 
   // Real-time: List manipulation (move to top, add, delete)
-  useChannelListUpdates(channels, setChannels, scrollToTopOnOwnMessage ? handleOwnMessageNew : undefined);
+  useChannelListUpdates(channels, setChannels, scrollToTopOnOwnMessage ? handleOwnMessageNew : undefined, sort.length === 0);
 
   // Online status: compute set of online friend user IDs (skip if disabled)
   const onlineUsers = useOnlineUsers(showOnlineStatus ? channels : []);
@@ -799,6 +801,8 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                 videoMessageLabel={videoMessageLabel}
                 voiceRecordingMessageLabel={voiceRecordingMessageLabel}
                 fileMessageLabel={fileMessageLabel}
+                encryptedMessageLabel={encryptedMessageLabel}
+                encryptedMessageUnavailableLabel={encryptedMessageUnavailableLabel}
                 systemMessageTranslations={systemMessageTranslations}
                 signalMessageTranslations={signalMessageTranslations}
                 showTopicPills={showTopicPills}

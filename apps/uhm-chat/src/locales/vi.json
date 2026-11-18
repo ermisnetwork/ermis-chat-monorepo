@@ -668,7 +668,9 @@
     "create": "Tạo",
     "creating": "Đang tạo...",
     "choose_icon": "Chọn biểu tượng",
-    "error_processing_image": "Lỗi xử lý hình ảnh"
+    "error_processing_image": "Lỗi xử lý hình ảnh",
+    "choose_other_emoji": "Chọn emoji khác",
+    "search_emoji": "Tìm emoji"
   },
   "roles": {
     "owner": "Chủ kênh",

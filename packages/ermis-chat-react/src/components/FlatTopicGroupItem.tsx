@@ -56,6 +56,8 @@ type FlatTopicGroupItemProps = {
   videoMessageLabel?: React.ReactNode;
   voiceRecordingMessageLabel?: React.ReactNode;
   fileMessageLabel?: React.ReactNode;
+  encryptedMessageLabel?: React.ReactNode;
+  encryptedMessageUnavailableLabel?: React.ReactNode;
   systemMessageTranslations?: SystemMessageTranslations;
   signalMessageTranslations?: SignalMessageTranslations;
   showTopicPills?: boolean;
@@ -89,6 +91,8 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   videoMessageLabel,
   voiceRecordingMessageLabel,
   fileMessageLabel,
+  encryptedMessageLabel,
+  encryptedMessageUnavailableLabel,
   systemMessageTranslations,
   signalMessageTranslations,
   showTopicPills = false,
@@ -110,6 +114,8 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
       videoMessageLabel,
       voiceRecordingMessageLabel,
       fileMessageLabel,
+      encryptedMessageLabel,
+      encryptedMessageUnavailableLabel,
       systemMessageTranslations,
       signalMessageTranslations,
     }

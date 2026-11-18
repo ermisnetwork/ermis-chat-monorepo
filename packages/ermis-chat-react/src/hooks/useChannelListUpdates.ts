@@ -4,6 +4,15 @@ import { useChatCore } from './useChatCore';
 import { isDirectChannel, isGroupChannel } from '../channelTypeUtils';
 import { isPendingMember } from '../channelRoleUtils';
 
+import { getChannelListTime } from '../channelListActivity';
+
+const getLastMessageTime = getChannelListTime;
+
+export const sortChannelsByRecency = (channels: Channel[]): Channel[] =>
+  channels.map((channel) => ({channel, time: getLastMessageTime(channel)}))
+    .sort((a, b) => b.time - a.time)
+    .map(({channel}) => channel);
+
 const getChannelListRevision = (channels: Channel[]) =>
   JSON.stringify(
     channels.map((channel) => {
@@ -11,6 +20,7 @@ const getChannelListRevision = (channels: Channel[]) =>
       const lastMessage = channel.state?.latestMessages?.[channel.state.latestMessages.length - 1] as any;
       return [
         channel.cid,
+        getLastMessageTime(channel),
         (channel.state as any)?.unreadCount,
         membership?.channel_role,
         membership?.banned,
@@ -28,6 +38,12 @@ const getChannelListRevision = (channels: Channel[]) =>
         lastMessage?.text,
         lastMessage?.updated_at,
         lastMessage?.deleted_at,
+        (channel.state?.topics || []).map((topic) => {
+          const current = channel.getClient?.()?.activeChannels?.[topic.cid] || topic;
+          const head = current.state?.latestMessages?.slice(-1)[0];
+          return [current.cid, getLastMessageTime(current), head?.id, head?.text,
+            head?.type, head?.display_type, head?.updated_at, head?.deleted_at];
+        }),
       ];
     }),
   );
@@ -35,7 +51,7 @@ const getChannelListRevision = (channels: Channel[]) =>
 /**
  * Subscribes to real-time events and keeps the channel list in sync:
  *
- *  1. `message.new`  → moves channel to top, auto-calls `markRead()` if
+ *  1. `message.new`  → ranks by canonical activity, auto-calls `markRead()` if
  *                       the channel is currently active
  *  2. `message.read`  → triggers re-render so the unread badge disappears
  *
@@ -45,8 +61,9 @@ const getChannelListRevision = (channels: Channel[]) =>
  */
 export function useChannelListUpdates(
   channels: Channel[],
-  setChannels: React.Dispatch<React.SetStateAction<Channel[]>>,
+  setChannelsRaw: React.Dispatch<React.SetStateAction<Channel[]>>,
   onOwnMessageNew?: () => void,
+  sortByRecency = true,
 ): void {
   const { client, activeChannel, setActiveChannel } = useChatCore();
 
@@ -67,6 +84,15 @@ export function useChannelListUpdates(
   }, [channels]);
 
   useEffect(() => {
+    const orderChannels = (rows: Channel[]) => sortByRecency ? sortChannelsByRecency(rows) : rows;
+    // Every list writer shares canonical order. A late replay or membership
+    // callback must not undo a previous sync/cache publication.
+    const setChannels: React.Dispatch<React.SetStateAction<Channel[]>> = (update) => {
+      setChannelsRaw((previous) => {
+        const next = typeof update === 'function' ? update(previous) : update;
+        return next === previous ? previous : orderChannels(next);
+      });
+    };
     // --- message.new: re-sort + auto mark-read ---
     const handleNewMessage = (event: Event) => {
       const eventCid = event.cid;
@@ -91,34 +117,11 @@ export function useChannelListUpdates(
       }
 
       setChannels((prev) => {
-        let targetIdx = prev.findIndex((ch) => ch.cid === eventCid);
-
-        // If not found directly, check if this is a topic message — move the parent channel to top
-        if (targetIdx < 0) {
-          const topicChannel = client.activeChannels[eventCid];
-          const parentCid = topicChannel?.data?.parent_cid as string | undefined;
-          if (parentCid) {
-            targetIdx = prev.findIndex((ch) => ch.cid === parentCid);
-          }
-        }
-
-        if (targetIdx <= 0) {
-          // Already at top or not found — just create a new reference
-          return targetIdx === 0 ? [...prev] : prev;
-        }
-
-        const channel = prev[targetIdx];
-
-        // Don't move banned channels to the top
-        if (channel.state?.membership?.banned) {
-          return [...prev];
-        }
-
-        // Move channel to the top
-        const updated = [...prev];
-        const [ch] = updated.splice(targetIdx, 1);
-        updated.unshift(ch);
-        return updated;
+        const parentCid = client.activeChannels[eventCid]?.data?.parent_cid;
+        // Receipt may be a replay of an older message. Refresh the affected
+        // row, then let the shared writer rank canonical parent/topic activity.
+        if (!prev.some((ch) => ch.cid === eventCid || ch.cid === parentCid)) return prev;
+        return [...prev];
       });
 
       // Notify the component layer that the current user sent a message
@@ -322,7 +325,17 @@ export function useChannelListUpdates(
       setChannels((prev) => [...prev]);
     };
 
-    // --- sync.completed: force channel list refresh so unread badges update ---
+    const publishCurrentChannels = () => {
+      const nextRevision = getChannelListRevision(orderChannels(channelsRef.current));
+      if (nextRevision === renderedRevisionRef.current) return;
+
+      renderedRevisionRef.current = nextRevision;
+      // Offline replay updates canonical timestamps without message.new callbacks.
+      // Stable sort keeps equal/missing timestamps in their existing order. The
+      // ChannelList renderer still owns pinned/pending grouping.
+      setChannels((previous) => [...previous]);
+    };
+    // --- sync.completed: publish in-place state changes and restore recency order ---
     // applySyncResult() mutates channel.state directly without dispatching events,
     // so React.memo'd ChannelRow components won't re-render. This ensures they do.
     const handleSyncCompleted = () => {
@@ -341,11 +354,7 @@ export function useChannelListUpdates(
         }
       }
 
-      const nextRevision = getChannelListRevision(channelsRef.current);
-      if (nextRevision === renderedRevisionRef.current) return;
-
-      renderedRevisionRef.current = nextRevision;
-      setChannels((prev) => [...prev]);
+      publishCurrentChannels();
     };
 
     const sub1 = client.on('message.new', handleNewMessage);
@@ -370,6 +379,17 @@ export function useChannelListUpdates(
     const sub15 = client.on('member.joined', handleMemberUpdated);
     const sub16 = client.on('sync.completed', handleSyncCompleted);
     const sub17 = client.on('notification.channel_deleted', handleChannelDeleted);
+    // Durable MLS/cache publication can finish after a metadata refresh or run
+    // independently of global sync. These callbacks only read current state.
+    const sub18 = client.on('e2ee.post_join_sync', publishCurrentChannels);
+    const sub19 = client.on('e2ee.sync_state', publishCurrentChannels);
+    const sub20 = client.on('connection.recovered', handleSyncCompleted);
+    const sub21 = client.on('e2ee.local_messages_loaded', publishCurrentChannels);
+    const sub22 = client.on('sync.failed', publishCurrentChannels);
+    const sub23 = client.on('e2ee.message_decrypted', publishCurrentChannels);
+    const sub24 = client.on('message.updated', publishCurrentChannels);
+    const sub25 = client.on('channels.queried', publishCurrentChannels);
+    const sub26 = client.on('channel.updated', handleGenericUpdate);
 
     return () => {
       sub1.unsubscribe();
@@ -389,6 +409,15 @@ export function useChannelListUpdates(
       sub15.unsubscribe();
       sub16.unsubscribe();
       sub17.unsubscribe();
+      sub18.unsubscribe();
+      sub19.unsubscribe();
+      sub20.unsubscribe();
+      sub21.unsubscribe();
+      sub22.unsubscribe();
+      sub23.unsubscribe();
+      sub24.unsubscribe();
+      sub25.unsubscribe();
+      sub26.unsubscribe();
     };
-  }, [client, setChannels, setActiveChannel]);
+  }, [client, setChannelsRaw, setActiveChannel, sortByRecency]);
 }

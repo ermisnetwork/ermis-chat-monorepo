@@ -49,7 +49,7 @@ import { useSyncStatus } from '@/hooks/useSyncStatus'
 import { useRecoveryGateAcknowledgement } from '@/hooks/useRecoveryGateAcknowledgement'
 import { isSafari } from '@/utils/browser'
 import { toast } from 'sonner'
-import { beginUrlChannelRestore } from '@/utils/urlChannelRestore'
+import { beginUrlChannelRestore, isUrlChannelRestorePending } from '@/utils/urlChannelRestore'
 
 const CHANNEL_LIST_FILTERS = { type: ['messaging', 'team'] } as any
 const UHM_MESSAGE_RENDERERS = { signal: UhmSignalMessage, poll: UhmPollMessage }
@@ -910,15 +910,16 @@ export function ChatPage() {
     return isTopic ? t('chat.info_title_topic') : t('chat.info_title_channel')
   }, [infoChannel, activeChannel, t])
 
-  // Show full-page skeleton overlay while the app is bootstrapping.
-  // The overlay stays visible until ALL THREE conditions are met:
-  // 1. URL restore has completed (activeChannel is set)
-  // 2. Sync is not actively running (no visible scroll jumping from sync)
-  // 3. The message list has loaded and scrolled to the correct position
-  // This ensures the user never sees intermediate scroll jumps or blank states.
+  // Cover only the initial channel restore/message layout. Global sync failures
+  // and background work stay in the existing nonblocking status banner; they
+  // cannot hide an initialized, loaded channel indefinitely.
   const hasUrlChannel = !!searchParams.get('channel')
-  const isSyncing = syncState.status === 'syncing'
-  const isRestoringFromUrl = hasUrlChannel && urlRestoreNotice === 'none' && (!hasAttemptedRestore || isSyncing || !isMessageListReady)
+  const isRestoringFromUrl = isUrlChannelRestorePending({
+    hasUrlChannel,
+    notice: urlRestoreNotice,
+    channelRestored: hasAttemptedRestore,
+    messagesReady: isMessageListReady,
+  })
 
   const CustomMemberItem = useCallback((props: any) => (
     <UhmMemberItem {...props} onUserClick={setProfileUserId} />
@@ -1087,7 +1088,7 @@ export function ChatPage() {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col relative min-w-0">
         {/* Message area skeleton — only covers the chat area (not the sidebar).
-            Stays visible until URL restore + sync + message load are all done. */}
+            Stays visible until URL restore and initial message layout are done. */}
         {hasUrlChannel && (
           <div className={`absolute inset-0 z-[50] flex flex-col bg-white dark:bg-[#13111c] transition-opacity duration-300 ease-out ${
             isRestoringFromUrl ? 'opacity-100' : 'opacity-0 pointer-events-none'

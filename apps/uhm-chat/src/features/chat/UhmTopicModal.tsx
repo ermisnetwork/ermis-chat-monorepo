@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Loader2, LockKeyhole } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { TopicModalProps } from '@ermis-network/ermis-chat-react';
@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useChatCore } from '@ermis-network/ermis-chat-react';
+import { isTopicEmoji } from './topicEmoji';
+import { EmojiPicker } from 'frimousse';
 
 const DEFAULT_TOPIC_ICONS = ['💬', '🔥', '🚀', '⭐', '💡', '🎉', '📌', '📁', '🎨', '💻', '📈', '🤝', '🌈', '⚡', '🤖', '🎮', '🎧', '📚', '🍕', '⚽'];
 
@@ -24,7 +26,7 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
   saveButtonLabel: propSaveLabel,
   savingButtonLabel: propSavingLabel,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { client, activeChannel } = useChatCore();
   
   // Use props if provided, otherwise use localized strings
@@ -46,10 +48,12 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
   const [emoji, setEmoji] = useState(originalEmoji);
   const [description, setDescription] = useState(originalDescription);
   const [isSaving, setIsSaving] = useState(false);
+  const [showMoreEmoji, setShowMoreEmoji] = useState(false);
+  const moreEmojiButton = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleSave = useCallback(async () => {
-    if (!name.trim() || !emoji) return;
+    if (!name.trim() || !isTopicEmoji(emoji)) return;
 
     setIsSaving(true);
     setError(null);
@@ -64,7 +68,7 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
 
         const payload: any = {};
         if (name.trim() !== originalName) payload.name = name.trim();
-        if (emoji !== originalEmoji) payload.image = `emoji://${emoji}`;
+        if (emoji.trim() !== originalEmoji) payload.image = `emoji://${emoji.trim()}`;
         if (description.trim() !== originalDescription) payload.description = description.trim();
 
         if (Object.keys(payload).length > 0 && topic.cid) {
@@ -77,7 +81,7 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
         
         const payload: any = {
           name: name.trim(),
-          image: `emoji://${emoji}`,
+          image: `emoji://${emoji.trim()}`,
           description: description.trim(),
         };
 
@@ -91,13 +95,20 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
     }
   }, [client.activeChannels, activeChannel, propParentChannel, topic, name, emoji, description, originalName, originalEmoji, originalDescription, onClose]);
 
-  const isValid = name.trim().length > 0 && emoji.length > 0;
+  const emojiValid = isTopicEmoji(emoji);
+  const isValid = name.trim().length > 0 && emojiValid;
   const targetParentChannel = propParentChannel || activeChannel;
   const inheritsE2ee = !topic && targetParentChannel?.data?.mls_enabled === true;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isSaving && onClose()}>
-      <DialogContent className="sm:max-w-[380px] bg-white dark:bg-[#1a1828] border-zinc-200 dark:border-[#3a3555] shadow-2xl p-0 overflow-hidden">
+      <DialogContent onEscapeKeyDown={(event) => {
+        if (showMoreEmoji) {
+          event.preventDefault();
+          setShowMoreEmoji(false);
+          moreEmojiButton.current?.focus();
+        }
+      }} className="sm:max-w-[380px] bg-white dark:bg-[#1a1828] border-zinc-200 dark:border-[#3a3555] shadow-2xl p-0 max-h-[90dvh] overflow-y-auto">
         <DialogHeader className="p-4 pb-0 text-center">
           <DialogTitle className="text-base font-bold">{title}</DialogTitle>
         </DialogHeader>
@@ -106,7 +117,7 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
           {/* Top Row: Icon + Name */}
           <div className="flex items-end gap-3">
             <div className="flex flex-col gap-1.5 shrink-0">
-              <Label className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Icon</Label>
+              <span aria-hidden="true" className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">{t('edit.choose_icon')}</span>
               <div className="w-12 h-12 flex items-center justify-center text-2xl bg-zinc-50/50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700/50 shadow-sm">
                 {emoji || '💬'}
               </div>
@@ -125,22 +136,63 @@ export const UhmTopicModal: React.FC<TopicModalProps> = React.memo(({
             </div>
           </div>
 
-          {/* Compact Emoji Grid */}
-          <div className="space-y-1.5">
-            <Label className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">{t('edit.choose_icon')}</Label>
-            <div className="grid grid-cols-10 gap-1 p-1.5 bg-zinc-50/30 dark:bg-zinc-800/20 rounded-lg border border-zinc-100 dark:border-zinc-800/50">
+          <div className="space-y-2">
+            <span id="topic-icon-label" className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">{t('edit.choose_icon')}</span>
+            <div role="group" aria-labelledby="topic-icon-label" className="grid grid-cols-10 gap-1 p-1.5 bg-zinc-50/30 dark:bg-zinc-800/20 rounded-lg border border-zinc-100 dark:border-zinc-800/50">
               {DEFAULT_TOPIC_ICONS.map((icon) => (
                 <button
                   key={icon}
                   type="button"
-                  onClick={() => setEmoji(icon)}
-                  className={`w-7.5 h-7.5 flex items-center justify-center text-base rounded-md transition-all hover:bg-white dark:hover:bg-zinc-700 ${emoji === icon ? 'bg-white dark:bg-zinc-700 shadow-sm scale-110 border border-primary/20' : 'opacity-60 hover:opacity-100'}`}
+                  aria-pressed={emoji === icon}
+                  onClick={() => { setEmoji(icon); setShowMoreEmoji(false); }}
+                  className={`aspect-square min-w-0 flex items-center justify-center text-base rounded-md transition-colors hover:bg-white dark:hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${emoji === icon ? 'bg-white dark:bg-zinc-700 shadow-sm border border-primary/40' : 'opacity-60 hover:opacity-100'}`}
                   disabled={isSaving}
                 >
                   {icon}
                 </button>
               ))}
             </div>
+            <Button
+              ref={moreEmojiButton}
+              type="button"
+              variant="outline"
+              className="w-full text-xs"
+              aria-expanded={showMoreEmoji}
+              aria-controls="topic-full-emoji-picker"
+              disabled={isSaving}
+              onClick={() => setShowMoreEmoji((visible) => !visible)}
+            >
+              {t('edit.choose_other_emoji')}
+            </Button>
+            {showMoreEmoji && (
+              <EmojiPicker.Root
+                id="topic-full-emoji-picker"
+                className="isolate flex h-[280px] w-full flex-col rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-[#1a1828]"
+                locale={i18n.resolvedLanguage?.startsWith('vi') ? 'vi' : 'en'}
+                onEmojiSelect={({ emoji: selected }) => {
+                  if (isSaving || !isTopicEmoji(selected)) return;
+                  setEmoji(selected);
+                  setShowMoreEmoji(false);
+                  moreEmojiButton.current?.focus();
+                }}
+              >
+                <EmojiPicker.Search
+                  autoFocus
+                  aria-label={t('edit.search_emoji')}
+                  placeholder={t('edit.search_emoji')}
+                  className="m-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary dark:bg-zinc-800"
+                />
+                <EmojiPicker.Viewport className="relative min-h-0 flex-1">
+                  <EmojiPicker.Loading className="p-3 text-sm text-muted-foreground">{t('chat.info_loading')}</EmojiPicker.Loading>
+                  <EmojiPicker.Empty className="p-3 text-sm text-muted-foreground">{t('search.no_results')}</EmojiPicker.Empty>
+                  <EmojiPicker.List className="select-none pb-2" components={{
+                    CategoryHeader: ({ category, ...props }) => <div {...props} className="bg-white px-2 py-1 text-xs text-muted-foreground dark:bg-[#1a1828]">{category.label}</div>,
+                    Row: ({ children, ...props }) => <div {...props} className="flex justify-between px-1">{children}</div>,
+                    Emoji: ({ emoji: item, ...props }) => <button {...props} type="button" disabled={isSaving} className="flex size-8 items-center justify-center rounded-lg text-xl hover:bg-zinc-100 data-[active]:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:hover:bg-zinc-800 dark:data-[active]:bg-zinc-800">{item.emoji}</button>,
+                  }} />
+                </EmojiPicker.Viewport>
+              </EmojiPicker.Root>
+            )}
           </div>
 
           <div className="space-y-1.5">

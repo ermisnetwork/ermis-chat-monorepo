@@ -79,3 +79,78 @@ test('successful refresh replaces cached channel membership, not only its HTTP c
   const after=await refresh(client);assert.deepEqual(after.map(c=>c.cid),['team:after']);
   const shared=await client.loadChannelMetadata({type:'team'});assert.deepEqual(shared.map(c=>c.cid),['team:after']);assert.equal(count(),2);
 }));
+
+function reconnectFixture({failSync=false,options={message_limit:0},sort=[]}={}) {
+  const client=new ErmisChat('fixture','project','https://fixture.invalid',{
+    browser:false,logger:()=>{},recoverStateOnReconnect:true,
+    recoveryConfig:{filter:{type:['team']},sort,options},
+  });
+  client._setUser({id:'fixture',name:'Fixture'});
+  client._coldStartSyncState='ready';
+  const old='2026-11-18T10:00:00Z',latest='2026-11-18T12:34:23Z';
+  const channel=client.channel('team','unopened');
+  channel.initialized=true;channel.data.mls_enabled=true;
+  channel.state.addMessagesSorted([{id:'old',text:'fixture',created_at:old}]);
+  const calls=[],events=[];
+  client.on(e=>events.push(e.type));
+  client.post=async(_url,body)=>{
+    calls.push({kind:'metadata',body});
+    const messages=body.message_limit===0?[]:[{id:'fresh-unopened',text:'fixture',created_at:latest}];
+    return {channels:[{channel:{id:'unopened',cid:channel.cid,type:'team',mls_enabled:true,members:[]},messages,read:[]}]};
+  };
+  client.performSync=async()=>{
+    calls.push({kind:'sync',head:channel.state.latestMessages.at(-1)?.id});
+    if(failSync)throw Error('fixture protocol checkpoint held');
+  };
+  return{client,channel,calls,events,latest};
+}
+
+for(const failSync of [false,true])test('reconnect refreshes unopened heads before '+(failSync?'held':'successful')+' bounded sync without channel entry',async()=>{
+  const {client,channel,calls,events,latest}=reconnectFixture({failSync});
+  await client.recoverState();
+  assert.equal(calls[0]?.kind,'metadata','warm selection must see fresh activity');
+  assert.equal(calls.filter(x=>x.kind==='metadata').length,1,'reuse the successful metadata read on sync failure');
+  assert.equal(calls[0].body.message_limit,1,'zero previews cannot refresh baseline recency');
+  assert.deepEqual(calls[0].body.sort,[{field:'last_message_at',direction:-1}]);
+  assert.equal(calls.find(x=>x.kind==='sync')?.head,'fresh-unopened');
+  assert.equal(channel.state.last_message_at.toISOString(),new Date(latest).toISOString());
+  assert.equal(events.filter(x=>x==='connection.recovered').length,1);
+  assert.equal(events.includes('sync.completed'),false,'metadata cannot manufacture protocol completion');
+});
+
+test('reconnect retains explicit query sort and larger configured preview limit',async()=>{
+  const sort=[{field:'created_at',direction:1}],{client,calls}=reconnectFixture({options:{message_limit:7},sort});
+  await client.recoverState();
+  assert.deepEqual(calls[0]?.body?.sort,sort);
+  assert.equal(calls[0]?.body?.message_limit,7);
+});
+
+test('metadata outage does not suppress existing delta sync',async()=>{
+  const {client,calls}=reconnectFixture();
+  client.post=async()=>{calls.push({kind:'metadata_failed'});throw Error('fixture metadata unavailable');};
+  await client.recoverState();
+  assert.equal(calls.filter(x=>x.kind==='sync').length,1);
+});
+
+test('reconnect list head hydration does not request per-channel archive pages',async()=>{
+  const {client}=reconnectFixture(),post=client.post;let archiveReads=0;
+  client.encryptionManager={storage:{loadMessages:async()=>new Map()},
+    restoreHistoryPage:async()=>{archiveReads++;}};
+  client.post=async(...args)=>{
+    const result=await post(...args);
+    result.channels[0].messages=result.channels[0].messages.map(row=>({...row,text:undefined,
+      content_type:'mls',mls_ciphertext:'AQI=',mls_epoch:1}));
+    return result;
+  };
+  await client.recoverState();
+  assert.equal(archiveReads,0,'metadata must leave archive demand to the bounded warm preview lane');
+});
+
+test('late reconnect metadata cannot sync or publish for a replacement account',async()=>{
+  const {client,calls,events}=reconnectFixture({failSync:true}),entered=deferred(),release=deferred(),post=client.post;
+  client.post=async(...args)=>{entered.resolve();await release.promise;return post(...args);};
+  const old=client.recoverState(),rejected=assert.rejects(old,e=>e.code==='recovery_scope_changed');
+  await entered.promise;client._setUser({id:'replacement'});release.resolve();await rejected;
+  assert.equal(calls.filter(x=>x.kind==='sync').length,0);
+  assert.equal(events.includes('connection.recovered'),false);
+});

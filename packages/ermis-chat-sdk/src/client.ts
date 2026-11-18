@@ -1901,53 +1901,69 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   };
 
   recoverState = async () => {
-    // A startup snapshot may predate membership changes while disconnected.
-    // Existing queryChannels coalescing still shares any concurrent reads.
+    const owner = this._captureAuthScope();
+    // A startup snapshot may predate membership and activity while disconnected.
     this._startupMetadata.clear();
     this.logger('info', 'client:recoverState() - Start of recoverState', {
       tags: ['connection'],
     });
 
-    // Try Event Sourcing sync first (faster, sequence-based)
     const cids = Object.keys(this.activeChannels);
     if (cids.length && this.recoverStateOnReconnect) {
+      const {
+        filter = { type: ['messaging', 'team', 'meeting'] } as ChannelFilters,
+        sort = [],
+        options = { message_limit: 1 },
+      } = this.options.recoveryConfig || {};
+      const refreshChannels = () => {
+        owner.assertCurrent();
+        // One current envelope per route supplies canonical recency even for
+        // unopened channels outside the previous warm set. Zero-preview reads
+        // cannot refresh activity on the baseline backend.
+        return options.message_limit === 0 || options.message_limit === 1
+          ? this.loadChannelMetadata(filter, sort, {}, { refresh: true })
+          : this.queryChannels(filter, sort, options);
+      };
+      let metadataRefreshed = false;
       try {
+        await refreshChannels();
+        owner.assertCurrent();
+        metadataRefreshed = true;
+      } catch {
+        owner.assertCurrent();
+        // A metadata outage must not suppress the existing delta-sync lane.
+        this.logger('warn', 'client:recoverState() - Activity refresh unavailable; continuing event sync', {
+          tags: ['connection', 'sync'],
+        });
+      }
+
+      try {
+        // Warm scope selection now uses freshly hydrated list activity.
         await this.performSync();
+        owner.assertCurrent();
         this.logger('info', 'client:recoverState() - Event Sourcing sync completed', {
           tags: ['connection', 'client', 'sync'],
         });
-        this.dispatchEvent({
-          type: 'connection.recovered',
-        } as Event<ErmisChatGenerics>);
       } catch (syncErr) {
-        this.logger('warn', 'client:recoverState() - Event sync failed, falling back to queryChannels', {
+        owner.assertCurrent();
+        this.logger('warn', 'client:recoverState() - Event sync failed; retaining metadata recovery', {
           err: syncErr,
           tags: ['connection', 'client', 'sync'],
         });
-
-        // Fallback to legacy queryChannels recovery
-        this.logger('info', `client:recoverState() - Start the querying of ${cids.length} channels`, {
-          tags: ['connection', 'client'],
-        });
-
-        const {
-          filter = { type: ['messaging', 'team', 'meeting'] } as ChannelFilters,
-          sort = [],
-          options = { message_limit: 1 },
-        } = this.options.recoveryConfig || {};
-        await this.queryChannels(filter, sort, options);
-
-        this.logger('info', 'client:recoverState() - Querying channels finished', { tags: ['connection', 'client'] });
-        this.dispatchEvent({
-          type: 'connection.recovered',
-        } as Event<ErmisChatGenerics>);
+        // Reuse the successful head read. It cannot repair a held MLS cursor
+        // or authorize sync.completed, and querying it again adds no evidence.
+        if (!metadataRefreshed) {
+          await refreshChannels();
+          owner.assertCurrent();
+        }
       }
-    } else {
-      this.dispatchEvent({
-        type: 'connection.recovered',
-      } as Event<ErmisChatGenerics>);
     }
 
+    owner.assertCurrent();
+    this.dispatchEvent({
+      type: 'connection.recovered',
+    } as Event<ErmisChatGenerics>);
+    owner.assertCurrent();
     this.wsPromise = Promise.resolve();
     this.setUserPromise = Promise.resolve();
   };
@@ -2398,11 +2414,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
           channelState.messages = await ch._hydrateE2eeMessagesFromLocalCache(
             channelState.messages,
             channelState.channel,
+            options.message_limit !== 0 && options.message_limit !== 1,
           );
           if (channelState.pinned_messages?.length) {
             channelState.pinned_messages = await ch._hydrateE2eeMessagesFromLocalCache(
               channelState.pinned_messages,
               channelState.channel,
+              options.message_limit !== 0 && options.message_limit !== 1,
             );
           }
         }),
@@ -2589,9 +2607,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         Promise.resolve().then(() => { scope.assertCurrent(); return scope.manager?.initialized ? scope.manager.sync() : undefined; }),
       ]);
       scope.assertCurrent();
+      // Completion belongs to the combined standard + MLS operation. Publishing
+      // from the standard branch exposes stale E2EE previews and recency.
+      this.dispatchEvent({type: 'sync.completed'} as Event<ErmisChatGenerics>);
+      scope.assertCurrent();
       this._lastSyncCompletedAt = Date.now();
       this._lastSyncScopeIsCurrent = scope.isCurrent;
     }).then(()=>{if(progressId)this._finishSessionProgress(progressId,false);},error=>{
+      // The combined owner must terminate progress for either branch's failure.
+      // A retired account/connection must never publish into its replacement UI.
+      if (scope.isCurrent()) this.dispatchEvent({type: 'sync.failed', error} as Event<ErmisChatGenerics>);
       if(progressId && scope.isCurrent())this._finishSessionProgress(progressId,true,()=>this.performSync(true));throw error;
     }).finally(() => {
       releaseUnclaimedSyncGate?.();
@@ -2716,10 +2741,6 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
           assertCurrent();
           attempt++;
           if (attempt > maxRetries) {
-            this.dispatchEvent({
-              type: 'sync.failed',
-              error: err as Error,
-            } as Event<ErmisChatGenerics>);
             throw err;
           }
           const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
@@ -2808,13 +2829,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     assertCurrent();
     await this._persistSyncState(assertCurrent);
     assertCurrent();
-    this.logger('info', 'client:performSync() - Sync completed', { tags: ['sync'] });
-    assertCurrent();
-    this.dispatchEvent({
-      type: 'sync.completed',
-    } as Event<ErmisChatGenerics>);
-
-    assertCurrent();
+    this.logger('info', 'client:performSync() - Standard checkpoint completed', { tags: ['sync'] });
   }
 
   /**

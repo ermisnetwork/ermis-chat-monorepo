@@ -3104,11 +3104,53 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private _activeHistoryScope: string | null = null;
 
+  private async _restoreWarmListPreviews(): Promise<void> {
+    if (!this._recoveryPrivateKey || !this._recoveryKeyId || this._providerPersistenceUncertain) return;
+    const assertOwner = this._captureSyncScopeGuard();
+    const warm = new Set(this._warmScopeCids());
+    const channels = (this.client as any)?.activeChannels || {};
+    const previews: Array<{cid: string; head: any; time: number}> = [];
+    for (const [cid, channel] of Object.entries(channels) as Array<[string, any]>) {
+      assertOwner();
+      if (!warm.has(this._resolveChannelE2eeGroupId(cid, channel)) ||
+          !this._isE2eeChannelData(channel.data || channel) ||
+          this._isInactiveInviteRole(this._membershipRoleForChannel(channel))) continue;
+      const messages = channel.state?.latestMessages || channel.state?.messages || [];
+      const head = messages[messages.length - 1];
+      if (!head?.mls_ciphertext || !head.id || !channelPartsFromCid(cid)) continue;
+      const time = new Date(head.created_at).getTime();
+      previews.push({cid, head, time: Number.isFinite(time) ? time : 0});
+    }
+    for (const {cid, head} of previews.sort((a, b) => b.time - a.time).slice(0, 5)) {
+      assertOwner();
+      const parts = channelPartsFromCid(cid)!;
+      // One existing envelope, never a history query or permission to skip a
+      // held protocol cursor. Optional preview failure cannot fail normal sync.
+      try {
+        await this.restoreHistoryPage(parts.channelType, parts.channelId, [{...head, cid,
+          created_at: head.created_at instanceof Date ? head.created_at.toISOString() : head.created_at,
+          updated_at: head.updated_at instanceof Date ? head.updated_at.toISOString() : head.updated_at,
+        }]);
+      } catch { assertOwner(); }
+      assertOwner();
+    }
+  }
+
   private _warmScopeCids(activeCid: string | null = this._activeHistoryScope): string[] {
     const channels=(this.client as any)?.activeChannels || {};
     const rows=Object.entries(channels).flatMap(([cid,channel]:[string,any])=>{
       if(!this._isE2eeChannelData(channel.data||channel)||this._isInactiveInviteRole(this._membershipRoleForChannel(channel)))return [];
-      return [{cid,scopeCid:this._resolveChannelE2eeGroupId(cid,channel),lastMessageAt:channel.data?.last_message_at,updated_at:channel.data?.updated_at}];
+      // Query hydration/replay can update state without retaining the optional
+      // metadata timestamp. Rank that canonical head before falling back to
+      // channel.updated_at, so unopened active routes do not miss a warm slot.
+      const times=[channel.data?.last_message_at,channel.state?.last_message_at,
+        channel.state?.latestMessages?.slice(-1)[0]?.created_at].map(value=>{
+          if(value==null)return 0;
+          const time=value instanceof Date?value.getTime():Date.parse(value);
+          return Number.isFinite(time)?time:0;
+        });
+      const latest=Math.max(...times);
+      return [{cid,scopeCid:this._resolveChannelE2eeGroupId(cid,channel),lastMessageAt:latest?new Date(latest):null,updated_at:channel.data?.updated_at}];
     });
     return selectWarmScopes(rows,activeCid);
   }
@@ -6133,8 +6175,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       group_generation:generation,epoch_from:epoch,epoch_to:epoch,include_snapshots:true,include_wraps:true,
     }));assertOwner();
     const bytes=this._materialSize(value), max=16*1024*1024;
-    // Empty material is not cached: later upload/entitlement changes remain observable.
-    if (bytes<=max && value.blobs?.length) {
+    // A blob alone is not usable material. Late grants/snapshots must remain
+    // observable instead of pinning an incomplete response for the whole session.
+    const wraps = new Set((value.wraps || []).map(row => row.archive_blob_id));
+    const complete = !!value.blobs?.length && value.blobs.every(blob =>
+      wraps.has(blob.archive_blob_id) && !!value.snapshots?.[blob.member_snapshot_hash]);
+    if (bytes<=max && complete) {
       const replaced=this._archivePageMaterial.get(key);if(replaced){this._archivePageMaterial.delete(key);this._archivePageMaterialBytes-=replaced.bytes;}
       while(this._archivePageMaterialBytes+bytes>max && this._archivePageMaterial.size){const oldest=this._archivePageMaterial.keys().next().value!;this._archivePageMaterialBytes-=this._archivePageMaterial.get(oldest)!.bytes;this._archivePageMaterial.delete(oldest);}
       this._archivePageMaterial.set(key,{value,bytes});this._archivePageMaterialBytes+=bytes;
@@ -6173,7 +6219,19 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     try { for(const [generation,rows]of generations){
       const key=sha256Hex(new TextEncoder().encode(JSON.stringify([this._recoveryUnlockNamespace(),this._recoveryKeyId,cid,generation,
         rows.map(row=>[row.message_id,row.mls_epoch,sha256Hex(row.mls_ciphertext),row.updated_at||row.created_at])])));
-      if(options?.retry && this._pageRestores.get(key)===null)this._pageRestores.delete(key);
+      if (options?.retry && !this._pageRestores.get(key)) {
+        // Explicit retry is a fresh observation of exactly the requested epochs.
+        // Ordinary reopen keeps its quiet settled fingerprint; active work coalesces.
+        const archiveCid = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
+        const parts = channelPartsFromCid(archiveCid) || {channelType, channelId};
+        for (const epoch of new Set(rows.map(row => row.mls_epoch))) {
+          const materialKey = JSON.stringify([this._recoveryUnlockNamespace(), this._recoveryKeyId,
+            parts.channelType, parts.channelId, generation, epoch]);
+          const cached = this._archivePageMaterial.get(materialKey);
+          if (cached) { this._archivePageMaterial.delete(materialKey); this._archivePageMaterialBytes -= cached.bytes; }
+        }
+        this._pageRestores.delete(key);
+      }
       if(this._pageRestores.get(key)===null)continue;
       let work=this._pageRestores.get(key);
       if(!work){
@@ -7397,16 +7455,23 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       throw error;
     }
     const work = restoration
-      .then(() => {
+      .then(async () => {
+        assertScope(); await this._restoreWarmListPreviews();
         assertScope(); finish();
         if (this._scopeSyncRetry === retryAtStart && retryAtStart?.observations === retryObservations) {
           if (retryAtStart?.timer) clearTimeout(retryAtStart.timer);
           this._scopeSyncRetry = null;
         }
       })
-      .catch((err) => {
+      .catch(async (err) => {
         finish();
-        try { assertScope(); this._scheduleScopeSyncRetry(err); } catch { /* Retired owner. */ }
+        try {
+          assertScope(); this._scheduleScopeSyncRetry(err);
+          // Legacy active groups can have an unresolved old Welcome disposition.
+          // Restore only a proven preview with the independent archive provider;
+          // keep the original sync rejection/cursor/Ready status unchanged.
+          await this._restoreWarmListPreviews();
+        } catch { /* Preserve the original failure or retired owner. */ }
         throw err;
       })
       .finally(() => {
@@ -9167,8 +9232,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     const context = validateMlsAcceptanceContext(options.acceptanceContext, options.acceptanceEnvelope, protocol.welcome);
     if (context.cid !== cid) throw this._externalJoinError('acceptance_metadata_invalid');
     const cursor = eventCursor || {event_id: context.event_id, created_at: new Date(context.accepted_at * 1000).toISOString()};
-    const targets = (protocol.target_user_ids || []).includes(this.userId) &&
-      (!(protocol.target_device_ids || []).length || protocol.target_device_ids.includes(this.deviceId));
+    const targetedUser = (protocol.target_user_ids || []).includes(this.userId);
+    const targetedDevice = !(protocol.target_device_ids || []).length || protocol.target_device_ids.includes(this.deviceId);
+    const targets = targetedUser && targetedDevice;
+    const traceWelcome = (stage: 'received' | 'applied' | 'no_matching_key_package') => sdkLog('info',
+      `mls_welcome_checkpoint stage=${stage} cid=${cid} generation=${context.group_generation} epoch=${context.epoch} ` +
+      `event_id=${context.event_id} payload_sha256=${context.payload_sha256} targeted_current_user=${targetedUser} targeted_current_device=${targetedDevice}`);
+    traceWelcome('received');
     if (!targets) {await this.reconcileMlsBootstrapWelcome(cid, protocol); initialOwner.assertSession(); return 'not_targeted';}
     this._requireWelcomeWorkStorage();
     const processing = {...options, welcomeEventCursor: cursor}, record = this._welcomeRecoveryRecord(protocol.welcome, processing), observed = this._observedWelcomePending.get(cid);
@@ -9195,11 +9265,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (!(groupId instanceof Uint8Array) || !groupId.length) throw this._externalJoinError('acceptance_metadata_invalid');
       await this.joinGroup(protocol.welcome, protocol.ratchet_tree, protocol.user?.id,
         {cid, group_generation: context.group_generation, group_id: groupId}, processing);
+      traceWelcome('applied');
       return 'applied';
     } catch (error) {
       if (!isNoMatchingKeyPackageFailure(error)) throw error;
       welcomeOwner.assertCurrent();
       await this._recordOwnedWelcomeFailure(record, welcomeOwner); welcomeOwner.assertCurrent();
+      traceWelcome('no_matching_key_package');
       // NoMatchingKeyPackage consumed no private package. A fresh package
       // cannot decrypt this old Welcome; init/health and successful joins own
       // pool maintenance, rather than one count request per failed channel.
