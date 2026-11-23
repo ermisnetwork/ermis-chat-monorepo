@@ -13,11 +13,13 @@ export const getChannelMessageTime = (channel: Channel): number => Math.max(
   timestamp(channel.state?.latestMessages?.slice(-1)[0]?.created_at),
 );
 
-/** One level of loaded topics, each resolved against the current SDK instance. */
+/** Parent creation or canonical message activity; never client arrival/update time.
+ * Empty topic creation alone is not parent message activity.
+ */
 export const getChannelListTime = (channel: Channel): number => {
   const client = channel.getClient?.();
   const current = client?.activeChannels?.[channel.cid] || channel;
-  let latest = getChannelMessageTime(current);
+  let latest = Math.max(timestamp(current.data?.created_at), getChannelMessageTime(current));
   if (current.data?.topics_enabled) {
     for (const topic of current.state?.topics || []) {
       latest = Math.max(latest, getChannelMessageTime(client?.activeChannels?.[topic.cid] || topic));

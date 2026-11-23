@@ -1,7 +1,7 @@
 import {validateWelcomeGenerationDisposition} from './welcome_generation';
 import type {ExternalJoinWorkBase} from './external_join_work';
 import type {WelcomeRecoveryCheckpoint, ExternalJoinReadinessState, JoinPersistenceCheckpoint} from './types';
-import {externalWelcomeKey, validateExternalJoinWelcomeBase} from './external_join_work';
+import {externalWelcomeKey, validateExternalJoinWelcomeBase, externalJoinWelcomeDispositions, validateExternalJoinReadyBase} from './external_join_work';
 import {sameSyncCheckpointValue as equal} from './checkpoint_value';
 import {recoveryControlError} from './recovery_control';
 import {sha256Hex} from './sha256';
@@ -10,12 +10,14 @@ import {nextWelcomeHistorySource} from './welcome_history';
 export type WelcomeWorkChange = (
   | {kind: 'pending'; record: WelcomeRecoveryCheckpoint; readiness: ExternalJoinReadinessState}
   | {kind: 'apply'; record: WelcomeRecoveryCheckpoint; checkpoint: JoinPersistenceCheckpoint}
+  | {kind: 'reconcile_external'; record: WelcomeRecoveryCheckpoint; checkpoint: JoinPersistenceCheckpoint}
   | {kind: 'manual'; signing_identity_sha256: string; checkpoint: JoinPersistenceCheckpoint}) & {source_revision?: string; source_now?: number};
 
 /** A pure full read-set transition; canonical Welcome bytes are validated by the actual WASM caller. */
 export function nextWelcomeWorkBase(expected: ExternalJoinWorkBase, change: WelcomeWorkChange,
   user: string, device: string, cid: string): ExternalJoinWorkBase {
   if (change.kind === 'manual') return nextManualWelcomeWorkBase(expected, change, user, device, cid);
+  if (change.kind === 'reconcile_external') return nextExternalWelcomeWorkBase(expected, change, user, device, cid);
   const base = structuredClone(expected), row = change.record, state = base.state;
   if (!row || row.user_id !== user || row.device_id !== device || row.cid !== cid || !/^[0-9a-f]{64}$/.test(row.signing_identity_sha256)) throw recoveryControlError('welcome_checkpoint_invalid');
   validateExternalJoinWelcomeBase(base, user, device, cid, row.signing_identity_sha256);
@@ -81,6 +83,52 @@ export function nextWelcomeWorkBase(expected: ExternalJoinWorkBase, change: Welc
     base.welcome_history_work = nextWelcomeHistorySource(base.welcome_history_work, revision, change.kind === 'apply' ? change.checkpoint.generation!.updated_at : change.source_now!, {user, device, cid, signer: row.signing_identity_sha256});
   }
   validateExternalJoinWelcomeBase(base, user, device, cid, row.signing_identity_sha256);
+  return base;
+}
+
+/** An accepted join may predate delivery of an older Welcome. Reuse that exact
+ * receipt; this metadata-only disposition never imports the Welcome's old keys. */
+function nextExternalWelcomeWorkBase(expected: ExternalJoinWorkBase,
+  change: Extract<WelcomeWorkChange, {kind: 'reconcile_external'}>, user: string, device: string, cid: string): ExternalJoinWorkBase {
+  const base = structuredClone(expected), state = base.state, row = change.record, cp = change.checkpoint;
+  validateExternalJoinWelcomeBase(base, user, device, cid, row.signing_identity_sha256);
+  const marker = state.cleanup.marker as import('./types').MlsGroupGenerationMarker | null, receipt = base.accepted;
+  const prior = state.cleanup.metadata[`external_join_readiness:${cid}`] as ExternalJoinReadinessState | null;
+  const guard = cp.provider_write_guard;
+  if (!marker || marker.status !== 'active' || !receipt || receipt.state !== 'accepted' ||
+      row.status !== 'superseded_by_recovery' || row.group_generation !== marker.group_generation ||
+      receipt.group_generation !== marker.group_generation || !Number.isSafeInteger(receipt.epoch) ||
+      row.epoch >= receipt.epoch! || receipt.epoch! > marker.current_epoch ||
+      !state.provider_bytes || !equal(cp.provider_bytes, state.provider_bytes) || !equal(cp.generation, marker) ||
+      cp.user_id !== user || cp.device_id !== device || cp.cid !== cid || !guard || guard.expected_revision !== state.revision ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(guard.next_revision) || guard.next_revision === state.revision ||
+      state.cleanup.metadata[`external_candidate:v1:${cid}`] || state.cleanup.metadata[`mls_mutation:v1:${cid}`] ||
+      state.cleanup.metadata[`mls_removal:v1:${cid}`] || state.cleanup.metadata[`mls_rebootstrap_candidate:v1:${cid}`] ||
+      state.control?.recovery_action === 'manual_intervention_required' || base.rejected ||
+      base.welcome_retained?.[externalWelcomeKey(row)]) throw recoveryControlError('welcome_checkpoint_invalid');
+  const joinedMarker = {...marker, current_epoch: receipt.epoch!};
+  const proof = {provider_sha256: sha256Hex(state.provider_bytes), marker: joinedMarker, receipt};
+  if (!equal(row.checkpoint, proof)) throw recoveryControlError('welcome_checkpoint_invalid');
+  const key = externalWelcomeKey(row), existing = base.welcome_primary[key];
+  if (existing && (existing.status !== 'pending_external_join' ||
+      !equal({...existing, status: row.status, checkpoint: proof}, row))) throw recoveryControlError('welcome_disposition_required');
+  const dispositions = externalJoinWelcomeDispositions(base, joinedMarker, receipt, state.provider_bytes);
+  const byKey = new Map(dispositions.map(value => [externalWelcomeKey(value), value])); byKey.set(key, row);
+  if (!equal(cp.welcome_dispositions, [...byKey.values()])) throw recoveryControlError('welcome_checkpoint_invalid');
+  const ready = cp.readiness;
+  if (!ready || !Number.isSafeInteger(ready.updated_at) || ready.updated_at <= 0 || !equal(ready, {
+    cid, status: 'joined_external', reason: prior?.reason || 'manual_external_join',
+    welcome_epoch: prior?.welcome_epoch, welcome_generation: prior?.welcome_generation,
+    welcome_event_cursor: prior?.welcome_event_cursor, first_decryptable_epoch: receipt.epoch, updated_at: ready.updated_at,
+  })) throw recoveryControlError('welcome_checkpoint_invalid');
+  state.revision = guard.next_revision;
+  state.cleanup.metadata[`external_join_readiness:${cid}`] = structuredClone(ready);
+  for (const value of byKey.values()) {
+    base.welcome_primary[externalWelcomeKey(value)] = structuredClone(value); delete base.welcome_pending[externalWelcomeKey(value, true)];
+  }
+  if (base.welcome_history_work) base.welcome_history_work = nextWelcomeHistorySource(base.welcome_history_work,
+    guard.next_revision, ready.updated_at, {user, device, cid, signer: row.signing_identity_sha256});
+  validateExternalJoinReadyBase(base, user, device, cid, row.signing_identity_sha256);
   return base;
 }
 

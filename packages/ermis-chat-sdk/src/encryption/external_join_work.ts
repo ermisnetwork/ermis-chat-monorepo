@@ -22,7 +22,9 @@ export interface ExternalJoinWorkBase {
 }
 export type ExternalJoinWorkChange =
   | {kind: 'prepare'; candidate: ExternalJoinCandidateCheckpoint}
-  | {kind: 'activate'; candidate: ExternalJoinCandidateCheckpoint; checkpoint: JoinPersistenceCheckpoint; receipt: ExternalJoinReceipt};
+  | {kind: 'activate'; candidate: ExternalJoinCandidateCheckpoint; checkpoint: JoinPersistenceCheckpoint; receipt: ExternalJoinReceipt}
+  | {kind: 'record_active_member_recovery'; updated_at: number}
+  | {kind: 'restore_readiness'; operation_id: string; updated_at: number};
 export const externalWelcomePrefix = (cid: string, device: string, pending = false) =>
   `${pending ? 'welcome_pending' : 'welcome_recovery'}:v1:${encodeURIComponent(device)}:${encodeURIComponent(cid)}:`;
 export const externalWelcomeKey = (row: WelcomeRecoveryCheckpoint, pending = false) =>
@@ -128,7 +130,33 @@ export function validateExternalJoinReadyBase(base: ExternalJoinWorkBase, user: 
   if (Object.values(base.welcome_pending).some(row => row.group_generation === marker.group_generation && row.epoch < receipt.epoch!)) throw recoveryControlError('canonical_receipt_pending');
 }
 export function nextExternalJoinWorkBase(expected: ExternalJoinWorkBase, change: ExternalJoinWorkChange, user: string, device: string, cid: string): ExternalJoinWorkBase {
-  const base = structuredClone(expected), job = change.candidate, state = base.state, candidateKey = `external_candidate:v1:${cid}`;
+  const base = structuredClone(expected), state = base.state, candidateKey = `external_candidate:v1:${cid}`;
+  if (change.kind === 'record_active_member_recovery' || change.kind === 'restore_readiness') {
+    const marker=state.cleanup.marker as MlsGroupGenerationMarker|null,
+      prior=state.cleanup.metadata[`external_join_readiness:${cid}`] as ExternalJoinReadinessState|null;
+    if (!integer(change.updated_at) || !change.updated_at || !state.provider_bytes || !state.identity_bytes ||
+        state.control?.recovery_action === 'manual_intervention_required' ||
+        state.cleanup.metadata[candidateKey] || state.cleanup.metadata[`mls_mutation:v1:${cid}`] ||
+        state.cleanup.metadata[`mls_removal:v1:${cid}`] || state.cleanup.metadata[`mls_rebootstrap_candidate:v1:${cid}`]) {
+      throw recoveryControlError('mls_mutation_outcome_pending');
+    }
+    if(change.kind === 'record_active_member_recovery') {
+      if(marker?.status==='active' || prior?.status==='joined_external')throw recoveryControlError('external_join_welcome_conflict');
+      state.cleanup.metadata[`external_join_readiness:${cid}`]={cid,status:'pending_external_join',reason:'active_member_recovery',updated_at:change.updated_at};
+      return base;
+    }
+    // Repair only the legacy active-member prerequisite, using its original
+    // durable activation receipt. No new operation, private write or cursor.
+    if(prior?.cid!==cid || prior.status!=='pending_external_join' || prior.reason!=='active_member_recovery' ||
+        !marker || marker.status!=='active' || marker.operation_id!==change.operation_id ||
+        base.accepted?.operation_id!==change.operation_id)throw recoveryControlError('canonical_receipt_pending');
+    state.cleanup.metadata[`external_join_readiness:${cid}`]={...prior,status:'joined_external',
+      first_decryptable_epoch:base.accepted.epoch!,updated_at:change.updated_at};
+    validateExternalJoinReadyBase(base,user,device,cid,
+      state.control?.signing_identity_sha256 || Object.values(base.welcome_primary)[0]?.signing_identity_sha256 || '');
+    return base;
+  }
+  const job = change.candidate;
   validateExternalJoinCandidate(job, user, device, cid); assertExternalJoinGeneration(job, state.control);
   validateExternalJoinWelcomeBase(base, user, device, cid, job.signing_identity_sha256);
   if (!state.provider_bytes || !state.identity_bytes || base.rejected ||
@@ -159,6 +187,21 @@ export function nextExternalJoinWorkBase(expected: ExternalJoinWorkBase, change:
   if (!equal(cp.welcome_dispositions || [], dispositions)) throw recoveryControlError('welcome_checkpoint_invalid');
   state.provider_bytes = new Uint8Array(cp.provider_bytes); state.revision = guard.next_revision; state.cleanup.marker = structuredClone(cp.generation!);
   state.cleanup.metadata[candidateKey] = null; state.cleanup.metadata[`external_join_readiness:${cid}`] = structuredClone(cp.readiness);
+  // Receipt validation above binds the server second to this exact Commit.
+  // Seed only an absent initial position, in the same provider/CAS transaction.
+  // Zero UUID includes every event in that second, including the accepted Commit.
+  const cursorKey = `scope_sync:${cid}`;
+  const acceptedContext = validateMlsAcceptanceContextDigest(change.receipt.acceptance_context,
+    {event_id: change.receipt.event_id || '', cid, group_generation: job.marker.group_generation, epoch: job.body.epoch}, job.commit_sha256);
+  const pristineScope = expected.state.cleanup.marker == null && !prior &&
+    Object.keys(expected.welcome_primary).length === 0 && Object.keys(expected.welcome_pending).length === 0 &&
+    Object.keys(expected.welcome_retained || {}).length === 0;
+  if (pristineScope && state.cleanup.metadata[cursorKey] == null && acceptedContext.provenance === 'bellboy_transition_v1') {
+    state.cleanup.metadata[cursorKey] = {
+      created_at: new Date(acceptedContext.accepted_at * 1000).toISOString(),
+      event_id: '00000000-0000-0000-0000-000000000000',
+    };
+  }
   base.accepted = structuredClone(change.receipt);
   for (const row of dispositions) { base.welcome_primary[externalWelcomeKey(row)] = structuredClone(row); delete base.welcome_pending[externalWelcomeKey(row, true)]; }
   if (base.welcome_history_work && dispositions.length) base.welcome_history_work = nextWelcomeHistorySource(base.welcome_history_work, guard.next_revision, cp.generation!.updated_at, {user, device, cid, signer: job.signing_identity_sha256});

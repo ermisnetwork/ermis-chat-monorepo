@@ -66,6 +66,47 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   const canSendMessage = hasCapability('send-message');
   const canSendLinks = hasCapability('send-links');
 
+  const readSecureReady = () => {
+    if (!activeChannel?.initialized) return false;
+    const data = activeChannel.data as any;
+    const scope = data?.e2ee_group_id || (data?.gate !== true && data?.parent_cid) || activeChannel.cid;
+    const encrypted = data?.mls_enabled === true ||
+      (scope !== activeChannel.cid && client.activeChannels?.[scope]?.data?.mls_enabled === true);
+    if (!encrypted) return true;
+    const manager = client.encryptionManager;
+    return manager?.initialized === true && manager.userId === client.userID &&
+      (typeof manager.canEnqueueApplicationSend === 'function'
+        ? manager.canEnqueueApplicationSend(scope)
+        : manager.getE2eeState(scope)?.state === 'ready');
+  };
+  const [secureReady, setSecureReady] = useState(readSecureReady);
+  useEffect(() => {
+    const user = client.userID;
+    let disposed = false;
+    let localState: { unsubscribe: () => void } | undefined;
+    const update = () => {
+      if (!disposed && client.userID === user) setSecureReady(readSecureReady());
+    };
+    const observeLocalState = () => {
+      if (disposed || client.userID !== user) return;
+      localState?.unsubscribe();
+      localState = activeChannel?.cid
+        ? client.encryptionManager?.subscribeE2eeState(activeChannel.cid, update)
+        : undefined;
+      update();
+    };
+    const subscriptions = ['e2ee.channel_ready','e2ee.sync_state','e2ee.session_progress','channel.updated']
+      .map(type => client.on(type as any, update));
+    subscriptions.push(client.on('e2ee.initialized' as any, observeLocalState));
+    observeLocalState();
+    if (activeChannel?.cid) client.prioritizeChannelReadiness(activeChannel.cid);
+    return () => {
+      disposed = true;
+      localState?.unsubscribe();
+      subscriptions.forEach(subscription => subscription.unsubscribe());
+    };
+  }, [client, client.userID, activeChannel?.cid]);
+
   const [keywordError, setKeywordError] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<'maxChars' | 'links' | null>(null);
 
@@ -298,7 +339,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   const filesRef = useRef(files);
   filesRef.current = files;
 
-  const { isDragging } = useDragAndDrop(handleFilesSelected, !canSendMessage || !!editingMessage || !!quotedMessage);
+  const { isDragging } = useDragAndDrop(handleFilesSelected, !secureReady || !canSendMessage || !!editingMessage || !!quotedMessage);
 
   // Mentions
   const members = useMemo(() => {
@@ -335,7 +376,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   });
 
   // Message Send Hook
-  const { sending, handleSend } = useMessageSend({
+  const { sending, handleSend: submitMessage } = useMessageSend({
     activeChannel,
     editableRef,
     files,
@@ -376,6 +417,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
     editingMessage,
     clearEditingMessage: () => setEditingMessage(null),
   });
+  const handleSend = useCallback(() => {
+    if (secureReady) submitMessage();
+  }, [secureReady, submitMessage]);
   const handleInput = useCallback(() => {
     const el = editableRef.current;
     if (!el) return;
@@ -735,6 +779,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   const isStillUploading = files.some((f) => f.status === 'uploading');
   const disabledInput = !canSendMessage || sending || isStillUploading || isUploadingVoice;
+  const disabledSend = disabledInput || !secureReady;
 
   return (
     <div className="relative z-50 shrink-0">
@@ -889,12 +934,12 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                       handleFilesSelected(e.target.files);
                       e.target.value = '';
                     }}
-                    disabled={disabledInput || !!editingMessage}
+                    disabled={disabledSend || !!editingMessage}
                   />
 
                   <button
                     type="button"
-                    disabled={disabledInput || !!editingMessage}
+                    disabled={disabledSend || !!editingMessage}
                     onClick={handleAttachClick}
                     className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title={t('chat.attachFile', 'Attach file')}
@@ -904,7 +949,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
                   <button
                     type="button"
-                    disabled={disabledInput || !!editingMessage}
+                    disabled={disabledSend || !!editingMessage}
                     className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       pickerAction.type === 'emoji'
                         ? 'text-primary bg-primary/10'
@@ -925,7 +970,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
                   <button
                     type="button"
-                    disabled={disabledInput || !!editingMessage || !!quotedMessage}
+                    disabled={disabledSend || !!editingMessage || !!quotedMessage}
                     className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       pickerAction.type === 'sticker'
                         ? 'text-primary bg-primary/10'
@@ -954,7 +999,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
                   <button
                     type="button"
-                    disabled={disabledInput || !!editingMessage || !!quotedMessage}
+                    disabled={disabledSend || !!editingMessage || !!quotedMessage}
                     className={`picker-trigger inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       pickerAction.type === 'giphy'
                         ? 'text-primary bg-primary/10'
@@ -988,7 +1033,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
                   <button
                     type="button"
-                    disabled={disabledInput || !!editingMessage || !!quotedMessage}
+                    disabled={disabledSend || !!editingMessage || !!quotedMessage}
                     className="inline-flex items-center justify-center w-8 h-8 rounded-full text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => setIsPollOpen(true)}
                     title={t('chat.create_poll_title', 'Create Poll')}
@@ -1050,7 +1095,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
                   {hasContent ? (
                     <button
                       type="button"
-                      disabled={!hasContent || disabledInput || !!keywordError}
+                      disabled={!hasContent || disabledSend || !!keywordError}
                       onClick={handleSend}
                       className="inline-flex items-center justify-center w-8 h-8 rounded-full text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 transition-all shadow-sm active:scale-95 disabled:scale-100"
                       title={t('chat.send', 'Send')}

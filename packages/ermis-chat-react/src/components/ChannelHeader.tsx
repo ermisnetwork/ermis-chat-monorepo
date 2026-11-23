@@ -49,7 +49,11 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
 
   useEffect(() => {
     if (!activeChannel) return;
-    const handleUpdate = () => setChannelUpdateCount((c) => c + 1);
+    const user = client.userID;
+    let disposed = false;
+    const handleUpdate = () => {
+      if (!disposed && client.userID === user) setChannelUpdateCount((c) => c + 1);
+    };
 
     const sub1 = activeChannel.on('channel.updated', handleUpdate);
 
@@ -65,10 +69,24 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = React.memo(({
       }
     });
 
+    // Native groups are intentionally loaded on demand. Their epoch changes
+    // independently of channel metadata; repaint the mounted header when the
+    // existing admission/receive owner publishes that scope, without doing work.
+    const updateEncryption = (event: Event) => {
+      const data = activeChannel.data as any;
+      const scope = data?.e2ee_group_id || (data?.gate !== true && data?.parent_cid) || activeChannel.cid;
+      if (event.cid === activeChannel.cid || event.cid === scope) handleUpdate();
+    };
+    const encryptionSubs = ['e2ee.state_changed', 'e2ee.channel_ready', 'e2ee.sync_state']
+      .map(type => client.on(type as any, updateEncryption));
+    encryptionSubs.push(client.on('e2ee.initialized' as any, handleUpdate));
+
     return () => {
+      disposed = true;
       sub1.unsubscribe();
       sub2.unsubscribe();
       sub3.unsubscribe();
+      encryptionSubs.forEach(subscription => subscription.unsubscribe());
     };
   }, [activeChannel, client]);
 

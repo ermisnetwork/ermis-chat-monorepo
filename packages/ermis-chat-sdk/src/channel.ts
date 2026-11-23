@@ -173,6 +173,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   private _isE2eeChannelData(data?: ChannelData<ErmisChatGenerics> | ChannelResponse<ErmisChatGenerics>): boolean {
     const channelData = (data || this.data || this._data) as any;
     if (channelData?.mls_enabled === true) return true;
+    if (channelData?.gate === true || (channelData?.e2ee_group_id && channelData.e2ee_group_id === channelData.cid)) return false;
     const parentCid = typeof channelData?.parent_cid === 'string' ? channelData.parent_cid : undefined;
     if (!parentCid) return false;
     const parentChannel = this.getClient().activeChannels?.[parentCid] as any;
@@ -258,9 +259,12 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     const isE2ee = this._isEffectiveE2ee();
     const encryptionMgr = this.getClient().encryptionManager;
+    if (isE2ee && !encryptionMgr?.initialized) {
+      throw Object.assign(new Error('Encrypted channel is preparing'), {code: 'e2ee_not_initialized'});
+    }
     // An E2EE sending bubble must represent durable work, including the
     // final click before navigating away. Plaintext keeps its eager behavior.
-    if (!isE2ee || !encryptionMgr?.initialized) publishOptimistic();
+    if (!isE2ee) publishOptimistic();
     if (isE2ee && encryptionMgr?.initialized) {
       try {
         const response = await encryptionMgr.sendMessage(this.type, this.id, this.cid, message.text || '', messageId, {
@@ -1533,6 +1537,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
   async editMessage(oldMessageID: string, message: EditMessage) {
     const isE2ee = this._isEffectiveE2ee();
     const encryptionMgr = this.getClient().encryptionManager;
+    if (isE2ee && !encryptionMgr?.initialized) {
+      throw Object.assign(new Error('Encrypted channel is preparing'), {code: 'e2ee_not_initialized'});
+    }
     if (isE2ee && encryptionMgr?.initialized) {
       const response = await encryptionMgr.updateMessage(this.type, this.id, this.cid, oldMessageID, message.text, {
         mentioned_all: message.mentioned_all,
@@ -1872,6 +1879,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
   async delete() {
     const client = this.getClient();
+    if (this._isEffectiveE2ee() && !client.encryptionManager?.initialized) {
+      throw Object.assign(new Error('Encrypted channel is preparing'), {code: 'e2ee_not_initialized'});
+    }
     const response = await client.delete(this._channelURL());
     if (this.cid) {
       await client._waitForMlsRemoval(this.cid);
@@ -3984,24 +3994,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         if (event.channel) {
           channel._mergeChannelDataFromEvent(event.channel);
 
-          const encryptionMgr = this.getClient().encryptionManager;
-          const channelData = event.channel as any;
-          if (
-            encryptionMgr?.initialized &&
-            channelData?.mls_enabled &&
-            channelData?.mls_enabled_at &&
-            this.cid &&
-            !encryptionMgr.isChannelEncryptionSyncBlocked(this.cid)
-          ) {
-            encryptionMgr
-              .ensureChannelReady(this.type, this.id, this.cid, { source: 'channel_updated' })
-              .catch((err: unknown) => {
-                this.getClient().logger('error', '[Encryption Event] Failed to ensure channel after channel.updated', {
-                  err,
-                  cid: this.cid,
-                });
-              });
-          }
+          // Metadata delivery does not request offline catch-up. The online Welcome/
+          // Commit owner applies locally; a new invitation has its own admission path.
+
         }
         break;
       case 'pollchoice.new':
@@ -4312,14 +4307,15 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
         const protocolUser = encryptionMgrProto.userId;
         const protocolDevice = encryptionMgrProto.deviceId;
+        const protocolOwner = encryptionMgrProto.captureHostSyncScope?.();
         while (encryptionMgrProto.initialized && encryptionMgrProto.isSyncing()) {
           await encryptionMgrProto.waitForSync();
         }
         if (!encryptionMgrProto.initialized || this.getClient().encryptionManager !== encryptionMgrProto ||
             encryptionMgrProto.userId !== protocolUser || encryptionMgrProto.deviceId !== protocolDevice) break;
+        try { protocolOwner?.(); } catch { break; }
 
         if (encryptionMgrProto.isScopeRepairing(this.cid)) {
-          encryptionMgrProto.requestScopeSyncAfterRepair(this.cid);
           break;
         }
 
@@ -4334,11 +4330,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               const disposition = await encryptionMgrProto.processMlsWelcome(this.cid, protoMsg,
                 mlsProtocolProcessingOptions(event, protoMsg, this.cid, false),
                 {created_at: event.created_at!, event_id: protoMsg.event_id || (event as any).event_id});
-              if (disposition === 'pending_external_join') encryptionMgrProto.requestScopeSyncAfterRepair(this.cid);
+              if (disposition === 'pending_external_join') this.getClient().logger('warn', '[Encryption Event] Welcome awaits the existing join operation', {cid: this.cid});
             } catch {
               this.getClient().logger('warn', '[Encryption Event] Welcome requires durable recovery', {cid: this.cid});
-              encryptionMgrProto.requestScopeSyncAfterRepair(this.cid);
-            }
+              encryptionMgrProto.noteRealtimeProtocolFailure(this.cid, protoMsg, protocolOwner);
+                }
             break;
           }
           case 'commit':
@@ -4349,10 +4345,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               protoDeviceId === encryptionMgrProto.deviceId;
             if (isOwnDeviceCommit) {
               encryptionMgrProto.processOwnMlsCommit(this.cid, protoMsg,
-                mlsProtocolProcessingOptions(event, protoMsg, this.cid, false)).catch(() => {
+                {...mlsProtocolProcessingOptions(event, protoMsg, this.cid, false), realtime: true}).catch(() => {
                 if (encryptionMgrProto.initialized && this.getClient().encryptionManager === encryptionMgrProto &&
                     encryptionMgrProto.userId === protocolUser && encryptionMgrProto.deviceId === protocolDevice) {
-                  encryptionMgrProto.requestScopeSyncAfterRepair(this.cid!);
+                  encryptionMgrProto.noteRealtimeProtocolFailure(this.cid!, protoMsg, protocolOwner);
+                  this.getClient().logger('warn', '[Encryption Event] Own Commit remains pending', {cid: this.cid});
                 }
               });
               break;
@@ -4367,7 +4364,8 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
               });
               if (encryptionMgrProto.initialized && this.getClient().encryptionManager === encryptionMgrProto &&
                   encryptionMgrProto.userId === protocolUser && encryptionMgrProto.deviceId === protocolDevice) {
-                encryptionMgrProto.requestScopeSyncAfterRepair(this.cid!);
+                encryptionMgrProto.noteRealtimeProtocolFailure(this.cid!, protoMsg, protocolOwner);
+                this.getClient().logger('warn', '[Encryption Event] Commit remains pending for local replay or reconnect', {cid: this.cid});
               }
             });
             break;

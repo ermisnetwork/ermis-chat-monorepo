@@ -858,7 +858,7 @@ function missingGroupRecoveryManager(groupInfoResponse) {
   return { manager, cid, readiness, checkpointStorage };
 }
 
-test('legacy join routing uses exact active-member prerequisite; completion does not prove common Ready', async () => {
+test('legacy adapter without composed prerequisite capability cannot mutate readiness or join', async () => {
   const groupInfo = {
     group_info: Uint8Array.from([1, 2, 3]),
     epoch: 1,
@@ -866,6 +866,7 @@ test('legacy join routing uses exact active-member prerequisite; completion does
     external_join_prerequisite: { reason: 'active_member_recovery' },
   };
   const { manager, cid, readiness, checkpointStorage } = missingGroupRecoveryManager(groupInfo);
+  manager.storage.externalJoinReadinessReconcileVersion = undefined;
   let joinedWith;
   manager.joinExternal = async (_channelType, _channelId, _cid, initialGroupInfo) => {
     joinedWith = initialGroupInfo;
@@ -873,12 +874,10 @@ test('legacy join routing uses exact active-member prerequisite; completion does
   };
   manager.syncAfterExternalJoin = async () => ({ cid, status: 'ready' });
 
-  const result = await manager._syncNewChannelLegacy('team', 'channel-1', cid);
-
-  assert.equal(result.status, 'joined_external');
+  await assert.rejects(manager._syncNewChannelLegacy('team', 'channel-1', cid), {code:'client_upgrade_required'});
   assert.notEqual(manager.getE2eeState(cid)?.state, 'ready');
-  assert.equal(joinedWith, groupInfo);
-  assert.equal(readiness.get(cid).reason, 'active_member_recovery');
+  assert.equal(joinedWith, undefined);
+  assert.equal(readiness.get(cid), undefined);
   await checkpointStorage.close();
 });
 

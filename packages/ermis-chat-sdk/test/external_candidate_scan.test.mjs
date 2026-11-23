@@ -28,6 +28,18 @@ async function put(h,key,value,store='meta'){const db=await h.s.openDB();await n
 function entries(bytes){const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);let at=0;const n=()=>{const v=Number(view.getBigUint64(at));at+=8;assert.ok(Number.isSafeInteger(v)&&v>=0);return v;},count=n(),rows=[];for(let j=0;j<count;j++){const k=n(),v=n();assert.ok(at+k+v<=bytes.length);rows.push(Buffer.from(bytes.subarray(at,at+k)).toString('hex')+':'+Buffer.from(bytes.subarray(at+k,at+k+v)).toString('hex'));at+=k+v;}assert.equal(at,bytes.length);return rows.sort();}
 const key=h=>`external_candidate:v1:${h.cid}`;
 const scanKey=h=>`external_candidate_scan:v1:${encodeURIComponent(h.device)}`;
+test('a retained unknown operation outside current inventory leaves the active queue without erasing its journal',async()=>{
+ const h=await fixture();
+ try{
+  const reads=h.reads(),posts=h.posts();
+  await h.m._resumeExternalJoinCandidates(new Set(['team:still-authorized']));
+  assert.equal(h.reads(),reads);assert.equal(h.posts(),posts);
+  assert.deepEqual(await h.s.loadExternalJoinCandidateCheckpoint(h.cid),h.job);
+  await assert.rejects(h.join(),e=>e.code==='transport_unknown');
+  assert.equal((await h.s.loadExternalJoinCandidateCheckpoint(h.cid)).body.operation_id,h.job.body.operation_id);
+  await h.preserve();
+ }finally{await h.close();}
+});
 const holdKey=h=>`external_candidate_disposition:v1:${encodeURIComponent(key(h))}`;
 async function get(h,key,store='meta'){const db=await h.s.openDB();return new Promise((yes,no)=>{const tx=db.transaction(store,'readonly'),read=tx.objectStore(store).get(key);tx.oncomplete=()=>yes(read.result??null);tx.onabort=()=>no(tx.error);});}
 function control(h,cid=h.cid,action='manual_intervention_required',generation=0,revision='5'){return{version:1,user_id:h.user,device_id:h.device,cid,signing_identity_sha256:sha256Hex(h.m.identity.signature_public_key()),group_generation:generation,group_id:generation?Uint8Array.of(63):null,incident_id:'00000000-0000-4000-8000-000000000001',recovery_action:action,recovery_revision:revision,repair_retry_until:new Date(Date.now()+900000).toISOString()};}

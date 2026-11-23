@@ -110,6 +110,7 @@ async function initializeE2ee(userId: string) {
       const wasmModule = await loadUhmOpenMlsWasm('/openmls_wasm_bg.wasm');
       await encryptionManager.initialize(chatClient, userId, {
         wasmModule,
+        deferStartupKeyPackages: true,
         enableE2eeAttachmentMultipart: E2EE_ATTACHMENT_MULTIPART_ENABLED,
         e2eeAttachmentMultipartUploadConcurrency: E2EE_ATTACHMENT_MULTIPART_UPLOAD_CONCURRENCY,
         enableHistoricalReplay: E2EE_HISTORICAL_REPLAY_ENABLED,
@@ -129,11 +130,10 @@ async function initializeE2ee(userId: string) {
 
 import { isSafari } from '@/utils/browser';
 
-type BootstrapPhase = 'restoring' | 'idle' | 'connecting' | 'e2ee' | 'ready' | 'error';
+type BootstrapPhase = 'restoring' | 'idle' | 'connecting' | 'ready' | 'error';
 
 function bootstrapMessage(phase: BootstrapPhase) {
   if (phase === 'connecting') return i18n.t('app.bootstrap_connecting', 'Signing in and preparing your session...');
-  if (phase === 'e2ee') return i18n.t('app.bootstrap_e2ee', 'Preparing end-to-end encryption...');
   if (phase === 'error') return i18n.t('app.bootstrap_failed', 'Could not finish secure startup.');
   return i18n.t('app.bootstrap_restoring', 'Restoring your session...');
 }
@@ -303,15 +303,17 @@ function AppContent() {
         await chatClient.connectUser({ id: userId }, token, { refreshToken });
         if (!isCurrent()) return;
 
-        setBootstrapPhase('e2ee');
-        // Commit the secure-startup screen before synchronous WASM/KeyPackage
-        // work can occupy the main thread. This does not report the app ready
-        // early or move any cryptographic prerequisite into the background.
-        await waitForBrowserPaint();
-        if (!isCurrent()) return;
-        await initializeE2ee(userId);
-        if (!isCurrent()) return;
-
+        // Authentication owns the usable list. Native work remains session-owned
+        // and every encrypted write still passes the SDK's initialization/Ready guards.
+        const encryption = (async () => {
+          await waitForBrowserPaint();
+          if (!isCurrent()) throw Object.assign(new Error('Session changed'), {code: 'recovery_scope_changed'});
+          await initializeE2ee(userId);
+        })();
+        chatClient.setSessionEncryptionInitialization(encryption, () => initializeE2ee(userId));
+        void encryption.catch(() => {
+          if (isCurrent()) console.info('[Bootstrap] secure preparation pending retry');
+        });
         setIsAuthenticated(true);
         setChatReady(true);
         setBootstrapPhase('ready');

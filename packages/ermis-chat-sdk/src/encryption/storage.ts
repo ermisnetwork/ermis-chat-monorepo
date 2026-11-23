@@ -1116,29 +1116,50 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   // ---- Pending E2EE Sends ----
 
   readonly applicationIntentCheckpointVersion = 1 as const;
-  async reserveApplicationIntent(record: PendingE2eeSendRecord, owner: ProviderStorageCheckpoint & {identity_bytes: Uint8Array}, assertOwner: () => void): Promise<PendingE2eeSendRecord> {
+  readonly applicationIntentAdmissionVersion = 1 as const;
+  async reserveApplicationIntent(record: PendingE2eeSendRecord, owner: ProviderStorageCheckpoint & {identity_bytes: Uint8Array; intent_only?: true; group_generation?: number}, assertOwner: () => void): Promise<PendingE2eeSendRecord> {
     const row = structuredClone(record), expected = structuredClone(owner);
-    const user = row.checkpoint_user_id, device = row.checkpoint_device_id;
+    const user = row.checkpoint_user_id, device = row.checkpoint_device_id, admission = expected.intent_only === true;
     if (row.unsealed_intent_version !== 1 || row.mls_ciphertext || !user || user !== this.accountId || !device ||
-        !row.message_id || !row.payload || !row.channel_type || !row.channel_id || !expected.provider_bytes || !expected.identity_bytes)
+        !row.message_id || !row.payload || !row.channel_type || !row.channel_id || !expected.identity_bytes ||
+        (!admission && !expected.provider_bytes) || (admission && (!Number.isSafeInteger(expected.group_generation) ||
+          expected.group_generation! < 0 || row.group_generation !== expected.group_generation)))
       throw recoveryControlError('pending_send_checkpoint_invalid');
     const db = await this.openDB(); assertOwner();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORE_META, STORE_IDENTITY, STORE_PENDING_SENDS], 'readwrite'), store = tx.objectStore(STORE_PENDING_SENDS);
-      const requests = [store.get(row.message_id), tx.objectStore(STORE_META).get(`provider:${user}:${device}`),
-        tx.objectStore(STORE_META).get(`provider_revision:${user}:${device}`), tx.objectStore(STORE_IDENTITY).get(`${user}:${device}`)];
-      let remaining = requests.length, selected: PendingE2eeSendRecord, failure: unknown;
+      const tx = db.transaction(admission ? [STORE_META, STORE_IDENTITY, STORE_PENDING_SENDS, STORE_GROUPS] : [STORE_META, STORE_IDENTITY, STORE_PENDING_SENDS], 'readwrite'),
+        store = tx.objectStore(STORE_PENDING_SENDS), meta = tx.objectStore(STORE_META), cid = row.e2ee_group_id;
+      const requests = {row:store.get(row.message_id), identity:tx.objectStore(STORE_IDENTITY).get(`${user}:${device}`),
+        revision:meta.get(`provider_revision:${user}:${device}`), provider:admission?undefined:meta.get(`provider:${user}:${device}`),
+        marker:admission?tx.objectStore(STORE_GROUPS).get(cid):undefined,
+        control:admission?meta.get(recoveryControlKey(cid,device)):undefined,
+        mutation:admission?meta.get(`mls_mutation:v1:${cid}`):undefined,
+        candidate:admission?meta.get(`external_candidate:v1:${cid}`):undefined,
+        removal:admission?meta.get(`mls_removal:v1:${cid}`):undefined,
+        rebootstrap:admission?meta.get(`mls_rebootstrap_candidate:v1:${cid}`):undefined,
+        readiness:admission?meta.get(`${EXTERNAL_JOIN_READINESS_PREFIX}${cid}`):undefined,
+        repair:admission?meta.get(`channel_repair:${cid}`):undefined};
+      const reads=Object.values(requests).filter((q):q is IDBRequest=>!!q);
+      let remaining = reads.length, selected: PendingE2eeSendRecord, failure: unknown;
       const intent = (v: PendingE2eeSendRecord) => ({message_id:v.message_id,cid:v.cid,e2ee_group_id:v.e2ee_group_id,
         channel_type:v.channel_type,channel_id:v.channel_id,operation_kind:v.operation_kind||'send',payload:v.payload,
         send_envelope:v.send_envelope||{},aad_metadata:v.aad_metadata||{},checkpoint_user_id:v.checkpoint_user_id,
         checkpoint_device_id:v.checkpoint_device_id,signing_identity_sha256:v.signing_identity_sha256});
-      for (const q of requests) q.onsuccess = () => {
+      for (const q of reads) q.onsuccess = () => {
         if (--remaining) return;
         try {
           assertOwner();
-          if (!sameSyncCheckpointValue(requests[1].result, expected.provider_bytes) || requests[2].result !== expected.revision ||
-              !sameSyncCheckpointValue(requests[3].result, expected.identity_bytes)) throw recoveryControlError('provider_checkpoint_conflict');
-          const prior = requests[0].result as PendingE2eeSendRecord | undefined;
+          if (!sameSyncCheckpointValue(requests.identity.result, expected.identity_bytes)) throw recoveryControlError('provider_checkpoint_conflict');
+          if(admission) {
+            const marker=requests.marker?.result as MlsGroupGenerationMarker|undefined, control=requests.control?.result as RecoveryControlCheckpoint|undefined;
+            if(typeof requests.revision.result!=='string' || !requests.revision.result || !marker || marker.cid!==cid ||
+                marker.status!=='active' || marker.group_generation!==expected.group_generation)throw recoveryControlError('old_group_generation');
+            if(control){validateRecoveryControl(control);if(control.user_id!==user || control.device_id!==device || control.cid!==cid ||
+                control.group_generation!==marker.group_generation || control.recovery_action==='manual_intervention_required')throw recoveryControlError('recovery_scope_changed');}
+            if(requests.mutation?.result || requests.candidate?.result || requests.removal?.result || requests.rebootstrap?.result ||
+                requests.readiness?.result?.status==='pending_external_join' || (requests.repair?.result && requests.repair.result.status!=='healthy'))throw recoveryControlError('mls_mutation_outcome_pending');
+          } else if(!sameSyncCheckpointValue(requests.provider?.result,expected.provider_bytes) || requests.revision.result!==expected.revision)throw recoveryControlError('provider_checkpoint_conflict');
+          const prior = requests.row.result as PendingE2eeSendRecord | undefined;
           if (prior) {
             // An accepted version may become one fresh edit intent. The same
             // transaction rejects any competing unresolved version; reserve it
@@ -2927,6 +2948,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
 
   readonly externalJoinWorkCheckpointVersion = 1 as const;
   readonly externalJoinReadyCheckpointVersion = 1 as const;
+  readonly externalJoinReadinessReconcileVersion = 1 as const;
 
   private _readExternalJoinWorkBase(tx: IDBTransaction, user: string, device: string, cid: string, operation: string,
     done: (base: ExternalJoinWorkBase) => void, fail: (error: unknown) => void, eventId?: string): void {
@@ -3021,7 +3043,8 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
       wanted = nextExternalJoinWorkBase(captured, submitted, user, device, cid);
       assertOwner(); db = await this.openDB(); assertOwner();
     } catch (cause) { throw Object.assign(recoveryControlError((cause as {code?: string})?.code || 'recovery_checkpoint_uncertain'), {cause, checkpoint_outcome: 'aborted'}); }
-    const operation = submitted.candidate.body.operation_id;
+    const operation = submitted.kind==='restore_readiness'?submitted.operation_id:
+      submitted.kind==='record_active_member_recovery'?'':submitted.candidate.body.operation_id;
     const oldWork = captured.welcome_history_work?.work, newWork = wanted.welcome_history_work?.work;
     const predecessor = oldWork && newWork && oldWork.status !== 'pending' && newWork.status === 'pending' ?
       {key: `welcome_retention_work_previous:v1:${encodeURIComponent(device)}:${encodeURIComponent(cid)}:${newWork.intent_id}`, value: {version: 1, reason: 'new_source', previous: captured.welcome_history_work}} : null;
@@ -3036,11 +3059,19 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
         if (!sameSyncCheckpointValue(actual, captured)) throw Object.assign(recoveryControlError('recovery_checkpoint_conflict'),
           {recovery_owner_conflict: this._groupInfoOwnerConflict(actual.state, captured.state, cid)});
         const meta = tx.objectStore(STORE_META);
+        if (submitted.kind==='record_active_member_recovery' || submitted.kind==='restore_readiness') {
+          meta.put(wanted.state.cleanup.metadata[`external_join_readiness:${cid}`], `${EXTERNAL_JOIN_READINESS_PREFIX}${cid}`);
+          return;
+        }
         if (submitted.kind === 'prepare') { meta.put(submitted.candidate, `${EXTERNAL_CANDIDATE_PREFIX}${cid}`); return; }
         const cp = submitted.checkpoint;
         this._writeProviderCheckpoint(tx, user, device, cp.provider_bytes, cp.provider_write_guard, () => {
           assertOwner(); tx.objectStore(STORE_GROUPS).put(cp.generation, cid);
           meta.put(cp.readiness, `${EXTERNAL_JOIN_READINESS_PREFIX}${cid}`); meta.put(submitted.receipt, `${EXTERNAL_RECEIPT_PREFIX}${cid}`);
+          const cursorKey = `${SCOPE_SYNC_PREFIX}${cid}`;
+          if (!sameSyncCheckpointValue(captured.state.cleanup.metadata[cursorKey], wanted.state.cleanup.metadata[cursorKey])) {
+            meta.put(wanted.state.cleanup.metadata[cursorKey], cursorKey);
+          }
           meta.delete(`${EXTERNAL_CANDIDATE_PREFIX}${cid}`);
           for (const row of cp.welcome_dispositions || []) { meta.put(row, externalWelcomeKey(row)); meta.delete(externalWelcomeKey(row, true)); }
           if (wanted.welcome_history_work && !sameSyncCheckpointValue(wanted.welcome_history_work, captured.welcome_history_work)) {
@@ -3071,6 +3102,7 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
   readonly welcomeWorkCheckpointVersion = 1 as const;
   readonly welcomeAuthoredDispositionVersion = 1 as const;
   readonly welcomeGenerationDispositionVersion = 1 as const;
+  readonly welcomeExternalDispositionVersion = 1 as const;
   readonly welcomeManualWorkCheckpointVersion = 1 as const;
 
   /** One original full read set, one atomic transition, one consistent full readback. */
@@ -3115,6 +3147,11 @@ export class IndexedDBEncryptionStorage implements EncryptionStorageAdapter {
             meta.delete(`${EXTERNAL_JOIN_READINESS_PREFIX}${cid}`);
             if (submitted.record.checkpoint?.rejoin) meta.delete(`mls_removal:v1:${cid}`);
             meta.put(submitted.record, externalWelcomeKey(submitted.record)); meta.delete(externalWelcomeKey(submitted.record, true));
+          } else if (submitted.kind === 'reconcile_external') {
+            meta.put(cp.readiness, `${EXTERNAL_JOIN_READINESS_PREFIX}${cid}`);
+            for (const row of cp.welcome_dispositions || []) {
+              meta.put(row, externalWelcomeKey(row)); meta.delete(externalWelcomeKey(row, true));
+            }
           }
           // Manual processing preserves all existing readiness/event/index/receipt/candidate obligations.
 

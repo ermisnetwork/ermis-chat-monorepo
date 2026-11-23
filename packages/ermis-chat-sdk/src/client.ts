@@ -1,3 +1,4 @@
+import {SessionReadinessProgress, SessionScopeResult, STANDARD_CHANNEL_SCOPE, sessionChannelIndex, sessionApplicationInventory, standardMessagingReady, inheritTopicMemberCapabilities} from './session_readiness';
 import {SessionNetworkBudget} from './network_budget';
 /* eslint no-unused-vars: "off" */
 /* global process */
@@ -822,6 +823,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const userId = this.userID, deviceId = this.deviceId, uploads = this.standardAttachmentUploadStorage;
     const interval = this.cleaningIntervalRef;
     const epoch = ++this._hostSyncScopeEpoch;
+    this._sessionReadiness = undefined; this._dismissedSessionProgress = undefined; this._sessionEncryptionInitialization = undefined; this._sessionProgressSnapshot = null; this._progressJobs.clear(); this._progressCycle = null;
     const ownsHost = () => epoch === this._hostSyncScopeEpoch && this.userID === userId && this.deviceId === deviceId &&
       this.encryptionManager === manager && this.messageStorage === storage && this.userCache === cache &&
       this.activeChannels === channels && this.wsConnection === connection && this.tokenManager === tokens &&
@@ -1880,6 +1882,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       });
     }
 
+    if (event.cid && ['channel.deleted','notification.channel_deleted','member.removed','member.updated',
+      'channel.updated','channel.topic.closed'].includes(event.type)) {
+      // A durable MLS removal's next callback retires its owned channel. Revise
+      // progress while that unchanged ownership guard still holds.
+      postListenerCallbacks.unshift(() => this._reviseSessionReadinessForEvent(event));
+    }
     return postListenerCallbacks;
   }
 
@@ -2216,17 +2224,190 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
    * @param stateOptions     - Defines whether to skip state initialization or offline usage.
    * @returns                  An array of hydrated and locally manageable `Channel` objects.
    */
-  private _progressSerial=0;
-  private _progressCycle:{id:string;jobs:number;failed:boolean;retry?:()=>unknown}|null=null;
-  _beginSessionProgress(phase:string):string {
-    if(!this._progressCycle || this._progressCycle.jobs===0)this._progressCycle={id:`secure-session-${++this._progressSerial}`,jobs:0,failed:false};
-    const cycle=this._progressCycle;cycle.jobs++;
-    this.dispatchEvent({type:'e2ee.session_progress',cycle_id:cycle.id,phase,status:'running'} as any);return cycle.id;
+  private _sessionEncryptionInitialization?: {current: () => void; work: Promise<void>; retry: () => Promise<void>};
+
+  /** Bind the existing host initialization promise; this never declares a channel Ready. */
+  setSessionEncryptionInitialization(work: Promise<void>, retry: () => Promise<void>): void {
+    const scope = this._captureAuthScope(), previous = this._sessionReadiness;
+    let reuseInventory = false;
+    try { previous?.current(); reuseInventory = !!previous; } catch { /* Retired account metadata must not seed the new session. */ }
+    this._sessionEncryptionInitialization = {current: scope.assertCurrent, work, retry};
+    void work.catch(() => {});
+    if (reuseInventory && previous?.roots && previous.retryInventory) {
+      this._sessionReadiness = undefined; this._sessionProgressSnapshot = null;
+      this._prepareSessionInventory(previous.roots, previous.retryInventory);
+    }
   }
-  _finishSessionProgress(id:string,failed:boolean,retry?:()=>unknown):void {
-    const cycle=this._progressCycle;if(!cycle || cycle.id!==id)return;
-    cycle.jobs=Math.max(0,cycle.jobs-1);cycle.failed ||= failed;if(retry)cycle.retry=retry;
-    if(cycle.jobs===0)this.dispatchEvent({type:'e2ee.session_progress',cycle_id:id,phase:'done',status:cycle.failed?'partial':'done',retry:cycle.retry} as any);
+
+  async waitForSessionEncryptionInitialization(retry = false): Promise<void> {
+    if (this.encryptionManager?.initialized) return;
+    const pending = this._sessionEncryptionInitialization;
+    if (!pending) throw recoveryControlError('session_encryption_not_ready');
+    pending.current();
+    if (retry) {
+      try { await pending.work; } catch { pending.current(); pending.work = pending.retry(); }
+    }
+    await pending.work; pending.current();
+  }
+
+  /** @internal Existing metadata persistence only; never waits for native readiness. */
+  async _waitForSessionInventory(): Promise<void> {
+    const owner = this._sessionReadiness;
+    if (!owner) return;
+    await owner.work;
+    owner.current();
+    if (owner.progress.snapshot().phase === 'inventory') throw recoveryControlError('session_inventory_unavailable');
+  }
+
+  /** Current authorized inventory, distinct from hydrated/cached channel objects. */
+  _sessionE2eeInventoryScopes(): Set<string> | undefined {
+    const owner = this._sessionReadiness;
+    if (!owner) return;
+    owner.current(); return owner.progress.encryptedScopes;
+  }
+
+  /** Explicit navigation demand. UI render/cell/preview code never calls this. */
+  prioritizeChannelReadiness(cid: string): void {
+    const scope = this._captureAuthScope();
+    void this.waitForSessionEncryptionInitialization().then(async () => {
+      scope.assertCurrent();
+      const index = sessionChannelIndex(this.activeChannels);
+      const target = sessionApplicationInventory([cid], index, this.userID || '', false).get(cid);
+      if (!target) return;
+      const split = target.indexOf(':');
+      await this.encryptionManager?.ensureChannelReady(target.slice(0, split), target.slice(split + 1), target, {source: 'open'});
+    }).catch(() => { /* The session popup retains the real blocked/failed state. */ });
+  }
+
+  private _progressSerial = 0;
+  private _progressCycle: {id: string; jobs: number; failed: boolean; phase: string; retry?: () => unknown} | null = null;
+  private _progressJobs = new Map<string, {cycle: string; phase: string}>();
+  private _sessionProgressSnapshot: any = null;
+  private _dismissedSessionProgress?: string;
+  private _sessionReadiness?: {current: () => void; progress: SessionReadinessProgress;
+    bootstrapResolved?: boolean; quietBootstrap?: boolean;
+    roots?: Promise<Channel<ErmisChatGenerics>[]>; work?: Promise<void>; retryInventory?: () => void;
+    next?: {roots: Promise<Channel<ErmisChatGenerics>[]>; retry: () => void}};
+
+  /** Replay the one session presentation when its host mounts after startup. */
+  getSessionSyncProgress() {
+    try { this._sessionReadiness?.current(); } catch { return null; }
+    return this._sessionProgressSnapshot?.cycle_id === this._dismissedSessionProgress ? null : this._sessionProgressSnapshot;
+  }
+  isSessionSyncProgressDismissed(cycle: string): boolean { return this._dismissedSessionProgress === cycle; }
+  dismissSessionSyncProgress(cycle: string): void {
+    if (this._sessionProgressSnapshot?.cycle_id === cycle) this._dismissedSessionProgress = cycle;
+  }
+
+  private _sessionReadinessOwner() {
+    if (this._sessionReadiness) {
+      try { this._sessionReadiness.current(); return this._sessionReadiness; }
+      catch { this._sessionReadiness = undefined; }
+    }
+    const scope = this._captureAuthScope(), initialization = this._sessionEncryptionInitialization;
+    const current = () => { scope.assertCurrent(); if (this._sessionEncryptionInitialization !== initialization) throw recoveryControlError('recovery_scope_changed'); };
+    const value: NonNullable<ErmisChat<ErmisChatGenerics>['_sessionReadiness']> = {current, bootstrapResolved: !(this.messageStorage || this.encryptionManager?.storage)?.loadChannelMetadata,
+      progress: new SessionReadinessProgress(() => this._publishSessionProgress())};
+    this._sessionReadiness = value; return value;
+  }
+
+  private _publishSessionProgress() {
+    let readiness = this._sessionReadiness;
+    try { readiness?.current(); } catch { readiness = undefined; this._sessionReadiness = undefined; }
+    const history = [...this._progressJobs.values()].some(job => job.phase === 'restoring_page');
+    const cycle = this._progressCycle;
+    const value = readiness && !history ? readiness.progress.snapshot() : cycle ? {
+      cycle_id: cycle.id, phase: history ? 'restoring_page' : cycle.phase,
+      status: cycle.jobs ? 'running' : cycle.failed ? 'partial' : 'done', retry: cycle.retry,
+    } : null;
+    const quietCompletedUnpresented = readiness?.quietBootstrap && value?.status === 'done' &&
+      this._sessionProgressSnapshot?.cycle_id !== value.cycle_id;
+    if (readiness && !history && (!readiness.bootstrapResolved || quietCompletedUnpresented)) {
+      this._sessionProgressSnapshot = null; return;
+    }
+    this._sessionProgressSnapshot = value;
+    if (value && value.cycle_id !== this._dismissedSessionProgress) this.dispatchEvent({type: 'e2ee.session_progress', ...value} as any);
+  }
+
+  /** Restored login work is not a new native Ready observation. */
+  _restoreSessionBootstrapMilestones(scopes: Iterable<string>) {
+    const owner = this._sessionReadiness; if (!owner) return;
+    owner.current();
+    for (const scope of scopes) owner.progress.record(scope, 'ready');
+    owner.quietBootstrap = owner.progress.snapshot().status === 'done';
+    owner.bootstrapResolved = true;
+    this._publishSessionProgress();
+  }
+
+  /** Session catch-up starts after serial preparation; point opens never call this. */
+  _startSessionReadinessSync(): void {
+    const owner = this._sessionReadiness; if (!owner) return;
+    try { owner.current(); } catch { return; }
+    owner.progress.startReadiness();
+  }
+
+  /** Called only by the existing manager after its durable Ready guard, never by jobs/UI. */
+  _recordSessionReadiness(cid: string, result: SessionScopeResult, invalidateReady = false) {
+    const value = this._sessionReadiness; if (!value) return;
+    try { value.current(); } catch { return; }
+    value.bootstrapResolved = true;
+    value.progress.record(cid, result, invalidateReady);
+  }
+
+  _excludeSessionReadiness(cid: string, scope = false): void {
+    const value = this._sessionReadiness; if (!value) return;
+    try { value.current(); } catch { return; }
+    if (scope) value.progress.excludeScope(cid); else value.progress.exclude(cid);
+  }
+
+  /** Membership/deletion revisions may inspect metadata once; Ready callbacks remain O(1). */
+  private _reviseSessionReadinessForEvent(event: Event<ErmisChatGenerics>): void {
+    const owner = this._sessionReadiness, cid = event.cid;
+    if (!owner || !cid) return;
+    try { owner.current(); } catch { return; }
+    const selfMember = (event.member?.user_id || event.member?.user?.id || event.user?.id) === this.userID;
+    if ((event.type === 'member.removed' || event.type === 'member.updated') && !selfMember) return;
+    const scope = owner.progress.scopeFor(cid);
+    const removed = ['channel.deleted','notification.channel_deleted','channel.topic.closed'].includes(event.type) ||
+      event.type === 'member.removed' || event.type === 'member.updated' &&
+        (!['owner','moder','member'].includes(event.member?.channel_role || '') || event.member?.banned || event.member?.blocked);
+    if (removed) {
+      // An inherited route loses its parent's right; gated independent scopes keep
+      // their own policy unless the server explicitly removes their application CID.
+      const ids = new Set<string>([cid, ...(event.topic_cids || [])]);
+      const index = sessionChannelIndex(this.activeChannels);
+      for (const [child, channel] of index) {
+        const data = channel.data || channel.channel || channel;
+        if (data.parent_cid === cid && data.gate !== true && (data.e2ee_group_id || data.mls_cid || cid) === cid) ids.add(child);
+      }
+      for (const id of ids) {
+        const previous = owner.progress.scopeFor(id);
+        owner.progress.exclude(id);
+        if (previous) owner.progress.record(previous, 'pending', true);
+      }
+      return;
+    }
+    if (!scope) return;
+    if (scope.startsWith(STANDARD_CHANNEL_SCOPE)) {
+      const channel = this.activeChannels[cid];
+      owner.progress.record(scope, standardMessagingReady(channel, this.userID || '') ? 'ready' : 'blocked');
+    }
+  }
+
+  _beginSessionProgress(phase: string): string {
+    if (!this._progressCycle || this._progressCycle.jobs === 0) this._progressCycle = {
+      id: `secure-session-${++this._progressSerial}`, jobs: 0, failed: false, phase,
+    };
+    const cycle = this._progressCycle, ticket = `${cycle.id}-job-${++this._progressSerial}`;
+    cycle.jobs++; cycle.phase = phase; this._progressJobs.set(ticket, {cycle: cycle.id, phase});
+    this._publishSessionProgress(); return ticket;
+  }
+  _finishSessionProgress(ticket: string, failed: boolean, retry?: () => unknown): void {
+    const cycle = this._progressCycle, job = this._progressJobs.get(ticket);
+    if (!cycle || !job || cycle.id !== job.cycle) return;
+    this._progressJobs.delete(ticket); cycle.jobs--; cycle.failed ||= failed;
+    if (retry) cycle.retry = retry;
+    this._publishSessionProgress();
   }
 
   private _startupMetadata = new Map<string, {
@@ -2241,7 +2422,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     filter: ChannelFilters,
     sort: ChannelSort = [],
     stateOptions: ChannelStateOptions = {},
-    options: { refresh?: boolean } = {},
+    options: { refresh?: boolean; sessionReadiness?: boolean } = {},
   ) {
     const auth = this._captureAuthScope(), user = this.userID, backend = this.baseURL, project = this.projectId;
     const current = () => {
@@ -2250,6 +2431,11 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         throw recoveryControlError('recovery_scope_changed');
       }
     };
+    const prepare = (promise: Promise<Channel<ErmisChatGenerics>[]>) => {
+      if (options.sessionReadiness) this._prepareSessionInventory(promise,
+        () => { void this.loadChannelMetadata(filter, sort, stateOptions, {refresh: true, sessionReadiness: true}).catch(() => {}); });
+      return promise;
+    };
     const key = JSON.stringify([filter, sort, stateOptions]);
     let held = this._startupMetadata.get(key);
     if (held) {
@@ -2257,7 +2443,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       catch { this._startupMetadata.delete(key); held = undefined; }
     }
     const refresh = options.refresh === true;
-    if (held && (!refresh || (held.refresh && held.pending))) return held.promise;
+    if (held && (!refresh || (held.refresh && held.pending))) return prepare(held.promise);
     const previous = refresh && held?.pending ? held.promise : undefined;
     const promise = (async () => {
       // Do not let queryChannels' in-flight sharing turn a refresh into the older startup read.
@@ -2279,7 +2465,111 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
         if (entry?.promise === promise) entry.pending = false;
       });
     this._startupMetadata.set(key, { current, promise, pending: true, refresh });
-    return promise;
+    return prepare(promise);
+  }
+
+  private _prepareSessionInventory(roots: Promise<Channel<ErmisChatGenerics>[]>, retryInventory: () => void): void {
+    const owner = this._sessionReadinessOwner();
+    if (owner.roots === roots) return;
+    const ticket = owner.progress.begin();
+    if (ticket === undefined) { owner.next = {roots, retry: retryInventory}; return; }
+    owner.roots = roots; owner.retryInventory = retryInventory;
+    const work = async () => {
+      const checkpointStorage = this.messageStorage || this.encryptionManager?.storage;
+      if (checkpointStorage?.loadChannelMetadata && !owner.bootstrapResolved) {
+        const hint = await checkpointStorage.loadChannelMetadata(JSON.stringify(['bootstrap-hint:v1', this.baseURL, this.projectId || '', this.userID]));
+        owner.current(); owner.bootstrapResolved = !hint; owner.quietBootstrap = Boolean(hint); this._publishSessionProgress();
+      }
+      const rootRows = await roots; owner.current();
+      const topics: Channel<ErmisChatGenerics>[] = [], topicCids = new Set<string>(), size = 100;
+      // The root snapshot is already complete and visible. Enumerate own-scope topics
+      // independently, without mutating the list's pagination or restoring history.
+      for (let offset = 0; ; offset += size) {
+        const page = await this._queryChannelsInternal({type: ['topic'], roles: ['owner','moder','member'],
+          banned: false, blocked: false, include_parent: true, limit: size, offset} as ChannelFilters,
+          [], {message_limit: 0}, {}, true);
+        owner.current();
+        const count = (page as any)._inventoryPageSize ?? page.length;
+        if (count > size) throw recoveryControlError('session_inventory_invalid');
+        for (const cid of (page as any)._inventoryCids || page.map(channel => channel.cid)) topicCids.add(cid);
+        topics.push(...page); if (count < size) break;
+      }
+      const candidates = new Set<string>();
+      const visit = (channel: any) => {
+        const cid = channel?.cid || channel?.channel?.cid; if (typeof cid === 'string') candidates.add(cid);
+        for (const topic of channel?.state?.topics || channel?.topics || []) visit(topic);
+      };
+      rootRows.forEach(visit); topics.forEach(visit); topicCids.forEach(cid => candidates.add(cid));
+      const inventory = sessionApplicationInventory([...candidates], sessionChannelIndex(this.activeChannels), this.userID || '', true);
+      owner.current();
+      const storage = this.messageStorage || this.encryptionManager?.storage;
+      const index = sessionChannelIndex(this.activeChannels);
+      const snapshot = [...candidates].flatMap(cid => {
+        const channel = index.get(cid); if (!channel) return [];
+        return [{channel: channel.data || channel.channel || channel, membership: channel.state?.membership || channel.membership}];
+      });
+      await storage?.saveChannelMetadata?.(JSON.stringify([this.baseURL,this.projectId || '',this.userID]), snapshot, owner.current);
+      owner.current();
+      const standard = () => {
+        const latest = sessionChannelIndex(this.activeChannels);
+        const current = sessionApplicationInventory([...inventory.keys()], latest, this.userID || '', true);
+        for (const [cid, scope] of inventory) {
+          if (!current.has(cid)) { inventory.delete(cid); owner.progress.exclude(cid); continue; }
+          if (scope.startsWith(STANDARD_CHANNEL_SCOPE)) owner.progress.record(scope,
+            current.get(cid) === scope && standardMessagingReady(latest.get(cid), this.userID || '') ? 'ready' : 'blocked');
+        }
+      };
+      const resume = (explicit = false) => {
+        try { owner.current(); } catch { return; }
+        standard();
+        const scopes = (explicit ? owner.progress.incomplete : owner.progress.unstarted).filter(cid => !cid.startsWith(STANDARD_CHANNEL_SCOPE));
+        for (const cid of scopes) owner.progress.record(cid, 'pending');
+        if (!scopes.length) {
+          owner.bootstrapResolved = true; this._publishSessionProgress();
+          owner.progress.installRetry(() => resume(true)); return;
+        }
+        void this.waitForSessionEncryptionInitialization(explicit).then(async () => {
+          owner.current();
+          await this._waitForHydratedColdStartSync(); owner.current();
+          const manager = this.encryptionManager;
+          if (!manager?.initialized) throw recoveryControlError('session_encryption_not_ready');
+          const remaining = (explicit ? owner.progress.incomplete : owner.progress.unstarted)
+            .filter(cid => !cid.startsWith(STANDARD_CHANNEL_SCOPE));
+          if (!remaining.length) return;
+          // The existing sync owner now prepares joins and then batches transport.
+          // A late metadata tail must use that same owner, never the old point loop.
+          await manager.sync();
+        })
+          .then(() => {
+            owner.current();
+            // A finished job with no guarded readiness transition is partial, never Ready.
+            for (const cid of scopes) if (owner.progress.isPending(cid)) owner.progress.record(cid, 'blocked');
+            owner.progress.installRetry(() => resume(true));
+          }).catch(() => {
+            try { owner.current(); } catch { return; }
+            for (const cid of scopes) if (owner.progress.isPending(cid)) owner.progress.record(cid, 'failed');
+            owner.progress.installRetry(() => resume(true));
+          });
+      };
+      standard();
+      owner.progress.finish(ticket, inventory, () => resume(true));
+      if (owner.progress.snapshot().status === 'done') {
+        await storage?.saveChannelMetadata?.(JSON.stringify(['bootstrap-hint:v1', this.baseURL, this.projectId || '', this.userID]), true, owner.current);
+        owner.current();
+      }
+      resume();
+    };
+    const pending = work().catch(() => {
+      try { owner.current(); } catch { return; }
+      owner.bootstrapResolved = true;
+      owner.progress.fail(ticket, retryInventory);
+    }).finally(() => {
+      if (owner.work !== pending) return;
+      owner.work = undefined;
+      const next = owner.next; owner.next = undefined;
+      if (next) { try { owner.current(); } catch { return; } this._prepareSessionInventory(next.roots, next.retry); }
+    });
+    owner.work = pending; void pending;
   }
 
   private _metadataQueries = new Map<string, {current: () => void; promise: Promise<Channel<ErmisChatGenerics>[]>}>();
@@ -2306,12 +2596,15 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     sort: ChannelSort = [],
     options: { message_limit?: number } = {},
     stateOptions: ChannelStateOptions = {},
+    inventory = false,
   ) {
     const authOwner=this._captureAuthScope(), ownerUser=this.userID, ownerBackend=this.baseURL, ownerProject=this.projectId;
     const assertQueryOwner=()=>{authOwner.assertCurrent();if(this.userID!==ownerUser||this.baseURL!==ownerBackend||this.projectId!==ownerProject)throw recoveryControlError('recovery_scope_changed');};
     // Make sure we wait for the connect promise if there is a pending one
     await this.wsPromise; assertQueryOwner();
 
+    const memberships = inventory ? new Map(Object.entries(this.activeChannels).map(([cid, channel]) =>
+      [cid, {channel, membership: channel.state.membership}])) : undefined;
     // Return a list of channels
     const payload = {
       filter_conditions: this._withProjectId({ ...filterConditions }),
@@ -2333,7 +2626,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     );
     assertQueryOwner();
 
-    if (options.message_limit === 0 || options.message_limit === 1) {
+    if (!Array.isArray(data.channels) || data.channels.some(row => !row?.channel?.cid || !row.channel.type || !row.channel.id)) {
+      throw recoveryControlError('session_inventory_invalid');
+    }
+    const wireCids = data.channels.map(row => row.channel.cid), wireCount = data.channels.length;
+    inheritTopicMemberCapabilities(data.channels, this.activeChannels);
+    if (memberships) data.channels = data.channels.filter(row => {
+      const cid = row.channel.cid!, previous = memberships.get(cid), channel = this.activeChannels[cid];
+      return previous ? previous.channel === channel && previous.membership === channel.state.membership : !channel;
+    });
+    if (!inventory && (options.message_limit === 0 || options.message_limit === 1)) {
       const storage=this.encryptionManager?.storage || this.messageStorage;
       const auth=this._captureAuthScope(), user=this.userID, backend=this.baseURL, project=this.projectId;
       const current=()=>{auth.assertCurrent();if(this.userID!==user || this.baseURL!==backend || this.projectId!==project)throw recoveryControlError('recovery_scope_changed');};
@@ -2354,7 +2656,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       user?.id && typeof user.name === 'string' && user.name.trim() && user.name !== user.id &&
       (!this.state.users[user.id]?.name || this.state.users[user.id].name === user.id));
     if (completeProfiles.length) { assertQueryOwner(); this._upsertUsers(completeProfiles, {persist:false,updateReferences:false}); }
-    if (!filterConditions.parent_cid) {
+    if (!inventory && !filterConditions.parent_cid) {
       await ensureMembersUserInfoLoaded(this as any, snapshotMembers); assertQueryOwner();
     }
     const membersInfo = Object.values(this.state.users);
@@ -2442,6 +2744,10 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       type: 'channels.queried',
     } as unknown as Event<ErmisChatGenerics>);
 
+    if (inventory) {
+      Object.defineProperty(channels, '_inventoryPageSize', {value: wireCount});
+      Object.defineProperty(channels, '_inventoryCids', {value: wireCids});
+    }
     return channels;
   }
 
@@ -2478,6 +2784,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     this._coldStartSyncState = 'running';
     this._coldStartScopeIsCurrent = scope.isCurrent;
     const coldStartSync = Promise.resolve()
+      .then(async () => { scope.assertCurrent(); await this._sessionReadiness?.work; scope.assertCurrent(); })
       .then(() => { scope.assertCurrent(); return this.restoreSyncState({strict: true}); })
       .then(() => { scope.assertCurrent(); return this.performSync(true); })
       .then(() => { scope.assertCurrent(); this._coldStartSyncState = 'ready'; })
@@ -2494,15 +2801,20 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
 
   /** @internal Await this session's already-running cold start without scheduling another sync. */
   _waitForHydratedColdStartSync = (): Promise<void> => {
-    if (this._coldStartSyncState !== 'running' || !this._coldStartSyncPromise || !this._coldStartScopeIsCurrent?.()) return Promise.resolve();
-    return this._coldStartSyncPromise;
+    return this._getPendingHydratedColdStartSync() || Promise.resolve();
   };
+
+  /** @internal Foreground scope demand may finish before independent cold-start work. */
+  _getPendingHydratedColdStartSync = (): Promise<void> | null =>
+    this._coldStartSyncState === 'running' && this._coldStartSyncPromise && this._coldStartScopeIsCurrent?.()
+      ? this._coldStartSyncPromise : null;
 
   hydrateChannels(
     channelsFromApi: ChannelAPIResponse<ErmisChatGenerics>[] = [],
     stateOptions: ChannelStateOptions = {},
   ) {
     const { skipInitialization, offlineMode = false } = stateOptions;
+    inheritTopicMemberCapabilities(channelsFromApi, this.activeChannels);
 
     const channels: Channel<ErmisChatGenerics>[] = [];
     const userIds: string[] = [];

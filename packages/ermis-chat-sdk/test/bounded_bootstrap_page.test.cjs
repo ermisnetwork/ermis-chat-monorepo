@@ -134,3 +134,23 @@ test('optional preview failure does not suppress later heads or fail the complet
  m._syncAndRestoreGroups=async()=>{};m._scheduleScopeSyncRetry=()=>assert.fail('preview must not retry protocol sync');
  await m.sync();assert.equal(m.isSyncing(),false);
 });
+
+test('full session prepares missing joins before batched sync instead of syncing each channel first',async()=>{
+ const m=new EncryptionManager();rows(m,45);m.initialized=true;m.deviceId='fixture-device';
+ const order=[],requests=[];
+ m._finishStartupPublication=async()=>{};m._restoreGroupsLocally=async()=>{};
+ m.storage={loadRemovedSyncCursor:async()=>null};m._loadAllScopeSyncCursors=async()=>({});
+ m._discoverMlsRecoveryStates=async()=>({states:{},unsupported:false});
+ m.bootstrapKnownE2eeChannels=async options=>{order.push('prepare');assert.equal(options.prepareOnly,true);return{results:[],status:'done'};};
+ m._saveEncryptionSyncCheckpoint=async()=>{};m._emitSyncState=()=>{};
+ m._flushPendingSnapshotsForScope=async()=>({pending:[]});m._replayLaggingEpochs=async()=>{};
+ m._resumeExternalJoinCandidates=async()=>{};m._resumePendingMlsMutations=async()=>{};
+ m._ensureWelcomeHistorySubscription=()=>{};m._drainWelcomeHistoryWork=async()=>{};
+ m.e2eeClient={scopeSync:async cursors=>{
+  assert.equal(order[0],'prepare','batch sync must follow existing missing-group join preparation');
+  requests.push(Object.keys(cursors));return{channels:Object.fromEntries(Object.keys(cursors).map(cid=>[cid,{events:[],has_more:false}]))};
+ }};
+ await m._syncAndRestoreGroups();
+ assert.deepEqual(requests.map(x=>x.length),[45]);assert.equal(new Set(requests.flat()).size,45);
+ assert.equal(order.filter(x=>x==='prepare').length,1);
+});

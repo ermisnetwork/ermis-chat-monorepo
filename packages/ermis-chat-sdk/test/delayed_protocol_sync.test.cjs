@@ -21,6 +21,13 @@ function harness({ delivered = true, localGeneration = 1, authoritativeGeneratio
     return { cid, status: 'ready', needs_retry: false };
   };
   m._emitSyncState = s => states.push(s);
+  // This component harness has no native/provider checkpoint. Account delivery
+  // now admits completed scopes incrementally; it must not manufacture Ready.
+  m.ensureChannelReady = async (_type, _id, scope, options) => {
+    assert.equal(options.batchSyncOnly, true);
+    assert.equal(options.initialScopeSyncCompleted, true);
+    return {cid: scope, status: 'needs_retry', error: 'fixture_has_no_native_evidence'};
+  };
   const discovery = { [cid]: { result: 'state', generation: { group_generation: authoritativeGeneration, group_id: authoritativeId, current_epoch: 5 } } };
   return { m, discovery, calls, states, epoch: () => epoch, boundary };
 }
@@ -95,7 +102,11 @@ test(`${code} in a forward page holds its prefix but still reaches authoritative
   h.m._membershipBoundedEventCursor = (_, saved) => saved || h.boundary;
   h.m._saveEncryptionSyncCheckpoint = async cp => { checkpoint = cp; };
   h.m._discoverMlsRecoveryStates = async () => ({ states: h.discovery, unsupported: false });
-  h.m.bootstrapKnownE2eeChannels = async opts => { assert.deepEqual(opts.scopeSyncedCids, []); };
+  h.m.bootstrapKnownE2eeChannels = async opts => {
+    assert.equal(opts.prepareOnly, true);
+    assert.deepEqual(opts.targetCids, [cid]);
+    assert.deepEqual(opts.recoveryDiscoveryStates, h.discovery);
+  };
   h.m._resumePendingMlsMutations = async () => {};
   h.m._processChannelEvents = async () => {
     const error = new Error('actual Commit rejected because predecessor is missing');
@@ -112,7 +123,7 @@ test(`${code} in a forward page holds its prefix but still reaches authoritative
   assert.deepEqual(h.calls[0].cursor, h.boundary);
 });
 }
-test('future application requests only its existing scope recovery lane with cooldown; ordinary failures do not', async () => {
+test('future application remains pending without an automatic offline recovery request', async () => {
   const m = new EncryptionManager(); let calls = 0;
   m.initialized = true; m.e2eeClient = {};
   m.sync = async () => { assert.fail('future epoch must not fan out global warm sync'); };
@@ -125,10 +136,10 @@ test('future application requests only its existing scope recovery lane with coo
   m._syncing = true; m._requestFutureEpochSync(cid,4,5,'epoch differs'); assert.equal(calls,0);
   m._syncing = false;
   for (let n=0;n<100;n++) m._requestFutureEpochSync(cid,4,5,'epoch differs');
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
   m._lastFutureEpochSyncAt -= 10_001;
   m._requestFutureEpochSync(cid,4,6,'epoch differs');
-  assert.equal(calls, 2);
+  assert.equal(calls, 0);
 });
 for (const type of ['commit', 'own-commit', 'welcome']) {
   test(`realtime ${type} waits for protocol replay before touching the provider`, async () => {
@@ -138,7 +149,7 @@ for (const type of ['commit', 'own-commit', 'welcome']) {
     let syncing = true, release; const calls = [];
     const gate = new Promise(resolve => { release = resolve; });
     client.encryptionManager = { initialized: true, userId: 'alice', deviceId: 'device',
-      isSyncing: () => syncing, waitForSync: () => gate, isScopeRepairing: () => false,
+      isSyncing: () => syncing, waitForSync: () => gate, isScopeRepairing: () => false, noteRealtimeProtocolFailure: () => {},
       isChannelEncryptionSyncBlocked: () => false, getGroup: () => null,
       reconcileMlsBootstrapWelcome: async () => {
         assert.equal(syncing, false);
@@ -170,7 +181,7 @@ test('a protocol event waiting for sync cannot cross a logout/session switch', a
   let syncing = true, release, processed = 0;
   const gate = new Promise(resolve => { release = resolve; });
   client.encryptionManager = { initialized: true, userId: 'alice', deviceId: 'device',
-    isSyncing: () => syncing, waitForSync: () => gate, isScopeRepairing: () => false,
+    isSyncing: () => syncing, waitForSync: () => gate, isScopeRepairing: () => false, noteRealtimeProtocolFailure: () => {},
     processCommit: async () => { processed++; },
   };
   const work = channel._handleChannelEvent({ type: 'protocol', protocol_data: {
@@ -220,21 +231,21 @@ test('legacy ownerless current membership remains usable when no peer identity c
 });
 
 
-for (const own of [false, true]) test(`failed realtime ${own ? 'own ' : ''}Commit requests only affected scope recovery`, async () => {
+for (const own of [false, true]) test(`failed realtime ${own ? 'own ' : ''}Commit retains pending work without requesting sync`, async () => {
  const client = new ErmisChat('fixture', 'fixture', 'https://fixture.invalid', {browser:false});
  client.userID='alice';client.logger=()=>{};const ch=client.channel('messaging','commit-recovery');const wakes=[];let global=0;
- client.encryptionManager={initialized:true,userId:'alice',deviceId:'device',isSyncing:()=>false,isScopeRepairing:()=>false,
+ client.encryptionManager={initialized:true,userId:'alice',deviceId:'device',isSyncing:()=>false,isScopeRepairing:()=>false,noteRealtimeProtocolFailure:()=>{},
   processOwnMlsCommit:async()=>{throw Error('protocol not yet usable');},processCommit:async()=>{throw Error('protocol not yet usable');},
   requestScopeSyncAfterRepair:cid=>wakes.push(cid),sync:async()=>{global++;}};
  await ch._handleChannelEvent({type:'protocol',cid:ch.cid,protocol_data:{type:'commit',epoch:2,user:{id:own?'alice':'bob'},device_id:own?'device':'other'}});
- await new Promise(r=>setImmediate(r));assert.deepEqual(wakes,[ch.cid]);assert.equal(global,0);
+ await new Promise(r=>setImmediate(r));assert.deepEqual(wakes,[]);assert.equal(global,0);
 });
 
 
 test('failed realtime Commit from a retired session cannot wake recovery on its replacement', async () => {
  const client=new ErmisChat('fixture','fixture','https://fixture.invalid',{browser:false});client.userID='alice';client.logger=()=>{};
  const ch=client.channel('messaging','retired-commit');let reject,wakes=0;
- const m={initialized:true,userId:'alice',deviceId:'device',isSyncing:()=>false,isScopeRepairing:()=>false,
+ const m={initialized:true,userId:'alice',deviceId:'device',isSyncing:()=>false,isScopeRepairing:()=>false,noteRealtimeProtocolFailure:()=>{},
   processCommit:()=>new Promise((_,r)=>reject=r),requestScopeSyncAfterRepair:()=>wakes++,sync:async()=>wakes++};client.encryptionManager=m;
  await ch._handleChannelEvent({type:'protocol',cid:ch.cid,protocol_data:{type:'commit',epoch:2,user:{id:'bob'},device_id:'other'}});
  client.encryptionManager={...m,userId:'replacement'};reject(Error('late failure'));await new Promise(r=>setImmediate(r));assert.equal(wakes,0);

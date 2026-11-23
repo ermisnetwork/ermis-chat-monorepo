@@ -26,6 +26,21 @@ async function fixture(generation=0){
 }
 function abort(s){const old=s._writeProviderCheckpoint.bind(s);s._writeProviderCheckpoint=(tx,...args)=>{old(tx,...args);tx.abort();};return()=>s._writeProviderCheckpoint=old;}
 async function restart(h){const m=new EncryptionManager();Object.assign(m,{userId:h.user,deviceId:'device',storage:new IndexedDBEncryptionStorage(h.user),_injectedWasm:wasm,_wasmArtifactSha256:sha256Hex(fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url)))});await m._initWasm();await m._initIdentity();await m._restoreGroupsLocally();return m;}
+test('durable encrypted deletion revises global117of119 to117of118 before its target retires',async()=>{
+ const h=await host(),p=h.c._sessionReadinessOwner().progress;
+ const inventory=new Map(Array.from({length:117},(_,i)=>['team:ready-'+i,'team:ready-'+i]));
+ inventory.set(h.cid,h.cid);inventory.set(h.other,h.other);
+ p.finish(p.begin(),inventory,()=>{});
+ for(let i=0;i<117;i++)p.record('team:ready-'+i,'ready');
+ p.record(h.cid,'blocked');p.record(h.other,'blocked');
+ assert.equal(p.snapshot().ready_channels,117);assert.equal(p.snapshot().total_channels,119);
+ await h.c._dispatchMlsRemovalEvent({type:'channel.deleted',cid:h.cid,created_at:'2026-10-12T00:00:00Z'});
+ assert.equal(p.snapshot().total_channels,118);assert.equal(p.snapshot().ready_channels,117);
+ assert.equal(p.snapshot().blocked_channels,1);assert.equal(p.snapshot().status,'partial');
+ assert.equal(h.c.activeChannels[h.cid],undefined);assert.equal(h.m.groups.has(h.cid),false);
+ h.c._recordSessionReadiness(h.cid,'ready');
+ assert.equal(p.snapshot().total_channels,118);assert.equal(p.snapshot().ready_channels,117);
+});
 for(const cap of ['mlsCleanupCheckpointVersion','providerCheckpointCASVersion','loadProviderCheckpoint','loadMlsCleanupState','saveMlsCleanupCheckpoint','verifyMlsCleanupCheckpoint'])test(`cleanup missing ${cap} refuses before active private deletion`,async()=>{
  const h=await fixture();h.s[cap]=undefined;await assert.rejects(h.m.leaveGroup(h.cid),e=>e.code==='client_upgrade_required');assert.equal(h.m.groups.get(h.cid),h.group);assert.deepEqual(h.p.to_bytes(),h.bytes);assert.equal(h.m._providerPersistenceUncertain,false);
 });

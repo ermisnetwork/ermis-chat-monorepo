@@ -819,7 +819,12 @@
     "done": "Đã hoàn tất",
     "retry": "Thử lại",
     "dismiss": "Đóng tiến trình",
-    "title": "Đồng bộ tin nhắn"
+    "title": "Đồng bộ tin nhắn",
+    "inventory": "Đang lấy danh sách kênh…",
+    "inventory_partial": "Chưa lấy đủ danh sách kênh",
+    "channels_syncing": "Đang đồng bộ · {{ready}}/{{total}} kênh đã sẵn sàng",
+    "channels_partial": "Cần thử lại · {{ready}}/{{total}} kênh đã sẵn sàng",
+    "channels_done": "Đã sẵn sàng · {{ready}}/{{total}} kênh"
   },
   "privacy_settings": {
     "title": "Quyền riêng tư và an toàn",

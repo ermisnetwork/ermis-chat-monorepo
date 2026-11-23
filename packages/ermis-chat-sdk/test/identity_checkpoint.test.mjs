@@ -60,6 +60,25 @@ function withRegistration(client){
  return client;
 }
 function startup(m){m._loadRecoveryPublicMetadata=async()=>{};m._normalizeStaleRestoreProgress=async()=>{};m.ensureKeyPackagesFromCachedHealthOrServer=async()=>{};m._restoreGroupsLocally=async()=>{};m._resumeExternalJoinCandidates=async()=>{};m._resumeEpochArchiveCheckpoints=async()=>{};m.resumePendingE2eeSends=async()=>{};m._drainGroupInfoValidationAcks=async()=>{};}
+for(const retire of [false,true])test('native initialization waits for full metadata before scoped restore; retired owner='+retire,async()=>{
+ const user='inventory-startup-'+(++seq),s=new IndexedDBEncryptionStorage(user),m=new EncryptionManager(),entered=latch(),release=latch(),events=[];
+ startup(m);let metadataDone=false,restores=0;
+ m._restoreGroupsLocally=async()=>{restores++;assert.equal(metadataDone,true,'membership-dependent restore cannot race full inventory hydration');};
+ const client=withRegistration({deviceId:'device',dispatchEvent:e=>events.push(e),_waitForSessionInventory:async()=>{
+  entered.resolve();await release.promise;
+  if(retire)throw Object.assign(Error('retired'),{code:'recovery_scope_changed'});
+  metadataDone=true;
+ }});
+ const work=m.initialize(client,user,{storage:s,wasmModule:wasm,wasmArtifactSha256:sha256Hex(fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url)))});
+ const observed=work.then(()=> 'completed',()=> 'failed');
+ try{
+  assert.equal(await Promise.race([entered.promise.then(()=> 'waiting'),observed]),'waiting');
+  assert.equal(restores,0);assert.equal(client.encryptionManager,undefined);assert.ok(await s.loadIdentity(user,'device'));
+  release.resolve();
+  if(retire){await assert.rejects(work,e=>e.code==='recovery_scope_changed');assert.equal(restores,0);assert.equal(client.encryptionManager,undefined);}
+  else{await work;assert.equal(restores,1);assert.equal(client.encryptionManager,m);assert.equal(events.filter(e=>e.type==='e2ee.initialized').length,1);}
+ }finally{release.resolve();await observed;m.destroy();await s.close();}
+});
 for(const mode of ['abort','readback'])test(`initialization final ${mode} does not register or publish initialized`,async()=>{
  const user='startup-'+(++seq),s=new IndexedDBEncryptionStorage(user),m=new EncryptionManager(),events=[];startup(m);const client={deviceId:'device',baseURL:'http://fixture',dispatchEvent:e=>events.push(e)};
  if(mode==='abort'){const old=s.saveIdentityCheckpoint.bind(s);let writes=0;s.saveIdentityCheckpoint=async(...args)=>{if(++writes===1)return old(...args);const restore=abort(s);try{return await old(...args);}finally{restore();}};}

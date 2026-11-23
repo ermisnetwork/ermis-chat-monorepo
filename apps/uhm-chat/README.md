@@ -2,6 +2,8 @@
 
 ## UHM Chat E2EE Runtime Notes
 
+- The sidebar renders after the account-scoped metadata query succeeds; it does not wait for independent MLS scope sync or decrypted previews. Query failure retains explicit retry and a successful empty response remains an empty list. Background updates preserve recency ordering, membership/unread and the existing encrypted-message/send-readiness guards. [Canonical implementation/evidence](../../../bellboy/docs/todo/e2ee_mls_lifetime_ownership_recovery_plan.md#2026-11-19--ios-topic-first-load-and-web-channel-list-performance-480f).
+
 - Own failed outgoing messages expose **More → Retry send** (Vietnamese: **Gửi lại**) when sending is permitted. It retries the SDK's original durable E2EE operation and updates presentation from the real outcome; it does not create a new UUID or mark success optimistically. Reload preserves failed unsealed intents until an explicit retry. Missing or terminal checkpoints remain errors.
 - The header's **Waiting to restore** badge describes PIN/history restoration. It does not establish current MLS readiness or a message delivery outcome. Current send admission still validates the actual private group and authoritative recovery control.
 

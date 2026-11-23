@@ -819,7 +819,12 @@
     "done": "Completed",
     "retry": "Retry",
     "dismiss": "Dismiss progress",
-    "title": "Message sync"
+    "title": "Message sync",
+    "inventory": "Loading your channels…",
+    "inventory_partial": "Channel list incomplete",
+    "channels_syncing": "Syncing · {{ready}}/{{total}} channels ready",
+    "channels_partial": "Retry needed · {{ready}}/{{total}} channels ready",
+    "channels_done": "Ready · {{ready}}/{{total}} channels"
   },
   "privacy_settings": {
     "title": "Privacy & safety",

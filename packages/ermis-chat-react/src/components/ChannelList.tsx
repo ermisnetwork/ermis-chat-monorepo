@@ -448,6 +448,7 @@ ChannelRow.displayName = 'ChannelRow';
 
 
 export const ChannelList: React.FC<ChannelListProps> = React.memo(({
+  sessionReadiness = false,
   filters = { type: ['messaging', 'team', 'meeting'] } as unknown as ChannelFilters,
   sort = [],
   options = { message_limit: 0 } as unknown as ChannelListProps['options'],
@@ -615,7 +616,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
       setLoading(true);
       setError(null);
       const result = (options as {message_limit?:number})?.message_limit===0
-        ? await client.loadChannelMetadata(filters,sort,{}, {refresh})
+        ? await client.loadChannelMetadata(filters,sort,{}, {refresh, sessionReadiness})
         : await client.queryChannels(filters, sort, options as { message_limit?: number });
       // Backend metadata pages use update order. The default presentation is
       // message recency; a reconnect query must not undo completed-sync sorting.
@@ -626,7 +627,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
     } finally {
       setLoading(false);
     }
-  }, [client, filtersKey]);
+  }, [client, filtersKey, sessionReadiness]);
 
   useEffect(() => {
     loadChannels();

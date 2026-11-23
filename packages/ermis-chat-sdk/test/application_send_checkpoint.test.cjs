@@ -2,6 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {pathToFileURL}=require('node:url'),{webcrypto,randomUUID}=require('node:crypto');
 require('fake-indexeddb/auto');globalThis.crypto??=webcrypto;
 const {EncryptionManager,IndexedDBEncryptionStorage}=require('../dist/encryption/index.cjs');
+const {sha256Hex}=require('../dist/index.cjs');
 let sequence=0,wasmPromise;
 function latch(){let open;const promise=new Promise(r=>open=r);return{promise,open};}
 async function fixture(generation=0){
@@ -737,5 +738,54 @@ test('indexed pending status selection never scans accepted ciphertext journals'
   await f.send('accepted');const db=await f.m.storage.openDB(),transaction=db.transaction.bind(db);let fullScans=0;
   db.transaction=(...args)=>{const tx=transaction(...args);if([args[0]].flat().includes('pending_sends')){const objectStore=tx.objectStore.bind(tx);tx.objectStore=name=>{const store=objectStore(name);if(name==='pending_sends'){const cursor=store.openCursor.bind(store);store.openCursor=(...a)=>{fullScans++;return cursor(...a);};}return store;};}return tx;};
   assert.deepEqual(await f.m.storage.listPendingE2eeSends(['sending','failed_retryable','sending']),[]);assert.equal(fullScans,0);db.transaction=transaction;
+ }finally{await f.close();}
+});
+
+test('durable queued intent admission does not wait for a held native provider turn',async()=>{
+ const f=await fixture(),entered=latch(),release=latch(),id=randomUUID();let held,reservation,timer,sub;
+ try{
+  const cursor={created_at:'2026-11-01T00:00:00Z',event_id:'00000000-0000-0000-0000-000000000001'};
+  await f.m.storage.saveScopeSyncCursor(f.cid,cursor);assert.equal((await f.m.refreshE2eeState(f.cid)).state,'ready');
+  f.m._emitSyncState(f.m._makeSyncState(f.cid,'ready',cursor,cursor));sub=f.m.subscribeE2eeState(f.cid,()=>{});
+  const before=await f.m.storage.loadProviderCheckpoint(f.user,f.device);
+  held=f.m._withProviderMutation(async()=>{entered.open();await release.promise;});await entered.promise;
+  reservation=f.m._reserveApplicationIntent({message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),payload:{text:'durable next intent'},status:'sending',created_at:1,updated_at:1},true);
+  const admitted=await Promise.race([reservation.then(()=>true),new Promise(done=>{timer=setTimeout(()=>done(false),1000)})]);
+  assert.equal(admitted,true,'metadata admission must finish while the native owner remains held');
+  const row=await f.m.storage.loadPendingE2eeSend(id);assert.equal(row.unsealed_intent_version,1);assert.equal(row.mls_ciphertext,undefined);
+  assert.deepEqual(await f.m.storage.loadProviderCheckpoint(f.user,f.device),before);assert.equal(f.calls.length,0);
+ }finally{clearTimeout(timer);release.open();await Promise.allSettled([held,reservation].filter(Boolean));sub?.unsubscribe();await f.close();}
+});
+
+for(const fault of ['identity','generation','historical','mutation','candidate','removal','rebootstrap','pending_readiness','manual','owner','abort'])test('metadata-only queued intent preserves '+fault+' fences before admission',async()=>{
+ const f=await fixture(),id=randomUUID(),s=f.m.storage;let transaction;
+ try{
+  const before=await s.loadProviderCheckpoint(f.user,f.device),row={message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),payload:{text:'not admitted'},status:'sending',unsealed_intent_version:1,checkpoint_user_id:f.user,checkpoint_device_id:f.device,signing_identity_sha256:sha256Hex(f.m.identity.signature_public_key()),group_generation:0,created_at:1,updated_at:1};
+  const owner={provider_bytes:null,revision:null,identity_bytes:new Uint8Array(f.m.identity.to_bytes()),intent_only:true,group_generation:0};
+  if(fault==='identity')owner.identity_bytes=Uint8Array.of(1);
+  if(fault==='generation'){row.group_generation=1;owner.group_generation=1;}
+  if(fault==='historical')await s.saveGroupState(f.cid,{...f.m._groupGenerations.get(f.cid),status:'historical'});
+  if(['mutation','candidate','removal','rebootstrap'].includes(fault)){
+   const key=({mutation:'mls_mutation:v1:',candidate:'external_candidate:v1:',removal:'mls_removal:v1:',rebootstrap:'mls_rebootstrap_candidate:v1:'})[fault]+f.cid,db=await s.openDB();
+   await new Promise((yes,no)=>{const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({operation_id:'retained'},key);tx.oncomplete=yes;tx.onabort=()=>no(tx.error);});
+  }
+  if(fault==='pending_readiness')await s.saveExternalJoinReadiness({cid:f.cid,status:'pending_external_join',reason:'active_member_recovery',updated_at:1});
+  if(fault==='manual')await s.saveRecoveryControlCheckpoint({version:1,user_id:f.user,device_id:f.device,cid:f.cid,signing_identity_sha256:row.signing_identity_sha256,group_generation:0,incident_id:randomUUID(),recovery_action:'manual_intervention_required',recovery_revision:'1',repair_retry_until:null});
+  const db=await s.openDB();if(fault==='abort'){transaction=db.transaction.bind(db);db.transaction=(...a)=>{const tx=transaction(...a);if(a[1]==='readwrite')queueMicrotask(()=>tx.abort());return tx;};}
+  await assert.rejects(s.reserveApplicationIntent(row,owner,()=>{if(fault==='owner')throw Object.assign(Error('retired owner'),{code:'recovery_scope_changed'});}));
+  if(transaction)db.transaction=transaction;
+  assert.equal(await s.loadPendingE2eeSend(id),null);assert.deepEqual(await s.loadProviderCheckpoint(f.user,f.device),before);assert.equal(f.calls.length,0);
+ }finally{if(transaction)(await s.openDB()).transaction=transaction;await f.close();}
+});
+test('metadata-only admission keeps exact UUID/payload CAS while committed provider revision advances',async()=>{
+ const f=await fixture(),id=randomUUID(),s=f.m.storage;
+ try{
+  const before=await s.loadProviderCheckpoint(f.user,f.device),row={message_id:id,cid:f.cid,e2ee_group_id:f.cid,channel_type:'team',channel_id:f.cid.slice(5),payload:{text:'one exact intent'},status:'sending',unsealed_intent_version:1,checkpoint_user_id:f.user,checkpoint_device_id:f.device,signing_identity_sha256:sha256Hex(f.m.identity.signature_public_key()),group_generation:0,created_at:1,updated_at:1};
+  const owner={provider_bytes:null,revision:null,identity_bytes:new Uint8Array(f.m.identity.to_bytes()),intent_only:true,group_generation:0};
+  const admitted=await s.reserveApplicationIntent(row,owner,()=>{});assert.equal(admitted.mls_ciphertext,undefined);
+  await f.m._persistProviderStrict();
+  assert.deepEqual(await s.reserveApplicationIntent(row,owner,()=>{}),admitted);
+  await assert.rejects(s.reserveApplicationIntent({...row,payload:{text:'different'}},owner,()=>{}),e=>e.code==='pending_send_conflict');
+  assert.deepEqual(await s.loadPendingE2eeSend(id),admitted);assert.deepEqual((await s.loadProviderCheckpoint(f.user,f.device)).provider_bytes,before.provider_bytes);assert.equal(f.calls.length,0);
  }finally{await f.close();}
 });

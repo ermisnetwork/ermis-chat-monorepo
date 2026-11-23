@@ -81,6 +81,7 @@ export function ChatPage() {
   const totalUnreadCount = useTotalUnreadCount()
   useNotification(activeChannel)
   const syncState = useSyncStatus(client)
+  const [sessionProgressHost, setSessionProgressHost] = useState<HTMLDivElement | null>(null)
 
   // Directly update browser tab title with unread count (more reliable than Helmet)
   useEffect(() => {
@@ -656,7 +657,7 @@ export function ChatPage() {
               <LockKeyhole className="w-3.5 h-3.5" />
               <span>{t('e2ee.badge')}</span>
               {typeof encryptionManager?.getEpoch === 'function' && !isTopic && (
-                <span className="font-mono opacity-70">{encryptionManager.getEpoch(channel.cid) ?? '?'}</span>
+                <span className="font-mono opacity-70">{encryptionManager.getEpoch(channel.cid) >= 0 ? encryptionManager.getEpoch(channel.cid) : '…'}</span>
               )}
             </div>
           )}
@@ -932,17 +933,18 @@ export function ChatPage() {
   }, [])
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="relative flex h-screen w-full overflow-hidden">
       <SEO title={totalUnreadCount > 0 ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) Uhm Chat` : 'Uhm Chat'} />
 
 
       {/* Sidebar */}
-      <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0">
+      <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0 flex flex-col">
+        <SyncStatusBanner syncState={syncState} client={client} container={sessionProgressHost} />
 
         {/* Channels + Topics — width-based push animation */}
         {/* Channel list shrinks 380→66px (overflow-hidden clips to avatars on left) */}
         {/* Topics panel fills the remaining 314px, creating a push effect */}
-        <div className="absolute inset-0 flex">
+        <div className="relative min-h-0 flex flex-1">
           {/* Channel list — shrinks width, overflow-hidden clips to show only avatars */}
           <div
             className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${drillDownChannel ? 'channel-sidebar-collapsed' : ''}`}
@@ -966,12 +968,14 @@ export function ChatPage() {
                 />
               </div>
 
-              {/* ChannelList — always visible; clipped at 66px shows only avatars */}
+              <div ref={drillDownChannel ? undefined : setSessionProgressHost} className="pointer-events-none relative z-40 h-0 shrink-0" data-session-progress-host="channels" />
+
+              {/* Metadata rows are usable while Client-owned sync updates previews in place. */}
               <div className="flex-1 overflow-hidden relative">
                 <ChannelList
+                  sessionReadiness
                   filters={CHANNEL_LIST_FILTERS}
                   showPendingInvites={false}
-                  waitForSync
                   onTopicDrillDown={handleTopicDrillDown}
                   onAddTopic={openCreateTopicModal}
                   onEditTopic={openEditTopicModal}
@@ -1038,6 +1042,7 @@ export function ChatPage() {
             {drillDownChannel && (
               <TopicsPanel
                 channel={drillDownChannel}
+                progressHostRef={setSessionProgressHost}
                 onBack={handleBackFromTopics}
                 onCreateTopic={openCreateTopicModal}
                 onEditTopic={openEditTopicModal}
@@ -1152,7 +1157,6 @@ export function ChatPage() {
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
-          <SyncStatusBanner syncState={syncState} client={client} />
           <SecureSessionBanner client={client} channel={activeChannel} />
 
           {/* Music Room Player for Group Channels */}

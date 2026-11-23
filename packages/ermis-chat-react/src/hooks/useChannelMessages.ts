@@ -5,6 +5,7 @@ import type { VListHandle } from 'virtua';
 import { useChatCore } from './useChatCore';
 import { useChatMessages } from './useChatMessages';
 import { isPendingMember } from '../channelRoleUtils';
+import { hasLatestPage, markLatestPage, queryLatestPage } from './channelLatestPage';
 import {
   isDeletedMessage,
   isUnavailableDisplayMessage,
@@ -34,9 +35,11 @@ export type UseChannelMessagesOptions = {
 };
 
 // Track channels that have already run the initial seq-based query globally for the session
-const fullyQueriedChannels = new Set<string>();
-const queryingChannels = new Set<string>();
-export const markChannelAsFullyQueried = (cid: string) => fullyQueriedChannels.add(cid);
+const queryingChannels = new WeakSet<object>();
+// A legacy CID-only hint cannot establish page/session ownership.
+export const markChannelAsFullyQueried = (channel: string | object) => {
+  if (typeof channel === 'object' && channel !== null) markLatestPage(channel);
+};
 
 const isInactiveInviteRole = (role?: string) => isPendingMember(role) || role === 'rejected' || role === 'skipped';
 const isE2eeChannel = (channel: any, client: any) => {
@@ -369,7 +372,9 @@ export function useChannelMessages({
             setMessages((prev) => {
               if (!isCurrentEffect()) return prev;
 
-              let mergeBase = prev.length ? prev : baseMessages;
+              // A whole-window query/sync replaces the sidebar preview. Using
+              // nonempty React state here discards newly queried ciphertexts.
+              let mergeBase = targetIds && prev.length ? prev : baseMessages;
               if (targetIds && prev.length) {
                 const byId = new Map(prev.map((message: any) => [message.id, message]));
                 for (const baseMessage of targetBaseMessages) {
@@ -504,18 +509,18 @@ export function useChannelMessages({
         });
     };
 
+    // Promote an unopened scope immediately, independently of the history request.
+    ensureE2eeChannelReady();
+
     // Run the initial seq-based query if not already done for this channel
     const cid = activeChannel.cid;
-    if (includeHiddenMessages && cid && !fullyQueriedChannels.has(cid)) {
+    if (includeHiddenMessages && cid && !hasLatestPage(activeChannel)) {
       syncMessagesWithCache({ includeStoredWindow: true });
-      queryingChannels.add(cid);
-      activeChannel
-        .query({
-          messages_seq: { limit: 50 },
-        })
+      queryingChannels.add(activeChannel);
+      queryLatestPage(activeChannel)
         .then(() => {
           if (!isCurrentEffect()) return;
-          fullyQueriedChannels.add(cid);
+          markLatestPage(activeChannel);
           syncMessagesWithCache({ includeStoredWindow: true });
           ensureE2eeChannelReady();
           // Sync initial read state from SDK so read receipts show immediately
@@ -539,7 +544,7 @@ export function useChannelMessages({
             jumpingRef.current = false;
           }, 100);
         })
-        .finally(() => queryingChannels.delete(cid));
+        .finally(() => queryingChannels.delete(activeChannel));
     } else {
       // Already queried: sync cache immediately for instant UI, scroll and fade in quickly
       syncMessagesWithCache({ includeStoredWindow: true });
@@ -565,8 +570,7 @@ export function useChannelMessages({
       // array reference, triggers a full VList re-render, and produces a visible
       // second "flash" even though nothing changed.
       const prevIds = (activeChannel.state?.latestMessages || []).map((m: any) => `${m.id}:${m.type}`).join(',');
-      activeChannel
-        .query({ messages_seq: { limit: 50 } })
+      queryLatestPage(activeChannel)
         .then(() => {
           if (!isCurrentEffect()) return;
           const nextIds = (activeChannel.state?.latestMessages || []).map((m: any) => `${m.id}:${m.type}`).join(',');
@@ -754,7 +758,7 @@ export function useChannelMessages({
     };
 
     const handleRecovery = () => {
-      if (activeChannel.cid && queryingChannels.has(activeChannel.cid)) return;
+      if (activeChannel.cid && queryingChannels.has(activeChannel)) return;
       const syncRecoveredMessages = () => {
         const nextRevision = getSdkMessagesRevision(activeChannel.state.latestMessages);
         if (nextRevision === lastSdkMessagesRevision) return;
@@ -765,8 +769,7 @@ export function useChannelMessages({
       // Re-query the active channel with a proper limit, but only update React
       // when the visible message state actually changed. A no-op query used to
       // recreate the whole VList and schedule four bottom scrolls.
-      activeChannel
-        .query({ messages_seq: { limit: 50 } })
+      queryLatestPage(activeChannel)
         .then(() => {
           syncRecoveredMessages();
           ensureE2eeChannelReady();
@@ -877,6 +880,9 @@ export function useChannelMessages({
     });
     const sub19 = eventClient.on('e2ee.local_messages_loaded' as any, handleE2eeRefresh);
     const unlockSub = eventClient.on('e2ee.recovery_unlocked' as any, handleRecoveryUnlocked);
+    // A channel can be opened while the nonblocking session initialization is pending.
+    // Transfer that demand when its existing manager becomes available.
+    const initializedSub = eventClient.on('e2ee.initialized' as any, ensureE2eeChannelReady);
     const sub19a = eventClient.on('e2ee.repair_started' as any, handleE2eeRepairStarted);
     const sub19b = eventClient.on('e2ee.repair_completed' as any, handleE2eeRepairCompleted);
     const sub19c = eventClient.on('e2ee.repair_failed' as any, handleE2eeRepairFailed);
@@ -916,6 +922,7 @@ export function useChannelMessages({
       sub18a?.unsubscribe();
       sub19.unsubscribe();
       unlockSub.unsubscribe();
+      initializedSub.unsubscribe();
       sub19a.unsubscribe();
       sub19b.unsubscribe();
       sub19c.unsubscribe();

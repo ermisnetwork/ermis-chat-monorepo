@@ -38,6 +38,20 @@ function acceptedReadiness(h){
  // IDB checkpoint and Ready validation; only historical transport is empty.
  h.m._syncChannelFromCursor=async()=>({cid:h.cid,status:'ready',epoch:1,has_more:false,needs_retry:false});
 }
+test('session preparation reconciles canonical head conflict then permits only one fresh-head operation',async()=>{
+ const h=await fixture(), original=h.job.body.operation_id, operations=[], heads=[];
+ h.api.getGroupInfo=async()=>{heads.push(1);return h.info;};
+ h.api.getExternalJoinReceipt=async(_t,_id,op)=>op===original?h.rejection():h.unknown(op);
+ h.api.externalJoin=async(_t,_id,body)=>{operations.push(body.operation_id);};
+ await assert.rejects(h.m._prepareSessionChannelJoin('team',h.user,h.cid),e=>e.code==='transport_unknown');
+ assert.equal(heads.length,1);assert.equal(operations.length,1);assert.notEqual(operations[0],original);
+ assert.ok(await h.s.loadExternalJoinRejectionCheckpoint(h.cid,original));
+ const retained=await h.s.loadExternalJoinCandidateCheckpoint(h.cid);
+ assert.equal(retained.body.operation_id,operations[0]);
+ await assert.rejects(h.m._prepareSessionChannelJoin('team',h.user,h.cid),e=>e.code==='transport_unknown');
+ assert.equal(heads.length,1);assert.deepEqual(operations,[retained.body.operation_id,retained.body.operation_id]);
+ await h.close();
+});
 test('normal channel readiness resumes accepted pending UUID instead of dead-ending before receipt',async()=>{
  const h=await fixture();acceptedReadiness(h);const before=h.posts();
  const result=await h.m.ensureChannelReady('team',h.user,h.cid,{source:'open'});

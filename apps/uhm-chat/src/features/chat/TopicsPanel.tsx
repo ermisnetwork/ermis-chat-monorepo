@@ -13,6 +13,7 @@ import { UhmChannelActions } from './UhmChannelActions'
 
 interface TopicsPanelProps {
   channel: Channel
+  progressHostRef?: React.Ref<HTMLDivElement>
   onBack: () => void
   onCreateTopic?: (channel: Channel) => void
   onEditTopic?: (topic: Channel) => void
@@ -52,6 +53,7 @@ const TopicEmojiAvatar: React.FC<AvatarProps> = ({ image }) => {
 
 export function TopicsPanel({
   channel,
+  progressHostRef,
   onBack,
   onCreateTopic,
   onEditTopic,
@@ -165,6 +167,8 @@ export function TopicsPanel({
           )}
         </div>
       </div>
+
+      <div ref={progressHostRef} className="pointer-events-none relative z-40 h-0 shrink-0" data-session-progress-host="topics" />
 
       {/* Topic List — from UI Kit */}
       <div className="flex-1 overflow-hidden">

@@ -27,6 +27,7 @@ export { useContactCount } from './hooks/useContactCount';
 export { useChannel } from './hooks/useChannel';
 export type { UseChannelReturn } from './hooks/useChannel';
 export { useChannelListUpdates } from './hooks/useChannelListUpdates';
+export { getChannelListTime } from './channelListActivity';
 export { useChannelRowUpdates } from './hooks/useChannelRowUpdates';
 export { useBannedState } from './hooks/useBannedState';
 export { useBlockedState } from './hooks/useBlockedState';

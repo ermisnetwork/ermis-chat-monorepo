@@ -8,25 +8,26 @@ const {EncryptionManager,IndexedDBEncryptionStorage,sha256Hex}=createRequire(imp
 globalThis.indexedDB=indexedDB;globalThis.IDBKeyRange=IDBKeyRange;
 const binary=fs.readFileSync(new URL('../src/encryption/wasm/openmls_wasm_bg.wasm',import.meta.url));await init({module_or_path:binary});let sequence=0;
 const enc=encodeURIComponent,latch=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};};
-async function fixture(pending=true,generation=0){
+async function fixture(pending=true,generation=0,existingCursor=null,retainedWelcome=true){
  const user='external-activation-'+ ++sequence,device='device',cid='team:'+user,peer=cid+'-peer',s=new IndexedDBEncryptionStorage(user),m=new EncryptionManager(),events=[];
  Object.assign(m,{userId:user,deviceId:device,storage:s,_injectedWasm:wasm,_wasmArtifactSha256:sha256Hex(binary)});await m._initWasm();await m._initIdentity();m.initialized=true;m.client={activeChannels:{},dispatchEvent:e=>events.push(e)};m._armValidationAckRetry=()=>{};m.safeArchiveCurrentEpoch=async()=>{};m.ensureKeyPackagesFromServer=async()=>{};
  const g=wasm.Group.create_with_cid(m._activeProvider,m.identity,peer),marker={cid:peer,group_generation:0,group_id:null,current_epoch:0,status:'active',updated_at:1};m.groups.set(peer,g);m._groupGenerations.set(peer,marker);await s.saveGroupState(peer,marker);
  for(const id of [cid,peer])m.client.activeChannels[id]={data:{mls_enabled:true},state:{members:{[user]:{user_id:user}}}};
+ if(existingCursor)await s.saveScopeSyncCursor(cid,existingCursor);
  const kp=m.identity.key_package(m._activeProvider),ref=kp.hash_ref(m._activeProvider);kp.free();await m._persistProviderStrict();
  const p=new wasm.Provider(),i=new wasm.Identity(p,'remote'),groupId=generation?Uint8Array.of(42,43,sequence%255):null,remote=generation?wasm.Group.create_with_group_id(p,i,groupId):wasm.Group.create_with_cid(p,i,cid),otherP=new wasm.Provider(),otherI=new wasm.Identity(otherP,'other'),otherKp=otherI.key_package(otherP),bundle=remote.add_members(p,i,[otherKp]);remote.merge_pending_commit(p);otherI.free();otherP.free();
  const event='00000000-0000-4000-8000-000000000011',created_at=new Date().toISOString(),context={version:1,event_id:event,cid,group_generation:generation,epoch:Number(remote.epoch()),accepted_at:Math.floor(Date.now()/1000),payload_sha256:sha256Hex(bundle.welcome),provenance:'bellboy_transition_v1'};
  const protocol={type:'welcome',event_id:event,epoch:Number(remote.epoch()),group_generation:generation,group_id:groupId,welcome:bundle.welcome,ratchet_tree:remote.export_ratchet_tree().to_bytes(),target_user_ids:[user],target_device_ids:[device],acceptance_context:context};
  if(generation)await m._applyRecoveryControl(cid,{group_generation:generation,group_id:groupId,current_epoch:1,membership_version:'1',state:'ready',reason:'fixture',retryable:true,incident_id:'00000000-0000-4000-8000-000000000020',recovery_action:'repair',recovery_revision:'1',repair_retry_until:new Date(Date.now()+900000).toISOString()});
- assert.equal(await m.processMlsWelcome(cid,protocol,{acceptanceContext:context,acceptanceEnvelope:{event_id:event,cid,group_generation:generation,epoch:protocol.epoch}},{event_id:event,created_at}),'pending_external_join');
+ if(retainedWelcome)assert.equal(await m.processMlsWelcome(cid,protocol,{acceptanceContext:context,acceptanceEnvelope:{event_id:event,cid,group_generation:generation,epoch:protocol.epoch}},{event_id:event,created_at}),'pending_external_join');
  let posts=0,reads=0;const unknown=op=>({version:1,operation_id:op,cid,state:'outcome_unknown',delivery_pending:false,group_generation:null,epoch:null,group_id:null,commit_sha256:null,event_id:null,acceptance_context:null});
- const api={getGroupInfo:async()=>({group_info:remote.export_group_info(p,i,true),epoch:Number(remote.epoch()),hash:'fixture',is_stale:false,group_generation:generation,group_id:groupId}),getExternalJoinReceipt:async(_t,_id,op)=>{reads++;return unknown(op);},externalJoin:async()=>{assert.equal(m._providerCheckpointInFlight,false);posts++;},uploadGroupInfo:async()=>{}};m.e2eeClient=api;
+ const api={getGroupInfo:async()=>({group_info:remote.export_group_info(p,i,true),epoch:Number(remote.epoch()),hash:'fixture',is_stale:false,group_generation:generation,group_id:groupId,external_join_prerequisite:{reason:'active_member_recovery'}}),getExternalJoinReceipt:async(_t,_id,op)=>{reads++;return unknown(op);},externalJoin:async()=>{assert.equal(m._providerCheckpointInFlight,false);posts++;},uploadGroupInfo:async()=>{}};m.e2eeClient=api;
  const join=()=>m.joinExternal('team',user,cid);if(pending)await assert.rejects(join(),e=>e.code==='transport_unknown');
  const job=await s.loadExternalJoinCandidateCheckpoint(cid),base=await s.loadProviderCheckpoint(user,device),identity=await s.loadIdentity(user,device);
  const accepted=j=>{const id='00000000-0000-4000-8000-000000000012';return{version:1,operation_id:j.body.operation_id,cid,state:'accepted',delivery_pending:true,group_generation:j.marker.group_generation,epoch:j.body.epoch,group_id:j.marker.group_id,commit_sha256:j.commit_sha256,group_info_sha256:j.group_info_sha256,event_id:id,acceptance_context:{version:1,event_id:id,cid,group_generation:j.marker.group_generation,epoch:j.body.epoch,accepted_at:Math.floor(Date.now()/1000),payload_sha256:j.commit_sha256,provenance:'bellboy_transition_v1'}};};
  async function verifyPrivate(bytes){const q=wasm.Provider.from_bytes(bytes),id=wasm.Identity.from_bytes(q,identity);assert.equal(id.owns_key_package_ref(q,ref),true);const survivor=wasm.Group.load(q,peer);assert.equal(Number(survivor.epoch()),0);survivor.free();id.free();q.free();}
  async function restart(){const next=new EncryptionManager();Object.assign(next,{userId:user,deviceId:device,storage:s,_injectedWasm:wasm,_wasmArtifactSha256:sha256Hex(binary),client:m.client,e2eeClient:api});await next._initWasm();await next._initIdentity();await next._restoreGroupsLocally();next.initialized=true;next._armValidationAckRetry=()=>{};return next;}
- return{m,s,user,device,cid,peer,job,base,identity,accepted,api,join,event,generation,groupId,verifyPrivate,restart,events,posts:()=>posts,reads:()=>reads,close:async()=>{await s.close();remote.free();i.free();p.free();}};
+ return{m,s,user,device,cid,peer,job,base,identity,accepted,api,join,event,protocol,context,generation,groupId,verifyPrivate,restart,events,posts:()=>posts,reads:()=>reads,close:async()=>{await s.close();remote.free();i.free();p.free();}};
 }
 async function put(h,key,value,store='meta'){const db=await h.s.openDB();await new Promise((yes,no)=>{const tx=db.transaction(store,'readwrite');if(value===undefined)tx.objectStore(store).delete(key);else tx.objectStore(store).put(value,key);tx.oncomplete=yes;tx.onabort=()=>no(tx.error);});}
 async function mutate(h,field,base,job,transaction){
@@ -167,4 +168,188 @@ test('joined Ready own revision still stays uncertain when the canonical reproof
  h.s.verifyMlsReadyCheckpoint=async cp=>{await h.s.saveScopeSyncCursor(h.cid,{created_at:'2026-11-01T00:00:00Z',event_id:'forward'});committed=true;return verify(cp);};
  h.s.loadExternalJoinWorkBase=async(...a)=>{if(committed)throw Error('unknown canonical read');return load(...a);};
  assert.notEqual((await h.m.refreshE2eeState(h.cid)).state,'ready');assert.equal(h.m._providerPersistenceUncertain,true);assert.equal(h.posts(),1);await h.close();
+});
+
+
+test('canonical older Welcome first observed after accepted External Join uses that receipt without reopening join',async()=>{
+ const h=await fixture();await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));
+ const bytes=await h.s.loadProviderCheckpoint(h.user,h.device),posts=h.posts();
+ const event='00000000-0000-4000-8000-000000000099',context={...h.context,event_id:event};
+ const protocol={...h.protocol,event_id:event,acceptance_context:context};
+ const disposition=await h.m.processMlsWelcome(h.cid,protocol,{acceptanceContext:context,acceptanceEnvelope:{event_id:event,cid:h.cid,group_generation:h.generation,epoch:protocol.epoch}},{event_id:event,created_at:new Date(context.accepted_at*1000).toISOString()});
+ assert.equal(disposition,'superseded_by_recovery');assert.equal(h.posts(),posts);assert.equal(h.m._externalJoinCandidates.size,0);
+ const base=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id);
+ assert.equal(Object.keys(base.welcome_pending).length,0);assert.equal(Object.values(base.welcome_primary).find(x=>x.event_cursor.event_id===event).checkpoint.receipt.operation_id,h.job.body.operation_id);
+ assert.deepEqual(base.state.provider_bytes,bytes.provider_bytes);assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');await h.close();
+});
+
+
+function lateWelcome(h,event='00000000-0000-4000-8000-000000000098') {
+ const context={...h.context,event_id:event}, protocol={...h.protocol,event_id:event,acceptance_context:context};
+ const options={acceptanceContext:context,acceptanceEnvelope:{event_id:event,cid:h.cid,group_generation:h.generation,epoch:protocol.epoch}};
+ const cursor={event_id:event,created_at:new Date(context.accepted_at*1000).toISOString()};
+ return {protocol,options,cursor,record:h.m._welcomeRecoveryRecord(protocol.welcome,{...options,welcomeEventCursor:cursor})};
+}
+test('replay repairs late Welcome pending metadata using the same accepted operation and unchanged private bytes',async()=>{
+ const h=await fixture();await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));const late=lateWelcome(h),bytes=await h.s.loadProviderCheckpoint(h.user,h.device),posts=h.posts();
+ await h.m._recordOwnedWelcomeFailure(late.record,h.m._captureExternalJoinOwner(h.cid));
+ assert.equal((await h.s.loadExternalJoinReadiness(h.cid)).status,'pending_external_join');
+ assert.equal(await h.m.processMlsWelcome(h.cid,late.protocol,late.options,late.cursor),'superseded_by_recovery');
+ const base=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id);
+ assert.equal(base.state.cleanup.metadata['external_join_readiness:'+h.cid].status,'joined_external');assert.equal(Object.keys(base.welcome_pending).length,0);
+ assert.equal(base.accepted.operation_id,h.job.body.operation_id);assert.deepEqual(base.state.provider_bytes,bytes.provider_bytes);assert.equal(h.posts(),posts);await h.close();
+});
+for(const kind of ['equal_epoch','newer_epoch','different_generation','missing_receipt'])test('late Welcome '+kind+' cannot borrow accepted join entitlement',async()=>{
+ const h=await fixture();await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));const late=lateWelcome(h),before=await h.s.loadProviderCheckpoint(h.user,h.device);
+ if(kind==='equal_epoch')late.record.epoch=h.job.body.epoch;
+ if(kind==='newer_epoch')late.record.epoch=h.job.body.epoch+1;
+ if(kind==='different_generation')late.record.group_generation=h.generation+1;
+ if(kind==='missing_receipt')await put(h,'external_receipt:v1:'+h.cid,undefined);
+ assert.equal(await h.m._reconcileWelcomeAfterAcceptedExternalJoin(late.record,h.m._captureExternalJoinOwner(h.cid)),false);
+ assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),before);assert.equal(h.m._externalJoinCandidates.size,0);await h.close();
+});
+for(const fault of ['abort','lost_ack'])test('late Welcome reconciliation '+fault+' keeps the existing full-readset ownership boundary',async()=>{
+ const h=await fixture();await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));const late=lateWelcome(h),before=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id);
+ const save=h.s.saveWelcomeWork.bind(h.s);h.s.saveWelcomeWork=async(...args)=>{
+  if(args[4].kind!=='reconcile_external')return save(...args);
+  if(fault==='abort')throw Object.assign(Error('fixture transaction aborted'),{checkpoint_outcome:'aborted'});
+  await save(...args);throw Error('fixture committed acknowledgement lost');
+ };
+ await assert.rejects(h.m.processMlsWelcome(h.cid,late.protocol,late.options,late.cursor));
+ const after=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id);
+ assert.equal(h.m._providerPersistenceUncertain,fault==='lost_ack');assert.equal(h.posts(),1);assert.equal(after.accepted.operation_id,before.accepted.operation_id);
+ assert.deepEqual(after.state.provider_bytes,before.state.provider_bytes);
+ if(fault==='abort')assert.deepEqual(after,before);else assert(Object.values(after.welcome_primary).some(x=>x.event_cursor.event_id===late.cursor.event_id&&x.status==='superseded_by_recovery'));
+ await h.close();
+});
+
+
+test('late Welcome actual IndexedDB transaction abort preserves receipt, provider and pending indexes',async()=>{
+ const h=await fixture();await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));const late=lateWelcome(h);
+ const before=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id),save=h.s.saveWelcomeWork.bind(h.s),db=await h.s.openDB(),original=db.transaction.bind(db);
+ h.s.saveWelcomeWork=async(...args)=>{if(args[4].kind!=='reconcile_external')return save(...args);
+  db.transaction=(...a)=>{const tx=original(...a);if(a[1]==='readwrite')queueMicrotask(()=>tx.abort());return tx;};try{return await save(...args);}finally{db.transaction=original;}};
+ await assert.rejects(h.m.processMlsWelcome(h.cid,late.protocol,late.options,late.cursor));db.transaction=original;
+ assert.deepEqual(await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id),before);assert.equal(h.m._providerPersistenceUncertain,false);assert.equal(h.posts(),1);await h.close();
+});
+test('late Welcome full-readset CAS cannot overwrite a concurrent durable control winner',async()=>{
+ const h=await fixture();await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));const late=lateWelcome(h),save=h.s.saveWelcomeWork.bind(h.s);
+ const key='recovery_control:v1:device:'+encodeURIComponent(h.cid),winner={version:99,opaque:'fixture-control-winner'};
+ h.s.saveWelcomeWork=async(...args)=>{if(args[4].kind==='reconcile_external')await put(h,key,winner);return save(...args);};
+ await assert.rejects(h.m.processMlsWelcome(h.cid,late.protocol,late.options,late.cursor));
+ const db=await h.s.openDB(),tx=db.transaction('meta','readonly'),request=tx.objectStore('meta').get(key);await new Promise((yes,no)=>{tx.oncomplete=yes;tx.onabort=()=>no(tx.error);});
+ assert.deepEqual(request.result,winner);assert.equal(h.posts(),1);assert.equal(h.m._externalJoinCandidates.size,0);await h.close();
+});
+
+
+test('late Welcome requires explicit adapter capability before any reconciliation write',async()=>{
+ const h=await fixture();await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));const late=lateWelcome(h),before=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id);
+ h.s.welcomeExternalDispositionVersion=undefined;
+ await assert.rejects(h.m.processMlsWelcome(h.cid,late.protocol,late.options,late.cursor),error=>error.code==='client_upgrade_required');
+ assert.deepEqual(await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id),before);assert.equal(h.posts(),1);await h.close();
+});
+
+test('fresh accepted receipt seeds the canonical second but preserves an existing cursor',async()=>{
+ for(const saved of [null,{created_at:'2026-01-01T00:00:00.123Z',event_id:'existing-durable-position'}]){
+  const h=await fixture(true,0,saved,false),receipt=h.accepted(h.job);
+  try{await h.m._activateExternalJoinCandidate(h.job,receipt);
+   assert.deepEqual(await h.s.loadScopeSyncCursor(h.cid),saved||{created_at:new Date(receipt.acceptance_context.accepted_at*1000).toISOString(),event_id:'00000000-0000-0000-0000-000000000000'});
+   assert.equal(h.m._getCompletedSyncProgress(h.cid),null,'An initial boundary is not completed live delivery');
+  }finally{await h.close();}
+ }
+});
+
+test('fresh initial receipt cursor cannot be rewound by a competing Ready observation',async()=>{
+ const h=await fixture(true,0,null,false);try{
+  await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));
+  const initial=await h.s.loadScopeSyncCursor(h.cid),verify=h.s.verifyMlsReadyCheckpoint.bind(h.s);
+  h.s.verifyMlsReadyCheckpoint=async cp=>{await h.s.saveScopeSyncCursor(h.cid,{created_at:new Date(Date.parse(initial.created_at)-1000).toISOString(),event_id:'backward'});return verify(cp);};
+  assert.notEqual((await h.m.refreshE2eeState(h.cid)).state,'ready');
+  assert.equal(h.m._providerPersistenceUncertain,true);assert.equal(h.posts(),1);
+ }finally{await h.close();}
+});
+
+for(const retained of [false,true])test('stale active-member prerequisite reconciles the original accepted activation, retained Welcome='+retained,async()=>{
+ const h=await fixture(true,0,null,retained);
+ try{
+  await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));
+  const before=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id),posts=h.posts();
+  await h.s.saveExternalJoinReadiness({cid:h.cid,status:'pending_external_join',reason:'active_member_recovery',updated_at:Date.now()});
+  assert.equal((await h.m.refreshE2eeState(h.cid)).state,'ready');
+  const after=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id);
+  assert.equal(after.state.cleanup.metadata['external_join_readiness:'+h.cid].status,'joined_external');
+  assert.equal(after.state.cleanup.metadata['external_join_readiness:'+h.cid].first_decryptable_epoch,h.job.body.epoch);
+  assert.deepEqual(after.state.provider_bytes,before.state.provider_bytes);assert.equal(after.state.revision,before.state.revision);
+  assert.deepEqual(after.state.cleanup.marker,before.state.cleanup.marker);assert.deepEqual(after.accepted,before.accepted);
+  assert.deepEqual(after.welcome_primary,before.welcome_primary);assert.deepEqual(after.welcome_pending,before.welcome_pending);
+  assert.deepEqual(after.state.cleanup.metadata['scope_sync:'+h.cid],before.state.cleanup.metadata['scope_sync:'+h.cid]);
+  assert.equal(h.posts(),posts,'reconciliation performs no External Join');
+ }finally{h.m.destroy();await h.close();}
+});
+for(const fault of ['receipt_missing','receipt_digest','receipt_operation','pending_welcome','candidate','manual','capability'])test('stale prerequisite reconciliation keeps '+fault+' blocked',async()=>{
+ const h=await fixture();
+ try{
+  await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));
+  const base=await h.s.loadExternalJoinWorkBase(h.user,h.device,h.cid,h.job.body.operation_id),provider=await h.s.loadProviderCheckpoint(h.user,h.device);
+  const pending={cid:h.cid,status:'pending_external_join',reason:'active_member_recovery',updated_at:Date.now()};await h.s.saveExternalJoinReadiness(pending);
+  if(fault==='receipt_missing')await put(h,'external_receipt:v1:'+h.cid,undefined);
+  if(fault==='receipt_digest')await put(h,'external_receipt:v1:'+h.cid,{...base.accepted,commit_sha256:'f'.repeat(64)});
+  if(fault==='receipt_operation')await put(h,'external_receipt:v1:'+h.cid,{...base.accepted,operation_id:crypto.randomUUID()});
+  if(fault==='pending_welcome'){const row=Object.values(base.welcome_primary)[0];await put(h,Object.keys(base.welcome_primary)[0].replace('welcome_recovery:','welcome_pending:'),{...row,status:'pending_external_join',checkpoint:undefined});}
+  if(fault==='candidate')await put(h,'external_candidate:v1:'+h.cid,h.job);
+  if(fault==='manual')h.m._recoveryControls.set(h.cid,{recovery_action:'manual_intervention_required'});
+  if(fault==='capability')h.s.externalJoinReadinessReconcileVersion=undefined;
+  assert.notEqual((await h.m.refreshE2eeState(h.cid)).state,'ready');
+  assert.deepEqual(await h.s.loadExternalJoinReadiness(h.cid),pending);assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),provider);
+ }finally{h.m.destroy();await h.close();}
+});
+test('a dormant installed group cannot be downgraded by an active-member prerequisite',async()=>{
+ const h=await fixture();try{
+  await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));const before=await h.s.loadExternalJoinReadiness(h.cid);
+  h.m.groups.get(h.cid).free();h.m.groups.delete(h.cid);
+  assert.equal(await h.m._recordActiveMemberRecoveryPrerequisite(h.cid,{reason:'active_member_recovery'}),false);
+  assert.equal(h.m.groups.has(h.cid),true);assert.deepEqual(await h.s.loadExternalJoinReadiness(h.cid),before);
+ }finally{h.m.destroy();await h.close();}
+});
+test('an installed-group winner during GroupInfo HTTP cannot be downgraded or joined again',async()=>{
+ const h=await fixture(),entered=latch(),release=latch();let work;
+ try{
+  await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));const before=await h.s.loadExternalJoinReadiness(h.cid),posts=h.posts();
+  h.m.groups.get(h.cid).free();h.m.groups.delete(h.cid);
+  h.api.getGroupInfo=async()=>{entered.resolve();await release.promise;return{external_join_prerequisite:{reason:'active_member_recovery'}};};
+  work=h.m._syncNewChannelLegacy('team',h.cid.slice(5),h.cid,{initialScopeSyncCompleted:true});work.catch(()=>{});await entered.promise;
+  await h.m._restoreInstalledGroupOnDemand(h.cid);release.resolve();await work;
+  assert.deepEqual(await h.s.loadExternalJoinReadiness(h.cid),before);assert.equal(h.posts(),posts);
+ }finally{release.resolve();if(work)await work.catch(()=>{});h.m.destroy();await h.close();}
+});
+
+test('typed active-member prerequisite persists only for a genuinely missing group with unchanged private state',async()=>{
+ const h=await fixture(false,0,null,false);try{
+  const before=await h.s.loadProviderCheckpoint(h.user,h.device);
+  assert.equal(await h.m._recordActiveMemberRecoveryPrerequisite(h.cid,{reason:'sync_failed'}),false);
+  assert.equal(await h.m._recordActiveMemberRecoveryPrerequisite(h.cid,{reason:'active_member_recovery'}),true);
+  assert.equal((await h.s.loadExternalJoinReadiness(h.cid)).status,'pending_external_join');
+  assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),before);assert.equal(h.posts(),0);
+ }finally{h.m.destroy();await h.close();}
+});
+for(const winner of ['account','cursor','provider','readback'])test('accepted-readiness metadata reconciliation preserves '+winner+' fencing',async()=>{
+ const h=await fixture(),save=h.s.saveExternalJoinWork.bind(h.s);try{
+  await h.m._activateExternalJoinCandidate(h.job,h.accepted(h.job));
+  const pending={cid:h.cid,status:'pending_external_join',reason:'active_member_recovery',updated_at:Date.now()};await h.s.saveExternalJoinReadiness(pending);
+  const before=await h.s.loadProviderCheckpoint(h.user,h.device);let once=false;
+  h.s.saveExternalJoinWork=async(...args)=>{
+   if(args[4].kind!=='restore_readiness'||once)return save(...args);once=true;
+   if(winner==='account')h.m.userId='replacement';
+   if(winner==='cursor')await h.s.saveScopeSyncCursor(h.cid,{created_at:'2026-11-23T00:00:00Z',event_id:'winner'});
+   if(winner==='provider')await mutate(h,'provider',args[3],h.job,(await h.s.openDB()).transaction.bind(await h.s.openDB()));
+   const actual=await save(...args);
+   if(winner==='readback')throw Object.assign(Error('metadata readback unavailable'),{code:'recovery_checkpoint_uncertain'});
+   return actual;
+  };
+  const outcome=await h.m.refreshE2eeState(h.cid).then(state=>state,()=>null);
+  assert.equal(once,true);assert.notEqual(outcome?.state,'ready');
+  if(winner!=='readback')assert.deepEqual(await h.s.loadExternalJoinReadiness(h.cid),pending);
+  if(winner!=='provider')assert.deepEqual(await h.s.loadProviderCheckpoint(h.user,h.device),before);
+  if(winner==='cursor')assert.equal((await h.s.loadScopeSyncCursor(h.cid)).event_id,'winner');
+ }finally{h.m.userId=h.user;h.m.destroy();await h.close();}
 });

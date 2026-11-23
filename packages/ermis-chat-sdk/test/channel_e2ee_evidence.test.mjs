@@ -60,6 +60,25 @@ test('ready metadata is quiet unless the durable publication marker is set',asyn
  f.m.observeChannelE2ee({...f.metadata,group_info:{...f.metadata.group_info,refresh_requested:true}});
  await f.m._checkChannelEvidence(f.cid);assert.equal(f.uploads,1);
 });
+test('publication HTTP budget exhaustion retains actual durable messaging proof and queues existing continuation',async()=>{
+ const f=await fixture('missing');let queued=0;
+ f.m._queueChannelEvidence=cid=>{assert.equal(cid,f.cid);queued++;};
+ f.m._channelEvidenceBudget={at:Date.now(),remaining:0};
+ const proof=await f.m._checkChannelEvidence(f.cid);
+ assert.ok(proof);proof.assertCurrent();assert.equal(proof.snapshot.state,'ready');
+ assert.equal(f.uploads,0);assert.equal(queued,1);assert.equal((await work(f)).length,0);
+ assert.equal(f.m.getE2eeState(f.cid).state,'ready');
+ f.m.destroy();await f.storage.close();
+});
+test('publication concurrency cap queues observation without rejecting an independent local Ready proof',async()=>{
+ const f=await fixture('missing');let queued=0;
+ f.m._queueChannelEvidence=cid=>{assert.equal(cid,f.cid);queued++;};
+ for(let n=0;n<6;n++)f.m._channelEvidenceLocks.set('team:other-'+n,Promise.resolve());
+ assert.equal(await f.m._checkChannelEvidence(f.cid),undefined);
+ assert.equal(queued,1);assert.equal(f.uploads,0);
+ assert.equal((await f.m.refreshE2eeState(f.cid)).state,'ready','native/durable guard remains required');
+ f.m._channelEvidenceLocks.clear();f.m.destroy();await f.storage.close();
+});
 test('missing local state and unmatched epoch cannot upload or offer reset authority',async()=>{
  const f=await fixture();f.m.groups.delete(f.cid);await f.m._checkChannelEvidence(f.cid);assert.equal(f.uploads+f.continues,0);
  const g=await fixture();g.m._channelE2ee.get(g.cid).epoch=1;g.m._syncChannelFromCursor=async()=>({needs_retry:true});g.m._loadScopeSyncCursor=async()=>null;

@@ -10,6 +10,7 @@ import {
   isSkippedMember,
   hasTopicsEnabled,
   useInviteCount,
+  getChannelListTime,
 } from '@ermis-network/ermis-chat-react'
 import type { Channel } from '@ermis-network/ermis-chat-sdk'
 
@@ -64,6 +65,7 @@ export function CollapsedChannelSidebar({
     }
     const subs = [
       client.on('channels.queried', bump),
+      client.on('channel.created', bump),
       client.on('message.new', bump),
       client.on('message.read', bump),
       client.on('channel.updated', bump),
@@ -109,16 +111,9 @@ export function CollapsedChannelSidebar({
       }
     }
 
-    // Sort by last message time (most recent first)
-    const sortByLastMessage = (a: Channel, b: Channel) => {
-      const aTime = a.state?.last_message_at
-        ? new Date(a.state.last_message_at).getTime()
-        : 0
-      const bTime = b.state?.last_message_at
-        ? new Date(b.state.last_message_at).getTime()
-        : 0
-      return bTime - aTime
-    }
+    // Match the full list, including creation time for a new empty channel.
+    const activity = new Map([...pinned, ...regular].map(ch => [ch, getChannelListTime(ch)]))
+    const sortByLastMessage = (a: Channel, b: Channel) => activity.get(b)! - activity.get(a)!
 
     pinned.sort(sortByLastMessage)
     regular.sort(sortByLastMessage)

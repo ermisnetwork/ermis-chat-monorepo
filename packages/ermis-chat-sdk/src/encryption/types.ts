@@ -555,7 +555,9 @@ export interface EncryptionStorageAdapter {
 
   // ---- Pending E2EE Sends ----
   applicationIntentCheckpointVersion?: 1;
-  reserveApplicationIntent?(record: PendingE2eeSendRecord, owner: ProviderStorageCheckpoint & {identity_bytes: Uint8Array}, assertOwner: () => void): Promise<PendingE2eeSendRecord>;
+  /** Unsealed queued intent admission binds identity/active generation without native provider work. */
+  applicationIntentAdmissionVersion?: 1;
+  reserveApplicationIntent?(record: PendingE2eeSendRecord, owner: ProviderStorageCheckpoint & {identity_bytes: Uint8Array; intent_only?: true; group_generation?: number}, assertOwner: () => void): Promise<PendingE2eeSendRecord>;
   savePendingE2eeSend(record: PendingE2eeSendRecord): Promise<void>;
   /** Update/delete only the exact ciphertext job; false preserves an intervening replacement. */
   savePendingE2eeSendOutcome?(expected: PendingE2eeSendRecord, next: PendingE2eeSendRecord | null, message?: StoredMessage): Promise<boolean>;
@@ -608,12 +610,15 @@ export interface EncryptionStorageAdapter {
   saveExternalJoinCandidateCheckpoint?(checkpoint: ExternalJoinCandidateCheckpoint): Promise<void>;
   externalJoinWorkCheckpointVersion?: 1;
   externalJoinReadyCheckpointVersion?: 1;
+  /** Composed metadata-only prerequisite admission and accepted-readiness reconciliation. */
+  externalJoinReadinessReconcileVersion?: 1;
   loadExternalJoinWorkBase?(userId: string, deviceId: string, cid: string, operationId: string, eventId?: string, continuation?: import('./welcome_history').WelcomeHistoryContinuation): Promise<import('./external_join_work').ExternalJoinWorkBase>;
   saveExternalJoinWork?(userId: string, deviceId: string, cid: string, expected: import('./external_join_work').ExternalJoinWorkBase,
     change: import('./external_join_work').ExternalJoinWorkChange, assertOwner: () => void): Promise<import('./external_join_work').ExternalJoinWorkBase>;
   welcomeWorkCheckpointVersion?: 1;
   welcomeAuthoredDispositionVersion?: 1;
   welcomeGenerationDispositionVersion?: 1;
+  welcomeExternalDispositionVersion?: 1;
   welcomeManualWorkCheckpointVersion?: 1;
   saveWelcomeWork?(userId: string, deviceId: string, cid: string, expected: import('./external_join_work').ExternalJoinWorkBase,
     change: import('./welcome_work').WelcomeWorkChange, assertOwner: () => void): Promise<import('./external_join_work').ExternalJoinWorkBase>;
@@ -1866,6 +1871,8 @@ export interface MlsRolloutTelemetryResponse extends APIResponse {
 }
 
 export interface EncryptionManagerOptions {
+  /** Show the authenticated list after identity checkpoint; publish packages through the existing startup owner after metadata hydration. */
+  deferStartupKeyPackages?: boolean;
   /** SHA256 of actual loaded WASM bytes, provided by a verified loader. Required for validation ACK. */
   wasmArtifactSha256?: string;
   /** Explicit join-tree policy only; preserves not_before/range/crypto. Defaults to false. */
@@ -2003,6 +2010,8 @@ export interface E2eeBootstrapProgress {
 }
 
 export interface BootstrapKnownE2eeChannelsOptions {
+  /** @internal Prepare local/retained/Welcome/join work; the session owner performs batch sync afterwards. */
+  prepareOnly?: boolean;
   source?: 'startup' | 'channels_queried' | 'manual' | string;
   priorityActiveCid?: string;
   /** @internal Authoritative state captured after the final scope_sync page. */

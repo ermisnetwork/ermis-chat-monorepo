@@ -540,6 +540,8 @@ export type TopicListProps = {
 };
 
 export type ChannelListProps = {
+  /** Full session readiness inventory for the owning unfiltered root list. */
+  sessionReadiness?: boolean;
   filters?: ChannelFilters;
   sort?: ChannelSort;
   options?: ChannelQueryOptions;

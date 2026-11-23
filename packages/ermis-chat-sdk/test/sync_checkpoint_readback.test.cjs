@@ -105,7 +105,10 @@ test('global sync buffers its final callbacks until aggregate readback; readback
     f.storage.verifyEncryptionSyncCheckpoint=async c=>{entered.open();await release.promise;return failed?false:verify(c);};
     const work=f.m.sync(),rejected=failed?assert.rejects(work,e=>e.code==='provider_persistence_uncertain'):null;
     await entered.promise;assert.equal(f.emitted().length,0);release.open();if(failed)await rejected;else await work;
-    assert.equal(f.emitted().length,failed?0:1);assert.equal(f.m.isSyncing(),false);assert.equal(f.m._providerPersistenceUncertain,failed);await f.storage.close();
+    // Session batch finalization may publish an additional local admission state.
+    // Every such callback must still follow the same aggregate readback barrier.
+    if(failed)assert.equal(f.emitted().length,0);else assert.ok(f.emitted().length>=1);
+    assert.equal(f.m.isSyncing(),false);assert.equal(f.m._providerPersistenceUncertain,failed);await f.storage.close();
   }
 });
 
@@ -152,12 +155,15 @@ test('synchronous listener scope replacement cannot receive later CID callbacks 
     const f=await fixture();transport(f);if(global)globalSync(f);let requests=0,discovery=0;const newEvents=[],old=f.m.e2eeClient;
     if(global){
       const second=`${f.cid}-second`;f.m.groups.set(second,f.m._injectedWasm.Group.create_with_cid(f.m.provider,f.m.identity,second));
+      f.m._warmScopeCids=()=>[f.cid,second];f.m._listKnownE2eeChannels=()=>[{cid:f.cid},{cid:second}];
       f.m.e2eeClient={scopeSync:async()=>{requests++;const response=await old.scopeSync();response.channels[second]={events:[],has_more:false};return response;}};
-      f.m._discoverMlsRecoveryStates=async()=>{discovery++;assert.fail('old sync continued after listener switch');};
+      // Preparation now precedes the one session request. A discovery after a
+      // request/callback would still be work leaking from the retired owner.
+      f.m._discoverMlsRecoveryStates=async()=>{assert.equal(requests,0,'old sync continued after listener switch');discovery++;return{states:{},unsupported:false};};
     }else f.m.e2eeClient={scopeSync:async()=>{requests++;const response=await old.scopeSync();response.channels[f.cid].has_more=true;return response;}};
     f.m.client.dispatchEvent=e=>{f.events.push(e);if(e.type!=='e2ee.sync_state')return;
       if(replacement==='user')f.m.userId='listener-account';else f.m.client={dispatchEvent:event=>newEvents.push(event)};};
     await assert.rejects(global?f.m._syncAndRestoreGroups():f.m._syncChannelFromCursor(f.cid,since),e=>e.code==='recovery_scope_changed');
-    assert.equal(requests,1);assert.equal(discovery,0);assert.equal(f.emitted().length,1);assert.deepEqual(newEvents,[]);await f.storage.close();
+    assert.equal(requests,1);assert.equal(discovery,global?1:0);assert.equal(f.emitted().length,1);assert.deepEqual(newEvents,[]);await f.storage.close();
   }
 });

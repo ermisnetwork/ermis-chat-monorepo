@@ -7,7 +7,7 @@ export interface OwnCommitProtocol {
   commit?: Uint8Array;
 }
 
-export type OwnCommitReplayOptions = MlsProtocolProcessingOptions;
+export type OwnCommitReplayOptions = MlsProtocolProcessingOptions & { realtime?: boolean };
 
 export type OwnCommitReplayReason = 'own_commit_unresolved' | 'own_commit_candidate_mismatch'
   | 'own_commit_unjournaled_candidate' | 'own_commit_no_candidate';

@@ -177,7 +177,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         if (response?.channel?.id) {
           createdChannel = client.channel('messaging', response.channel.id);
           await createdChannel.watch({ messages: { limit: 25 } });
-          markChannelAsFullyQueried(createdChannel.cid);
+          markChannelAsFullyQueried(createdChannel);
           if (e2eeEnabled && client.encryptionManager?.initialized && createdChannel.id) {
             client.encryptionManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
               .catch((err: unknown) => console.warn('[E2EE] Initial epoch archive failed:', err));
@@ -226,7 +226,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         if (response?.channel?.id) {
           createdChannel = client.channel('team', response.channel.id);
           await createdChannel.watch({ messages: { limit: 25 } });
-          markChannelAsFullyQueried(createdChannel.cid);
+          markChannelAsFullyQueried(createdChannel);
           if (e2eeEnabled && client.encryptionManager?.initialized && createdChannel.id) {
             client.encryptionManager.archiveCurrentEpoch(createdChannel.type, createdChannel.id)
               .catch((err: unknown) => console.warn('[E2EE] Initial epoch archive failed:', err));

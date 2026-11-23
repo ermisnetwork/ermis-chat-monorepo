@@ -85,12 +85,14 @@ for(const malformed of ['missing','digest'])test('startup '+malformed+' acceptan
   if(malformed==='missing')delete h.welcome.acceptance_context;
   else h.welcome.acceptance_context={...h.welcome.acceptance_context,payload_sha256:'0'.repeat(64)};
   h.m.client.activeChannels[healthy]={id:healthy.slice(5),type:'team',cid:healthy,data:{mls_enabled:true},state:{membership:{channel_role:'member',created_at:'2026-10-27T06:59:59Z'}}};
-  const visited=[];let synced;
+  const visited=[];let preparation;
   h.m._discoverMlsRecoveryStates=async cids=>{visited.push(...cids);return{states:{},unsupported:false};};
-  h.m.bootstrapKnownE2eeChannels=async options=>{synced=options.scopeSyncedCids;return{results:[]};};
+  h.m.bootstrapKnownE2eeChannels=async options=>{preparation=options;return{results:[]};};
   await h.m._syncAndRestoreGroups();
   assert.ok(visited.includes(healthy));assert.ok(visited.includes(h.cid));
-  assert.ok(synced.includes(healthy));assert.ok(!synced.includes(h.cid));
+  assert.equal(preparation.prepareOnly,true, 'join preparation precedes the shared batch catch-up');
+  assert.ok(preparation.targetCids.includes(healthy));assert.ok(preparation.targetCids.includes(h.cid));
+  assert.equal(h.m._getCompletedSyncProgress(h.cid),null,'invalid protocol cannot establish completed delivery');
   assert.equal(h.m.getSyncState(h.cid).error,'acceptance_metadata_invalid');
   assert.equal(h.m.getSyncState(h.cid).needs_retry,true);
   assert.equal(await h.s.loadScopeSyncCursor(h.cid),null);
