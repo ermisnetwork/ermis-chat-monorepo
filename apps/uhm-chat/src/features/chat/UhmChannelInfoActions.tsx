@@ -27,6 +27,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
   useChatCore,
+  useChatMessages,
   useRecoveryPin,
   canManageChannel,
   CHANNEL_ROLES,
@@ -41,6 +42,7 @@ import type {
 } from '@ermis-network/ermis-chat-sdk';
 import { useActionConfirm, needsConfirmation } from './useActionConfirm';
 import { UhmRecoveryPinDialog } from './UhmRecoveryPinDialog';
+import { isUnresolvedE2eeMessage } from './messageInfo';
 
 function ActionItem({
   onClick,
@@ -131,6 +133,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
   }) => {
     const { t } = useTranslation();
     const { activeChannel, client } = useChatCore();
+    const { messages } = useChatMessages();
     const recovery = useRecoveryPin();
     const { loadRestoreProgress, repairEncryptedChannel } = recovery;
     const { requestConfirm, confirmDialog } = useActionConfirm();
@@ -144,6 +147,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     const repairChannelType = channel?.type;
     const repairChannelId = channel?.id;
     const repairChannelCid = channel?.cid;
+    const encryptedMessagesRemain = activeChannel?.cid === repairChannelCid && messages.some((message) =>
+      (!message.cid || message.cid === repairChannelCid) && isUnresolvedE2eeMessage(message));
 
     const loadRepairProgress = useCallback(async () => {
       if (!repairChannelType || !repairChannelId) {
@@ -183,6 +188,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
           if (result.messageRepair) setRepairResult(result.messageRepair);
           const latestProgress = await loadRepairProgress();
           const remainingIssueCount = Math.max(result.stillFailed, latestProgress?.repair_issues?.length || 0);
+          const encryptedAfterRepair = activeChannel?.cid === repairChannelCid &&
+            activeChannel?.state.messages.some(isUnresolvedE2eeMessage);
           if (result.requiresPin) {
             setRepairAfterUnlock(true);
             setIsPinDialogOpen(true);
@@ -190,14 +197,20 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
           } else if (result.resetAvailable) {
             toast.warning(t('encrypted_history.reset_available'));
             setIsRepairDetailOpen(true);
+          } else if (result.status === 'replay_failed' || result.status === 'failed') {
+            toast.error(t('encrypted_history.repair_failed'));
+            setIsRepairDetailOpen(true);
           } else if (remainingIssueCount > 0) {
             toast.warning(t('encrypted_history.repair_partial', { count: remainingIssueCount }));
             setIsRepairDetailOpen(true);
           } else if (result.repairedMessages > 0) {
             toast.success(t('encrypted_history.repair_complete', { count: result.repairedMessages }));
             setIsRepairDetailOpen(true);
-          } else {
-            toast.success(t('encrypted_history.repair_up_to_date'));
+          } else if (encryptedAfterRepair) {
+            toast.message(t('encrypted_history.detail_encrypted_remaining'));
+            setIsRepairDetailOpen(true);
+          } else if (result.messageRepair) {
+            toast.message(t('encrypted_history.detail_scope_checked'));
           }
         } catch (err) {
           toast.error(err instanceof Error ? err.message : String(err));
@@ -205,7 +218,7 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
           setIsRepairing(false);
         }
       },
-      [loadRepairProgress, repairChannelId, repairChannelType, repairEncryptedChannel, t],
+      [activeChannel, loadRepairProgress, repairChannelCid, repairChannelId, repairChannelType, repairEncryptedChannel, t],
     );
 
     const requestRepair = useCallback(() => {
@@ -217,11 +230,16 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     const repairStatus = useMemo(() => {
       if (isRepairing) return 'repairing';
       if (channelRepairResult?.resetAvailable) return 'reset_available';
-      if (repairIssues.length === 0) return 'ready';
+      if (channelRepairResult?.status === 'replay_failed' || channelRepairResult?.status === 'failed') return 'still_failed';
+      if (repairIssues.length === 0) {
+        if (encryptedMessagesRemain) return 'encrypted_remaining';
+        return repairResult || repairProgress?.status === 'done' ? 'scope_checked' : 'unchecked';
+      }
       if (repairIssues.every((issue) => issue.status === 'terminal')) return 'incomplete';
       if (repairResult) return 'still_failed';
       return 'needs_repair';
-    }, [channelRepairResult?.resetAvailable, isRepairing, repairIssues, repairResult]);
+    }, [channelRepairResult, encryptedMessagesRemain, isRepairing, repairIssues, repairProgress?.status, repairResult]);
+    const showRepairDetails = repairIssues.length > 0 || Boolean(repairResult) || encryptedMessagesRemain;
 
     const handleActionWithConfirm = (actionId: string, execute?: () => void) => {
       if (!execute) return;
@@ -250,8 +268,8 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
     };
 
     const statusTone =
-      repairStatus === 'ready'
-        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+      repairStatus === 'scope_checked' || repairStatus === 'unchecked'
+        ? 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300'
         : repairStatus === 'repairing'
         ? 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300'
         : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300';
@@ -422,16 +440,16 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
               >
                 {repairStatus === 'repairing' ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
-                ) : repairStatus === 'ready' ? (
+                ) : repairStatus === 'scope_checked' ? (
                   <CheckCircle2 className="h-3 w-3" />
-                ) : (
+                ) : repairStatus !== 'unchecked' ? (
                   <AlertTriangle className="h-3 w-3" />
-                )}
+                ) : null}
                 {t(`encrypted_history.status.${repairStatus}`)}
               </div>
             </div>
 
-            {(repairIssues.length > 0 || repairResult) && (
+            {showRepairDetails && (
               <button
                 type="button"
                 onClick={() => setIsRepairDetailOpen((open) => !open)}
@@ -443,11 +461,11 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
               </button>
             )}
 
-            {isRepairDetailOpen && (repairIssues.length > 0 || repairResult) && (
+            {isRepairDetailOpen && showRepairDetails && (
               <div className="mt-2 space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
                 <div>
                   <div className="flex items-center gap-2 text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                    {detailIssues.length > 0 ? (
+                    {detailIssues.length > 0 || encryptedMessagesRemain ? (
                       <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
                     ) : (
                       <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -457,27 +475,32 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
                   <div className="mt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
                     {detailIssues.length > 0
                       ? t('encrypted_history.detail_partial')
-                      : t('encrypted_history.detail_complete')}
+                      : t(encryptedMessagesRemain
+                        ? 'encrypted_history.detail_encrypted_remaining'
+                        : 'encrypted_history.detail_scope_checked')}
                   </div>
                 </div>
 
                 {repairResult && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <RepairMetric
-                      label={t('encrypted_history.metric_recovered')}
-                      value={repairResult.newlyRepaired.length}
-                      tone="success"
-                    />
-                    <RepairMetric label={t('encrypted_history.metric_synced')} value={repairResult.alreadyAvailable} />
-                    <RepairMetric
-                      label={t('encrypted_history.metric_unavailable')}
-                      value={repairResult.stillFailed.length}
-                      tone={repairResult.stillFailed.length > 0 ? 'warning' : undefined}
-                    />
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      <RepairMetric
+                        label={t('encrypted_history.metric_recovered')}
+                        value={repairResult.newlyRepaired.length}
+                        tone="success"
+                      />
+                      <RepairMetric label={t('encrypted_history.metric_synced')} value={repairResult.alreadyAvailable} />
+                      <RepairMetric
+                        label={t('encrypted_history.metric_unavailable')}
+                        value={repairResult.stillFailed.length}
+                        tone={repairResult.stillFailed.length > 0 ? 'warning' : undefined}
+                      />
+                    </div>
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('encrypted_history.metrics_scope')}</div>
                   </div>
                 )}
 
-                {detailIssues.length > 0 ? (
+                {detailIssues.length > 0 && (
                   <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
                     {detailIssues.map((issue) => (
                       <div
@@ -512,10 +535,6 @@ export const UhmChannelInfoActions: React.FC<ChannelInfoActionsProps> = React.me
                         </details>
                       </div>
                     ))}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">
-                    {t('encrypted_history.no_issues')}
                   </div>
                 )}
               </div>

@@ -19,7 +19,7 @@ import { CustomCreateChannelModal } from '@/components/custom/CustomCreateChanne
 import { ConnectionStatusBanner } from '@/features/chat/ConnectionStatusBanner'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useUIStore } from '@/store/useUIStore'
-import { UhmMessageActions } from '@/features/chat/UhmMessageActions'
+import { UhmMessageActions, UhmMessageInfoActions } from '@/features/chat/UhmMessageActions'
 import { UhmMessageInput } from '@/features/chat/UhmMessageInput'
 import { GlobalPickers } from '@/features/chat/GlobalPickers'
 import { UhmChannelInfoHeader } from '@/features/chat/UhmChannelInfoHeader'
@@ -40,7 +40,6 @@ import { UhmPollMessage } from '@/features/chat/UhmPollMessage'
 import { UserProfileModal } from '@/features/chat/UserProfileModal'
 import { UhmRecoveryPinDialog } from '@/features/chat/UhmRecoveryPinDialog'
 import { SyncStatusBanner } from '@/features/chat/SyncStatusBanner'
-import { SecureSessionBanner } from '@/features/chat/SecureSessionBanner'
 import { MessageGapIndicator } from '@/features/chat/MessageGapIndicator'
 import { SEO } from '@/components/SEO'
 import { useTotalUnreadCount } from '@/hooks/useTotalUnreadCount'
@@ -117,7 +116,6 @@ export function ChatPage() {
   const [isRecoveryGateOpen, setIsRecoveryGateOpen] = useState(false)
   const [activeRestoreProgress, setActiveRestoreProgress] = useState<RestoreProgressRecord | null>(null)
   const [activeRestoreProgressCheckedCid, setActiveRestoreProgressCheckedCid] = useState<string | null>(null)
-  const activeRestoreEnqueuedCidRef = useRef<string | null>(null)
   const activeRestorePromptedCidRef = useRef<string | null>(null)
   const activeRestoreProgressRequestRef = useRef(0)
   const {
@@ -300,17 +298,11 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!activeChannel?.id || !isEffectiveE2eeChannel(activeChannel, client)) return
-    if (recovery.recoveryStatus?.autoUnlockUnavailable) return
+    if (recovery.recoveryStatus?.autoUnlockUnavailable || recovery.recoveryStatus?.unlocked ||
+        client?.encryptionManager?.isRecoveryVaultUnlocked()) return
     if (!activeChannel.cid || activeRestoreProgressCheckedCid !== activeChannel.cid) return
 
     if (!activeRestoreProgress) {
-      if (recovery.recoveryStatus?.unlocked) {
-        if (activeRestoreEnqueuedCidRef.current === activeChannel.cid) return
-        activeRestoreEnqueuedCidRef.current = activeChannel.cid || null
-        // Requested history pages own restoration.
-        return
-      }
-
       if (
         !recoveryGateAcknowledgement.isAcknowledged(activeChannel.cid) &&
         recovery.recoveryStatus?.hasVault &&
@@ -327,13 +319,6 @@ export function ChatPage() {
       isUserGatedRestoreProgress(activeRestoreProgress) &&
       ['pending', 'partial', 'failed'].includes(activeRestoreProgress.status)
     if (!needsRestore) return
-
-    if (recovery.recoveryStatus?.unlocked) {
-      if (activeRestoreEnqueuedCidRef.current === activeRestoreProgress.cid) return
-      activeRestoreEnqueuedCidRef.current = activeRestoreProgress.cid
-      // Requested history pages own restoration.
-      return
-    }
 
     if (
       !recoveryGateAcknowledgement.isAcknowledged(activeRestoreProgress.cid) &&
@@ -481,14 +466,14 @@ export function ChatPage() {
         tone: 'running',
       }
     }
-    if (
+    if (!recovery.recoveryStatus?.unlocked && !client?.encryptionManager?.isRecoveryVaultUnlocked() && (
       (isUserGatedRestoreProgress(progress) && ['pending', 'partial', 'failed'].includes(progress?.status || '')) ||
-      recovery.recoveryStatus?.incompleteChannels.includes(cid)
+      recovery.recoveryStatus?.incompleteChannels.includes(cid))
     ) {
       return { label: t('recovery_pin.status_restore_pending'), tone: 'pending' }
     }
     return null
-  }, [activeRestoreProgress, activeRestoreTotal, recovery.recoveryStatus, t])
+  }, [activeRestoreProgress, activeRestoreTotal, client, recovery.recoveryStatus, t])
 
   const roleLabels = useMemo(() => ({
     owner: t('roles.owner'),
@@ -622,6 +607,22 @@ export function ChatPage() {
     }
   }, [client, setActiveChannel]);
 
+  const [activeLocalEpoch, setActiveLocalEpoch] = useState<{cid: string; epoch: number} | null>(null)
+  useEffect(() => {
+    const cid = activeChannel?.cid
+    if (!client || !cid) return
+    const update = () => {
+      const epoch = client.encryptionManager?.getEpoch(cid) ?? -1
+      setActiveLocalEpoch(prior => prior?.cid === cid && prior.epoch === epoch ? prior : {cid, epoch})
+    }
+    update()
+    const changed = client.on('e2ee.state_changed' as any, (event: SdkEvent) => {
+      if (event.cid === cid) update()
+    })
+    const initialized = client.on('e2ee.initialized' as any, update)
+    return () => { changed.unsubscribe(); initialized.unsubscribe() }
+  }, [activeChannel?.cid, client, client?.userID])
+
   /** Info button injected into ChannelHeader's right side */
   const renderHeaderRight = useCallback(
     (channel: ChannelType, actionDisabled?: boolean) => {
@@ -632,6 +633,7 @@ export function ChatPage() {
       const encryptionManager = client.encryptionManager
       const rotating = rotatingKeyCid === channel.cid
       const restoreBadge = isE2ee ? getRestoreBadge(channel) : null
+      const localEpoch = activeLocalEpoch?.cid === channel.cid ? activeLocalEpoch.epoch : encryptionManager?.getEpoch(channel.cid) ?? -1
 
       const handleRotateKey = async () => {
         if (!canRotateKey || !encryptionManager?.initialized || !channel.cid || rotating) return
@@ -657,7 +659,7 @@ export function ChatPage() {
               <LockKeyhole className="w-3.5 h-3.5" />
               <span>{t('e2ee.badge')}</span>
               {typeof encryptionManager?.getEpoch === 'function' && !isTopic && (
-                <span className="font-mono opacity-70">{encryptionManager.getEpoch(channel.cid) >= 0 ? encryptionManager.getEpoch(channel.cid) : '…'}</span>
+                <span className="font-mono opacity-70">{localEpoch >= 0 ? localEpoch : '…'}</span>
               )}
             </div>
           )}
@@ -709,7 +711,7 @@ export function ChatPage() {
         </>
       )
     },
-    [client, getRestoreBadge, rotatingKeyCid, showMusicRoom, t, toggleChannelInfo],
+    [activeLocalEpoch, client, getRestoreBadge, rotatingKeyCid, showMusicRoom, t, toggleChannelInfo],
   )
 
   const safariCallTooltip = t('safari_call.tooltip', 'Calls are not supported on Safari. Please use Chrome or Firefox.')
@@ -1157,7 +1159,6 @@ export function ChatPage() {
             renderAudioCallButton={renderAudioCallButton}
             renderVideoCallButton={renderVideoCallButton}
           />
-          <SecureSessionBanner client={client} channel={activeChannel} />
 
           {/* Music Room Player for Group Channels */}
           {activeChannel && isGroupChannel(activeChannel) && (
@@ -1172,6 +1173,7 @@ export function ChatPage() {
 
           <VirtualMessageList
             MessageActionsBoxComponent={UhmMessageActions}
+            SpecialMessageActionsBoxComponent={UhmMessageInfoActions}
             messageRenderers={UHM_MESSAGE_RENDERERS}
             dateLocale={i18n.language}
             bannedOverlayTitle={t('overlays.bannedTitle', 'You are banned')}
@@ -1204,7 +1206,7 @@ export function ChatPage() {
             attachmentLabel={t('chat.preview_attachment', 'Attachment')}
             unavailableMessageLabel={t('chat.message_unavailable', 'Message unavailable')}
             encryptedMessageLabel={t('chat.encrypted_message', 'Encrypted message')}
-            encryptedMessageFailedLabel={t('chat.encrypted_message_failed', 'Encrypted message could not be decrypted')}
+            encryptedMessageFailedLabel={t('chat.encrypted_message', 'Encrypted message')}
             encryptedMessageDecryptingLabel={t('chat.encrypted_message_decrypting', 'Decrypting encrypted message...')}
             encryptedMessageUnavailableLabel={t('chat.encrypted_message_unavailable', 'Encrypted message unavailable')}
             typingIndicatorLabel={typingIndicatorLabel}

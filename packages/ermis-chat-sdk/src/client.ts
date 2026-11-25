@@ -2317,13 +2317,16 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const history = [...this._progressJobs.values()].some(job => job.phase === 'restoring_page');
     const cycle = this._progressCycle;
     const value = readiness && !history ? readiness.progress.snapshot() : cycle ? {
-      cycle_id: cycle.id, phase: history ? 'restoring_page' : cycle.phase,
+      cycle_id: cycle.id, phase: history ? 'restoring_page' : cycle.jobs && cycle.phase === 'restoring_page' ? 'syncing' : cycle.phase,
       status: cycle.jobs ? 'running' : cycle.failed ? 'partial' : 'done', retry: cycle.retry,
     } : null;
     const quietCompletedUnpresented = readiness?.quietBootstrap && value?.status === 'done' &&
       this._sessionProgressSnapshot?.cycle_id !== value.cycle_id;
     if (readiness && !history && (!readiness.bootstrapResolved || quietCompletedUnpresented)) {
-      this._sessionProgressSnapshot = null; return;
+      const wasVisible = this._sessionProgressSnapshot !== null;
+      this._sessionProgressSnapshot = null;
+      if (wasVisible) this.dispatchEvent({type: 'e2ee.session_progress', status: 'idle'} as any);
+      return;
     }
     this._sessionProgressSnapshot = value;
     if (value && value.cycle_id !== this._dismissedSessionProgress) this.dispatchEvent({type: 'e2ee.session_progress', ...value} as any);

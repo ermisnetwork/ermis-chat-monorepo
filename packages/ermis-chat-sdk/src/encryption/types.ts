@@ -2028,6 +2028,18 @@ export interface BootstrapKnownE2eeChannelsResult extends E2eeBootstrapProgress 
   results: EnsureE2eeChannelResult[];
 }
 
+export type MessageDecryptionReason =
+  | RepairIssueReason
+  | NonNullable<RestoredMessage['reason']>
+  | 'pin_locked'
+  | 'no_recovery_vault'
+  | 'invalid_envelope'
+  | 'encryption_unavailable'
+  | 'recovery_status_unavailable'
+  | 'local_status_read_failed'
+  | 'archive_check_incomplete'
+  | 'recovered';
+
 export interface RestoredMessage {
   epoch: number;
   messageId?: string;
@@ -2044,7 +2056,10 @@ export interface RestoredMessage {
     | 'missing_snapshot'
     | 'expired_restore_window'
     | 'adk_unwrap_error'
-    | 'decrypt_error';
+    | 'decrypt_error'
+    | 'archive_access_denied'
+    | 'archive_request_failed'
+    | 'invalid_archive_material';
 }
 
 export type RepairMode = 'failed_only' | 'recheck_channel';

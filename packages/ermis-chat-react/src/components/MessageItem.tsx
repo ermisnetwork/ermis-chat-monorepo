@@ -93,6 +93,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
   onClickQuote,
   QuotedMessagePreviewComponent = QuotedMessagePreview,
   MessageActionsBoxComponent = MessageActionsBox,
+  SpecialMessageActionsBoxComponent,
   MessageReactionsComponent = MessageReactions,
   forwardedLabel = 'Forwarded',
   editedLabel = 'Edited',
@@ -187,7 +188,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
     hasAttachments && !isDeletedDisplay ? 'ermis-message-list__item-content--has-attachments' : '',
   ].filter(Boolean).join(' ');
 
-  // Deleted display: show icon + label, no actions/reactions/quote/attachments
+  // Deleted display uses a tombstone and optional informational actions.
   if (isDeletedDisplay) {
     return (
       <div className={itemClass} data-message-id={message.id}>
@@ -216,6 +217,9 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({
                 {formatTime(message.created_at)}
               </span>
             </MessageBubble>
+            {SpecialMessageActionsBoxComponent && (
+              <SpecialMessageActionsBoxComponent message={message} isOwnMessage={isOwnMessage} />
+            )}
           </div>
         </div>
       </div>

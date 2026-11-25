@@ -29,6 +29,8 @@ import { useTranslation } from 'react-i18next';
 import { MultiRecorder } from 'react-ts-audio-recorder';
 import pcmWorkletUrl from 'react-ts-audio-recorder/assets/pcm-worklet.js?url';
 
+import { SecureSessionBanner } from './SecureSessionBanner';
+import { secureSessionScope } from './secureSessionNotice';
 import { UhmDragAndDropOverlay } from './UhmDragAndDropOverlay';
 import { UhmCreatePollModal } from './UhmCreatePollModal';
 import { UhmSlashCommandSuggestions, type SlashCommandItem } from './UhmSlashCommandSuggestions';
@@ -66,32 +68,38 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
   const canSendMessage = hasCapability('send-message');
   const canSendLinks = hasCapability('send-links');
 
-  const readSecureReady = () => {
-    if (!activeChannel?.initialized) return false;
-    const data = activeChannel.data as any;
-    const scope = data?.e2ee_group_id || (data?.gate !== true && data?.parent_cid) || activeChannel.cid;
-    const encrypted = data?.mls_enabled === true ||
-      (scope !== activeChannel.cid && client.activeChannels?.[scope]?.data?.mls_enabled === true);
-    if (!encrypted) return true;
+  const scope = activeChannel ? secureSessionScope(activeChannel) : '';
+  const encrypted = activeChannel?.data?.mls_enabled === true ||
+    (scope !== activeChannel?.cid && client.activeChannels?.[scope]?.data?.mls_enabled === true);
+  const readSecureReadiness = (observedState?: string) => {
+    if (!activeChannel?.initialized) return { ready: false, verified: false };
+    if (!encrypted) return { ready: true, verified: true };
     const manager = client.encryptionManager;
-    return manager?.initialized === true && manager.userId === client.userID &&
-      (typeof manager.canEnqueueApplicationSend === 'function'
-        ? manager.canEnqueueApplicationSend(scope)
-        : manager.getE2eeState(scope)?.state === 'ready');
+    if (manager?.initialized !== true || manager.userId !== client.userID) return { ready: false, verified: false };
+    const verified = (observedState ?? manager.getE2eeState(scope)?.state) === 'ready';
+    return { ready: verified || manager.canEnqueueApplicationSend?.(scope) === true, verified };
   };
-  const [secureReady, setSecureReady] = useState(readSecureReady);
+  const [readiness, setReadiness] = useState(() => ({ client, user: client.userID, scope, ...readSecureReadiness() }));
+  const secure = readiness.client === client && readiness.user === client.userID && readiness.scope === scope
+    ? readiness : readSecureReadiness();
+  const secureReady = secure.ready;
   useEffect(() => {
     const user = client.userID;
     let disposed = false;
     let localState: { unsubscribe: () => void } | undefined;
-    const update = () => {
-      if (!disposed && client.userID === user) setSecureReady(readSecureReady());
+    const publish = (observedState?: string) => {
+      if (disposed || client.userID !== user) return;
+      const next = readSecureReadiness(observedState);
+      setReadiness(previous => previous.client === client && previous.user === user &&
+        previous.scope === scope && previous.ready === next.ready && previous.verified === next.verified
+        ? previous : { client, user, scope, ...next });
     };
+    const update = () => publish();
     const observeLocalState = () => {
       if (disposed || client.userID !== user) return;
       localState?.unsubscribe();
       localState = activeChannel?.cid
-        ? client.encryptionManager?.subscribeE2eeState(activeChannel.cid, update)
+        ? client.encryptionManager?.subscribeE2eeState(activeChannel.cid, (snapshot: { state: string }) => publish(snapshot.state))
         : undefined;
       update();
     };
@@ -105,7 +113,7 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
       localState?.unsubscribe();
       subscriptions.forEach(subscription => subscription.unsubscribe());
     };
-  }, [client, client.userID, activeChannel?.cid]);
+  }, [client, client.userID, activeChannel?.cid, activeChannel?.initialized, encrypted, scope]);
 
   const [keywordError, setKeywordError] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<'maxChars' | 'links' | null>(null);
@@ -783,6 +791,10 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   return (
     <div className="relative z-50 shrink-0">
+      {encrypted && canSendMessage && (
+        <SecureSessionBanner key={JSON.stringify([client.userID, activeChannel.cid, scope])}
+          client={client} scopeCid={scope} sendReady={secure.verified} />
+      )}
       <div className="relative flex flex-col background-transparent transition-shadow">
         {quotedMessage && !editingMessage && (
           <div className="border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-black/20 p-2">

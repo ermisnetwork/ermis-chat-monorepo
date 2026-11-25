@@ -10,7 +10,7 @@ export type SecureSessionEvent = {
 export type SecureSessionNotice = {
   cid: string;
   source: 'repair' | 'generation' | 'manual';
-  message: 'refreshing' | 'preparing' | 'waiting_member' | 'retry' | 'upgrade' | 'server_upgrade' | 'history';
+  message: 'refreshing' | 'preparing' | 'waiting_member' | 'retry' | 'upgrade' | 'server_upgrade' | 'manual';
   startedAt: number;
 };
 
@@ -41,7 +41,7 @@ export function updateSecureSessionNotice(
     case 'client_upgrade_required':
       message = event.reason === 'unsupported_protocol_version' ? 'server_upgrade' : 'upgrade';
       break;
-    case 'history_incomplete': message = 'history'; break;
+    case 'manual_intervention_required': message = 'manual'; break;
     default: return current;
   }
   // A background generation reconciliation must not replace active repair work.
@@ -57,7 +57,19 @@ export function secureSessionPresentation(notice: SecureSessionNotice, now: numb
   const activeWork = notice.message === 'refreshing' || notice.message === 'preparing';
   const working = activeWork && now - notice.startedAt < SECURE_SESSION_WORKING_LIMIT_MS;
   const message = activeWork && !working ? 'retry' : notice.message;
-  return { working, message, canRetry: !working && !['upgrade', 'server_upgrade', 'history'].includes(message) };
+  return { working, message, canRetry: !working && !['upgrade', 'server_upgrade', 'manual'].includes(message) };
+}
+
+export function secureSessionComposerPresentation(
+  notice: SecureSessionNotice | null,
+  now: number,
+  sendReady: boolean,
+  showSuccess: boolean,
+) {
+  if (sendReady) {
+    return showSuccess ? { working: false, message: 'restored', canRetry: false } as const : null;
+  }
+  return notice ? secureSessionPresentation(notice, now) : null;
 }
 
 export function secureSessionScope(channel: {

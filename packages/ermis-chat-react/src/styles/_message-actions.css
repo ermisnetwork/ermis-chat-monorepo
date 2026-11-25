@@ -21,8 +21,19 @@
 }
 
 .ermis-message-list__bubble-wrapper:hover .ermis-message-list__actions,
+.ermis-message-list__bubble-wrapper:focus-within .ermis-message-list__actions,
 .ermis-message-list__actions--active {
   opacity: 1;
+}
+
+.ermis-message-list__system-with-actions {
+  display: flex;
+  justify-content: center;
+  padding-inline: 2.75rem;
+}
+
+.ermis-message-list__system-with-actions > .ermis-message-list__bubble-wrapper {
+  width: fit-content;
 }
 
 /* Position container for other (left) vs own (right) */

@@ -163,7 +163,15 @@ export function nextExternalJoinWorkBase(expected: ExternalJoinWorkBase, change:
       state.cleanup.metadata[`mls_mutation:v1:${cid}`] || state.cleanup.metadata[`mls_removal:v1:${cid}`] ||
       state.cleanup.metadata[`mls_rebootstrap_candidate:v1:${cid}`]) throw recoveryControlError('mls_mutation_outcome_pending');
   const marker = state.cleanup.marker as MlsGroupGenerationMarker | null;
-  if (marker?.status === 'active') throw recoveryControlError('external_join_welcome_conflict');
+  if (marker?.status === 'active') {
+    // An installed group wins races within its generation. Only a later,
+    // independently bound server group may replace it.
+    if (marker.cid !== cid || !integer(marker.group_generation) ||
+        marker.group_generation >= job.marker.group_generation || state.control?.recovery_action !== 'none' ||
+        equal(marker.group_id ?? new TextEncoder().encode(cid), job.marker.group_id)) {
+      throw recoveryControlError('external_join_welcome_conflict');
+    }
+  }
   if (marker && marker.group_generation > job.marker.group_generation) throw recoveryControlError('canonical_receipt_pending');
   if (change.kind === 'prepare') {
     if (state.cleanup.metadata[candidateKey] || !equal(state.provider_bytes, job.base_provider_bytes) || base.accepted?.operation_id === job.body.operation_id) throw recoveryControlError('recovery_checkpoint_conflict');

@@ -140,6 +140,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
   JumpToLatestButton = DefaultJumpToLatest,
   QuotedMessagePreviewComponent = QuotedMessagePreview,
   MessageActionsBoxComponent,
+  SpecialMessageActionsBoxComponent,
   showPinnedMessages = true,
   PinnedMessagesComponent = PinnedMessages,
   showReadReceipts = true,
@@ -656,14 +657,24 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
 
       // System messages — standalone
       if (entry.messageType === 'system') {
+        const systemMessage = (
+          <SystemMessageItemComponent
+            message={entry.message}
+            isOwnMessage={entry.isOwnMessage}
+            SystemRenderer={renderers.system}
+            systemMessageTranslations={systemMessageTranslations}
+          />
+        );
         elements.push(
           <div key={entry.message.id || `msg-${entry.index}`}>
-            <SystemMessageItemComponent
-              message={entry.message}
-              isOwnMessage={entry.isOwnMessage}
-              SystemRenderer={renderers.system}
-              systemMessageTranslations={systemMessageTranslations}
-            />
+            {SpecialMessageActionsBoxComponent ? (
+              <div className="ermis-message-list__system-with-actions">
+                <div className="ermis-message-list__bubble-wrapper ermis-message-list__item--other" data-message-id={entry.message.id}>
+                  {systemMessage}
+                  <SpecialMessageActionsBoxComponent message={entry.message} isOwnMessage={false} />
+                </div>
+              </div>
+            ) : systemMessage}
           </div>
         );
         i++;
@@ -767,6 +778,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
                       onClickQuote={scrollToMessage}
                       QuotedMessagePreviewComponent={QuotedMessagePreviewComponent}
                       MessageActionsBoxComponent={MessageActionsBoxComponent}
+                      SpecialMessageActionsBoxComponent={SpecialMessageActionsBoxComponent}
                       MessageReactionsComponent={MessageReactionsComponent}
                       deletedMessageLabel={deletedMessageLabel}
                       attachmentLabel={attachmentLabel}
@@ -838,6 +850,7 @@ export const VirtualMessageList: React.FC<MessageListProps> = React.memo(({
     SystemMessageItemComponent,
     QuotedMessagePreviewComponent,
     MessageActionsBoxComponent,
+    SpecialMessageActionsBoxComponent,
     MessageReactionsComponent,
     readByMap,
     showReadReceipts,

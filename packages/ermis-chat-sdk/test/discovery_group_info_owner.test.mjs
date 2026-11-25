@@ -42,3 +42,57 @@ test('101 retained legacy rows do not become a new generic discovery cap or eras
   const value=await h.m._discoverMlsRecoveryStatesRaw([h.cid]);assert.equal(value.states[h.cid].result,'state');assert.equal(calls,1);assert.equal((await h.s.listGroupInfoRefreshRequests()).length,101);await privatePreserved(h);
  }finally{await h.close();}
 });
+
+for (const prior of ['absent', 'older']) test(`activated generation reaches recovery with ${prior} local marker`, async () => {
+  const h = await setup();
+  try {
+    if (prior === 'absent') {
+      h.m._groupGenerations.delete(h.cid);
+      h.m.groups.delete(h.cid);
+      const db = await h.s.openDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('groups', 'readwrite');
+        tx.objectStore('groups').delete(h.cid);
+        tx.oncomplete = resolve;
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+    const generation = {...response(h).states[h.cid].generation, group_generation: 1,
+      group_id: new Uint8Array([1, 2, 3]), current_epoch: 3, state: 'activated',
+      incident_id: null, recovery_action: 'none', recovery_revision: '2', repair_retry_until: null};
+    h.m.e2eeClient.discoverMlsRecovery = async () => response(h, {generation});
+    const wakes = [];
+    h.m._scheduleGenerationRecoveryRetry = cid => wakes.push(cid);
+    const observed = (await h.m._discoverMlsRecoveryStatesRaw([h.cid])).states[h.cid];
+    assert.deepEqual(wakes, [h.cid]);
+    assert.equal(observed.result, 'state');
+    assert.equal(observed.generation.group_generation, 1);
+    assert.equal(h.m._groupGenerations.get(h.cid)?.group_generation, prior === 'older' ? 0 : undefined);
+    assert.equal(h.events.some(event => event.state === 'ready'), false);
+    await privatePreserved(h);
+  } finally { await h.close(); }
+});
+
+test('sync consumes an authenticated retired Commit without moving the current MLS epoch', async () => {
+  const h = await setup();
+  try {
+    const groupId = h.group.group_id();
+    h.m._groupGenerations.set(h.cid, {...h.marker, group_generation: 1, group_id: groupId});
+    h.m._recoveryControls.set(h.cid, {cid: h.cid, group_generation: 1, group_id: groupId, recovery_action: 'none'});
+    const commit = new Uint8Array([1, 2]);
+    const id = crypto.randomUUID();
+    const context = {version: 1, event_id: id, cid: h.cid, epoch: 72, group_generation: 0,
+      accepted_at: 1_700_000_000, provenance: 'bellboy_transition_v1', payload_sha256: sdk.sha256Hex(commit)};
+    const event = {type: 'protocol', cid: h.cid, event_id: id, created_at: '2026-11-24T00:00:00Z',
+      data: {type: 'external_commit', commit, epoch: 72, group_generation: 0, acceptance_context: context}};
+    const processed = await h.m._processChannelEvents(h.cid, [event]);
+    assert.equal(processed.processedEvents, 1);
+    assert.equal(processed.maxObservedEpoch, undefined);
+    assert.equal(Number(h.group.epoch()), 0);
+    await assert.rejects(h.m._processChannelEvents(h.cid, [{...event, data: {...event.data, commit: new Uint8Array([3])}}]),
+      {code: 'acceptance_metadata_invalid'});
+    await assert.rejects(h.m._processChannelEvents(h.cid, [{...event, data: {...event.data, group_generation: 2}}]),
+      {code: 'mls_protocol_generation_mismatch'});
+    await privatePreserved(h);
+  } finally { await h.close(); }
+});

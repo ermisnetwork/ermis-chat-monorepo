@@ -74,6 +74,7 @@ import type {
   EnsureE2eeChannelResult,
   EventCursor,
   HistoricalCiphertext,
+  MessageDecryptionReason,
   EncryptionManagerOptions,
   MlsRolloutMetricObservation,
   MlsGenerationRecoveryResult,
@@ -411,6 +412,16 @@ interface GenerationRecoveryRetry {
   retryAt: number;
 }
 
+interface MessageDecryptionEnvelope {
+  id?: string;
+  cid?: string;
+  created_at?: string | Date;
+  updated_at?: string | Date | null;
+  group_generation?: number;
+  mls_epoch?: number;
+  mls_ciphertext?: unknown;
+}
+
 interface RestoreExecutionOptions {
   groupGeneration?: number;
   fromEpoch?: number;
@@ -421,6 +432,14 @@ interface RestoreExecutionOptions {
   targetEpochs?: number[];
   messageIds?: Set<string>;
   pageCiphertexts?: HistoricalCiphertext[];
+  pageArchiveCid?: string;
+}
+
+interface HistoryPageOptions {
+  retry?: boolean;
+  isPreview?: boolean;
+  reportCached?: boolean;
+  queryChannel?: { cid?: string; e2ee_group_id?: string; mls_cid?: string; parent_cid?: string; gate?: boolean; mls_enabled?: boolean };
 }
 
 interface ChannelProcessResult {
@@ -2574,7 +2593,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       this._autoUnlockUnavailable=true;
       // Corrupt/missing browser protection is a Settings Restore state, never a modal loop.
       (this.client as any)?.dispatchEvent?.({type:'e2ee.recovery_unlock_unavailable',reason:'protected_recovery_key_unavailable'});
+      return;
     }
+    if (this._recoveryPrivateKey) this.client?.dispatchEvent?.({ type: 'e2ee.recovery_unlocked' } as any);
   }
 
   clearRecoveryUnlock(): void {
@@ -3174,10 +3195,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       // One existing envelope, never a history query or permission to skip a
       // held protocol cursor. Optional preview failure cannot fail normal sync.
       try {
-        await this.restoreHistoryPage(parts.channelType, parts.channelId, [{...head, cid,
-          created_at: head.created_at instanceof Date ? head.created_at.toISOString() : head.created_at,
-          updated_at: head.updated_at instanceof Date ? head.updated_at.toISOString() : head.updated_at,
-        }]);
+        await this.restoreHistoryPage(parts.channelType, parts.channelId, [{...head, cid}], {isPreview: true});
       } catch { assertOwner(); }
       assertOwner();
     }
@@ -3217,6 +3235,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       control = this._recoveryControls.get(cid);
     if (control?.recovery_action === 'manual_intervention_required' || control?.recovery_action === 'waiting_for_evidence' ||
         control && control.group_generation !== marker.group_generation) return null;
+    const advertisedGeneration = this._channelE2ee.get(cid)?.group_generation;
+    if (advertisedGeneration != null && advertisedGeneration > marker.group_generation) return null;
     if (!member?.created_at || this._isInactiveInviteRole(member.channel_role) || member.banned || member.blocked ||
         marker.status !== 'active' || this._externalJoinCandidates.has(cid) || this._externalJoinCandidateIssues.has(cid) ||
         this._pendingMlsMutations.has(cid)) return null;
@@ -3247,6 +3267,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (!stamp) continue;
       const saved = await this.storage.loadChannelMetadata(this._bootstrapOwnerNamespace() + ':' + cid); current();
       if (saved !== stamp) continue;
+      if (marker.group_generation > 0) {
+        const repair = await this._loadChannelRepairState(cid); current();
+        if (repair && repair.status !== 'healthy') continue;
+      }
       this._groupGenerations.set(cid, marker);
       completed.add(cid);
     }
@@ -4739,10 +4763,27 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               const selected = await this._applyRecoveryControl(cid,{...item.generation,capability}); assertRequestOwner(cid);
               if (selected && (selected.recovery_revision !== item.generation.recovery_revision || selected.group_generation !== item.generation.group_generation)) throw recoveryControlError('recovery_checkpoint_conflict');
               const marker = owners.get(cid)!.marker;
-              if (marker && (marker.group_generation !== item.generation.group_generation ||
-                  !bytesEqual(marker.group_id || new Uint8Array(), item.generation.group_id || new Uint8Array()))) throw recoveryControlError('recovery_checkpoint_conflict');
-              if (!marker && item.generation.group_generation !== 0) throw recoveryControlError('recovery_checkpoint_conflict');
-              if (repair instanceof DurableGroupInfoRepairCoordinator) {
+              const remote = item.generation;
+              const advancing = remote.group_generation > (marker?.group_generation ?? 0);
+              if (advancing) {
+                // Discovery supplies the target for recovery before this device installs it.
+                // GI repair work belongs to the installed generation.
+                if (!Number.isSafeInteger(remote.group_generation) ||
+                    !['activated', 'delivery_failed_retryable'].includes(remote.state) ||
+                    !(remote.group_id instanceof Uint8Array) || !remote.group_id.length || remote.group_id.length > 255 ||
+                    !recoveryControlGroupMatches(selected, {cid, group_generation: remote.group_generation, group_id: remote.group_id})) {
+                  throw recoveryControlError('recovery_checkpoint_conflict');
+                }
+                // A realtime discovery may arrive after startup already completed.
+                // Wake this CID through the normal recovery owner after discovery returns.
+                if (this.initialized && !this._bootstrapKnownChannelsPromise && selected?.recovery_action === 'none') {
+                  this._scheduleGenerationRecoveryRetry(cid, this._generationRecoveryRetryAt(0));
+                }
+              } else if ((marker?.group_generation ?? 0) !== remote.group_generation ||
+                  !bytesEqual(marker?.group_id || new Uint8Array(), remote.group_id || new Uint8Array())) {
+                throw recoveryControlError('recovery_checkpoint_conflict');
+              }
+              if (!advancing && repair instanceof DurableGroupInfoRepairCoordinator) {
                 await repair.applyAuthoritativeSnapshot({[cid]:item.group_info_refresh}, {[cid]:observed![cid]}); assertRequestOwner(cid);
               }
             }
@@ -4885,7 +4926,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           // Generic public discovery can exhaust its bounded observation budget.
           // An installed group still has its independent normal sync/evidence/
           // checkpoint proof; no discovery error may replace that proof path.
-          if (!options.prepareOnly && this.groups.has(channel.cid) && this.storage.readyCheckpointVersion === 2) {
+          const newerGeneration = (this._recoveryControls.get(channel.cid)?.group_generation ?? 0) >
+            (this._groupGenerations.get(channel.cid)?.group_generation ?? 0);
+          if (!newerGeneration && !options.prepareOnly && this.groups.has(channel.cid) && this.storage.readyCheckpointVersion === 2) {
             const local = await this.ensureChannelReady(channel.channelType, channel.channelId, channel.cid, {
               // A bootstrap already in flight may itself be awaited by sync.
               // Its channel admissions must not wait back on that sync owner.
@@ -4962,6 +5005,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               continue;
             }
             this._clearGenerationRecoveryRetry(channel.cid);
+            if (recovery.generation > 0) {
+              await this._resumeRepairAfterGenerationRecovery(channel.channelType, channel.channelId, channel.cid, recovery.generation);
+              assertScope();
+            }
           }
           let result = options.prepareOnly
             ? await this._prepareSessionChannelJoin(channel.channelType, channel.channelId, channel.cid)
@@ -6242,6 +6289,22 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     };
   }
 
+  private async _resumeRepairAfterGenerationRecovery(channelType: string, channelId: string, cid: string, generation: number): Promise<void> {
+    const marker = this._groupGenerations.get(cid), group = this.groups.get(cid), control = this._recoveryControls.get(cid);
+    if (!group || marker?.status !== 'active' || marker.group_generation !== generation ||
+        control?.recovery_action !== 'none' || !recoveryControlGroupMatches(control, marker) ||
+        !bytesEqual(group.group_id(), marker.group_id!) || this._providerPersistenceUncertain) return;
+    const assertScope = this._captureCleanupRevisionGuard(cid);
+    const repair = await this._loadChannelRepairState(cid);
+    assertScope();
+    if (this._groupGenerations.get(cid) !== marker || this.groups.get(cid) !== group || this._recoveryControls.get(cid) !== control) return;
+    // A previous failed replay is durable across login. Reuse its safe cursor
+    // and the ordinary repair lock before the normal composer admission runs.
+    if (repair?.status === 'reset_available' || repair?.status === 'replay_failed' || repair?.status === 'replaying') {
+      await this.repairEncryptedChannel(channelType, channelId, {mode: 'replay'});
+    }
+  }
+
   private async _replayEncryptedChannelState(
     channelType: string,
     channelId: string,
@@ -6460,8 +6523,124 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
   private _archivePageMaterial = new Map<string,{value: QueryEpochArchivesResponse;bytes:number}>();
   private _archivePageMaterialBytes = 0;
+  private _archiveCryptoProvider: any = null;
   // Null is a settled fingerprint for this session, never cached plaintext.
   private _pageRestores = new Map<string,Promise<RestoredMessage[]>|null>();
+  private _historyMessageFailures = new Map<string, NonNullable<RestoredMessage['reason']>>();
+  private _messageDecryptionChecks = new Map<string, Promise<MessageDecryptionReason>>();
+
+  private _historyMessageOutcomeKey(
+    cid: string,
+    generation: number,
+    epoch: number,
+    version: string,
+    ciphertext: Uint8Array,
+    archiveCid = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid)),
+  ): string {
+    return JSON.stringify([this._recoveryUnlockNamespace(), this.deviceId, this._recoveryKeyId,
+      cid, generation, epoch, version, sha256Hex(ciphertext), archiveCid]);
+  }
+
+  private _messageDecryptionMetadata(cid: string, message: MessageDecryptionEnvelope) {
+    const { id, mls_epoch: epoch } = message;
+    const generation = message.group_generation === undefined ? 0 : message.group_generation;
+    const createdAt = message.created_at ? new Date(message.created_at).getTime() : NaN;
+    const updatedAt = message.updated_at == null ? null : new Date(message.updated_at).getTime();
+    if (!id || (message.cid && message.cid !== cid) || epoch === undefined ||
+        !Number.isSafeInteger(epoch) || epoch < 0 || !Number.isSafeInteger(generation) || generation < 0 ||
+        !Number.isFinite(createdAt) || (updatedAt !== null && !Number.isFinite(updatedAt))) return null;
+    let ciphertext: Uint8Array;
+    try { ciphertext = normalizeRequiredBytes(message.mls_ciphertext, 'mls_ciphertext'); }
+    catch { return null; }
+    if (!ciphertext.byteLength) return null;
+    const version = this._messageVersionKey({ id, updated_at: new Date(updatedAt ?? createdAt).toISOString() });
+    const key = this._historyMessageOutcomeKey(cid, generation, epoch, version, ciphertext);
+    return { id, generation, epoch, version, key };
+  }
+
+  /** Read the outcome for this ciphertext and message version without running recovery. */
+  async getMessageDecryptionReason(
+    cid: string,
+    message: MessageDecryptionEnvelope,
+  ): Promise<MessageDecryptionReason | 'unknown'> {
+    if (!this.initialized || !this.userId || !this.deviceId) return 'unknown';
+    const metadata = this._messageDecryptionMetadata(cid, message);
+    if (!metadata) return 'invalid_envelope';
+    const { id, generation, epoch, version, key } = metadata;
+    const observed = this._historyMessageFailures.get(key);
+    if (observed) return observed;
+    const assertOwner = this._captureSyncScopeGuard();
+    const progress = await this.storage.loadRestoreProgress(this.userId, this.deviceId, cid, generation);
+    assertOwner();
+    const issue = progress?.repair_issues?.find(row =>
+      row.message_id === id && row.message_version === version && row.mls_epoch === epoch);
+    if (issue) return issue.reason;
+    if (!this._recoveryPrivateKey) {
+      if (this._recoveryVaultKnown === true) return 'pin_locked';
+      if (this._recoveryVaultKnown === false) return 'no_recovery_vault';
+    }
+    return 'unknown';
+  }
+
+  /** Obtain fresh evidence for a selected message when its local outcome is missing. */
+  async diagnoseMessageDecryption(cid: string, message: MessageDecryptionEnvelope): Promise<MessageDecryptionReason> {
+    if (!this.initialized || !this.userId || !this.deviceId) return 'encryption_unavailable';
+    const metadata = this._messageDecryptionMetadata(cid, message);
+    if (!metadata) return 'invalid_envelope';
+    const { key } = metadata;
+    const active = this._messageDecryptionChecks.get(key);
+    if (active) return active;
+    const pending = this._diagnoseMessageDecryption(cid, message).finally(() => {
+      if (this._messageDecryptionChecks.get(key) === pending) this._messageDecryptionChecks.delete(key);
+    });
+    this._messageDecryptionChecks.set(key, pending);
+    return pending;
+  }
+
+  private async _diagnoseMessageDecryption(cid: string, message: MessageDecryptionEnvelope): Promise<MessageDecryptionReason> {
+    const assertOwner = this._captureSyncScopeGuard();
+    let localReason: MessageDecryptionReason | 'unknown';
+    try {
+      localReason = await this.getMessageDecryptionReason(cid, message);
+      assertOwner();
+    } catch {
+      assertOwner();
+      return 'local_status_read_failed';
+    }
+    if (localReason !== 'unknown') return localReason;
+    if (!this._recoveryPrivateKey) return 'recovery_status_unavailable';
+    const parts = channelPartsFromCid(cid);
+    if (!parts) return 'invalid_envelope';
+    try {
+      const outcomes = await this.restoreHistoryPage(parts.channelType, parts.channelId, [message], {
+        isPreview: true, retry: true, reportCached: true,
+      });
+      assertOwner();
+      const outcome = outcomes.find(row => row.messageId === message.id) ??
+        outcomes.find(row => !row.messageId && row.epoch === message.mls_epoch);
+      if (outcome?.reason) return outcome.reason;
+      if (outcome?.synced) return 'recovered';
+    } catch {
+      assertOwner();
+    }
+    return 'archive_check_incomplete';
+  }
+
+  private _recordHistoryPageOutcomes(cid: string, archiveCid: string, rows: HistoricalCiphertext[], outcomes: RestoredMessage[]): void {
+    const byMessage = new Map(outcomes.filter(row => row.messageId).map(row => [row.messageId, row]));
+    const byEpoch = new Map(outcomes.filter(row => !row.messageId).map(row => [row.epoch, row]));
+    for (const row of rows) {
+      const outcome = byMessage.get(row.message_id) ?? byEpoch.get(row.mls_epoch);
+      if (!outcome) continue;
+      const version = this._messageVersionKey({ id: row.message_id, created_at: row.created_at, updated_at: row.updated_at });
+      const key = this._historyMessageOutcomeKey(cid, row.group_generation ?? 0, row.mls_epoch, version, row.mls_ciphertext, archiveCid);
+      this._historyMessageFailures.delete(key);
+      if (outcome.gap && outcome.reason) this._historyMessageFailures.set(key, outcome.reason);
+    }
+    while (this._historyMessageFailures.size > 1024) {
+      this._historyMessageFailures.delete(this._historyMessageFailures.keys().next().value!);
+    }
+  }
 
   private _materialSize(value: unknown): number {
     if (value instanceof Uint8Array) return value.byteLength;
@@ -6478,7 +6657,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if(cached){this._archivePageMaterial.delete(key);this._archivePageMaterial.set(key,cached);return cached.value;}
     const value=await this._withRecoveryNetworkRetry(()=>this.e2eeClient!.queryEpochArchives(type,id,{
       group_generation:generation,epoch_from:epoch,epoch_to:epoch,include_snapshots:true,include_wraps:true,
-    }));assertOwner();
+    }, 10_000));assertOwner();
     const bytes=this._materialSize(value), max=16*1024*1024;
     // A blob alone is not usable material. Late grants/snapshots must remain
     // observable instead of pinning an incomplete response for the whole session.
@@ -6494,11 +6673,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   /** Decrypt only the requested history page. Never fetch ciphertexts for an entire epoch. */
-  async restoreHistoryPage(channelType: string,channelId: string,page: Array<Record<string,any>>,options?:{retry?:boolean}): Promise<RestoredMessage[]> {
+  async restoreHistoryPage(channelType: string,channelId: string,page: Array<Record<string,any>>,options?:HistoryPageOptions): Promise<RestoredMessage[]> {
     if (!this._recoveryPrivateKey || !page.length) return [];
     if(page.length>50)throw new Error('History restore page exceeds 50 messages');
     const assertOwner=this._captureSyncScopeGuard(),cid=cidFromParts(channelType,channelId);
+    const queryChannel = options?.queryChannel;
+    const archiveCid = this._resolveChannelE2eeGroupId(
+      cid, queryChannel?.cid === cid ? queryChannel : this._getActiveChannel(cid),
+    );
     const generations=new Map<number,HistoricalCiphertext[]>();
+    const result: RestoredMessage[] = [];
     for(const row of page){
       if(row.content_type!=='mls' && !row.mls_ciphertext)continue;
       // Baseline MessageContent omits generation zero. Bind that omission to zero,
@@ -6507,27 +6691,37 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       let ciphertext: Uint8Array;
       try { ciphertext = normalizeRequiredBytes(row.mls_ciphertext, 'mls_ciphertext'); }
       catch { continue; }
+      const createdAt = row.created_at instanceof Date && Number.isFinite(row.created_at.getTime())
+        ? row.created_at.toISOString() : row.created_at;
+      const updatedAt = row.updated_at instanceof Date && Number.isFinite(row.updated_at.getTime())
+        ? row.updated_at.toISOString() : row.updated_at;
       if(typeof row.id!=='string' || !Number.isSafeInteger(row.mls_epoch) || row.mls_epoch<0 ||
           !Number.isSafeInteger(generation) || generation<0 || ciphertext.byteLength === 0 ||
-          typeof row.created_at!=='string' || (row.cid && row.cid!==cid))continue;
-      const normalized={...row,cid,group_generation:generation,message_id:row.id,mls_ciphertext:new Uint8Array(ciphertext)} as HistoricalCiphertext;
+          typeof createdAt!=='string' || !Number.isFinite(Date.parse(createdAt)) ||
+          (updatedAt != null && (typeof updatedAt !== 'string' || !Number.isFinite(Date.parse(updatedAt)))) ||
+          (row.cid && row.cid!==cid))continue;
+      const normalized={...row,cid,created_at:createdAt,updated_at:updatedAt,group_generation:generation,message_id:row.id,mls_ciphertext:new Uint8Array(ciphertext)} as HistoricalCiphertext;
       const cached=await this.storage!.loadMessage(row.id);assertOwner();
       if(cached?.mls_ciphertext_hash && this._cachedMessageMatchesEnvelope(cached,
         this._buildArchiveMessageEnvelope(cid,normalized,this._collectActiveChannelEnvelopes(cid).get(row.id),{epoch:BigInt(row.mls_epoch)}),
-        cid,ciphertext,this._resolveChannelE2eeGroupId(cid,this._getActiveChannel(cid))))continue;
+        cid,ciphertext,archiveCid)) {
+        if (options?.reportCached) {
+          result.push({ epoch: row.mls_epoch, messageId: row.id, synced: true, alreadyAvailable: true });
+        }
+        continue;
+      }
       const values=generations.get(generation)||[];
       values.push(normalized);
       generations.set(generation,values);
     }
-    const result:RestoredMessage[]=[];let progressId:string|undefined;
+    let progressId:string|undefined;
     let failed=true;
     try { for(const [generation,rows]of generations){
-      const key=sha256Hex(new TextEncoder().encode(JSON.stringify([this._recoveryUnlockNamespace(),this._recoveryKeyId,cid,generation,
+      const key=sha256Hex(new TextEncoder().encode(JSON.stringify([this._recoveryUnlockNamespace(),this._recoveryKeyId,cid,archiveCid,generation,
         rows.map(row=>[row.message_id,row.mls_epoch,sha256Hex(row.mls_ciphertext),row.updated_at||row.created_at])])));
       if (options?.retry && !this._pageRestores.get(key)) {
         // Explicit retry is a fresh observation of exactly the requested epochs.
         // Ordinary reopen keeps its quiet settled fingerprint; active work coalesces.
-        const archiveCid = this._resolveChannelE2eeGroupId(cid, this._getActiveChannel(cid));
         const parts = channelPartsFromCid(archiveCid) || {channelType, channelId};
         for (const epoch of new Set(rows.map(row => row.mls_epoch))) {
           const materialKey = JSON.stringify([this._recoveryUnlockNamespace(), this._recoveryKeyId,
@@ -6539,17 +6733,37 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }
       if(this._pageRestores.get(key)===null)continue;
       let work=this._pageRestores.get(key);
+      if (!options?.isPreview) progressId ??= (this.client as any)?._beginSessionProgress?.('restoring_page');
       if(!work){
-        progressId ??= (this.client as any)?._beginSessionProgress?.('restoring_page');
-        const settled=()=>{if(this._pageRestores.get(key)!==work)return;this._pageRestores.set(key,null);
-          if(this._pageRestores.size>128)for(const [old,value]of this._pageRestores){if(old!==key && value===null)this._pageRestores.delete(old);if(this._pageRestores.size<=128)break;}};
+        const settle = (remember: boolean) => {
+          if (this._pageRestores.get(key) !== work) return;
+          if (!remember) { this._pageRestores.delete(key); return; }
+          this._pageRestores.set(key, null);
+          for (const [old, value] of this._pageRestores) {
+            if (this._pageRestores.size <= 128) break;
+            if (old !== key && value === null) this._pageRestores.delete(old);
+          }
+        };
         work=this._restoreHistoricalMessagesInternal(channelType,channelId,{groupGeneration:generation,timelineOnly:true,
-        targetEpochs:Array.from(new Set(rows.map(row=>row.mls_epoch))),messageIds:new Set(rows.map(row=>row.message_id)),pageCiphertexts:rows})
-        .finally(settled);this._pageRestores.set(key,work);}
-      result.push(...await work);assertOwner();
+          targetEpochs:Array.from(new Set(rows.map(row=>row.mls_epoch))),messageIds:new Set(rows.map(row=>row.message_id)),
+          pageCiphertexts:rows,pageArchiveCid:archiveCid,
+        }).then(outcomes => {
+          assertOwner();
+          this._recordHistoryPageOutcomes(cid, archiveCid, rows, outcomes);
+          settle(!outcomes.some(row => row.reason === 'archive_request_failed'));
+          return outcomes;
+        }).catch(error => {
+          settle(false);
+          throw error;
+        });
+        this._pageRestores.set(key,work);
+      }
+      const outcomes = await work;
+      assertOwner();
+      result.push(...outcomes);
     }
     failed=result.some(row=>row.gap===true);return result;
-    } finally {if(progressId)(this.client as any)?._finishSessionProgress?.(progressId,failed,()=>this.restoreHistoryPage(channelType,channelId,page,{retry:true}));}
+    } finally {if(progressId)(this.client as any)?._finishSessionProgress?.(progressId,failed,()=>this.restoreHistoryPage(channelType,channelId,page,{...options,retry:true}));}
   }
 
   private async _restoreHistoricalMessagesInternal(
@@ -6560,13 +6774,20 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if (!this._recoveryPrivateKey) {
       throw new Error('Recovery vault not unlocked.');
     }
+    const assertRestoreOwner = this._captureSyncScopeGuard();
     const requestedCid = cidFromParts(channelType, channelId);
     const requestedChannel = this._getActiveChannel(requestedCid);
-    const archiveCid = this._resolveChannelE2eeGroupId(requestedCid, requestedChannel);
+    const archiveCid = options?.pageArchiveCid ?? this._resolveChannelE2eeGroupId(requestedCid, requestedChannel);
     const archiveParts = channelPartsFromCid(archiveCid) || { channelType, channelId };
     const restoreGeneration = options?.groupGeneration ?? this._groupGenerations.get(archiveCid)?.group_generation ?? 0;
     const restoreSingleTimeline = requestedCid !== archiveCid || options?.timelineOnly === true;
-    let progress = await this._loadOrCreateRestoreProgress(channelType, channelId, restoreGeneration);
+    // An exact page cannot establish whole-conversation coverage. In particular,
+    // concurrent pages and previews must never overwrite an explicit Repair.
+    let progress = options?.pageCiphertexts
+      ? this._newRestoreProgressRecord(channelType, channelId, restoreGeneration)
+      : await this._loadOrCreateRestoreProgress(channelType, channelId, restoreGeneration);
+    const saveProgress = (record: RestoreProgressRecord, status: RestoreStatus) =>
+      options?.pageCiphertexts ? record : this._saveRestoreProgress(record, status);
     const epochListResponse = options?.pageCiphertexts
       ? {epochs: Array.from(new Set(options.pageCiphertexts.map(row=>row.mls_epoch))).map(epoch=>({epoch,group_generation:restoreGeneration}))}
       : await this._withRecoveryNetworkRetry(() =>
@@ -6592,7 +6813,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       .sort((a, b) => a - b);
     const progressAfterMissingArchives = this._markManualRepairIssuesMissingArchives(progress, serverEpochs, options);
     if (progressAfterMissingArchives !== progress) {
-      progress = await this._saveRestoreProgress(
+      progress = await saveProgress(
         progressAfterMissingArchives,
         this._finalRestoreStatus(progressAfterMissingArchives),
       );
@@ -6625,10 +6846,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       .sort((a, b) => a - b);
 
     if (targetEpochs.length === 0) {
-      progress = await this._saveRestoreProgress(progress, options?.pageCiphertexts ? 'partial' : this._finalRestoreStatus(progress));
+      await saveProgress(progress, this._finalRestoreStatus(progress));
       return [];
     }
-    progress = await this._saveRestoreProgress({ ...progress, target_epochs: targetEpochs }, 'running');
+    progress = await saveProgress({ ...progress, target_epochs: targetEpochs }, 'running');
 
     const restored: RestoredMessage[] = [];
     const restoredMessagesForStateByCid = new Map<string, Record<string, unknown>[]>();
@@ -6664,11 +6885,16 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             include_wraps: true,
           }),
         );
+        assertRestoreOwner();
         const mismatchedMaterial = [
           ...(material.blobs || []),
           ...(material.wraps || []),
           ...Object.values(material.snapshots || {}),
         ].some((record) => (record.group_generation || 0) !== restoreGeneration);
+        if (mismatchedMaterial && options?.pageCiphertexts) {
+          restored.push({ epoch: epochFrom, gap: true, reason: 'invalid_archive_material' });
+          continue;
+        }
         if (mismatchedMaterial) {
           throw new Error('Archive material belongs to another MLS group generation');
         }
@@ -6699,13 +6925,21 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           cursor = batch.has_more ? batch.next_cursor : undefined;
         } while (cursor);
       } catch (err) {
+        if (options?.pageCiphertexts) {
+          assertRestoreOwner();
+          const accessDenied = getApiErrorCode(err) === 6 &&
+            /\brestore this epoch range\b/i.test(getApiErrorMessage(err));
+          restored.push({ epoch: epochFrom, gap: true,
+            reason: accessDenied ? 'archive_access_denied' : 'archive_request_failed' });
+          continue;
+        }
         const reason: RestoreTransientFailureReason =
           (err as any)?.response?.status >= 500 ? 'server_error' : 'network_error';
         for (const epoch of epochBatch) {
           progress = this._addTransientFailure(progress, epoch, reason);
           progress = this._replaceTargetRepairIssueReason(progress, epoch, reason, options?.messageIds);
         }
-        await this._saveRestoreProgress(progress, this._finalRestoreStatus(progress));
+        await saveProgress(progress, this._finalRestoreStatus(progress));
         throw err;
       }
 
@@ -6733,7 +6967,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           restored.push({ epoch, gap: true, reason: 'no_archive' });
           progress = this._addPermanentGap(progress, epoch, 'no_archive');
           progress = this._replaceTargetRepairIssueReason(progress, epoch, 'no_archive', options?.messageIds);
-          progress = await this._saveRestoreProgress(progress, 'running');
+          progress = await saveProgress(progress, 'running');
           continue;
         }
 
@@ -6743,7 +6977,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           prepared: boolean;
           archiveBytes?: Uint8Array;
           snapshotBytes?: Uint8Array;
-          prepareError?: 'no_matching_wrap' | 'missing_snapshot';
+          prepareError?: 'adk_unwrap_error' | 'invalid_archive_material' | 'missing_snapshot';
         };
         const candidates: LazyArchiveCandidate[] = blobs
           .map((blob) => {
@@ -6751,6 +6985,11 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             return wrap ? { blob, wrap, prepared: false } : null;
           })
           .filter((candidate): candidate is LazyArchiveCandidate => candidate !== null);
+        // These WASM functions use only crypto, never the live MLS group store.
+        // A live provider checkpoint can reject access while history is decrypting.
+        const archiveProvider = candidates.length
+          ? (this._archiveCryptoProvider ??= new wasmModule.Provider())
+          : null;
         const prepareCandidate = (candidate: LazyArchiveCandidate): boolean => {
           if (candidate.prepared) return !!candidate.archiveBytes && !!candidate.snapshotBytes;
           candidate.prepared = true;
@@ -6763,7 +7002,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           let phase: 'archive_key_unwrap' | 'archive_blob_open' = 'archive_key_unwrap';
           try {
             const adk = wasmModule.unwrap_archive_data_key_from_parts(
-              this.provider,
+              archiveProvider,
               this._recoveryPrivateKey,
               new Uint8Array(candidate.wrap.hpke_kem_output),
               new Uint8Array(candidate.wrap.hpke_ciphertext),
@@ -6771,7 +7010,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             );
             phase = 'archive_blob_open';
             candidate.archiveBytes = wasmModule.decrypt_archive_blob(
-              this.provider,
+              archiveProvider,
               adk,
               new Uint8Array(candidate.blob.encrypted_archive_bytes),
               new Uint8Array(candidate.blob.aead_nonce),
@@ -6785,7 +7024,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             sdkLog('warn', '[Encryption] History archive candidate unavailable', {
               cid: requestedCid, group_generation: restoreGeneration, epoch, phase,
             });
-            candidate.prepareError = 'no_matching_wrap';
+            candidate.prepareError = phase === 'archive_key_unwrap' ? 'adk_unwrap_error' : 'invalid_archive_material';
             return false;
           }
         };
@@ -6794,7 +7033,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           restored.push({ epoch, gap: true, reason: 'no_matching_wrap' });
           progress = this._addPermanentGap(progress, epoch, 'no_matching_wrap');
           progress = this._replaceTargetRepairIssueReason(progress, epoch, 'no_matching_wrap', options?.messageIds);
-          progress = await this._saveRestoreProgress(progress, 'running');
+          progress = await saveProgress(progress, 'running');
           continue;
         }
 
@@ -6812,6 +7051,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             epoch: BigInt(epoch),
           });
           const existingMessage = await this.storage.loadMessage(ciphertext.message_id);
+          assertRestoreOwner();
           if (existingMessage && this._storedMessageCoversVersion(existingMessage, envelope)) {
             progress = this._clearRepairIssueInProgress(progress, envelope);
             const fullMessage = await this._buildFullMessageWithQuoted(existingMessage, envelope);
@@ -6842,7 +7082,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             if (!prepareCandidate(candidate)) continue;
             try {
               archivedMessage = wasmModule.decrypt_with_epoch_archive_v2(
-                this.provider,
+                archiveProvider,
                 candidate.archiveBytes!,
                 candidate.snapshotBytes!,
                 new Uint8Array(ciphertext.mls_ciphertext),
@@ -6859,7 +7099,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
 
           if (archivedMessage && matchedCandidate) {
             const raw = decoder.decode(archivedMessage.content);
-            const parsed = JSON.parse(raw);
+            let parsed: E2eePayload;
+            try { parsed = JSON.parse(raw); }
+            catch (error) {
+              if (!options?.pageCiphertexts) throw error;
+              restored.push({ epoch, messageId: ciphertext.message_id, gap: true, reason: 'decrypt_error' });
+              continue;
+            }
             const payload: E2eePayload = parsed && typeof parsed.text === 'string' ? parsed : { text: raw };
             const decryptedEnvelope = this._buildArchiveMessageEnvelope(
               routeCid,
@@ -6876,6 +7122,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               restoredEpoch: epoch,
             };
             await this.storage.saveMessage(storedMessage);
+            assertRestoreOwner();
             this._decryptedMsgIds.add(this._messageVersionKey(decryptedEnvelope));
             progress = this._clearRepairIssueInProgress(progress, decryptedEnvelope);
 
@@ -6893,25 +7140,28 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             continue;
           }
 
-          const reason: RepairIssueReason = candidates.every(
-            (candidate) => candidate.prepareError === 'missing_snapshot',
-          )
+          const pageReason = candidates[0].prepareError;
+          const samePreparationFailure = pageReason && candidates.every((candidate) => candidate.prepareError === pageReason);
+          const reason: RepairIssueReason = samePreparationFailure && pageReason === 'missing_snapshot'
             ? 'missing_snapshot'
-            : candidates.every((candidate) => candidate.prepareError === 'no_matching_wrap')
+            : candidates.every((candidate) => candidate.prepareError === 'adk_unwrap_error' ||
+              candidate.prepareError === 'invalid_archive_material')
             ? 'no_matching_wrap'
             : 'decrypt_error';
           progress = this._upsertRepairIssueInProgress(progress, envelope, reason);
-          restored.push({ epoch, messageId: ciphertext.message_id, gap: true, reason });
+          restored.push({ epoch, messageId: ciphertext.message_id, gap: true,
+            reason: options?.pageCiphertexts && samePreparationFailure ? pageReason : reason });
         }
 
         if (!options?.pageCiphertexts) progress = this._markEpochCompleted(progress, epoch);
-        progress = await this._saveRestoreProgress(progress, 'running');
+        progress = await saveProgress(progress, 'running');
       }
     }
 
-    progress = await this._saveRestoreProgress(progress, options?.pageCiphertexts ? 'partial' : this._finalRestoreStatus(progress));
+    await saveProgress(progress, this._finalRestoreStatus(progress));
 
     for (const [routeCid, restoredMessagesForState] of restoredMessagesForStateByCid) {
+      assertRestoreOwner();
       if (restoredMessagesForState.length === 0) continue;
       const activeChannel = this.client?.activeChannels?.[routeCid];
       const channelState = activeChannel?.state;
@@ -7800,23 +8050,24 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (this._syncWorkGateResolve === gateResolve) this._syncWorkGateResolve = null;
       throw error;
     }
+    const restorePreviews = () => { void this._restoreWarmListPreviews().catch(() => undefined); };
     const work = restoration
-      .then(async () => {
-        assertScope(); await this._restoreWarmListPreviews();
+      .then(() => {
         assertScope(); finish();
+        restorePreviews();
         if (this._scopeSyncRetry === retryAtStart && retryAtStart?.observations === retryObservations) {
           if (retryAtStart?.timer) clearTimeout(retryAtStart.timer);
           this._scopeSyncRetry = null;
         }
       })
-      .catch(async (err) => {
+      .catch((err) => {
         finish();
         try {
           assertScope(); this._scheduleScopeSyncRetry(err);
           // Legacy active groups can have an unresolved old Welcome disposition.
           // Restore only a proven preview with the independent archive provider;
           // keep the original sync rejection/cursor/Ready status unchanged.
-          await this._restoreWarmListPreviews();
+          restorePreviews();
         } catch { /* Preserve the original failure or retired owner. */ }
         throw err;
       })
@@ -8087,7 +8338,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           // A synchronous listener can replace the account/client. Do not start
           // local admission for that retired response under its new owner.
           assertSyncScope();
-          if (!this.groups.has(cid)) continue;
+          if (!this.groups.has(cid) && !(foreground(cid) && completedBootstrap.has(cid))) continue;
           const parts = channelPartsFromCid(cid); if (!parts) continue;
           const result = await this.ensureChannelReady(parts.channelType, parts.channelId, cid,
             {source:'batch_finalization', initialScopeSyncCompleted:true, batchSyncOnly:true});
@@ -8465,6 +8716,22 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           await this._restoreInstalledGroupOnDemand(protocolCid);
           const protoMsg = event.data || event.message || event;
           const typeField = protoMsg.type || protoMsg.type_field;
+          const installed = this._groupGenerations.get(protocolCid);
+          const eventGeneration = protoMsg.group_generation ?? 0;
+          const control = this._recoveryControls.get(protocolCid);
+          const group = this.groups.get(protocolCid);
+          if ((typeField === 'commit' || typeField === 'external_commit') &&
+              Number.isSafeInteger(eventGeneration) && eventGeneration >= 0 && installed?.status === 'active' &&
+              installed.group_generation > eventGeneration && control?.recovery_action === 'none' &&
+              recoveryControlGroupMatches(control, installed) && group && !group.has_pending_commit() &&
+              !this._providerPersistenceUncertain && bytesEqual(group.group_id(), installed.group_id!) &&
+              !this._externalJoinCandidates.has(protocolCid) && !this._pendingMlsMutations.has(protocolCid)) {
+            this._requireHistoricalReplayEnabled();
+            const options = mlsProtocolProcessingOptions(event, protoMsg, protocolCid, true);
+            validateMlsAcceptanceContext(options.acceptanceContext, options.acceptanceEnvelope, protoMsg.commit);
+            // Epochs restart with each generation. This Commit cannot affect the installed group.
+            break;
+          }
           if (typeof protoMsg.epoch === 'number') {
             maxObservedEpoch = Math.max(maxObservedEpoch ?? protoMsg.epoch, protoMsg.epoch);
           }
@@ -9028,6 +9295,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const startedCursor = cursor;
       const response = await this.e2eeClient!.scopeSync({ [cid]: startedCursor }, limit); assertSyncScope();
       const result = response.channels?.[cid];
+      if (this._scopeRepairLocks.has(cid) && !Array.isArray(result?.events)) {
+        throw recoveryControlError('scope_sync_pending');
+      }
 
       if (!result?.events || result.events.length === 0) {
         const flushed = await this._flushPendingSnapshotsForScope(cid); assertSyncScope();
@@ -12101,6 +12371,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     channelId: string,
     cid: string,
   ): Promise<{ epoch: number; status?: E2eeSyncStatus }> {
+    if (this._pendingMlsMutations.has(cid)) return {epoch: this.getEpoch(cid), status: 'needs_retry'};
+    const assertSession = this._captureSyncScopeGuard();
     const previousMarker = this._groupGenerations.get(cid);
     const previous = this.groups.get(cid);
     this.groups.delete(cid);
@@ -12108,6 +12380,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     try {
       return await this.joinExternal(channelType, channelId, cid);
     } catch (error) {
+      assertSession();
+      if (!previous || this.groups.has(cid) || this._groupGenerations.get(cid) !== previousMarker ||
+          this._providerPersistenceUncertain) throw error;
       try {
         const restored =
           previousMarker?.group_generation && previousMarker.group_id
@@ -12278,6 +12553,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     if ((state.state === 'activated' || state.state === 'delivery_failed_retryable') && state.group_id) {
       await this.storage.deleteRebootstrapClaimIntent?.(cid);
       const joined = await this._joinAuthoritativeGeneration(channelType, channelId, cid);
+      if (joined.status === 'needs_retry') {
+        return {cid, generation: state.group_generation, epoch: joined.epoch, status: 'waiting_for_repair',
+          reason: state.reason, retryable: true, retry_at: this._generationRecoveryRetryAt()};
+      }
       return {
         cid,
         generation: state.group_generation,
@@ -15985,6 +16264,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       if (this._providerCheckpointInFlight) this._destroyDeferredProvider = this._activeProvider;
       else { try { this._activeProvider.free?.(); } catch { /* already freed */ } }
     }
+    this._archiveCryptoProvider?.free();
+    this._archiveCryptoProvider = null;
     this._providerScopeRevision += 1;
     this._activeProvider = null;
     this._providerDurableBase = undefined;
@@ -16032,6 +16313,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this._waterfallSummaryLogKeys.clear();
     this._deferredEncryptionEventLogKeys.clear();
     this._archivePageMaterial.clear();this._archivePageMaterialBytes=0;this._pageRestores.clear();
+    this._historyMessageFailures.clear();
+    this._messageDecryptionChecks.clear();
     this._autoUnlockUnavailable=false;
     this._activeHistoryScope=null;
     this._restoreQueue = [];

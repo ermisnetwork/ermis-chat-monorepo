@@ -21,3 +21,10 @@ test('blocked preparation exposes truthful partial counts and never starts a don
 test('zero-channel completion still gets the existing success timer',()=>{
  const h=mount({...initial,phase:'readiness',status:'done',total_channels:0,ready_channels:0});assert.match(text(h.render()),/0\/0/);assert.equal(h.timers.length,1);
 });
+
+test('a hidden quiet readiness snapshot removes an already visible history spinner', () => {
+ const h = mount({cycle_id: 'history', phase: 'restoring_page', status: 'running'});
+ assert.match(text(h.render()), /restoring_page/);
+ h.emit({status: 'idle'});
+ assert.equal(h.render(), null);
+});

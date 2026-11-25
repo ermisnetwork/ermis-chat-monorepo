@@ -569,12 +569,11 @@ export function useChannelMessages({
       // different messages. Otherwise the redundant setMessages() creates a new
       // array reference, triggers a full VList re-render, and produces a visible
       // second "flash" even though nothing changed.
-      const prevIds = (activeChannel.state?.latestMessages || []).map((m: any) => `${m.id}:${m.type}`).join(',');
+      const previousRevision = getSdkMessagesRevision(activeChannel.state?.latestMessages);
       queryLatestPage(activeChannel)
         .then(() => {
           if (!isCurrentEffect()) return;
-          const nextIds = (activeChannel.state?.latestMessages || []).map((m: any) => `${m.id}:${m.type}`).join(',');
-          if (nextIds !== prevIds) {
+          if (getSdkMessagesRevision(activeChannel.state?.latestMessages) !== previousRevision) {
             // Messages actually changed — sync them, but preserve scroll position
             // so the user doesn't see a jump.
             const handle = vlistRef?.current;
@@ -882,7 +881,10 @@ export function useChannelMessages({
     const unlockSub = eventClient.on('e2ee.recovery_unlocked' as any, handleRecoveryUnlocked);
     // A channel can be opened while the nonblocking session initialization is pending.
     // Transfer that demand when its existing manager becomes available.
-    const initializedSub = eventClient.on('e2ee.initialized' as any, ensureE2eeChannelReady);
+    const initializedSub = eventClient.on('e2ee.initialized' as any, () => {
+      ensureE2eeChannelReady();
+      handleRecoveryUnlocked();
+    });
     const sub19a = eventClient.on('e2ee.repair_started' as any, handleE2eeRepairStarted);
     const sub19b = eventClient.on('e2ee.repair_completed' as any, handleE2eeRepairCompleted);
     const sub19c = eventClient.on('e2ee.repair_failed' as any, handleE2eeRepairFailed);

@@ -736,6 +736,7 @@ export type MessageListProps = {
   QuotedMessagePreviewComponent?: React.ComponentType<QuotedMessagePreviewProps>;
   /** Custom message actions component (hover buttons + dropdown) */
   MessageActionsBoxComponent?: React.ComponentType<MessageActionsBoxProps>;
+  SpecialMessageActionsBoxComponent?: React.ComponentType<MessageActionsBoxProps>;
   /** Show pinned messages bar (default: true) */
   showPinnedMessages?: boolean;
   /** Custom pinned messages component */
@@ -916,6 +917,7 @@ export type MessageItemProps = {
   QuotedMessagePreviewComponent?: React.ComponentType<QuotedMessagePreviewProps>;
   /** Custom message actions component (hover buttons + dropdown) */
   MessageActionsBoxComponent?: React.ComponentType<MessageActionsBoxProps>;
+  SpecialMessageActionsBoxComponent?: React.ComponentType<MessageActionsBoxProps>;
   /** Users who have read up to this message */
   readBy?: Array<{ id: string; name?: string; avatar?: string }>;
   /** Custom component for message reactions */

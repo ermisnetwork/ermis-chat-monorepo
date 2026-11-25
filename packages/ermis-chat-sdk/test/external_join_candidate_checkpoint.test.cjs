@@ -82,6 +82,54 @@ async function fixture() {
 }
 const join = f => f.m.joinExternal('team',f.cid.slice(5),f.cid);
 
+test('returning active member joins the authoritative next group, resumes failed replay and can exchange messages', async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    const oldEpoch = f.m.getEpoch(f.cid);
+    const cursor = await f.storage.loadScopeSyncCursor(f.cid);
+    await f.storage.saveChannelRepairState({cid: f.cid, scope_cid: f.cid, status: 'reset_available',
+      fail_count: 2, last_safe_cursor: cursor, local_epoch: oldEpoch, updated_at: Date.now()});
+    const groupId = crypto.getRandomValues(new Uint8Array(32));
+    const next = f.wasm.Group.create_with_group_id(f.a, f.alice, groupId);
+    const state = {group_generation: 1, group_id: groupId, current_epoch: 0, state: 'activated', reason: 'none',
+      retryable: false, recovery_action: 'none', recovery_revision: '2', incident_id: null,
+      repair_retry_until: null, capability: {protocol_version: 1}};
+    f.api.getGroupInfo = async () => ({group_info: next.export_group_info(f.a, f.alice, true),
+      epoch: 0, is_stale: false, group_generation: 1, group_id: groupId});
+    f.setReceipt(op => f.body()?.operation_id === op ? f.accepted(f.body()) : f.unknown(op));
+    const submit = f.api.externalJoin;
+    f.api.externalJoin = async (...args) => {
+      await submit(...args);
+      next.process_message(f.a, args[2].commit);
+    };
+    const recovered = await f.m.recoverMlsGeneration('team', f.cid.slice(5), f.cid, state);
+    assert.equal(recovered.status, 'recovered');
+    const base = await f.storage.loadExternalJoinWorkBase(f.user, f.device, f.cid, '');
+    validateExternalJoinReadyBase(base, f.user, f.device, f.cid, sha256Hex(f.m.identity.signature_public_key()));
+    assert.equal(base.state.cleanup.marker.group_generation, 1);
+    assert.deepEqual(base.state.cleanup.marker.group_id, groupId);
+    assert.equal((await f.storage.loadChannelRepairState(f.cid)).status, 'reset_available');
+    f.api.scopeSync = async () => ({channels: {}});
+    await f.m._resumeRepairAfterGenerationRecovery('team', f.cid.slice(5), f.cid, 1);
+    assert.equal((await f.storage.loadChannelRepairState(f.cid)).status, 'reset_available');
+    let pages = 0;
+    f.api.scopeSync = async cursors => {
+      pages++;
+      assert.deepEqual(cursors[f.cid], cursor);
+      return {channels: {[f.cid]: {events: [], has_more: false}}};
+    };
+    await f.m._resumeRepairAfterGenerationRecovery('team', f.cid.slice(5), f.cid, 1);
+    assert.equal(pages, 1);
+    assert.equal((await f.storage.loadChannelRepairState(f.cid)).status, 'healthy');
+    const received = new TextEncoder().encode('after rebootstrap');
+    const group = f.m.groups.get(f.cid);
+    assert.deepEqual(next.process_application_message(f.a, group.create_message(f.m.provider, f.m.identity, received)).content, received);
+    assert.deepEqual(group.process_application_message(f.m.provider, next.create_message(f.a, f.alice, received)).content, received);
+    assert.equal(f.post(), 2);
+  } finally { await f.storage.close(); }
+});
+
 test('isolated candidate precedes HTTP; unknown/lost ACK survives restart and accepted receipt alone activates', async () => {
   const f=await fixture(), before=sha256Hex(f.m.provider.to_bytes());
   f.api.externalJoin=async (_t,_id,body) => {

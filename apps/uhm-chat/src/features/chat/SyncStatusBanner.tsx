@@ -18,11 +18,17 @@ export function SyncStatusBanner({ client, container }: SyncStatusBannerProps) {
     setProgress(null); setDismissed(null); current.current = null
     if (!client) return
     const receive = (event: any) => {
+      if (event.status === 'idle') {
+        current.current = null
+        setProgress(null)
+        return
+      }
       if (typeof event.cycle_id !== 'string' || client.isSessionSyncProgressDismissed?.(event.cycle_id)) return
       current.current = event; setProgress(event)
     }
     const bootstrap = (event: any) => {
-      if (!current.current || current.current.readiness || current.current.status !== 'running') return
+      if (!current.current || current.current.readiness || current.current.status !== 'running' ||
+          current.current.phase === 'restoring_page') return
       const next = { ...current.current, phase: event.status === 'running' ? 'preparing' : 'syncing' }
       current.current = next; setProgress(next)
     }

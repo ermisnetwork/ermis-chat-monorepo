@@ -2739,7 +2739,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubs);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
-    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -2777,7 +2777,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubsGt);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
-    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -2815,7 +2815,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubsAround);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
-    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -4490,15 +4490,20 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
         continue;
       }
 
-      const storedMessage = cachedMessages.get(message.id);
+      // Sequence windows on older builds could persist a raw ciphertext as a
+      // cache row. It must stay eligible for automatic history recovery.
+      const cached = cachedMessages.get(message.id);
+      const storedMessage = cached?.display_type === 'deleted' || cached?.type === 'deleted' ||
+        (cached?.content_type === 'standard' && typeof cached.text === 'string') ? cached : undefined;
       const currentMessage = currentMessagesById.get(message.id);
       if (!storedMessage && currentMessage) {
         const currentAny = currentMessage as any;
-        const currentHasPlaintext =
-          currentAny.content_type === 'standard' ||
+        const currentHasPlaintext = currentAny.content_type !== 'mls' && (
+          Boolean(currentAny.mls_ciphertext_hash) ||
           Boolean(currentAny.text) ||
           Boolean(currentAny.attachments?.length) ||
-          Boolean(currentAny.sticker_url);
+          Boolean(currentAny.sticker_url)
+        );
         if (currentHasPlaintext) {
           const mergedMessage = {
             ...message,
@@ -4553,11 +4558,16 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       hydrated.push(mergedMessage as MessageResponse<ErmisChatGenerics>);
     }
 
-    const pending=hydrated.filter((row:any)=>row.content_type==='mls' || row.mls_ciphertext && !row.text);
+    const pending = hydrated.filter(row =>
+      String(row.type) !== 'deleted' && row.display_type !== 'deleted' && row.display_type !== 'unavailable' &&
+      (row.content_type === 'mls' || (row.content_type !== 'standard' && !!row.mls_ciphertext)),
+    );
     const manager=this.getClient().encryptionManager;
     if(restoreHistory && pending.length && manager?.restoreHistoryPage) {
       for(let offset=0;offset<pending.length;offset+=50) {
-        void manager.restoreHistoryPage(this.type,this.id,pending.slice(offset,offset+50) as any[])
+        void manager.restoreHistoryPage(this.type,this.id,pending.slice(offset,offset+50) as any[], {
+          queryChannel: channelData,
+        })
           .catch(()=>this.getClient().logger('warn','History page restore deferred',{tags:['encryption']}));
       }
     }
@@ -5301,7 +5311,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     await ensureMembersUserInfoLoaded(this.getClient(), messageMemberStubs);
     const users = Object.values(this.getClient().state.users);
     state.messages = enrichWithUserInfo(state.messages, users);
-    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
     if (state.messages && state.messages.length > 0) {
       for (const msg of state.messages) {
         if (!msg.pinned) {
@@ -5312,8 +5322,9 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
             msg.pinned_at = typeof pmDate === 'string' ? pmDate : pmDate.toISOString();
           }
         }
-        // Persist fetched message to IndexedDB cache for future visits
-        if (storage?.saveMessage && this.cid) {
+        // Only the encryption manager may persist E2EE projections. An
+        // overlapping sequence fetch must never replace authenticated history.
+        if (storage?.saveMessage && this.cid && msg.content_type !== 'mls' && !msg.mls_ciphertext) {
           storage.saveMessage({ ...msg, cid: this.cid }).catch(() => {});
         }
       }

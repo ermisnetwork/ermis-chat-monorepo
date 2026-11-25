@@ -372,9 +372,10 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
   }
 
   /** POST with X-Device-ID header */
-  private async _post<T>(url: string, data?: unknown, headers?: Record<string, string>): Promise<T> {
+  private async _post<T>(url: string, data?: unknown, headers?: Record<string, string>, timeout?: number): Promise<T> {
     return await (this.client as any).doAxiosRequest('post', url, data, {
       headers: { ...this.deviceHeaders, ...(headers || {}) },
+      ...(timeout ? {timeout} : {}),
     });
   }
 
@@ -533,10 +534,13 @@ export class E2eeClient<ErmisChatGenerics extends ExtendableGenerics = DefaultGe
     channelType: string,
     channelId: string,
     data: QueryEpochArchivesRequest,
+    timeout?: number,
   ): Promise<QueryEpochArchivesResponse> {
     const raw = await this._post<RawQueryEpochArchivesResponse>(
       this.baseURL + `/v1/e2ee/channels/${channelType}/${channelId}/epoch_archives/query`,
       data,
+      undefined,
+      timeout,
     );
     return {
       ...raw,

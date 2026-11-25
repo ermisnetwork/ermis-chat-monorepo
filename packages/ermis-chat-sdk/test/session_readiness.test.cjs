@@ -160,3 +160,16 @@ test('fully restored quiet restart remains invisible when no progress cycle was 
  client._restoreSessionBootstrapMilestones(['team:done']);
  assert.equal(client.getSessionSyncProgress(),null);assert.equal(events.length,0);
 });
+
+test('quiet retained startup publishes idle when its visible history page settles', () => {
+ const client = clientFixture(), owner = client._sessionReadinessOwner(), events = [];
+ client.on('e2ee.session_progress', event => events.push(event));
+ owner.bootstrapResolved = false;
+ owner.progress.finish(owner.progress.begin(), new Map([['team:done','team:done']]), () => {});
+ client._restoreSessionBootstrapMilestones(['team:done']);
+ const page = client._beginSessionProgress('restoring_page');
+ assert.equal(events.at(-1).phase, 'restoring_page');
+ client._finishSessionProgress(page, false);
+ assert.equal(events.at(-1).status, 'idle');
+ assert.equal(client.getSessionSyncProgress(), null);
+});
