@@ -147,18 +147,18 @@ export function useLoadMessages({
         lastRequestedAnchorRef.current = null;
         console.error('Failed to load more messages:', err);
       }
+      return;
     } finally {
-      if (isCurrentRequest()) {
-        loadingMoreRef.current = false;
-        requestAnimationFrame(() => {
-          if (jumpingRef.current || scrollLoadLockRef?.current) return;
-          const handle = vlistRef.current;
-          if (handle && handle.scrollOffset <= LOAD_MORE_THRESHOLD && hasMoreRef.current && !loadingMoreRef.current) {
-            loadMore();
-          }
-        });
-      }
+      if (isCurrentRequest()) loadingMoreRef.current = false;
     }
+
+    requestAnimationFrame(() => {
+      if (!isCurrentRequest() || jumpingRef.current || scrollLoadLockRef?.current) return;
+      const handle = vlistRef.current;
+      if (handle && handle.scrollOffset <= LOAD_MORE_THRESHOLD && hasMoreRef.current && !loadingMoreRef.current) {
+        loadMore();
+      }
+    });
   }, [activeChannel, loadMoreLimit, setMessages, jumpingRef, scrollLoadLockRef, vlistRef]);
 
   const loadNewer = useCallback(async () => {
@@ -214,21 +214,21 @@ export function useLoadMessages({
         lastRequestedNewerAnchorRef.current = null;
         console.error('Failed to load newer messages:', err);
       }
+      return;
     } finally {
-      if (isCurrentRequest()) {
-        loadingNewerRef.current = false;
-        requestAnimationFrame(() => {
-          if (jumpingRef.current || scrollLoadLockRef?.current) return;
-          const handle = vlistRef.current;
-          if (handle) {
-            const { scrollOffset, scrollSize, viewportSize } = handle;
-            if (scrollOffset + viewportSize >= scrollSize - LOAD_MORE_THRESHOLD && hasNewerRef.current && !loadingNewerRef.current) {
-              loadNewer();
-            }
-          }
-        });
-      }
+      if (isCurrentRequest()) loadingNewerRef.current = false;
     }
+
+    requestAnimationFrame(() => {
+      if (!isCurrentRequest() || jumpingRef.current || scrollLoadLockRef?.current) return;
+      const handle = vlistRef.current;
+      if (handle) {
+        const { scrollOffset, scrollSize, viewportSize } = handle;
+        if (scrollOffset + viewportSize >= scrollSize - LOAD_MORE_THRESHOLD && hasNewerRef.current && !loadingNewerRef.current) {
+          loadNewer();
+        }
+      }
+    });
   }, [activeChannel, loadMoreLimit, setMessages, jumpingRef, scrollLoadLockRef, vlistRef]);
 
   const handleScroll = useCallback(

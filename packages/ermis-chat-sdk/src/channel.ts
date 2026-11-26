@@ -5297,7 +5297,10 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
 
     // 2. Fetch from HTTP API if not found in IndexedDB
     const queryURL = `${this.getClient().baseURL}/channels/${this.type}/${this.id}/query`;
-    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(queryURL, options);
+    const state = await this.getClient().post<QueryChannelAPIResponse<ErmisChatGenerics>>(
+      queryURL,
+      this.getClient()._withProjectId({ ...options }),
+    );
 
     if (state.messages) {
       state.messages = state.messages.filter((m: any) =>

@@ -15,3 +15,7 @@ canonical plan.
 ## UHM API default for commits
 
 - [x] `UHM-ENDPOINT-002-WEB` — [Shared canonical endpoint plan](../../../ios/ermis-chat-ios/docs/todo/uhm_dev_endpoint_plan.md#2026-10-07--cross-platform-defaults-restored-for-earlier-client-commits): restore the committable API fallback and private local override to `https://api-trieve.ermis.network`; verify the effective module on Web3001. Cross-platform requirement/status is `UHM-ENDPOINT-002` in the [owning iOS ledger](../../../ios/ermis-chat-ios/docs/todo/todo.md). No backend/auth/MLS production acceptance claim.
+
+## Web history pagination
+
+- [x] [WEB-HISTORY-SEQ-001](./web_history_pagination_plan.md) Scope HTTP sequence queries to the configured Ermis project and stop automatic pagination after a failed request. Verified SDK payloads, bounded retries, and the Chrome QA flow.
