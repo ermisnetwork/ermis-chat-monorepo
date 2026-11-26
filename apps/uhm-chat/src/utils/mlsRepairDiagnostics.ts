@@ -86,6 +86,16 @@ export function installMlsRepairDiagnostics(client: ErmisChat) {
         reason: typeof event.reason === 'string' ? event.reason : undefined });
     });
   }
+  client.on('e2ee.recovery_presentation_changed', (event) => {
+    if (!event.cid) return;
+    const state = client.encryptionManager?.getMlsRecoveryPresentation(event.cid);
+    recordMlsRepairDiagnostic('e2ee.recovery_presentation_changed', {
+      cid: event.cid,
+      status: state?.phase ?? 'cleared',
+      retryable: state?.actionable,
+      deadline_at: state?.retryAt,
+    });
+  });
 }
 
 const instrumentedGroups = registry.groups;

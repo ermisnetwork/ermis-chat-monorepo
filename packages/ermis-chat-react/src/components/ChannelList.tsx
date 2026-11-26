@@ -42,6 +42,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   lastMessageTimestamp,
   onSelect,
   AvatarComponent,
+  AvatarStatusComponent,
   isBlocked,
   isPending,
   pendingBadgeLabel,
@@ -146,9 +147,16 @@ export const ChannelItem: React.FC<ChannelItemProps> = React.memo(({
   ].filter(Boolean).join(' ');
 
   return (
-    <div className={itemClass} onClick={handleClick}>
+    <div className={itemClass} onClick={handleClick}
+      tabIndex={AvatarStatusComponent ? 0 : undefined}
+      onKeyDown={AvatarStatusComponent ? event => {
+        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        handleClick();
+      } : undefined}>
       <div className="ermis-channel-list__item-avatar-wrapper">
         <AvatarComponent image={image} name={name} size={45} disableLightbox className={avatarClassName} />
+        {AvatarStatusComponent && <AvatarStatusComponent channel={channel} />}
         {isOnline !== undefined && (
           <span className={`ermis-channel-list__online-dot ermis-channel-list__online-dot--${isOnline ? 'online' : 'offline'}`} />
         )}
@@ -288,6 +296,7 @@ type ChannelRowProps = {
   renderChannel?: (c: Channel, active: boolean) => React.ReactNode;
   ChannelItemComponent: React.ComponentType<ChannelItemProps>;
   AvatarComponent: React.ComponentType<any>;
+  AvatarStatusComponent?: ChannelItemProps["AvatarStatusComponent"];
   currentUserId?: string;
   pendingBadgeLabel?: string;
   blockedBadgeLabel?: string;
@@ -323,6 +332,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
   renderChannel,
   ChannelItemComponent,
   AvatarComponent,
+  AvatarStatusComponent,
   currentUserId,
   pendingBadgeLabel,
   blockedBadgeLabel,
@@ -422,6 +432,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = React.memo(({
       lastMessageTimestamp={lastMessageTimestamp}
       onSelect={handleSelect}
       AvatarComponent={AvatarComponent}
+      AvatarStatusComponent={AvatarStatusComponent}
       isBlocked={isBlockedInChannel}
       isPending={isPending}
       pendingBadgeLabel={pendingBadgeLabel}
@@ -459,6 +470,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
   EmptyStateIndicator = DefaultEmpty,
   ErrorIndicator,
   AvatarComponent = Avatar,
+  AvatarStatusComponent,
   ChannelItemComponent = ChannelItem,
   pendingInvitesLabel,
   channelsLabel = 'Channels',
@@ -737,6 +749,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               renderChannel={renderChannel}
               ChannelItemComponent={ChannelItemComponent}
               AvatarComponent={AvatarComponent}
+              AvatarStatusComponent={AvatarStatusComponent}
               currentUserId={client.userID}
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}
@@ -784,6 +797,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
                   if (onTopicDrillDown) onTopicDrillDown(c);
                 }}
                 AvatarComponent={AvatarComponent}
+                AvatarStatusComponent={AvatarStatusComponent}
                 maxVisibleTopics={maxVisibleTopics}
                 moreTopicsLabel={moreTopicsLabel}
                 generalTopicLabel={generalTopicLabel}
@@ -820,6 +834,7 @@ export const ChannelList: React.FC<ChannelListProps> = React.memo(({
               renderChannel={renderChannel}
               ChannelItemComponent={ChannelItemComponent}
               AvatarComponent={AvatarComponent}
+              AvatarStatusComponent={AvatarStatusComponent}
               currentUserId={client.userID}
               pendingBadgeLabel={pendingBadgeLabel}
               blockedBadgeLabel={blockedBadgeLabel}

@@ -36,6 +36,7 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
   channel,
   ChannelItemComponent = ChannelItem,
   AvatarComponent = Avatar,
+  AvatarStatusComponent,
   GeneralAvatarComponent,
   TopicAvatarComponent,
   generalTopicLabel = 'general',
@@ -173,6 +174,7 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
         handleSelect={handleSelectGeneral}
         ChannelItemComponent={ChannelItemComponent}
         AvatarComponent={GeneralAvatarComponent || DefaultGeneralAvatar as any}
+        AvatarStatusComponent={AvatarStatusComponent}
         currentUserId={currentUserId}
         pendingBadgeLabel={pendingBadgeLabel}
         blockedBadgeLabel={blockedBadgeLabel}
@@ -198,6 +200,7 @@ export const TopicList: React.FC<TopicListProps> = React.memo(({
           handleSelect={handleSelectTopic}
           ChannelItemComponent={ChannelItemComponent}
           AvatarComponent={TopicAvatarComponent || DefaultTopicEmojiAvatar as any}
+          AvatarStatusComponent={AvatarStatusComponent}
           currentUserId={currentUserId}
           pendingBadgeLabel={pendingBadgeLabel}
           blockedBadgeLabel={blockedBadgeLabel}

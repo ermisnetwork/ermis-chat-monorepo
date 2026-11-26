@@ -2303,6 +2303,20 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     try { this._sessionReadiness?.current(); } catch { return null; }
     return this._sessionProgressSnapshot?.cycle_id === this._dismissedSessionProgress ? null : this._sessionProgressSnapshot;
   }
+
+  /** Cached readiness for an authorized encrypted conversation, independent of popup dismissal. */
+  getChannelSessionReadiness(cid: string): SessionScopeResult | undefined {
+    const owner = this._sessionReadiness;
+    try { owner?.current(); } catch { return undefined; }
+    return owner?.progress.resultFor(cid);
+  }
+
+  getSingleBlockedEncryptedChannel(): Channel<ErmisChatGenerics> | undefined {
+    const owner = this._sessionReadiness;
+    try { owner?.current(); } catch { return undefined; }
+    const scope = owner?.progress.singleBlockedEncryptedScope();
+    return scope ? this.activeChannels[scope] : undefined;
+  }
   isSessionSyncProgressDismissed(cycle: string): boolean { return this._dismissedSessionProgress === cycle; }
   dismissSessionSyncProgress(cycle: string): void {
     if (this._sessionProgressSnapshot?.cycle_id === cycle) this._dismissedSessionProgress = cycle;
@@ -2316,7 +2330,12 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const scope = this._captureAuthScope(), initialization = this._sessionEncryptionInitialization;
     const current = () => { scope.assertCurrent(); if (this._sessionEncryptionInitialization !== initialization) throw recoveryControlError('recovery_scope_changed'); };
     const value: NonNullable<ErmisChat<ErmisChatGenerics>['_sessionReadiness']> = {current, bootstrapResolved: !(this.messageStorage || this.encryptionManager?.storage)?.loadChannelMetadata,
-      progress: new SessionReadinessProgress(() => this._publishSessionProgress())};
+      progress: new SessionReadinessProgress(scope => {
+        this._publishSessionProgress();
+        if (scope && !scope.startsWith(STANDARD_CHANNEL_SCOPE)) {
+          this.dispatchEvent({type: 'e2ee.recovery_presentation_changed', cid: scope} as any);
+        }
+      })};
     this._sessionReadiness = value; return value;
   }
 

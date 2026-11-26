@@ -78,6 +78,7 @@ import type {
   EncryptionManagerOptions,
   MlsRolloutMetricObservation,
   MlsGenerationRecoveryResult,
+  MlsRecoveryPresentation,
   MlsGenerationStateResponse,
   MlsRecoveryDiscoveryAppliedItem,
   MlsGroupGenerationMarker,
@@ -870,6 +871,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   private _channelReadyLockOwners = new Map<string, () => void>();
   private _generationRecoveryAttempted: Set<string> = new Set();
   private _generationRecoveryPending: Map<string, MlsGenerationRecoveryResult> = new Map();
+  private _recoveryPresentation = new Map<string, MlsRecoveryPresentation>();
+  private _generationRecoveryWork = new Map<string, Promise<MlsGenerationRecoveryResult>>();
+  private _manualRecoveryWork = new Map<string, Promise<void>>();
   private _generationRecoveryRetries: Map<string, GenerationRecoveryRetry> = new Map();
   private _legacyGroupInfoRepairDeadlines: Map<string, number> = new Map();
   private _generationRecoveryRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1541,6 +1545,19 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         }
       }
     }
+    const current = this._recoveryPresentation.get(state.cid);
+    if (state.status === 'ready' || state.status === 'removed') {
+      this._setMlsRecoveryPresentation(state.cid);
+    } else if (!current || ['checking', 'waiting', 'retry'].includes(current.phase)) {
+      if (state.status === 'refreshing') {
+        this._setMlsRecoveryPresentation(state.cid, {phase: 'checking', actionable: false});
+      } else if (state.status === 'unsupported') {
+        this._setMlsRecoveryPresentation(state.cid, {phase: 'upgrade'});
+      } else if (state.status === 'retryable') {
+        const waiting = ['no_local_group', 'group_info_invalid', 'group_info_stale', 'awaiting_newer_group_info'].includes(state.reason ?? '');
+        this._setMlsRecoveryPresentation(state.cid, {phase: waiting ? 'waiting' : 'retry', retryAt: state.deadline_at});
+      }
+    }
     const { status, ...metadata } = state;
     (this.client as any)?.dispatchEvent?.({
       type: 'e2ee.group_info_repair_state',
@@ -1603,6 +1620,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   async handleGroupInfoChannelRemoved(cid: string): Promise<void> {
+    this._setMlsRecoveryPresentation(cid);
     await this._groupInfoRepair?.handleRemoved(cid);
   }
   /**
@@ -3551,6 +3569,87 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this._generationRecoveryPending.delete(cid);
   }
 
+  /** In-memory status for an already observed scope. Reading it performs no recovery work. */
+  getMlsRecoveryPresentation(cid: string): MlsRecoveryPresentation | undefined {
+    if (!this.initialized || this._groupGenerations.get(cid)?.status === 'historical') return undefined;
+    return this._recoveryPresentation.get(cid);
+  }
+
+  private _setMlsRecoveryPresentation(cid: string, value?: MlsRecoveryPresentation): void {
+    const previous = this._recoveryPresentation.get(cid);
+    if (previous?.phase === value?.phase && previous?.retryAt === value?.retryAt &&
+        previous?.actionable === value?.actionable) return;
+    if (value) {
+      const startedAt = previous?.phase === value.phase ? previous.startedAt : Date.now();
+      this._recoveryPresentation.set(cid, Object.freeze({...value, startedAt}));
+    } else {
+      this._recoveryPresentation.delete(cid);
+    }
+    this.client?.dispatchEvent?.({type: 'e2ee.recovery_presentation_changed', cid} as any);
+  }
+
+  private _presentGenerationRecovery(cid: string, result: MlsGenerationRecoveryResult): void {
+    if (this.getE2eeState(cid)?.state === 'ready') {
+      this._setMlsRecoveryPresentation(cid);
+      return;
+    }
+    const retryAt = result.retry_at;
+    switch (result.status) {
+      case 'preparing':
+        this._setMlsRecoveryPresentation(cid, {phase: 'restoring', retryAt});
+        break;
+      case 'waiting_for_repair': {
+        const action = this._recoveryControls.get(cid)?.recovery_action;
+        const phase = action === 'waiting_for_evidence' ? 'waiting_for_evidence' : 'waiting';
+        this._setMlsRecoveryPresentation(cid, {phase, retryAt, actionable: result.retryable});
+        break;
+      }
+      case 'client_upgrade_required':
+        this._setMlsRecoveryPresentation(cid, {
+          phase: result.reason === 'unsupported_protocol_version' ? 'server_upgrade' : 'upgrade',
+        });
+        break;
+      case 'manual_intervention_required':
+        this._setMlsRecoveryPresentation(cid, {phase: 'support'});
+        break;
+      case 'retryable_infrastructure_failure':
+        this._setMlsRecoveryPresentation(cid, {
+          phase: this._recoveryPresentation.get(cid)?.phase === 'confirming' && result.retryable
+            ? 'confirming' : result.retryable ? 'retry' : 'support',
+          retryAt,
+          actionable: result.retryable,
+        });
+        break;
+      case 'recovered':
+      case 'history_incomplete':
+        if (result.generation > 0 || this._recoveryPresentation.has(cid)) {
+          this._setMlsRecoveryPresentation(cid, {phase: 'syncing', actionable: false});
+        }
+    }
+  }
+
+  private _presentDiscoveredGeneration(cid: string, state: MlsGenerationStateResponse, enabled: boolean, advancing: boolean): void {
+    if (this._generationRecoveryWork.has(cid) || this._manualRecoveryWork.has(cid)) return;
+    const current = this._recoveryPresentation.get(cid);
+    if (current?.phase === 'confirming') return;
+    const control = this._recoveryControls.get(cid);
+    if (control?.recovery_action === 'manual_intervention_required') {
+      this._setMlsRecoveryPresentation(cid, {phase: 'support'});
+    } else if (advancing) {
+      this._setMlsRecoveryPresentation(cid, {phase: 'syncing', actionable: false});
+    } else if (state.state === 'eligible' && enabled && state.reason !== 'group_info_invalid' &&
+        !this.groups.has(cid) && this.storage.saveRebootstrapCandidateCheckpoint &&
+        this.storage.saveRebootstrapClaimIntent && this.storage.loadRebootstrapClaimIntent &&
+        this.storage.deleteRebootstrapClaimIntent) {
+      this._setMlsRecoveryPresentation(cid, {phase: 'eligible'});
+    } else if (current?.phase === 'eligible') {
+      const phase = control?.recovery_action === 'waiting_for_evidence' ? 'waiting_for_evidence' : 'waiting';
+      this._setMlsRecoveryPresentation(cid, {
+        phase, actionable: state.retryable, retryAt: control?.repair_retry_until ?? state.incident_deadline_at ?? undefined,
+      });
+    }
+  }
+
   /** State belongs to the canonical MLS scope; channel inheritance is routing only. */
   private _commonStateScope(cid: string): string | null {
     const seen=new Set<string>();
@@ -3612,6 +3711,13 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     let prior: E2eeStateSnapshot | null = null;
     try { record?.scope(); prior = record?.snapshot || null; } catch { /* prior owner is retired */ }
     this._commonStates.set(snapshot.cid, {snapshot: {...snapshot}, scope: this._captureMlsCleanupScope(), proof, readyOwner: proof ? this._captureReadyReproofOwner(snapshot.cid,scope) : undefined});
+    if (snapshot.state === 'ready' || snapshot.reason === 'mls_group_removed') {
+      this._setMlsRecoveryPresentation(cid);
+    } else if (snapshot.state === 'manual_intervention_required') {
+      this._setMlsRecoveryPresentation(cid, {phase: 'support'});
+    } else if (snapshot.state === 'upgrade_required') {
+      this._setMlsRecoveryPresentation(cid, {phase: 'upgrade'});
+    }
     if(snapshot.state==='ready' && proof){
       this._hotReadyScopes=this._hotReadyScopes.filter(cid=>cid!==snapshot.cid);this._hotReadyScopes.push(snapshot.cid);
       if(this._hotReadyScopes.length>6){const cold=this._hotReadyScopes.shift()!;this._retiredHotReady.delete(cold);}
@@ -4787,6 +4893,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               if (!advancing && repair instanceof DurableGroupInfoRepairCoordinator) {
                 await repair.applyAuthoritativeSnapshot({[cid]:item.group_info_refresh}, {[cid]:observed![cid]}); assertRequestOwner(cid);
               }
+              this._presentDiscoveredGeneration(cid, {...remote, capability}, capability.automatic_enabled, advancing);
             }
             catch(error){
               assertScope();
@@ -4980,6 +5087,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
                     discoveryItem?.generation,
                     options.recoveryDiscoveryUnsupported === true,
                   );
+            if (discoveryItem?.result === 'error') this._presentGenerationRecovery(channel.cid, recovery);
             (this.client as any)?.dispatchEvent?.({
               type: 'e2ee.mls_generation_recovery_state',
               ...recovery,
@@ -12045,6 +12153,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     await this._deleteLocalGroupState(cid, owner, authority); assertScope(); owner.assertCurrent();
     // Metadata is retained dormant; wake/notify only after the atomic proof.
     this._groupInfoRepair?.notifyRemoved(cid);
+    this._setMlsRecoveryPresentation(cid);
     assertScope(); owner.assertCurrent(); return true;
   }
 
@@ -12434,10 +12543,82 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
    * This method is deliberately explicit: rendering, typing and send retries
    * must never invoke it implicitly.
    */
-  async recoverMlsGeneration(
+  recoverMlsGeneration(
     channelType: string,
     channelId: string,
     cid: string,
+    discoveredState?: MlsGenerationStateResponse,
+    discoveryUnsupported = false,
+  ): Promise<MlsGenerationRecoveryResult> {
+    const existing = this._generationRecoveryWork.get(cid);
+    if (existing) return existing;
+    const assertOwner = this._captureCleanupRevisionGuard(cid);
+    const work = Promise.resolve().then(async () => {
+      assertOwner();
+      try {
+        const result = await this._recoverMlsGeneration(channelType, channelId, cid, assertOwner, discoveredState, discoveryUnsupported);
+        assertOwner();
+        this._presentGenerationRecovery(cid, result);
+        return result;
+      } catch (error) {
+        assertOwner();
+        const previous = this._recoveryPresentation.get(cid);
+        this._setMlsRecoveryPresentation(cid, {phase: previous?.phase === 'confirming' ? 'confirming' : 'retry'});
+        throw error;
+      }
+    }).finally(() => {
+      if (this._generationRecoveryWork.get(cid) === work) this._generationRecoveryWork.delete(cid);
+    });
+    this._generationRecoveryWork.set(cid, work);
+    return work;
+  }
+
+  /** User action for one conversation. Use the same generation attempt as bootstrap/reconnect. */
+  retryMlsChannelRecovery(cid: string): Promise<void> {
+    const pending = this._manualRecoveryWork.get(cid);
+    if (pending) return pending;
+    const parts = channelPartsFromCid(cid);
+    if (!parts || this._commonStateScope(cid) !== cid || !this.initialized) {
+      return Promise.reject(recoveryControlError('recovery_scope_changed'));
+    }
+    const assertOwner = this._captureCleanupRevisionGuard(cid);
+    const work = Promise.resolve().then(async () => {
+      assertOwner();
+      if (this.getE2eeState(cid)?.state === 'ready') return;
+      const phase = this._recoveryPresentation.get(cid)?.phase;
+      if (phase !== 'confirming' && phase !== 'restoring') {
+        this._setMlsRecoveryPresentation(cid, {phase: 'checking', actionable: false});
+      }
+      try {
+        const automatic = this._generationRecoveryWork.get(cid);
+        if (!automatic && phase !== 'confirming') await this.reconcileGroupInfoRefresh(cid);
+        assertOwner();
+        const recovery = await (automatic ?? this.recoverMlsGeneration(parts.channelType, parts.channelId, cid));
+        assertOwner();
+        if (recovery.status !== 'recovered' && recovery.status !== 'history_incomplete') return;
+        const ready = await this.ensureChannelReady(parts.channelType, parts.channelId, cid, {source: 'manual_retry'});
+        assertOwner();
+        if (ready.status !== 'ready' && this._recoveryPresentation.get(cid)?.phase === 'syncing') {
+          this._setMlsRecoveryPresentation(cid, {phase: 'retry'});
+        }
+      } catch (error) {
+        assertOwner();
+        const previous = this._recoveryPresentation.get(cid);
+        this._setMlsRecoveryPresentation(cid, {phase: previous?.phase === 'confirming' ? 'confirming' : 'retry'});
+        throw error;
+      }
+    }).finally(() => {
+      if (this._manualRecoveryWork.get(cid) === work) this._manualRecoveryWork.delete(cid);
+    });
+    this._manualRecoveryWork.set(cid, work);
+    return work;
+  }
+
+  private async _recoverMlsGeneration(
+    channelType: string,
+    channelId: string,
+    cid: string,
+    assertOwner: () => void,
     discoveredState?: MlsGenerationStateResponse,
     discoveryUnsupported = false,
   ): Promise<MlsGenerationRecoveryResult> {
@@ -12445,7 +12626,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       throw new Error('[Encryption] Not initialized');
     }
     const checkpoint = await this.storage.loadRebootstrapCandidateCheckpoint?.(cid);
+    assertOwner();
     if (checkpoint) {
+      this._setMlsRecoveryPresentation(cid, {phase: 'confirming', actionable: false});
       try {
         const receipt = await this.e2eeClient.getMlsRebootstrapReceipt(
           channelType,
@@ -12538,6 +12721,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     }
     await this._loadRecoveryControl(cid);
     const control=await this._applyRecoveryControl(cid,state) || this._recoveryControls.get(cid);
+    assertOwner();
     if (control?.recovery_action==='manual_intervention_required') {
       return {cid,generation:control.group_generation,epoch:this.getEpoch(cid),status:'manual_intervention_required',
         reason:'repair_timeout_elapsed',retryable:false};
@@ -12638,6 +12822,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       };
     }
 
+    this._setMlsRecoveryPresentation(cid, {phase: 'restoring', actionable: false});
     const claimIntent = await resolveMlsRebootstrapClaimIntent(
       this.storage,
       {
@@ -12745,6 +12930,8 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       const receipt = await this.e2eeClient.completeMlsRebootstrap(channelType, channelId, completion);
       return await this._reconcileRebootstrapReceipt(cid, candidateCheckpoint, receipt);
     } catch (error) {
+      assertOwner();
+      this._setMlsRecoveryPresentation(cid, {phase: 'confirming', actionable: false});
       try {
         const receipt = await this.e2eeClient.getMlsRebootstrapReceipt(channelType, channelId, claim.operation_id);
         return await this._reconcileRebootstrapReceipt(cid, candidateCheckpoint, receipt);
@@ -16401,6 +16588,9 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
     this._subscribedReadyRequests.clear(); this._subscribedReadyRevalidation = null;
     this._generationRecoveryAttempted.clear();
     this._generationRecoveryPending.clear();
+    this._generationRecoveryWork.clear();
+    this._manualRecoveryWork.clear();
+    this._recoveryPresentation.clear();
     this._generationRecoveryRetries.clear();
     this._legacyGroupInfoRepairDeadlines.clear();
     if (this._generationRecoveryRetryTimer) {

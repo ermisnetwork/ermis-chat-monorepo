@@ -9,6 +9,7 @@ import {
   type AvatarProps,
 } from '@ermis-network/ermis-chat-react'
 import type { Channel, SystemMessageTranslations, SignalMessageTranslations } from '@ermis-network/ermis-chat-sdk'
+import { UhmChannelRecoveryIndicator } from "./UhmChannelRecoveryIndicator"
 import { UhmChannelActions } from './UhmChannelActions'
 
 interface TopicsPanelProps {
@@ -175,6 +176,7 @@ export function TopicsPanel({
         <TopicList
           channel={channel}
           generalTopicLabel={t('chat.topics_general', 'general')}
+          AvatarStatusComponent={UhmChannelRecoveryIndicator}
           GeneralAvatarComponent={GeneralAvatar}
           TopicAvatarComponent={TopicEmojiAvatar}
           ChannelActionsComponent={UhmChannelActions}

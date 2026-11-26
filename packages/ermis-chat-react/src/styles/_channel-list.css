@@ -489,6 +489,7 @@
 }
 
 .ermis-channel-list__topic-pill-avatar {
+  position: relative;
   width: 16px;
   height: 16px;
   min-width: 16px;

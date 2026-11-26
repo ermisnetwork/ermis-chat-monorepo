@@ -426,6 +426,8 @@ export type ChannelActionsProps = {
 };
 
 export type ChannelItemProps = {
+  /** Optional indicator rendered inside the avatar wrapper. */
+  AvatarStatusComponent?: React.ComponentType<{ channel: Channel }>;
   channel: Channel;
   isActive: boolean;
   hasUnread: boolean;
@@ -479,6 +481,7 @@ export type ChannelItemProps = {
    TopicPill types (for FlatTopicGroupItem)
    ---------------------------------------------------------- */
 export type TopicPillProps = {
+  AvatarStatusComponent?: React.ComponentType<{ channel: Channel }>;
   /** The topic channel to display as a pill */
   topic: Channel;
   /** Size of the topic avatar in pixels (default: 16) */
@@ -489,6 +492,8 @@ export type TopicPillProps = {
    TopicList types
    ---------------------------------------------------------- */
 export type TopicListProps = {
+  /** Optional indicator rendered inside the avatar wrapper. */
+  AvatarStatusComponent?: React.ComponentType<{ channel: Channel }>;
   /** Parent channel that has topics enabled */
   channel: Channel;
   /** Custom channel item component for each topic row */
@@ -540,6 +545,8 @@ export type TopicListProps = {
 };
 
 export type ChannelListProps = {
+  /** Optional indicator rendered inside the avatar wrapper. */
+  AvatarStatusComponent?: React.ComponentType<{ channel: Channel }>;
   /** Full session readiness inventory for the owning unfiltered root list. */
   sessionReadiness?: boolean;
   filters?: ChannelFilters;

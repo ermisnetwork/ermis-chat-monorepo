@@ -10,7 +10,7 @@ import type { AvatarProps, ChannelActionsProps, ChannelActionLabels, ChannelActi
 /* ----------------------------------------------------------
    Default TopicPill – renders a single topic preview
    ---------------------------------------------------------- */
-const DefaultTopicPill: React.FC<TopicPillProps> = React.memo(({ topic }) => {
+const DefaultTopicPill: React.FC<TopicPillProps> = React.memo(({ topic, AvatarStatusComponent }) => {
   const image = topic.data?.image as string | undefined;
 
   let emoji = '💬';
@@ -22,7 +22,10 @@ const DefaultTopicPill: React.FC<TopicPillProps> = React.memo(({ topic }) => {
 
   return (
     <span className="ermis-channel-list__topic-pill">
-      <span className="ermis-channel-list__topic-pill-avatar">{emoji}</span>
+      <span className="ermis-channel-list__topic-pill-avatar">
+        {emoji}
+        {AvatarStatusComponent && <AvatarStatusComponent channel={topic} />}
+      </span>
       {name && <span className="ermis-channel-list__topic-pill-name">{name}</span>}
     </span>
   );
@@ -37,6 +40,7 @@ type FlatTopicGroupItemProps = {
   isActive: boolean;
   onDrillDown?: (channel: Channel) => void;
   AvatarComponent: React.ComponentType<AvatarProps>;
+  AvatarStatusComponent?: TopicPillProps["AvatarStatusComponent"];
   maxVisibleTopics?: number;
   moreTopicsLabel?: string;
   /** Label for the general pill (default: 'general') */
@@ -73,6 +77,7 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   isActive,
   onDrillDown,
   AvatarComponent,
+  AvatarStatusComponent,
   maxVisibleTopics = 3,
   moreTopicsLabel = '...',
   generalTopicLabel = 'general',
@@ -180,9 +185,16 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
   ].filter(Boolean).join(' ');
 
   return (
-    <div className={itemClass} onClick={handleClick}>
+    <div className={itemClass} onClick={handleClick}
+      tabIndex={AvatarStatusComponent ? 0 : undefined}
+      onKeyDown={AvatarStatusComponent ? event => {
+        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        handleClick();
+      } : undefined}>
       <div className="ermis-channel-list__item-avatar-wrapper">
         <AvatarComponent image={image} name={name} size={45} disableLightbox className="ermis-avatar-wrapper--group" />
+        {AvatarStatusComponent && <AvatarStatusComponent channel={channel} />}
         {showUnread && aggregatedUnreadCount > 0 && (
           <span className="ermis-channel-list__avatar-unread-badge">
             {aggregatedUnreadCount > 99 ? '99+' : aggregatedUnreadCount}
@@ -234,7 +246,7 @@ export const FlatTopicGroupItem: React.FC<FlatTopicGroupItemProps> = React.memo(
                 <span className="ermis-channel-list__topic-pill-name">{generalTopicLabel}</span>
               </span>
               {visibleTopics.map((topic: Channel) => (
-                <Pill key={topic.cid} topic={topic} />
+                <Pill key={topic.cid} topic={topic} AvatarStatusComponent={AvatarStatusComponent} />
               ))}
               {hasOverflow && (
                 <span className="ermis-channel-list__topic-overflow">{moreTopicsLabel}</span>

@@ -11,95 +11,50 @@ const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
 });
 const fixture = new Module(filename, module);
 fixture._compile(compiled.outputText, filename);
-const { updateSecureSessionNotice: update, secureSessionPresentation: present, secureSessionScope: scope, secureSessionComposerPresentation: composer } = fixture.exports;
-const cid = 'messaging:active';
-const event = (repair_status, reason) => ({ cid, repair_status, reason });
+const { hasSecureSessionIssue, scopedRecoveryPresentation, secureSessionPresentation: present, secureSessionScope: scope } = fixture.exports;
 
-test('invalid GroupInfo and missing local group are waiting states without a spinner', () => {
-  for (const reason of ['group_info_invalid', 'no_local_group', 'awaiting_newer_group_info']) {
-    const notice = update(null, event('retryable', reason), cid, 1000);
-    assert.deepEqual(present(notice, 1000), { working: false, message: 'waiting_member', canRetry: true });
+test('late channel open reads a retained stop before any new event', () => {
+  const retained = Object.freeze({ phase: 'waiting', startedAt: 1000 });
+  assert.equal(scopedRecoveryPresentation(retained, 'blocked'), retained);
+  assert.equal(hasSecureSessionIssue(retained, 'blocked'), true);
+  assert.equal(scopedRecoveryPresentation(undefined, 'failed').phase, 'retry');
+  assert.equal(scopedRecoveryPresentation(undefined, 'pending'), undefined);
+  assert.equal(hasSecureSessionIssue(undefined, 'pending'), false);
+  assert.equal(hasSecureSessionIssue({ phase: 'syncing' }, 'pending'), false);
+  assert.equal(scopedRecoveryPresentation(retained, 'ready'), undefined);
+  assert.equal(hasSecureSessionIssue(retained, 'ready'), false);
+});
+
+test('server retry time only enables a check, never generation recovery', () => {
+  const retryAt = new Date(20_000).toISOString();
+  assert.deepEqual(present({ phase: 'waiting', retryAt }, 15_000, true),
+    { message: 'waiting', working: false, action: undefined, nextCheck: 20_000 });
+  assert.equal(present({ phase: 'waiting', retryAt }, 20_000, true).action, 'check');
+  assert.equal(present({ phase: 'waiting_for_evidence', actionable: false }, 20_001, true).action, undefined);
+  assert.equal(present({ phase: 'eligible' }, 1000, true).action, 'restore');
+});
+
+test('work timelines have a bounded spinner and keep confirmation distinct', () => {
+  for (const phase of ['checking', 'restoring', 'syncing']) {
+    assert.deepEqual(present({ phase, startedAt: 1000 }, 30_999, true), { message: phase, working: true });
+    assert.deepEqual(present({ phase, startedAt: 1000 }, 31_000, true), { message: 'pending', working: false });
   }
+  assert.deepEqual(present({ phase: 'confirming', startedAt: 1000, actionable: false }, 31_000, true),
+    { message: 'unconfirmed', working: false });
+  assert.equal(present({ phase: 'confirming', actionable: true }, 31_000, true).action, 'receipt');
 });
 
-test('exhausted attempts end active repair and expose retry', () => {
-  const running = update(null, event('refreshing'), cid, 1000);
-  const finished = update(running, event('retryable', 'repair_attempts_exhausted'), cid, 1500);
-  assert.deepEqual(present(finished, 1500), { working: false, message: 'retry', canRetry: true });
+test('offline, unsupported and support states expose truthful next steps', () => {
+  assert.deepEqual(present({ phase: 'eligible' }, 1000, false), { message: 'offline', working: false });
+  for (const phase of ['support', 'upgrade', 'server_upgrade']) {
+    assert.equal(present({ phase }, 1000, true).action, 'help');
+  }
+  assert.equal(present({ phase: 'retry' }, 1000, true).action, 'retry');
 });
 
-test('duplicate progress cannot extend the active-work timeout', () => {
-  const running = update(null, event('refreshing'), cid, 1000);
-  const repeated = update(running, event('refreshing'), cid, 30_999);
-  assert.equal(repeated, running);
-  assert.equal(present(repeated, 30_999).working, true);
-  assert.deepEqual(present(repeated, 31_000), { working: false, message: 'retry', canRetry: true });
-});
-
-test('preparation is bounded and waiting for repair never pretends work is active', () => {
-  const preparing = update(null, { cid, status: 'preparing' }, cid, 1000);
-  assert.equal(present(preparing, 1000).working, true);
-  assert.equal(present(preparing, 31_000).working, false);
-  const waiting = update(null, { cid, status: 'waiting_for_repair' }, cid, 1000);
-  assert.equal(present(waiting, 1000).working, false);
-});
-
-test('background channels cannot change or clear the active notice', () => {
-  const running = update(null, event('refreshing'), cid, 1000);
-  assert.equal(update(running, { cid: 'messaging:background', status: 'recovered' }, cid, 1500), running);
-  assert.equal(update(null, { cid: 'messaging:background', repair_status: 'retryable' }, cid, 1500), null);
-});
-
-test('ready clears repair but cannot clear generation preparation', () => {
-  const repair = update(null, event('refreshing'), cid, 1000);
-  assert.equal(update(repair, event('ready'), cid, 1500), null);
-  const preparation = update(null, { cid, status: 'preparing' }, cid, 1000);
-  assert.equal(update(preparation, event('ready'), cid, 1500), preparation);
-  assert.equal(update(preparation, { cid, status: 'recovered' }, cid, 1500), null);
-});
-
-test('generation waiting does not overwrite a bounded active GroupInfo repair', () => {
-  const running = update(null, event('refreshing'), cid, 1000);
-  assert.equal(update(running, { cid, status: 'waiting_for_repair' }, cid, 1500), running);
-  const waiting = update(running, { cid, status: 'waiting_for_repair' }, cid, 31_000);
-  assert.equal(present(waiting, 31_000).working, false);
-});
-
-test('required upgrades do not offer repair retry', () => {
-  const notice = update(null, { cid, status: 'client_upgrade_required' }, cid, 1000);
-  assert.equal(present(notice, 1000).canRetry, false);
-  assert.equal(present(notice, 1000).working, false);
-});
-
-test('topics use the authoritative encryption scope without using gated parents', () => {
-  assert.equal(scope({ cid: 'team:topic', data: { parent_cid: cid } }), cid);
-  assert.equal(scope({ cid: 'team:topic', data: { parent_cid: cid, gate: true } }), 'team:topic');
-  assert.equal(scope({ cid: 'team:topic', data: { parent_cid: cid, e2ee_group_id: 'team:own' } }), 'team:own');
-  assert.equal(scope({ cid: 'team:topic', data: { mls_cid: 'team:scope' } }), 'team:scope');
-});
-
-test('a recovery result cannot report success before local send readiness', () => {
-  const preparing = update(null, { cid, status: 'preparing' }, cid, 1000);
-  const recovered = update(preparing, { cid, status: 'recovered' }, cid, 1500);
-  assert.equal(composer(recovered, 1500, false, true), null);
-  assert.equal(composer(recovered, 1600, true, true).message, 'restored');
-  assert.equal(composer(recovered, 4600, true, false), null);
-});
-
-test('history gaps never produce a composer notice or replace a genuine repair error', () => {
-  const history = update(null, { cid, status: 'history_incomplete' }, cid, 1000);
-  assert.equal(composer(history, 1100, false, false), null);
-  assert.equal(composer(history, 5000, true, false), null);
-  assert.equal(composer(history, 5000, true, true).message, 'restored');
-  const repair = update(null, { cid, status: 'retryable_infrastructure_failure' }, cid, 1000);
-  assert.equal(update(repair, { cid, status: 'history_incomplete' }, cid, 1100), repair);
-  assert.equal(composer(repair, 1100, false, false).canRetry, true);
-});
-
-test('ordinary pending stays quiet and explicit recovery work retains its timeout', () => {
-  assert.equal(composer(null, 31_000, false, false), null);
-  const working = update(null, { cid, status: 'preparing' }, cid, 1000);
-  assert.deepEqual(composer(working, 31_000, false, false), { working: false, message: 'retry', canRetry: true });
-  const manual = update(null, { cid, status: 'manual_intervention_required' }, cid, 1000);
-  assert.equal(composer(manual, 2000, false, false).canRetry, false);
+test('inherited topics use the parent scope and gated topics keep their own', () => {
+  const cid = 'team:parent';
+  assert.equal(scope({ cid: 'topic:child', data: { parent_cid: cid } }), cid);
+  assert.equal(scope({ cid: 'topic:gated', data: { parent_cid: cid, gate: true } }), 'topic:gated');
+  assert.equal(scope({ cid: 'topic:child', data: { parent_cid: cid, e2ee_group_id: 'team:own' } }), 'team:own');
 });

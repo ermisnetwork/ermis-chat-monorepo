@@ -11,6 +11,7 @@ import { ContactsPanel } from '@/features/chat/ContactsPanel'
 import { InvitesPanel } from '@/features/chat/InvitesPanel'
 import { TopicsPanel } from '@/features/chat/TopicsPanel'
 import { SearchPanel } from '@/features/chat/SearchPanel'
+import { UhmChannelRecoveryIndicator } from "@/features/chat/UhmChannelRecoveryIndicator"
 import { ChannelListSkeleton } from '@/features/chat/ChannelListSkeleton'
 import { ChannelListEmpty } from '@/features/chat/ChannelListEmpty'
 import { UhmChannelActions } from '@/features/chat/UhmChannelActions'
@@ -454,7 +455,7 @@ export function ChatPage() {
     ]).size
     return Math.max(target, known)
   }, [activeRestoreProgress])
-  const getRestoreBadge = useCallback((channel: ChannelType): { label: string; tone: 'pending' | 'running' } | null => {
+  const getRestoreBadge = useCallback((channel: ChannelType): { label: string; tone: 'pending' | 'running' | 'gap' } | null => {
     const cid = channel.cid
     if (!cid) return null
     const progress = activeRestoreProgress?.cid === cid ? activeRestoreProgress : null
@@ -472,6 +473,9 @@ export function ChatPage() {
       recovery.recoveryStatus?.incompleteChannels.includes(cid))
     ) {
       return { label: t('recovery_pin.status_restore_pending'), tone: 'pending' }
+    }
+    if (progress?.permanent_gaps.length) {
+      return { label: t('e2ee.recovery_history_gap'), tone: 'gap' }
     }
     return null
   }, [activeRestoreProgress, activeRestoreTotal, client, recovery.recoveryStatus, t])
@@ -493,6 +497,18 @@ export function ChatPage() {
     setActivePanel('channels')
     setDrillDownChannel(null)
   }, [])
+
+  const openRecoveryChannel = useCallback((channel: ChannelType) => {
+    if (isGroupChannel(channel) && channel.data?.topics_enabled) {
+      handleTopicDrillDown(channel)
+      return
+    }
+    const parentCid = channel.data?.parent_cid
+    const parent = typeof parentCid === 'string' ? client.activeChannels[parentCid] : undefined
+    setActiveChannel(channel)
+    setDrillDownChannel(parent || null)
+    setActivePanel(parent ? 'topics' : 'channels')
+  }, [client, handleTopicDrillDown, setActiveChannel])
 
 
   const handleTruncateChannel = useCallback(async (channel: ChannelType) => {
@@ -664,7 +680,13 @@ export function ChatPage() {
               )}
             </div>
           )}
-          {restoreBadge && (
+          {restoreBadge?.tone === 'gap' ? (
+            <button type="button" onClick={toggleChannelInfo}
+              className="inline-flex h-7 items-center rounded-full bg-zinc-100 px-2 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+              aria-label={t('e2ee.recovery_view_history')}>
+              {restoreBadge.label}
+            </button>
+          ) : restoreBadge && (
             <div className={`hidden md:inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold ${
               restoreBadge.tone === 'running'
                   ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300'
@@ -943,6 +965,7 @@ export function ChatPage() {
       {/* Sidebar */}
       <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0 flex flex-col">
         <SyncStatusBanner syncState={syncState} client={client} container={sessionProgressHost}
+          onOpenChannel={openRecoveryChannel}
           activeCid={activeChannel?.cid}
           activeEncrypted={isEffectiveE2eeChannel(activeChannel, client)} />
 
@@ -979,6 +1002,7 @@ export function ChatPage() {
               <div className="flex-1 overflow-hidden relative">
                 <ChannelList
                   sessionReadiness
+                  AvatarStatusComponent={UhmChannelRecoveryIndicator}
                   filters={CHANNEL_LIST_FILTERS}
                   showPendingInvites={false}
                   onTopicDrillDown={handleTopicDrillDown}

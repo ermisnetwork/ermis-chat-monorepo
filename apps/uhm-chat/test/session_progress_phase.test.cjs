@@ -1,11 +1,11 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),ts=require('typescript');
 function mount(initial){let cursor=0;const slots=[],effects=[],listeners=new Map(),timers=[];
- const client={userID:'owner',getSessionSyncProgress:()=>initial,isSessionSyncProgressDismissed:()=>false,on(type,fn){listeners.set(type,fn);return{unsubscribe(){listeners.delete(type)}}}};
+ const client={userID:'owner',getSessionSyncProgress:()=>initial,getSingleBlockedEncryptedChannel:()=>initial.target,isSessionSyncProgressDismissed:()=>false,on(type,fn){listeners.set(type,fn);return{unsubscribe(){listeners.delete(type)}}}};
  const react={useState(initial){const i=cursor++;if(!(i in slots))slots[i]=initial;return[slots[i],v=>slots[i]=v]},useRef(value){const i=cursor++;return slots[i]||={current:value}},useEffect(fn,deps){const i=cursor++,old=slots[i];if(!old||deps.some((v,k)=>!Object.is(v,old.deps[k]))){old?.cleanup?.();slots[i]={deps};effects.push(()=>slots[i].cleanup=fn())}}};
  const jsx=(type,props)=>({type,props}),t=(key,values)=>key.endsWith('preparing')?'Đang chuẩn bị…':key.includes('channels_')?`${key} ${values.ready}/${values.total}`:key;
  const file=path.resolve(__dirname,'../src/features/chat/SyncStatusBanner.tsx'),module={exports:{}};
  const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
- vm.runInNewContext(code,{module,exports:module.exports,setTimeout:fn=>{timers.push(fn);return timers.length},clearTimeout(){},require(name){if(name==='react')return react;if(name==='react/jsx-runtime')return{jsx,jsxs:jsx};if(name==='react-dom')return{createPortal:x=>x};if(name==='react-i18next')return{useTranslation:()=>({t})};if(name==='lucide-react')return{RefreshCw:'spinner',X:'close',CheckCircle2:'done',AlertCircle:'partial'};throw Error(name)}},{filename:file});
+ vm.runInNewContext(code,{module,exports:module.exports,setTimeout:fn=>{timers.push(fn);return timers.length},clearTimeout(){},require(name){if(name==='@ermis-network/ermis-chat-react')return{isDirectChannel:()=>false};if(name==='react')return react;if(name==='react/jsx-runtime')return{jsx,jsxs:jsx};if(name==='react-dom')return{createPortal:x=>x};if(name==='react-i18next')return{useTranslation:()=>({t})};if(name==='lucide-react')return{RefreshCw:'spinner',X:'close',CheckCircle2:'done',AlertCircle:'partial'};throw Error(name)}},{filename:file});
  const render=(props={})=>{cursor=0;const view=module.exports.SyncStatusBanner({client,...props});while(effects.length)effects.shift()();return view};
  render();return{render,emit:value=>listeners.get('e2ee.session_progress')(value),timers};
 }
@@ -37,4 +37,18 @@ test('history progress only appears on its encrypted timeline', () => {
  assert.equal(h.render(), null);
  h.emit({status: 'idle'});
  assert.equal(h.render({activeCid: 'team:secure', activeEncrypted: true}), null);
+});
+
+test('a single named blocked channel offers a direct route, while multiple use the progress summary', () => {
+ const target = {cid:'team:project',data:{name:'Project'}};
+ const partial = {...initial,phase:'readiness',status:'partial',ready_channels:8,total_channels:9,encrypted_blocked_channels:1,target};
+ const h=mount(partial), selected=[];
+ let view=h.render({onOpenChannel:channel=>selected.push(channel)});
+ assert.match(text(view),/recovery_single_blocked.*recovery_open_channel/);
+ view.props.children.props.children.flat().find(node=>node?.props?.children==='e2ee.recovery_open_channel').props.onClick();
+ assert.deepEqual(selected,[target]);
+ h.emit({...partial,total_channels:10,encrypted_blocked_channels:2});
+ view=h.render({onOpenChannel:channel=>selected.push(channel)});
+ assert.match(text(view),/recovery_channels_blocked/);
+ assert.doesNotMatch(text(view),/recovery_open_channel/);
 });

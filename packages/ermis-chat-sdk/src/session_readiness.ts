@@ -74,7 +74,8 @@ export type SessionScopeResult = 'pending' | 'ready' | 'blocked' | 'failed';
 export type SessionReadinessSnapshot = {
   cycle_id: string; phase: 'inventory' | 'preparing' | 'readiness'; status: 'running' | 'partial' | 'done';
   readiness: true; total_channels?: number; ready_channels: number; blocked_channels: number;
-  failed_channels: number; standard_channels: number; total_scopes: number; settled_scopes: number; retry?: () => void;
+  failed_channels: number; encrypted_blocked_channels: number; standard_channels: number;
+  total_scopes: number; settled_scopes: number; retry?: () => void;
 };
 let serial = 0;
 
@@ -92,11 +93,12 @@ export class SessionReadinessProgress {
   private ready = 0;
   private blocked = 0;
   private failed = 0;
+  private encryptedBlocked = 0;
   private settled = 0;
   private standardCount = 0;
   private standardSettled = 0;
   private retryAction?: () => void;
-  constructor(private changed: () => void) {}
+  constructor(private changed: (scope?: string) => void) {}
 
   begin(): number | undefined {
     if (this.fetching) return;
@@ -109,7 +111,7 @@ export class SessionReadinessProgress {
     if (this.channels && (this.channels.size !== channels.size ||
       [...channels].some(([cid, scope]) => this.channels!.get(cid) !== scope))) this.cycle = `session-readiness-${++serial}`;
     this.fetching = false; this.inventoryFailed = false; this.channels = new Map(channels); this.retryAction = retry;
-    this.reverse.clear(); this.ready = 0; this.blocked = 0; this.failed = 0; this.settled = 0; this.standardSettled = 0;
+    this.reverse.clear(); this.ready = 0; this.blocked = 0; this.failed = 0; this.encryptedBlocked = 0; this.settled = 0; this.standardSettled = 0;
     for (const [cid, scope] of channels) {
       const ids = this.reverse.get(scope) || new Set<string>(); ids.add(cid); this.reverse.set(scope, ids);
     }
@@ -134,7 +136,7 @@ export class SessionReadinessProgress {
       if (old === 'ready') this.cycle = `session-readiness-${++serial}`;
       this.add(old, weight, -1, scope.startsWith(STANDARD_CHANNEL_SCOPE)); this.add(result, weight, 1, scope.startsWith(STANDARD_CHANNEL_SCOPE));
     }
-    this.changed();
+    this.changed(scope);
   }
   exclude(cid: string): void { this.remove([cid]); }
   excludeScope(scope: string): void { this.remove(this.reverse.get(scope) || []); }
@@ -146,6 +148,7 @@ export class SessionReadinessProgress {
       const members = this.reverse.get(scope)!; const result = this.results.get(scope) || 'pending';
       this.channels!.delete(cid); members.delete(cid); changed = true;
       if (result === 'ready') this.ready--; else if (result === 'blocked') this.blocked--; else if (result === 'failed') this.failed--;
+      if (!scope.startsWith(STANDARD_CHANNEL_SCOPE) && (result === 'blocked' || result === 'failed')) this.encryptedBlocked--;
       if (!members.size) {
         this.reverse.delete(scope); if (result !== 'pending') this.settled--;
         if (scope.startsWith(STANDARD_CHANNEL_SCOPE)) { this.standardCount--; if (result !== 'pending') this.standardSettled--; }
@@ -155,6 +158,18 @@ export class SessionReadinessProgress {
   }
   isPending(scope: string): boolean { return this.reverse.has(scope) && (this.results.get(scope) || 'pending') === 'pending'; }
   scopeFor(cid: string): string | undefined { return this.channels?.get(cid); }
+  resultFor(cid: string): SessionScopeResult | undefined {
+    const scope = this.scopeFor(cid);
+    return scope && !scope.startsWith(STANDARD_CHANNEL_SCOPE) ? this.results.get(scope) : undefined;
+  }
+  singleBlockedEncryptedScope(): string | undefined {
+    if (this.encryptedBlocked !== 1) return;
+    for (const [scope, members] of this.reverse) {
+      const result = this.results.get(scope);
+      if (members.has(scope) && (result === 'blocked' || result === 'failed') &&
+          !scope.startsWith(STANDARD_CHANNEL_SCOPE)) return scope;
+    }
+  }
   get unstarted(): string[] { return [...this.reverse.keys()].filter(scope => (this.results.get(scope) || 'pending') === 'pending'); }
   get incomplete(): string[] { return [...this.reverse.keys()].filter(scope => this.results.get(scope) !== 'ready'); }
   get encryptedScopes(): Set<string> | undefined {
@@ -168,6 +183,7 @@ export class SessionReadinessProgress {
     if (result === 'ready') this.ready += sign * weight;
     else if (result === 'blocked') this.blocked += sign * weight;
     else this.failed += sign * weight;
+    if (!standard && result !== 'ready') this.encryptedBlocked += sign * weight;
   }
   snapshot(): SessionReadinessSnapshot {
     const total = this.channels?.size;
@@ -176,7 +192,8 @@ export class SessionReadinessProgress {
     return {cycle_id: this.cycle, phase: this.fetching || this.inventoryFailed || total === undefined ? 'inventory' :
       status === 'running' && !this.readinessStarted ? 'preparing' : 'readiness', status,
       readiness: true, total_channels: total, ready_channels: this.ready, blocked_channels: this.blocked,
-      failed_channels: this.failed, standard_channels: this.standardCount, settled_scopes: this.settled - this.standardSettled, total_scopes: this.reverse.size - this.standardCount,
+      failed_channels: this.failed, encrypted_blocked_channels: this.encryptedBlocked, standard_channels: this.standardCount,
+      settled_scopes: this.settled - this.standardSettled, total_scopes: this.reverse.size - this.standardCount,
       retry: status === 'partial' ? () => {
         if (this.snapshot().status !== 'partial' || this.fetching) return;
         const action = this.retryAction; this.retryAction = undefined; action?.();

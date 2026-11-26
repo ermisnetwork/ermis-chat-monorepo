@@ -1073,6 +1073,15 @@ export interface MlsGenerationRecoveryResult {
   retry_at?: string;
   delivery_pending?: number;
 }
+
+/** Session-owned, read-only recovery information for presentation. */
+export interface MlsRecoveryPresentation {
+  readonly phase: 'checking' | 'waiting' | 'waiting_for_evidence' | 'eligible' | 'restoring' |
+    'confirming' | 'syncing' | 'retry' | 'upgrade' | 'server_upgrade' | 'support';
+  readonly actionable?: boolean;
+  readonly startedAt?: number;
+  readonly retryAt?: string;
+}
 export type GroupInfoRepairReason = 'external_join_deadline' | 'group_info_stale' | 'group_info_invalid';
 export interface GroupInfoRefreshRequest {
   /** Missing on legacy servers/events means generation zero; never a GroupId proof. */

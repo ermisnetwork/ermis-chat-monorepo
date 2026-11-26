@@ -52,8 +52,11 @@ test('manual snapshot persists before callback, dedupes, suppresses retries/boot
   f.m.client.dispatchEvent=event=>{f.events.push(event);callbackDurable=f.storage.loadRecoveryControlCheckpoint(f.cid,f.device);};
   const result=await f.m.recoverMlsGeneration('team',f.cid.slice(5),f.cid,f.state());
   assert.equal(result.status,'manual_intervention_required');assert.equal(result.retryable,false);assert.equal(result.retry_at,undefined);
-  assert.equal((await callbackDurable).recovery_action,'manual_intervention_required');assert.equal(f.events.length,1);
-  await f.m.recoverMlsGeneration('team',f.cid.slice(5),f.cid,f.state());assert.equal(f.events.length,1);
+  assert.equal((await callbackDurable).recovery_action,'manual_intervention_required');
+  assert.equal(f.events.filter(event=>event.type!=='e2ee.recovery_presentation_changed').length,1);
+  assert.equal(f.events.filter(event=>event.type==='e2ee.recovery_presentation_changed').length,1);
+  assert.equal(f.m.getMlsRecoveryPresentation(f.cid).phase,'support');
+  await f.m.recoverMlsGeneration('team',f.cid.slice(5),f.cid,f.state());assert.equal(f.events.length,2);
   assert.equal(f.m._generationRecoveryRetries.has(f.cid),false);
   await assert.rejects(f.m.joinExternal('team',f.cid.slice(5),f.cid),e=>e.code==='manual_intervention_required');assert.equal(reads,0);
   assert.equal(sha256Hex(f.m.provider.to_bytes()),before);

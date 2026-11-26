@@ -2,14 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { RefreshCw, X, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { ErmisChat } from '@ermis-network/ermis-chat-sdk'
+import type { Channel, ErmisChat } from '@ermis-network/ermis-chat-sdk'
+import { getUserDisplayName, isDirectChannel } from '@ermis-network/ermis-chat-react'
 import type { SyncState } from '@/hooks/useSyncStatus'
 
-interface SyncStatusBannerProps { syncState: SyncState; client?: ErmisChat | null; container?: HTMLElement | null; activeCid?: string; activeEncrypted?: boolean }
-type Progress = { history_cid?: string; cycle_id: string; phase: string; status: string; readiness?: boolean; total_channels?: number; ready_channels?: number; retry?: () => unknown }
+interface SyncStatusBannerProps { syncState: SyncState; client?: ErmisChat | null; container?: HTMLElement | null; activeCid?: string; activeEncrypted?: boolean; onOpenChannel?: (channel: Channel) => void }
+type Progress = { history_cid?: string; cycle_id: string; phase: string; status: string; readiness?: boolean; total_channels?: number; ready_channels?: number; encrypted_blocked_channels?: number; retry?: () => unknown }
 
 /** One nonblocking progress popup. Dismissal never cancels its owning work. */
-export function SyncStatusBanner({ client, container, activeCid, activeEncrypted }: SyncStatusBannerProps) {
+export function SyncStatusBanner({ client, container, activeCid, activeEncrypted, onOpenChannel }: SyncStatusBannerProps) {
   const { t } = useTranslation()
   const [progress, setProgress] = useState<Progress | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(null)
@@ -53,7 +54,18 @@ export function SyncStatusBanner({ client, container, activeCid, activeEncrypted
   const done = progress.status === 'done'
   const phase = working ? progress.phase === 'restoring_page' ? 'restoring_page' : progress.phase === 'preparing' ? 'preparing' : 'syncing'
     : progress.status === 'partial' ? 'partial' : 'done'
-  const text = progress.readiness
+  const affected = progress.readiness && progress.status === 'partial' && progress.phase === 'readiness'
+    ? progress.encrypted_blocked_channels ?? 0 : 0
+  const target = affected === 1 ? client?.getSingleBlockedEncryptedChannel() : undefined
+  const other = target && isDirectChannel(target)
+    ? Object.values(target.state.members).find(member => (member.user_id || member.user?.id) !== client?.userID)
+    : undefined
+  const otherId = other?.user_id || other?.user?.id
+  const name = (otherId && getUserDisplayName(other?.user, otherId, client?.state.users[otherId])) || target?.data?.name
+  const counts = {ready: progress.ready_channels ?? 0, total: progress.total_channels, count: affected}
+  const text = affected
+    ? name ? t('e2ee.recovery_single_blocked', {...counts, name}) : t('e2ee.recovery_channels_blocked', counts)
+    : progress.readiness
     ? progress.total_channels === undefined || progress.phase === 'inventory'
       ? t(`session_progress.${progress.status === 'partial' ? 'inventory_partial' : 'inventory'}`)
       : progress.phase === 'preparing' && working
@@ -65,7 +77,12 @@ export function SyncStatusBanner({ client, container, activeCid, activeEncrypted
       <aside className={`pointer-events-auto flex w-max max-w-full items-center gap-2 whitespace-nowrap rounded-full border py-1 pl-3 pr-1 text-xs shadow-[0_3px_12px_rgba(0,0,0,0.08)] backdrop-blur-sm ${done ? 'border-emerald-200 bg-emerald-50/95 dark:border-emerald-800 dark:bg-emerald-950/95' : 'border-zinc-200/80 bg-white/95 dark:border-zinc-700 dark:bg-zinc-900/95'}`} role="status" aria-live="polite" data-cycle-id={progress.cycle_id}>
         {working ? <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-violet-600" aria-hidden="true" /> : progress.status === 'partial' ? <AlertCircle className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden="true" />}
         <span className={`min-w-0 truncate ${done ? 'text-emerald-700 dark:text-emerald-300' : 'text-zinc-600 dark:text-zinc-300'}`} title={text}>{text}</span>
-        {!working && progress.status === 'partial' && progress.retry && <button type="button" className="shrink-0 rounded-full px-1 py-1.5 font-semibold text-violet-600 hover:text-violet-500 dark:text-violet-400" onClick={() => { void progress.retry?.() }}>{t('session_progress.retry')}</button>}
+        {!working && progress.status === 'partial' && target && onOpenChannel && (
+          <button type="button" className="shrink-0 rounded-full px-1 py-1.5 font-semibold text-violet-600 hover:text-violet-500 dark:text-violet-400" onClick={() => onOpenChannel(target)}>{t('e2ee.recovery_open_channel')}</button>
+        )}
+        {!working && progress.status === 'partial' && progress.retry && !affected && (
+          <button type="button" className="shrink-0 rounded-full px-1 py-1.5 font-semibold text-violet-600 hover:text-violet-500 dark:text-violet-400" onClick={() => { void progress.retry?.() }}>{t(progress.phase === 'inventory' ? 'e2ee.recovery_retry_inventory' : 'session_progress.retry')}</button>
+        )}
         <button type="button" aria-label={t('session_progress.dismiss')} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800" onClick={() => { client?.dismissSessionSyncProgress?.(progress.cycle_id); setDismissed(progress.cycle_id) }}><X className="h-3.5 w-3.5" /></button>
       </aside>
     </div>

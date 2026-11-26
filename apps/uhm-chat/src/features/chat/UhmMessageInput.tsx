@@ -791,9 +791,9 @@ export const UhmMessageInput: React.FC<UhmMessageInputProps> = ({
 
   return (
     <div className="relative z-50 shrink-0">
-      {encrypted && canSendMessage && (
+      {encrypted && (
         <SecureSessionBanner key={JSON.stringify([client.userID, activeChannel.cid, scope])}
-          client={client} scopeCid={scope} sendReady={secure.verified} />
+          client={client} channelCid={activeChannel.cid} scopeCid={scope} sendReady={secure.verified} canRecover={canSendMessage} />
       )}
       <div className="relative flex flex-col background-transparent transition-shadow">
         {quotedMessage && !editingMessage && (

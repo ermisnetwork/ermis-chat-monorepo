@@ -346,3 +346,47 @@ function componentRoutingManager() {
   manager._discoverMlsRecoveryStates = cids => coordinator.request(cids);
   return manager;
 }
+
+test('startup and manual recovery share a generation attempt and retain the settled state for late views', async () => {
+  const manager = componentRoutingManager();
+  manager.initialized = true;
+  manager.userId = 'alice';
+  manager.deviceId = 'web-a';
+  manager.storage = {};
+  manager.e2eeClient = {};
+  let resolveAttempt;
+  let calls = 0;
+  manager._recoverMlsGeneration = async () => {
+    calls++;
+    return new Promise(resolve => { resolveAttempt = resolve; });
+  };
+  const startup = manager.recoverMlsGeneration('messaging', 'stable-cid', boundary.cid);
+  const first = manager.retryMlsChannelRecovery(boundary.cid);
+  assert.equal(first, manager.retryMlsChannelRecovery(boundary.cid));
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  resolveAttempt({ cid: boundary.cid, generation: 0, epoch: 9,
+    status: 'waiting_for_repair', reason: 'group_info_missing', retryable: true });
+  await Promise.all([startup, first]);
+  const state = manager.getMlsRecoveryPresentation(boundary.cid);
+  assert.equal(state.phase, 'waiting');
+  assert.equal(manager.getMlsRecoveryPresentation(boundary.cid), state, 'stable read for external-store consumers');
+  assert.equal(manager.getMlsRecoveryPresentation('messaging:unrelated'), undefined);
+});
+
+test('an activation result remains syncing until local Ready clears that scope', async () => {
+  const manager = componentRoutingManager();
+  manager.initialized = true;
+  manager.userId = 'alice';
+  manager.deviceId = 'web-a';
+  manager.storage = {};
+  manager.e2eeClient = {};
+  manager._recoverMlsGeneration = async () => ({
+    cid: boundary.cid, generation: 1, epoch: 1,
+    status: 'recovered', reason: 'delivery_pending', retryable: false,
+  });
+  await manager.recoverMlsGeneration('messaging', 'stable-cid', boundary.cid);
+  assert.equal(manager.getMlsRecoveryPresentation(boundary.cid).phase, 'syncing');
+  await manager.handleGroupInfoChannelRemoved(boundary.cid);
+  assert.equal(manager.getMlsRecoveryPresentation(boundary.cid), undefined);
+});
