@@ -2526,7 +2526,11 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     return state;
   }
 
-  async query(options: ChannelQueryOptions, messageSetToAddToIfDoesNotExist: MessageSetType = 'current') {
+  async query(
+    options: ChannelQueryOptions,
+    messageSetToAddToIfDoesNotExist: MessageSetType = 'current',
+    showHistoryProgress = false,
+  ) {
     // Make sure we wait for the connect promise if there is a pending one
     await this.getClient().wsPromise;
 
@@ -2600,7 +2604,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     state.pinned_messages = state.pinned_messages ? enrichWithUserInfo(state.pinned_messages, users) : [];
     state.read = enrichWithUserInfo(state.read || [], users);
     state.channel.is_pinned = state.is_pinned || false;
-    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel);
+    state.messages = await this._hydrateE2eeMessagesFromLocalCache(state.messages, state.channel, true, showHistoryProgress);
     state.pinned_messages = await this._hydrateE2eeMessagesFromLocalCache(state.pinned_messages || [], state.channel);
 
     // Process topics for team channels
@@ -4422,6 +4426,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
     messages: MessageResponse<ErmisChatGenerics>[] = [],
     channelData?: ChannelResponse<ErmisChatGenerics> | ChannelData<ErmisChatGenerics>,
     restoreHistory = true,
+    showHistoryProgress = false,
   ): Promise<MessageResponse<ErmisChatGenerics>[]> {
     const isE2ee = this._isE2eeChannelData(channelData);
     const storage = this.getClient().encryptionManager?.storage || (this.getClient() as any).messageStorage;
@@ -4567,6 +4572,7 @@ export class Channel<ErmisChatGenerics extends ExtendableGenerics = DefaultGener
       for(let offset=0;offset<pending.length;offset+=50) {
         void manager.restoreHistoryPage(this.type,this.id,pending.slice(offset,offset+50) as any[], {
           queryChannel: channelData,
+          showHistoryProgress,
         })
           .catch(()=>this.getClient().logger('warn','History page restore deferred',{tags:['encryption']}));
       }

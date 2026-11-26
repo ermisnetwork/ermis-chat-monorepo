@@ -9,10 +9,12 @@ export function markLatestPage(channel: object): void {
 }
 
 /** Object ownership keeps simultaneous mounts coalesced without leaking across sessions. */
-export function queryLatestPage<T>(channel: { query: (options: { messages_seq: { limit: number } }) => Promise<T> }): Promise<T> {
+export function queryLatestPage<T>(channel: {
+  query: (options: { messages_seq: { limit: number } }, messageSet?: 'current', showHistoryProgress?: boolean) => Promise<T>;
+}): Promise<T> {
   const pending = inFlight.get(channel);
   if (pending) return pending as Promise<T>;
-  const request = Promise.resolve().then(() => channel.query({ messages_seq: { limit: 25 } })).then(result => {
+  const request = Promise.resolve().then(() => channel.query({ messages_seq: { limit: 25 } }, 'current', true)).then(result => {
     completed.add(channel);
     return result;
   }).finally(() => {

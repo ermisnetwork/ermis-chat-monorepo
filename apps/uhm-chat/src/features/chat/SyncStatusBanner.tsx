@@ -5,11 +5,11 @@ import { useTranslation } from 'react-i18next'
 import type { ErmisChat } from '@ermis-network/ermis-chat-sdk'
 import type { SyncState } from '@/hooks/useSyncStatus'
 
-interface SyncStatusBannerProps { syncState: SyncState; client?: ErmisChat | null; container?: HTMLElement | null }
-type Progress = { cycle_id: string; phase: string; status: string; readiness?: boolean; total_channels?: number; ready_channels?: number; retry?: () => unknown }
+interface SyncStatusBannerProps { syncState: SyncState; client?: ErmisChat | null; container?: HTMLElement | null; activeCid?: string; activeEncrypted?: boolean }
+type Progress = { history_cid?: string; cycle_id: string; phase: string; status: string; readiness?: boolean; total_channels?: number; ready_channels?: number; retry?: () => unknown }
 
 /** One nonblocking progress popup. Dismissal never cancels its owning work. */
-export function SyncStatusBanner({ client, container }: SyncStatusBannerProps) {
+export function SyncStatusBanner({ client, container, activeCid, activeEncrypted }: SyncStatusBannerProps) {
   const { t } = useTranslation()
   const [progress, setProgress] = useState<Progress | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(null)
@@ -47,6 +47,8 @@ export function SyncStatusBanner({ client, container }: SyncStatusBannerProps) {
     return () => clearTimeout(timer)
   }, [progress?.cycle_id, progress?.status, client, client?.userID])
   if (!progress || progress.cycle_id === dismissed) return null
+  if (activeCid && !activeEncrypted) return null
+  if (progress.history_cid && progress.history_cid !== activeCid) return null
   const working = progress.status === 'running'
   const done = progress.status === 'done'
   const phase = working ? progress.phase === 'restoring_page' ? 'restoring_page' : progress.phase === 'preparing' ? 'preparing' : 'syncing'

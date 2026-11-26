@@ -439,6 +439,7 @@ interface HistoryPageOptions {
   retry?: boolean;
   isPreview?: boolean;
   reportCached?: boolean;
+  showHistoryProgress?: boolean;
   queryChannel?: { cid?: string; e2ee_group_id?: string; mls_cid?: string; parent_cid?: string; gate?: boolean; mls_enabled?: boolean };
 }
 
@@ -6714,8 +6715,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       values.push(normalized);
       generations.set(generation,values);
     }
-    let progressId:string|undefined;
-    let failed=true;
+    let progressId: string | undefined;
     try { for(const [generation,rows]of generations){
       const key=sha256Hex(new TextEncoder().encode(JSON.stringify([this._recoveryUnlockNamespace(),this._recoveryKeyId,cid,archiveCid,generation,
         rows.map(row=>[row.message_id,row.mls_epoch,sha256Hex(row.mls_ciphertext),row.updated_at||row.created_at])])));
@@ -6733,7 +6733,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       }
       if(this._pageRestores.get(key)===null)continue;
       let work=this._pageRestores.get(key);
-      if (!options?.isPreview) progressId ??= (this.client as any)?._beginSessionProgress?.('restoring_page');
+      if (options?.showHistoryProgress && !options.isPreview && !progressId && this.client) {
+        progressId = this.client._beginHistoryProgress(cid);
+        if (!progressId) break;
+      }
       if(!work){
         const settle = (remember: boolean) => {
           if (this._pageRestores.get(key) !== work) return;
@@ -6762,8 +6765,10 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
       assertOwner();
       result.push(...outcomes);
     }
-    failed=result.some(row=>row.gap===true);return result;
-    } finally {if(progressId)(this.client as any)?._finishSessionProgress?.(progressId,failed,()=>this.restoreHistoryPage(channelType,channelId,page,{...options,retry:true}));}
+    return result;
+    } finally {
+      if (progressId) this.client?._finishHistoryProgress?.(progressId);
+    }
   }
 
   private async _restoreHistoricalMessagesInternal(
@@ -8323,28 +8328,27 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             ? savedCursors[cid] ? [[cid, savedCursors[cid]]] : [] : [[cid, cursor]]),
         ) }); assertSyncScope();
       };
-      const publishCompletedScopes = async () => {
-        if (!unpublishedCompletedScopes.size) return;
-        // Keep the existing provider CAS/readback barrier. Commit once per
-        // response containing completed scopes, never once per channel/event.
-        await checkpoint(unpublishedCompletedScopes);
-        const completed=Array.from(unpublishedCompletedScopes), foreground=(cid:string)=>
-          cid===this._activeHistoryScope || this._foregroundReadiness.has(cid);
-        const ordered=[...completed.filter(foreground),...completed.filter(cid=>!foreground(cid))];
+      const isForeground = (cid: string) => cid === this._activeHistoryScope || this._foregroundReadiness.has(cid);
+      const publishCompletedScopes = async (completed = [...unpublishedCompletedScopes]) => {
+        if (!completed.length) return;
+        // Commit the active scope ahead of unrelated work. Other completed
+        // scopes still share one checkpoint for the response.
+        await checkpoint(completed);
+        const ordered = [...completed.filter(isForeground), ...completed.filter(cid => !isForeground(cid))];
         for (const cid of ordered) {
           assertSyncScope();
           const state = checkpointStates.get(cid);
           if (state) this._emitSyncState(state);
+          unpublishedCompletedScopes.delete(cid);
           // A synchronous listener can replace the account/client. Do not start
           // local admission for that retired response under its new owner.
           assertSyncScope();
-          if (!this.groups.has(cid) && !(foreground(cid) && completedBootstrap.has(cid))) continue;
+          if (!this.groups.has(cid) && !(isForeground(cid) && completedBootstrap.has(cid))) continue;
           const parts = channelPartsFromCid(cid); if (!parts) continue;
           const result = await this.ensureChannelReady(parts.channelType, parts.channelId, cid,
             {source:'batch_finalization', initialScopeSyncCompleted:true, batchSyncOnly:true});
           assertSyncScope(); this._finishForegroundReadiness(cid, result);
         }
-        unpublishedCompletedScopes.clear();
       };
       while (hasMore) {
         hasMore = false;
@@ -8385,8 +8389,19 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
             needs_retry: true, error: 'scope_sync_response_incomplete',
           }));
         }
-        for (const [scopeCid, channelResult] of Object.entries(response.channels || {})) {
-          if (!(scopeCid in requestedCursors)) throw recoveryControlError('scope_sync_unrequested_scope');
+        const results = Object.entries(response.channels || {});
+        if (results.some(([cid]) => !Object.hasOwn(requestedCursors, cid))) {
+          throw recoveryControlError('scope_sync_unrequested_scope');
+        }
+        const activeIndex = results.findIndex(([cid]) => cid === this._activeHistoryScope);
+        const activeScope = activeIndex >= 0 ? results[activeIndex][0] : undefined;
+        if (activeIndex > 0) results.unshift(...results.splice(activeIndex, 1));
+        const finishScope = async (cid: string) => {
+          scopeSyncCompletedCids.add(cid);
+          unpublishedCompletedScopes.add(cid);
+          if (cid === activeScope && !removedChannels?.has_more) await publishCompletedScopes([cid]);
+        };
+        for (const [scopeCid, channelResult] of results) {
           if (!Array.isArray(channelResult?.events) || typeof channelResult.has_more !== 'boolean') {
             blockedScopes.add(scopeCid); continue;
           }
@@ -8418,8 +8433,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
               scopeSyncCompletedCids.delete(scopeCid);
               blockedScopes.add(scopeCid);
             } else {
-              scopeSyncCompletedCids.add(scopeCid);
-              unpublishedCompletedScopes.add(scopeCid);
+              await finishScope(scopeCid);
             }
             continue;
           }
@@ -8494,8 +8508,7 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
           } else if (channelResult.has_more) {
             scopeSyncCompletedCids.delete(scopeCid);
           } else {
-            scopeSyncCompletedCids.add(scopeCid);
-            unpublishedCompletedScopes.add(scopeCid);
+            await finishScope(scopeCid);
           }
         }
         // A slow independent scope/page must not hold an already drained scope
@@ -9633,8 +9646,12 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
   }
 
   /** Both early and post-hydration opens await the same per-scope ticket. */
-  private async _awaitColdStartScopeReadiness(cid:string,coldStart:Promise<void>,assertCurrent:()=>void):Promise<EnsureE2eeChannelResult> {
-    const foreground=this._queueForegroundReadiness(cid);
+  private async _awaitColdStartScopeReadiness(
+    cid: string,
+    coldStart: Promise<void>,
+    assertCurrent: () => void,
+    foreground = this._queueForegroundReadiness(cid),
+  ): Promise<EnsureE2eeChannelResult> {
     const selected=await Promise.race([
       foreground.then(value=>({kind:'scope' as const,value})),
       coldStart.then(()=>({kind:'session' as const}),()=>({kind:'session' as const})),
@@ -9714,7 +9731,23 @@ export class EncryptionManager<ErmisChatGenerics extends ExtendableGenerics = De
         try { work.assertOwner(); } catch { continue; }
         const result = await work; assertScope(); return scope === cid ? result : {...result, cid};
       }
-      const result=coldStart?await this._awaitColdStartScopeReadiness(scope,coldStart,assertScope):await this._queueForegroundReadiness(scope);
+      const foreground = this._queueForegroundReadiness(scope);
+      const parts = channelPartsFromCid(scope);
+      if (parts && this.initialized && !this._providerPersistenceUncertain && !this.groups.has(scope)) {
+        // The batch owns delivery. A read of the requested installed group can
+        // start now under the existing provider owner while transport is pending.
+        await this._restoreInstalledGroupOnDemand(scope);
+        assertScope();
+      }
+      if (parts && this._foregroundReadiness.has(scope) && this._getCompletedSyncProgress(scope)) {
+        const local = await this.ensureChannelReady(parts.channelType, parts.channelId, scope,
+          {source: 'batch_finalization', initialScopeSyncCompleted: true, batchSyncOnly: true});
+        assertScope();
+        if (local.status === 'ready') this._finishForegroundReadiness(scope, local);
+      }
+      const result = coldStart
+        ? await this._awaitColdStartScopeReadiness(scope, coldStart, assertScope, foreground)
+        : await foreground;
       assertScope();
       return scope === cid ? result : {...result, cid};
     }

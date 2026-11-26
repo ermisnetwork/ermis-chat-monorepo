@@ -55,6 +55,7 @@ const UHM_MESSAGE_RENDERERS = { signal: UhmSignalMessage, poll: UhmPollMessage }
 
 const isEffectiveE2eeChannel = (channel: ChannelType | null | undefined, client: any) => {
   if (channel?.data?.mls_enabled === true) return true
+  if (channel?.data?.gate === true || channel?.data?.e2ee_group_id === channel?.cid) return false
   const parentCid = channel?.data?.parent_cid as string | undefined
   if (!parentCid) return false
   return client?.activeChannels?.[parentCid]?.data?.mls_enabled === true
@@ -941,7 +942,9 @@ export function ChatPage() {
 
       {/* Sidebar */}
       <div className="w-[380px] border-r border-zinc-200/50 dark:border-zinc-800/50 h-full relative overflow-hidden backdrop-blur-xl z-20 shadow-[1px_0_10px_rgba(0,0,0,0.02)] shrink-0 flex flex-col">
-        <SyncStatusBanner syncState={syncState} client={client} container={sessionProgressHost} />
+        <SyncStatusBanner syncState={syncState} client={client} container={sessionProgressHost}
+          activeCid={activeChannel?.cid}
+          activeEncrypted={isEffectiveE2eeChannel(activeChannel, client)} />
 
         {/* Channels + Topics — width-based push animation */}
         {/* Channel list shrinks 380→66px (overflow-hidden clips to avatars on left) */}

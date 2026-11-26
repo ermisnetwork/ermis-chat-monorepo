@@ -37,17 +37,25 @@ test('same CID in another account/channel object neither reuses request nor inhe
 // pending. The only fake is the channel transport; presentation must receive25.
 for (const encrypted of [false, true]) for (const cached of [false, true]) test(`actual channel hook queries and displays25 without awaiting account encryption, encrypted=${encrypted}, cached=${cached}`, async () => {
  const effects = [], timers = [], subscriptions = [];
- let shown = [], requests = 0, readiness = 0;
+ let shown = [], requests = 0, readiness = 0, restoreRequests = 0;
  const systemCache = Array.from({ length: 5 }, (_, i) => ({ id: 'system-' + i, type: 'system', text: 'fixture system', content_type: 'standard' }));
  const listeners = new Map();
  const noop = () => {}, sub = () => ({ unsubscribe: noop });
  const client = { userID: 'fixture', state: { users: {} }, activeChannels: {}, on: (event, callback) => { listeners.set(event, callback); return { unsubscribe: () => listeners.delete(event) }; },
-   encryptionManager: { initialized: false, subscribeE2eeState: sub, ensureChannelReady: async (...args) => { readiness++; assert.equal(args[3].source, 'open'); } } };
+   encryptionManager: { initialized: false, subscribeE2eeState: sub,
+     restoreHistoryPage: async (_type, _id, page, options) => {
+       restoreRequests++;
+       assert.equal(page.length, 25);
+       assert.equal(options.showHistoryProgress, true);
+     },
+     ensureChannelReady: async (...args) => { readiness++; assert.equal(args[3].source, 'open'); } } };
  const channel = { cid: 'team:fixture', type: 'team', id: 'fixture',
    data: { mls_enabled: encrypted }, state: { latestMessages: [{ id: 'preview', text: 'preview' }], read: {}, membership: { channel_role: 'member' } },
    getClient: () => client, on: sub,
-   async query(options) {
+   async query(options, messageSet, showHistoryProgress) {
      requests++; assert.equal(options.messages_seq.limit, 25);
+     assert.equal(messageSet, 'current');
+     assert.equal(showHistoryProgress, true);
      channel.state.latestMessages = Array.from({ length: 25 }, (_, i) => ({ id: 'message-' + i, text: 'fixture', content_type: encrypted ? 'mls' : 'standard' }));
    } };
  client.activeChannels[channel.cid] = channel;
@@ -85,6 +93,7 @@ for (const encrypted of [false, true]) for (const cached of [false, true]) test(
  listeners.get('e2ee.initialized')?.();
  await new Promise(done => setImmediate(done));
  assert.equal(readiness, encrypted ? 1 : 0, 'the still-open encrypted scope is promoted once initialization becomes available');
+ assert.equal(restoreRequests, encrypted ? 1 : 0);
  const staleInitialization = listeners.get('e2ee.initialized');
  for (const unsubscribe of subscriptions) unsubscribe?.();
  staleInitialization?.();

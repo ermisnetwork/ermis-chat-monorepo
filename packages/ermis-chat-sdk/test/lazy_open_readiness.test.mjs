@@ -271,3 +271,50 @@ test('cold start beginning during control hydration still releases open at its o
   const opened=await Promise.race([work,new Promise(done=>{timer=setTimeout(()=>done(null),1000)})]);assert.equal(opened?.status,'ready');
  }finally{clearTimeout(timer);finishCold();if(work)await work.catch(()=>{});await h.close();}
 });
+
+for (const delivered of [false, true]) {
+ test('foreground open loads its own dormant group during cold startup, delivered=' + delivered, async () => {
+  const h = await fixture('ready');
+  let finishCold, work, timer, loaded, loads = 0, requests = 0, settled = false;
+  const cold = new Promise(resolve => { finishCold = resolve; });
+  const materialized = new Promise(resolve => { loaded = resolve; });
+  h.m.client._getPendingHydratedColdStartSync = () => cold;
+  try {
+   const cursor = {created_at:'2026-11-01T00:00:00Z',event_id:'00000000-0000-0000-0000-000000000001'};
+   if (delivered) {
+    await h.s.saveScopeSyncCursor(h.cid, cursor);
+    h.m._emitSyncState(h.m._makeSyncState(h.cid, 'ready', cursor, cursor));
+   }
+   h.group.free();
+   h.m.groups.delete(h.cid);
+   h.m._commonStates.clear();
+   h.m._hotReadyScopes.length = 0;
+   const restore = h.m._restoreInstalledGroupOnDemand.bind(h.m);
+   h.m._restoreInstalledGroupOnDemand = async cid => {
+    assert.equal(cid, h.cid);
+    loads++;
+    await restore(cid);
+    loaded(true);
+   };
+   h.m.e2eeClient.scopeSync = async () => { requests++; assert.fail('open must share the session transport'); };
+   work = h.m.ensureChannelReady('team', h.cid.slice(5), h.cid, {source:'open'});
+   work.then(() => { settled = true; }, () => {});
+   const deadline = new Promise(resolve => { timer = setTimeout(() => resolve(null), 1500); });
+   assert.equal(await Promise.race([materialized, deadline]), true, 'materialization must start before the session settles');
+   assert.equal(h.m.getEpoch(h.cid), 0);
+   if (delivered) {
+    assert.equal((await Promise.race([work, deadline]))?.status, 'ready');
+    assert.equal(h.m.getE2eeState(h.cid)?.state, 'ready');
+   } else {
+    assert.equal(settled, false, 'loading the local group is insufficient to resolve the open');
+   }
+   assert.equal(loads, 1);
+   assert.equal(requests, 0);
+  } finally {
+   clearTimeout(timer);
+   finishCold();
+   await work?.catch(() => {});
+   await h.close();
+  }
+ });
+}

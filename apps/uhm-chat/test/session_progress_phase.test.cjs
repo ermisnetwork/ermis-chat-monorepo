@@ -6,7 +6,7 @@ function mount(initial){let cursor=0;const slots=[],effects=[],listeners=new Map
  const file=path.resolve(__dirname,'../src/features/chat/SyncStatusBanner.tsx'),module={exports:{}};
  const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  vm.runInNewContext(code,{module,exports:module.exports,setTimeout:fn=>{timers.push(fn);return timers.length},clearTimeout(){},require(name){if(name==='react')return react;if(name==='react/jsx-runtime')return{jsx,jsxs:jsx};if(name==='react-dom')return{createPortal:x=>x};if(name==='react-i18next')return{useTranslation:()=>({t})};if(name==='lucide-react')return{RefreshCw:'spinner',X:'close',CheckCircle2:'done',AlertCircle:'partial'};throw Error(name)}},{filename:file});
- const render=()=>{cursor=0;const view=module.exports.SyncStatusBanner({client});while(effects.length)effects.shift()();return view};
+ const render=(props={})=>{cursor=0;const view=module.exports.SyncStatusBanner({client,...props});while(effects.length)effects.shift()();return view};
  render();return{render,emit:value=>listeners.get('e2ee.session_progress')(value),timers};
 }
 function text(node){if(node==null||typeof node==='boolean')return'';if(typeof node!=='object')return String(node);if(Array.isArray(node))return node.map(text).join(' ');return text(node.props?.children)}
@@ -27,4 +27,14 @@ test('a hidden quiet readiness snapshot removes an already visible history spinn
  assert.match(text(h.render()), /restoring_page/);
  h.emit({status: 'idle'});
  assert.equal(h.render(), null);
+});
+
+test('history progress only appears on its encrypted timeline', () => {
+ const h = mount({cycle_id: 'p1', history_cid: 'team:secure', phase: 'restoring_page', status: 'running'});
+ assert.match(text(h.render({activeCid: 'team:secure', activeEncrypted: true})), /restoring_page/);
+ assert.equal(h.render({activeCid: 'team:other', activeEncrypted: true}), null);
+ assert.equal(h.render({activeCid: 'topic:standard', activeEncrypted: false}), null);
+ assert.equal(h.render(), null);
+ h.emit({status: 'idle'});
+ assert.equal(h.render({activeCid: 'team:secure', activeEncrypted: true}), null);
 });

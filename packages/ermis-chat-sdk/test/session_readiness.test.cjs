@@ -173,3 +173,21 @@ test('quiet retained startup publishes idle when its visible history page settle
  assert.equal(events.at(-1).status, 'idle');
  assert.equal(client.getSessionSyncProgress(), null);
 });
+
+test('foreground history tickets are once per route and reset with the login owner', () => {
+  const client = clientFixture();
+  const first = client._beginHistoryProgress('team:secure');
+  assert.equal(client.getSessionSyncProgress().history_cid, 'team:secure');
+  assert.equal(client._beginHistoryProgress('team:secure'), undefined);
+  const second = client._beginHistoryProgress('topic:child');
+  client._finishHistoryProgress(first);
+  assert.equal(client.getSessionSyncProgress().history_cid, 'topic:child');
+  client._finishHistoryProgress(second);
+  assert.equal(client.getSessionSyncProgress(), null);
+  assert.equal(client._beginHistoryProgress('team:secure'), undefined);
+  client._setUser({id: 'replacement'});
+  const replacement = client._beginHistoryProgress('team:secure');
+  assert.ok(replacement);
+  client._finishHistoryProgress(first);
+  assert.equal(client.getSessionSyncProgress().cycle_id, replacement);
+});

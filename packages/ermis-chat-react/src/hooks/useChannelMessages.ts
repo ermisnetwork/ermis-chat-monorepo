@@ -44,6 +44,7 @@ export const markChannelAsFullyQueried = (channel: string | object) => {
 const isInactiveInviteRole = (role?: string) => isPendingMember(role) || role === 'rejected' || role === 'skipped';
 const isE2eeChannel = (channel: any, client: any) => {
   if (channel?.data?.mls_enabled === true) return true;
+  if (channel?.data?.gate === true || channel?.data?.e2ee_group_id === channel?.cid) return false;
   const parentCid = channel?.data?.parent_cid as string | undefined;
   if (!parentCid) return false;
   return client?.activeChannels?.[parentCid]?.data?.mls_enabled === true;
@@ -796,7 +797,7 @@ export function useChannelMessages({
       // Retry only the already-requested current timeline page. Unlock is not
       // permission to fetch every channel or an entire epoch's ciphertexts.
       const page = activeChannel.state.latestMessages.slice(-50);
-      void client.encryptionManager?.restoreHistoryPage(activeChannel.type, activeChannel.id!, page as any[])
+      void client.encryptionManager?.restoreHistoryPage(activeChannel.type, activeChannel.id!, page as any[], { showHistoryProgress: true })
         .catch(() => console.warn('[E2EE] Requested page recovery deferred after unlock'));
     };
 

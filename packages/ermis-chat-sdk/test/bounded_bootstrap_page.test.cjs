@@ -86,7 +86,7 @@ test('Info checks just the selected unobserved message without opening a repair 
   const cid = 'team:0000';
   Object.assign(manager, { storage, initialized: true, deviceId: 'device',
     _recoveryPrivateKey: new Uint8Array(32), _recoveryKeyId: 'key' });
-  manager.client._beginSessionProgress = () => assert.fail('Info must not start a foreground progress ticket');
+  manager.client._beginHistoryProgress = () => assert.fail('Info must not start a foreground progress ticket');
   const calls = [];
   manager.e2eeClient = {
     queryEpochArchives: async (type, id, request) => {
@@ -255,32 +255,46 @@ test('native vault setup and unlock notify consumers only after protected recove
 });
 
 
-test('reopening an attempted history page is quiet; explicit retry and changed ciphertext are eligible',async()=>{
+test('reopening is quiet even if the first page changes; pagination and explicit retry are eligible',async()=>{
  const s=new IndexedDBEncryptionStorage('quiet-page-'+(++n)),m=new EncryptionManager();rows(m,1);
  Object.assign(m,{storage:s,deviceId:'device',initialized:true,_recoveryPrivateKey:new Uint8Array(32),_recoveryKeyId:'key'});
- const events=[];let calls=0;m.client._beginSessionProgress=()=>{events.push('begin');return 'page';};m.client._finishSessionProgress=(id,partial,retry)=>events.push({partial,retry});
+ const events=[];let calls=0;
+ m.client._beginHistoryProgress=()=>{
+  if(events.length) return undefined;
+  events.push('begin');return 'page';
+ };
+ m.client._finishHistoryProgress=()=>events.push('end');
  m._restoreHistoricalMessagesInternal=async()=>{calls++;return[{epoch:0,gap:true,reason:'no_archive'}]};
  const page=[{id:'quiet-message',cid:'team:0000',content_type:'mls',mls_ciphertext:new Uint8Array([1,2]),mls_epoch:0,group_generation:0,created_at:'2026-11-17T00:00:00Z'}];
  try{
-  await m.restoreHistoryPage('team','0000',page);assert.equal(calls,1);assert.equal(events.length,2);assert.equal(events[1].partial,true);
-  await m.restoreHistoryPage('team','0000',page);assert.equal(calls,1);assert.equal(events.length,2);
-  await events[1].retry();assert.equal(calls,2);
-  await m.restoreHistoryPage('team','0000',[{...page[0],mls_ciphertext:new Uint8Array([1,3])}]);assert.equal(calls,3);
+  const initial = {showHistoryProgress: true};
+  const older = [{...page[0], id:'older-message', mls_ciphertext:new Uint8Array([1,3])}];
+  await m.restoreHistoryPage('team','0000',page,initial);
+  assert.equal(calls,1);
+  assert.deepEqual(events,['begin','end']);
+  await m.restoreHistoryPage('team','0000',page,initial);
+  await m.restoreHistoryPage('team','0000',older,initial);
+  assert.equal(calls,1);
+  await m.restoreHistoryPage('team','0000',older);
+  assert.equal(calls,2);
+  await m.restoreHistoryPage('team','0000',page,{retry:true});
+  assert.equal(calls,3);
+  assert.deepEqual(events,['begin','end']);
  }finally{await s.close();}
 });
 
 test('bound cached plaintext skips archive work and progress; changed ciphertext cannot reuse it',async()=>{
  const s=new IndexedDBEncryptionStorage('cached-page-'+(++n)),m=new EncryptionManager();rows(m,1);
  Object.assign(m,{storage:s,deviceId:'device',initialized:true,_recoveryPrivateKey:new Uint8Array(32),_recoveryKeyId:'key'});
- let calls=0,progress=0;m.client._beginSessionProgress=()=>{progress++;return 'page';};m.client._finishSessionProgress=()=>{};
+ let calls=0,progress=0;m.client._beginHistoryProgress=()=>{progress++;return 'page';};m.client._finishHistoryProgress=()=>{};
  m._restoreHistoricalMessagesInternal=async()=>{calls++;return[]};
  const row={id:'cached-message',cid:'team:0000',content_type:'mls',mls_ciphertext:new Uint8Array([1,2]),mls_epoch:0,group_generation:0,created_at:'2026-11-17T00:00:00Z'};
  try{
   await s.saveMessage(m._storedFromPayload('team:0000',{text:'already authenticated'},row));
-  await m.restoreHistoryPage('team','0000',[row]);assert.equal(calls,0);assert.equal(progress,0);
+  await m.restoreHistoryPage('team','0000',[row],{showHistoryProgress:true});assert.equal(calls,0);assert.equal(progress,0);
   assert.equal(await m.diagnoseMessageDecryption('team:0000',row),'recovered');
   assert.equal(calls,0);assert.equal(progress,0);
-  await m.restoreHistoryPage('team','0000',[{...row,mls_ciphertext:new Uint8Array([1,3])}]);assert.equal(calls,1);assert.equal(progress,1);
+  await m.restoreHistoryPage('team','0000',[{...row,mls_ciphertext:new Uint8Array([1,3])}],{showHistoryProgress:true});assert.equal(calls,1);assert.equal(progress,1);
  }finally{await s.close();}
 });
 
@@ -461,8 +475,8 @@ test('an unlocked timeline page restores real MLS ciphertext while the live MLS 
  const wrap = wasm.wrap_archive_data_key(founderProvider, material.adk, recovery.public_key, info);
  const cipher = group.create_message(founderProvider, founder, encoder.encode(JSON.stringify({text})));
  const events = [];
- manager.client._beginSessionProgress = phase => { events.push(phase); return 'page'; };
- manager.client._finishSessionProgress = (ticket, partial) => { events.push({ticket, partial}); };
+ manager.client._beginHistoryProgress = cid => { events.push(cid); return 'page'; };
+ manager.client._finishHistoryProgress = ticket => { events.push(ticket); };
  manager.provider = recoveryProvider;
  manager.e2eeClient = {
   queryEpochArchives: async (_type, _id, query) => {
@@ -493,10 +507,12 @@ test('an unlocked timeline page restores real MLS ciphertext while the live MLS 
   });
   await checkpointEntered;
   assert.throws(() => manager.provider, {code: 'provider_mutation_busy'});
-  const restored = await manager.restoreHistoryPage('team', '0000', [row]);
+  const restored = await manager.restoreHistoryPage('team', '0000', [row], {showHistoryProgress: true});
   assert.equal(restored[0]?.reason, undefined);
   assert.equal(restored[0]?.messageId, row.id);
-  assert.deepEqual(events, ['restoring_page', {ticket: 'page', partial: false}]);
+  assert.deepEqual(events, [cid, 'page']);
+  await manager.restoreHistoryPage('team', '0000', [row], {showHistoryProgress: true});
+  assert.deepEqual(events, [cid, 'page'], 'already recovered history does not open a second ticket');
   const saved = await storage.loadMessage(row.id);
   assert.equal(saved.text, text);
   assert.equal(saved.mls_ciphertext_hash, createHash('sha256').update(cipher).digest('hex'));
@@ -513,4 +529,50 @@ test('an unlocked timeline page restores real MLS ciphertext while the live MLS 
   wrap.free(); material.free(); info.free(); aad.free(); recovery.free(); archive.free();
   group.free(); founder.free(); founderProvider.free();
  }
+});
+
+test('active batch scope publishes before unrelated work in the same response', async () => {
+ const manager = new EncryptionManager(); rows(manager, 2);
+ const active = 'team:0001', background = 'team:0000';
+ const order = [];
+ manager._activeHistoryScope = active;
+ manager._finishStartupPublication = async () => {};
+ manager._restoreBootstrapMilestones = async () => new Set([active, background]);
+ manager._restoreGroupsLocally = async () => {};
+ manager.storage = {loadRemovedSyncCursor: async () => null};
+ manager._loadAllScopeSyncCursors = async () => ({});
+ manager._discoverMlsRecoveryStates = async () => ({states: {}, unsupported: false});
+ manager.bootstrapKnownE2eeChannels = async () => ({results: []});
+ manager._saveEncryptionSyncCheckpoint = async ({scopeCursors}) => {
+  if (scopeCursors[active]) order.push('active-checkpoint');
+ };
+ manager._emitSyncState = () => {};
+ manager._replayLaggingEpochs = async () => {};
+ manager._resumeExternalJoinCandidates = async () => {};
+ manager._resumePendingMlsMutations = async () => {};
+ manager._ensureWelcomeHistorySubscription = () => {};
+ manager._drainWelcomeHistoryWork = async () => {};
+ manager._flushPendingSnapshotsForScope = async scope => {
+  assert.equal(scope, background);
+  order.push('background-work');
+  return {pending: []};
+ };
+ manager.groups.set(background, {});
+ manager.ensureChannelReady = async (_type, _id, scope, options) => {
+  assert.equal(options.batchSyncOnly, true);
+  if (scope === active) order.push('active-ready');
+  manager.groups.set(scope, {});
+  return {cid: scope, status: 'ready'};
+ };
+ let requests = 0;
+ manager.e2eeClient = {scopeSync: async () => {
+  requests++;
+  return {channels: {
+   [background]: {events: [], has_more: false},
+   [active]: {events: [], has_more: false},
+  }};
+ }};
+ await manager._syncAndRestoreGroups();
+ assert.deepEqual(order.slice(0, 3), ['active-checkpoint', 'active-ready', 'background-work']);
+ assert.equal(requests, 1);
 });

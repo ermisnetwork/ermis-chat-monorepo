@@ -671,6 +671,13 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   ) => this.tokenManager.setTokenOrProvider(userTokenOrProvider, user, refreshTokenOrProvider);
 
   _setUser(user: UserResponse<ErmisChatGenerics>) {
+    if (this.userID !== user.id) {
+      this._presentedHistoryCids.clear();
+      if (this._historyProgress) {
+        this._historyProgress = null;
+        this._sessionProgressSnapshot = null;
+      }
+    }
     this.user = { ...user };
     this.userID = user.id;
   }
@@ -823,7 +830,7 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     const userId = this.userID, deviceId = this.deviceId, uploads = this.standardAttachmentUploadStorage;
     const interval = this.cleaningIntervalRef;
     const epoch = ++this._hostSyncScopeEpoch;
-    this._sessionReadiness = undefined; this._dismissedSessionProgress = undefined; this._sessionEncryptionInitialization = undefined; this._sessionProgressSnapshot = null; this._progressJobs.clear(); this._progressCycle = null;
+    this._sessionReadiness = undefined; this._dismissedSessionProgress = undefined; this._sessionEncryptionInitialization = undefined; this._sessionProgressSnapshot = null; this._progressJobs.clear(); this._progressCycle = null; this._historyProgress = null; this._presentedHistoryCids.clear();
     const ownsHost = () => epoch === this._hostSyncScopeEpoch && this.userID === userId && this.deviceId === deviceId &&
       this.encryptionManager === manager && this.messageStorage === storage && this.userCache === cache &&
       this.activeChannels === channels && this.wsConnection === connection && this.tokenManager === tokens &&
@@ -2283,6 +2290,8 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
   private _progressCycle: {id: string; jobs: number; failed: boolean; phase: string; retry?: () => unknown} | null = null;
   private _progressJobs = new Map<string, {cycle: string; phase: string}>();
   private _sessionProgressSnapshot: any = null;
+  private _historyProgress: { cycle_id: string; history_cid: string; phase: 'restoring_page'; status: 'running' } | null = null;
+  private _presentedHistoryCids = new Set<string>();
   private _dismissedSessionProgress?: string;
   private _sessionReadiness?: {current: () => void; progress: SessionReadinessProgress;
     bootstrapResolved?: boolean; quietBootstrap?: boolean;
@@ -2316,20 +2325,25 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
     try { readiness?.current(); } catch { readiness = undefined; this._sessionReadiness = undefined; }
     const history = [...this._progressJobs.values()].some(job => job.phase === 'restoring_page');
     const cycle = this._progressCycle;
-    const value = readiness && !history ? readiness.progress.snapshot() : cycle ? {
+    const value = this._historyProgress ?? (readiness && !history ? readiness.progress.snapshot() : cycle ? {
       cycle_id: cycle.id, phase: history ? 'restoring_page' : cycle.jobs && cycle.phase === 'restoring_page' ? 'syncing' : cycle.phase,
       status: cycle.jobs ? 'running' : cycle.failed ? 'partial' : 'done', retry: cycle.retry,
-    } : null;
+    } : null);
     const quietCompletedUnpresented = readiness?.quietBootstrap && value?.status === 'done' &&
       this._sessionProgressSnapshot?.cycle_id !== value.cycle_id;
-    if (readiness && !history && (!readiness.bootstrapResolved || quietCompletedUnpresented)) {
+    if (!value || (!this._historyProgress && readiness && !history && (!readiness.bootstrapResolved || quietCompletedUnpresented))) {
       const wasVisible = this._sessionProgressSnapshot !== null;
       this._sessionProgressSnapshot = null;
       if (wasVisible) this.dispatchEvent({type: 'e2ee.session_progress', status: 'idle'} as any);
       return;
     }
+    const previous = this._sessionProgressSnapshot;
     this._sessionProgressSnapshot = value;
-    if (value && value.cycle_id !== this._dismissedSessionProgress) this.dispatchEvent({type: 'e2ee.session_progress', ...value} as any);
+    if (value.cycle_id !== this._dismissedSessionProgress) {
+      this.dispatchEvent({type: 'e2ee.session_progress', ...value} as any);
+    } else if (previous?.cycle_id !== value.cycle_id) {
+      this.dispatchEvent({type: 'e2ee.session_progress', status: 'idle'} as any);
+    }
   }
 
   /** Restored login work is not a new native Ready observation. */
@@ -2395,6 +2409,21 @@ export class ErmisChat<ErmisChatGenerics extends ExtendableGenerics = DefaultGen
       const channel = this.activeChannels[cid];
       owner.progress.record(scope, standardMessagingReady(channel, this.userID || '') ? 'ready' : 'blocked');
     }
+  }
+
+  _beginHistoryProgress(cid: string): string | undefined {
+    if (this._presentedHistoryCids.has(cid)) return;
+    this._presentedHistoryCids.add(cid);
+    const ticket = `history-page-${++this._progressSerial}`;
+    this._historyProgress = { cycle_id: ticket, history_cid: cid, phase: 'restoring_page', status: 'running' };
+    this._publishSessionProgress();
+    return ticket;
+  }
+
+  _finishHistoryProgress(ticket: string): void {
+    if (this._historyProgress?.cycle_id !== ticket) return;
+    this._historyProgress = null;
+    this._publishSessionProgress();
   }
 
   _beginSessionProgress(phase: string): string {
